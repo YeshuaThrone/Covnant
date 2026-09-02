@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Covnant brand tokens — Deep Onyx shell, Electric Blue and
+   Metallic Gold accents. Locked per the production build spec.
+   ============================================================ */
+
+@theme inline {
+  --color-onyx-950: #07090b;
+  --color-onyx-900: #0d0f12;
+  --color-onyx-800: #14171c;
+  --color-onyx-700: #1c2027;
+
+  --color-electric: #0066ff;
+  --color-electric-bright: #00c8ff;
+
+  --color-gold: #d4af37;
+  --color-gold-bright: #ffd700;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #0d0f12;
+  --foreground: #f2f4f8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0d0f12;
+    --foreground: #f2f4f8;
+  }
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Glassmorphic surface used across the platform shell. */
+.glass-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 1rem;
+}
+
+/* Metallic gold hairline for section rules and accents. */
+.gold-rule {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0) 0%, #d4af37 25%, #ffd700 50%, #d4af37 75%, rgba(212, 175, 55, 0) 100%);
+}
