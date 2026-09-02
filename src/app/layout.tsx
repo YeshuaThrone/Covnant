@@ -38,6 +38,9 @@ export default function RootLayout({
               <Link href="/assets" className="text-white/70 transition hover:text-white">
                 Asset Studio
               </Link>
+              <Link href="/contracts" className="text-white/70 transition hover:text-white">
+                Contracts
+              </Link>
             </nav>
           </div>
         </header>
