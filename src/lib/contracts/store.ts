@@ -9,8 +9,8 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { ContractIndustry } from './templates';
-import type { AgreementFields } from './generator';
+import { getTemplate, type ContractIndustry } from './templates';
+import { renderClauses, type AgreementContext } from './generator';
 import { SUPABASE_URL_ENV, SUPABASE_SERVICE_ROLE_KEY_ENV } from '../data-source';
 
 export type ContractStatus = 'DRAFT' | 'FINAL';
@@ -21,7 +21,7 @@ export interface StoredContract {
   templateId: string;
   industry: ContractIndustry;
   status: ContractStatus;
-  fields: AgreementFields;
+  fields: AgreementContext;
   document: string;
   createdAt: number;
   updatedAt: number;
@@ -54,21 +54,26 @@ export async function saveContract(input: {
   cbtCode: string;
   templateId: string;
   industry: ContractIndustry;
-  fields: AgreementFields;
-  document: string;
+  context: AgreementContext;
   id?: string;
 }): Promise<StoredContract> {
+  const template = getTemplate(input.templateId);
+  if (!template) throw new Error(`Unknown template: ${input.templateId}`);
   const existing = input.id ? await getContract(input.id) : undefined;
+  if (existing?.status === 'FINAL') {
+    throw new Error('This agreement is final and can no longer be edited.');
+  }
   const now = Date.now();
   const record: StoredContract = {
     id: existing?.id ?? newContractId(),
     cbtCode: input.cbtCode,
     templateId: input.templateId,
     industry: input.industry,
-    // A final agreement is immutable — edits after final are rejected upstream.
     status: existing?.status ?? 'DRAFT',
-    fields: input.fields,
-    document: input.document,
+    fields: input.context,
+    // The server re-renders from the saved context — the stored document is
+    // always the deterministic render of the stored fields, never client text.
+    document: renderClauses(template, input.context),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -135,7 +140,7 @@ function rowToRecord(row: Record<string, unknown>): StoredContract {
     templateId: row.template_id as string,
     industry: row.industry as ContractIndustry,
     status: row.status as ContractStatus,
-    fields: row.fields as AgreementFields,
+    fields: row.fields as AgreementContext,
     document: row.document as string,
     createdAt: new Date(row.created_at as string).getTime(),
     updatedAt: new Date(row.updated_at as string).getTime(),
