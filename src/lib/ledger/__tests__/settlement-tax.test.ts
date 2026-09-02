@@ -416,7 +416,15 @@ describe('supabase-backed ledger persistence (mocked client)', () => {
     expect(row.corner_dust_collected).toBe(result.cornerDustCollected);
     expect(row.currency).toBe('USD');
     expect(row.disbursements).toEqual(result.disbursements);
-    expect(sb.upsertCalls[1].rows[0]).toEqual(row);
+    // created_at is re-stamped per write — compare every engine field and pin
+    // created_at to an ISO string rather than racing the millisecond clock.
+    const { created_at: firstCreatedAt, ...firstRow } = row as typeof row & { created_at: string };
+    const { created_at: secondCreatedAt, ...secondRow } = sb.upsertCalls[1].rows[0] as typeof row & {
+      created_at: string;
+    };
+    expect(secondRow).toEqual(firstRow);
+    expect(typeof firstCreatedAt).toBe('string');
+    expect(secondCreatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     // Back in memory mode the replacement (not duplication) is observable: one row.
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
