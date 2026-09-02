@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CovenantMasterSDK,
   CovenantGlobalSocialEngine,
@@ -16,6 +16,32 @@ import {
   totalsFrom,
   holderStatsFrom,
 } from '../store';
+/**
+ * Mocked Supabase client — captures ledger upserts and feeds scripted selects so
+ * the store's DB mode is exercised without a live Supabase project. The engine
+ * never sees these env vars inside the tests below (they are set only after the
+ * engine settle completes), so all DB traffic here belongs to the store layer.
+ */
+const sb = vi.hoisted(() => ({
+  upsertCalls: [] as { table: string; rows: Record<string, unknown>[]; opts: unknown }[],
+  failNextUpsert: false,
+  selectResponse: { data: [] as Record<string, unknown>[], error: null as unknown },
+}));
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: () => ({
+    from: (table: string) => ({
+      upsert: async (rows: Record<string, unknown>[], opts: unknown) => {
+        sb.upsertCalls.push({ table, rows, opts });
+        return sb.failNextUpsert ? { error: { message: 'boom' } } : { error: null };
+      },
+      select: () => ({
+        order: async () => sb.selectResponse,
+      }),
+    }),
+  }),
+}));
+
 
 /**
  * PR 4 — settlement math, tax/verification integration, and the ledger store.
@@ -348,5 +374,99 @@ describe('royalty ledger store (memory mode)', () => {
     expect(alice!.withheldYtd).toEqual({ USD: 0, EUR: 0 });
     expect(alice!.latestTaxForm).toBe('NONE');
     expect(stats.get('h2')!.grossYtd).toEqual({ USD: 45, EUR: 90 });
+  });
+});
+
+describe('supabase-backed ledger persistence (mocked client)', () => {
+  function enableDbMode(): void {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://covnant-test.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+  }
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    sb.upsertCalls.length = 0;
+    sb.failNextUpsert = false;
+    sb.selectResponse = { data: [], error: null };
+  });
+
+  it('upserts engine columns with transaction_id conflict handling', async () => {
+    const sdk = new CovenantMasterSDK();
+    const cbtCode = 'CBT-TRK-TEST000009';
+    registerAsset(sdk, cbtCode, [makeHolder('h1', 'Alice', 'COMPOSER', 100)]);
+    // Engine settles while still in memory mode — env vars are set only afterwards,
+    // so every captured upsert below belongs to the store layer.
+    const result = await settle(sdk, cbtCode, 200);
+
+    enableDbMode();
+    await rememberSettlement(result, 'DIRECT');
+    await rememberSettlement(result, 'DIRECT'); // same transaction → conflict-replace, never duplicate
+
+    expect(sb.upsertCalls).toHaveLength(2);
+    const call = sb.upsertCalls[0];
+    expect(call.table).toBe('universal_royalty_ledger');
+    expect(call.opts).toEqual({ onConflict: 'transaction_id' });
+    const row = call.rows[0];
+    expect(row.transaction_id).toBe(result.transactionId);
+    expect(row.cbt_code).toBe(cbtCode);
+    expect(row.platform).toBe('DIRECT');
+    expect(row.gross_settled).toBe(result.totalSettled);
+    expect(row.covenant_fee).toBe(result.platformFeeDeducted);
+    expect(row.corner_dust_collected).toBe(result.cornerDustCollected);
+    expect(row.currency).toBe('USD');
+    expect(row.disbursements).toEqual(result.disbursements);
+    expect(sb.upsertCalls[1].rows[0]).toEqual(row);
+
+    // Back in memory mode the replacement (not duplication) is observable: one row.
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const ledger = await listLedger();
+    expect(ledger.filter((r) => r.transactionId === result.transactionId)).toHaveLength(1);
+  });
+
+  it('maps snake_case DB rows back to ledger rows on read', async () => {
+    enableDbMode();
+    sb.selectResponse = {
+      data: [
+        {
+          transaction_id: 'TEST-DB1',
+          cbt_code: 'CBT-TRK-TEST000010',
+          platform: 'SPOTIFY',
+          gross_settled: 100,
+          covenant_fee: 10,
+          corner_dust_collected: 0,
+          currency: 'USD',
+          disbursements: [],
+          created_at: '2026-09-02T00:00:00.000Z',
+        },
+      ],
+      error: null,
+    };
+
+    expect(await listLedger()).toEqual([
+      {
+        transactionId: 'TEST-DB1',
+        cbtCode: 'CBT-TRK-TEST000010',
+        platform: 'SPOTIFY',
+        grossSettled: 100,
+        covenantFee: 10,
+        cornerDustCollected: 0,
+        currency: 'USD',
+        disbursements: [],
+        createdAt: '2026-09-02T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('throws a ledger error when the Supabase upsert fails', async () => {
+    const sdk = new CovenantMasterSDK();
+    const cbtCode = 'CBT-TRK-TEST000011';
+    registerAsset(sdk, cbtCode, [makeHolder('h1', 'Bob', 'PRODUCER', 100)]);
+    const result = await settle(sdk, cbtCode, 50);
+
+    enableDbMode();
+    sb.failNextUpsert = true;
+    await expect(rememberSettlement(result, 'DIRECT')).rejects.toThrow(/Ledger upsert failed/);
   });
 });
