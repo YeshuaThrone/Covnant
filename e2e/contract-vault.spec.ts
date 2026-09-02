@@ -39,7 +39,10 @@ test('generates a Split Sheet from the asset of record, saves a draft, finalizes
   await expect(page.getByText('Bob E2E').first()).toBeVisible();
 
   await page.getByRole('button', { name: /Save draft/ }).click();
-  await expect(page.getByText('Save again')).toBeVisible();
+  // The first save creates the contract and navigates to its own editor page
+  // (the editor re-mounts, so the button label resets to "Save draft") — the
+  // reliable signal is the URL landing on the saved contract.
+  await page.waitForURL(/\/contracts\/[a-zA-Z0-9_-]+$/);
 
   await page.getByRole('button', { name: /Mark final/ }).click();
   await expect(page.getByText('FINAL — immutable')).toBeVisible();
