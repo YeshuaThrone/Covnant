@@ -28,3 +28,68 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: covnant_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migrations to scratch Postgres
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0001_covenant_init.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0002_contracts.sql
+
+      - name: Assert the engine's exact columns exist
+        env:
+          PGPASSWORD: postgres
+        run: |
+          assert_cols() {
+            local table="$1"; shift
+            local cols=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select column_name from information_schema.columns where table_schema='public' and table_name='$table'")
+            for col in "$@"; do
+              echo "$cols" | grep -qx "$col" || { echo "MISSING $table.$col"; exit 1; }
+            done
+            echo "OK: $table ($# columns asserted)"
+          }
+          assert_cols cbt_assets cbt_code
+          assert_cols universal_royalty_ledger transaction_id cbt_code platform gross_settled covenant_fee corner_dust_collected currency disbursements created_at
+          assert_cols platform_allowlists cbt_code
+          assert_cols contracts id cbt_code template_id industry status fields document
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E suite
+        run: npm run test:e2e

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import './globals.css';
 
 const geistSans = Geist({
@@ -28,8 +29,9 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <header className="border-b border-white/10">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <Link href="/" className="font-mono text-sm tracking-[0.3em] text-[#FFD700]">
-              CV
+            <Link href="/" className="flex items-center gap-3">
+              <CvRibbonMonogram size={36} />
+              <span className="font-mono text-sm tracking-[0.3em] text-[#FFD700]">COVNANT</span>
             </Link>
             <nav className="flex items-center gap-6 text-sm">
               <Link href="/" className="text-white/70 transition hover:text-white">
