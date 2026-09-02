@@ -41,6 +41,12 @@ export default function RootLayout({
               <Link href="/contracts" className="text-white/70 transition hover:text-white">
                 Contracts
               </Link>
+              <Link href="/ledger" className="text-white/70 transition hover:text-white">
+                Ledger
+              </Link>
+              <Link href="/rights-holders" className="text-white/70 transition hover:text-white">
+                Rights Holders
+              </Link>
             </nav>
           </div>
         </header>
