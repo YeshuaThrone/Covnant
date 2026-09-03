@@ -1,19 +1,21 @@
 /**
  * GET /api/health/db — read-only Supabase schema diagnostic.
  *
- * Pings every table the stores expect with a head-only count through the
- * server-only service-role client and reports per-table existence, row
- * count, and the raw Postgres error message when a read fails.
+ * Per expected table this endpoint runs two probes through the server-only
+ * service-role client:
  *
- * Exists because some store reads swallow Supabase errors and fall back to
- * the empty in-memory index — a missing table otherwise masquerades as a
- * healthy empty ledger (`mode: "supabase"` reflects credential presence,
- * not read success). This endpoint surfaces the truth.
+ *   1. Existence/count — a head-only exact count. Proves the relation exists.
+ *   2. Store read — the exact select/order shape the application store runs
+ *      for that table (listAssets, listLedger, the allowlist lookup, and
+ *      listContracts). Proves the table is usable by the app, not merely
+ *      present: `create table if not exists` silently skips creation when a
+ *      same-named table already exists with a different shape, and bare
+ *      existence checks would pass while every store read fails.
  *
- * Read-only by construction (head + exact count, no row payloads) and never
- * exposes the service-role credential. No request authentication exists in
- * v1 by locked spec decision; error strings are limited to Postgres table/
- * relation diagnostics, which mirror the public migration files.
+ * Read-only by construction (head counts and limit(1) reads, no row payloads
+ * in the response) and never exposes the service-role credential. No request
+ * authentication exists in v1 by locked spec decision; error strings are
+ * limited to Postgres diagnostics, which mirror the public migration files.
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -25,17 +27,73 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const EXPECTED_TABLES = [
-  'cbt_assets',
-  'universal_royalty_ledger',
-  'platform_allowlists',
-  'contracts',
-] as const;
+interface ProbeResult {
+  data: unknown;
+  error: { message: string } | null;
+}
+
+interface StoreProbe {
+  table: string;
+  probe: (db: SupabaseClient) => Promise<ProbeResult>;
+}
+
+/**
+ * One entry per table, mirroring the store's read shape exactly:
+ *   - cbt_assets: listAssets (src/lib/sdk.ts) — select * ordered by created_timestamp
+ *   - universal_royalty_ledger: listLedger (src/lib/ledger/store.ts) — select * ordered by created_at
+ *   - platform_allowlists: engine allowlist lookup (src/engine/covenant-master-sdk.ts) — column-scoped select
+ *   - contracts: listContracts (src/lib/contracts/store.ts) — select * ordered by updated_at
+ */
+const STORE_PROBES: StoreProbe[] = [
+  {
+    table: 'cbt_assets',
+    probe: async (db) => {
+      const { data, error } = await db
+        .from('cbt_assets')
+        .select('*')
+        .order('created_timestamp', { ascending: false })
+        .limit(1);
+      return { data, error };
+    },
+  },
+  {
+    table: 'universal_royalty_ledger',
+    probe: async (db) => {
+      const { data, error } = await db
+        .from('universal_royalty_ledger')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      return { data, error };
+    },
+  },
+  {
+    table: 'platform_allowlists',
+    probe: async (db) => {
+      const { data, error } = await db
+        .from('platform_allowlists')
+        .select('cbt_code, platform, target_account_id, status')
+        .limit(1);
+      return { data, error };
+    },
+  },
+  {
+    table: 'contracts',
+    probe: async (db) => {
+      const { data, error } = await db
+        .from('contracts')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      return { data, error };
+    },
+  },
+];
 
 interface TableHealth {
   exists: boolean;
   count: number | null;
-  error: string | null;
+  storeRead: { ok: boolean; error: string | null };
 }
 
 export async function GET() {
@@ -53,34 +111,42 @@ export async function GET() {
     );
   }
 
-  const client: SupabaseClient = createClient(
+  const db: SupabaseClient = createClient(
     process.env[SUPABASE_URL_ENV] as string,
     process.env[SUPABASE_SERVICE_ROLE_KEY_ENV] as string,
   );
 
   const entries = await Promise.all(
-    EXPECTED_TABLES.map(async (table): Promise<[string, TableHealth]> => {
-      const { count, error } = await client
-        .from(table)
-        .select('*', { count: 'exact', head: true });
+    STORE_PROBES.map(async ({ table, probe }): Promise<[string, TableHealth]> => {
+      const [headCount, storeRead] = await Promise.all([
+        db.from(table).select('*', { count: 'exact', head: true }),
+        probe(db),
+      ]);
       return [
         table,
-        error
-          ? { exists: false, count: null, error: error.message }
-          : { exists: true, count: count ?? 0, error: null },
+        {
+          exists: !headCount.error,
+          count: headCount.error ? null : (headCount.count ?? 0),
+          storeRead: {
+            ok: !storeRead.error,
+            error: storeRead.error ? storeRead.error.message : null,
+          },
+        },
       ];
     }),
   );
 
   const tables = Object.fromEntries(entries);
-  const ok = entries.every(([, health]) => health.exists);
+  const ok = entries.every(
+    ([, health]) => health.exists && health.storeRead.ok,
+  );
 
   return Response.json(
     {
       ok,
       mode,
       tables,
-      note: 'Read-only head-count pings through the service-role credential; RLS deny-all is unaffected.',
+      note: 'Existence = head-only exact count; storeRead = the exact select/order shape the application store runs.',
     },
     { headers: { 'cache-control': 'no-store' } },
   );
