@@ -2,6 +2,11 @@ import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import { BRAND } from '@/lib/brand';
 
+// Root route renders on demand in production (strict-execution directive):
+// no stale prerender of '/' on Vercel.
+export const dynamic = 'force-dynamic';
+
+
 const MEDIA = ['Music', 'Film & TV', 'Publishing', 'Games & Social', 'Emerging Media'];
 
 const CAPABILITIES = [
