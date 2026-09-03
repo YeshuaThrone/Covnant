@@ -16,7 +16,7 @@ import {
 } from '@/lib/splits/shared';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-[#00C8FF] focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function emptyHolder(): HolderDraft {
@@ -94,7 +94,7 @@ export function PoolSplitEditor({ pools, onChange }: PoolSplitEditorProps) {
       {pools.map((pool) => (
         <section key={pool.pool} className="glass-card p-6">
           <div className="flex items-center justify-between gap-4">
-            <h3 className="font-mono text-sm uppercase tracking-widest text-[#00C8FF]">
+            <h3 className="font-mono text-sm uppercase tracking-widest text-gold">
               {POOL_LABELS[pool.pool]}
             </h3>
             <PoolTotalChip pool={pool} />
@@ -191,7 +191,7 @@ export function PoolSplitEditor({ pools, onChange }: PoolSplitEditorProps) {
                       onChange={(e) =>
                         updateHolder(pool.pool, holder.id, { isVerified: e.target.checked })
                       }
-                      className="h-4 w-4 accent-[#00C8FF]"
+                      className="h-4 w-4 accent-gold"
                     />
                     <label htmlFor={`verified-${holder.id}`} className="text-sm text-white/60">
                       Identity verified
@@ -205,7 +205,7 @@ export function PoolSplitEditor({ pools, onChange }: PoolSplitEditorProps) {
                       onChange={(e) =>
                         updateHolder(pool.pool, holder.id, { usTaxResident: e.target.checked })
                       }
-                      className="h-4 w-4 accent-[#00C8FF]"
+                      className="h-4 w-4 accent-gold"
                     />
                     <label htmlFor={`taxres-${holder.id}`} className="text-sm text-white/60">
                       US tax resident
@@ -305,7 +305,7 @@ export function PoolSplitEditor({ pools, onChange }: PoolSplitEditorProps) {
           <button
             type="button"
             onClick={() => updatePool(pool.pool, [...pool.holders, emptyHolder()])}
-            className="mt-4 rounded-lg border border-[#00C8FF]/40 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/10"
+            className="mt-4 rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"
           >
             + Add holder
           </button>

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { registerAssetAction } from '@/app/assets/actions';
+import { registerAssetAction } from '@/lib/assets/actions';
 import {
   MEDIA_MEDIUMS,
   MEDIUM_LABELS,
@@ -13,7 +13,7 @@ import {
 import { freshPools, PoolSplitEditor } from './PoolSplitEditor';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-[#00C8FF] focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function AssetRegistrationForm() {
@@ -47,7 +47,7 @@ export function AssetRegistrationForm() {
   return (
     <div className="space-y-8">
       <section className="glass-card p-6">
-        <h2 className="font-mono text-sm uppercase tracking-widest text-[#00C8FF]">Identity</h2>
+        <h2 className="font-mono text-sm uppercase tracking-widest text-gold">Identity</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={LABEL}>Asset title</label>

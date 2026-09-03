@@ -74,7 +74,7 @@ export default async function RightsHoldersPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Rights Holder Registry
       </p>
       <h1 className="mt-2 text-3xl font-semibold text-white">Rights Holders</h1>

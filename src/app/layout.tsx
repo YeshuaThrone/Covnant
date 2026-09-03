@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { Geist, Geist_Mono } from 'next/font/google';
-import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
+import { Geist, Geist_Mono, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 
 const geistSans = Geist({
@@ -11,6 +9,12 @@ const geistSans = Geist({
 
 const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
+  subsets: ['latin'],
+});
+
+// Display face — bold geometric sans for headings and the wordmark.
+const spaceGrotesk = Space_Grotesk({
+  variable: '--font-space-grotesk',
   subsets: ['latin'],
 });
 
@@ -26,32 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <header className="border-b border-white/10">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <Link href="/" className="flex items-center gap-3">
-              <CvRibbonMonogram size={36} />
-              <span className="font-mono text-sm tracking-[0.3em] text-[#FFD700]">COVNANT</span>
-            </Link>
-            <nav className="flex items-center gap-6 text-sm">
-              <Link href="/" className="text-white/70 transition hover:text-white">
-                Home
-              </Link>
-              <Link href="/assets" className="text-white/70 transition hover:text-white">
-                Asset Studio
-              </Link>
-              <Link href="/contracts" className="text-white/70 transition hover:text-white">
-                Contracts
-              </Link>
-              <Link href="/ledger" className="text-white/70 transition hover:text-white">
-                Ledger
-              </Link>
-              <Link href="/rights-holders" className="text-white/70 transition hover:text-white">
-                Rights Holders
-              </Link>
-            </nav>
-          </div>
-        </header>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased`}>
         {children}
       </body>
     </html>

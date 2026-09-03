@@ -19,7 +19,7 @@ export default async function AssetsPage() {
     <main className="mx-auto max-w-5xl px-6 py-16">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
             Covenant Block Vault
           </p>
           <h1 className="mt-2 text-3xl font-semibold text-[#F2F4F8]">Assets</h1>
@@ -45,7 +45,7 @@ export default async function AssetsPage() {
           </p>
           <Link
             href="/assets/new"
-            className="mt-6 inline-block rounded-lg border border-[#00C8FF]/40 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/10"
+            className="mt-6 inline-block rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"
           >
             Open the Asset Studio
           </Link>
@@ -56,7 +56,7 @@ export default async function AssetsPage() {
             <li key={asset.cbtCode}>
               <Link
                 href={`/assets/${asset.cbtCode}`}
-                className="glass-card block p-5 hover:border-[#00C8FF]/40"
+                className="glass-card block p-5 hover:border-gold/40"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>

@@ -25,7 +25,7 @@ export default async function ContractsPage({
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">
       <header>
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
           Contract Vault
         </p>
         <h1 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
@@ -50,7 +50,7 @@ export default async function ContractsPage({
                   aria-selected={active === tab.key}
                   className={`rounded-full border px-4 py-1.5 text-sm transition ${
                     active === tab.key
-                      ? 'border-[#00C8FF]/60 bg-[#00C8FF]/10 text-[#00C8FF]'
+                      ? 'border-gold/60 bg-gold/10 text-gold'
                       : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
                   }`}
                 >
@@ -64,7 +64,7 @@ export default async function ContractsPage({
                 <li key={template.id}>
                   <Link
                     href={`/contracts/new?template=${template.id}`}
-                    className="glass-card flex h-full flex-col p-5 transition hover:border-[#00C8FF]/40"
+                    className="glass-card flex h-full flex-col p-5 transition hover:border-gold/40"
                   >
                     <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#D4AF37]">
                       {template.industry === 'MUSIC' ? 'Music' : 'Film, Media & Merch'}
@@ -94,7 +94,7 @@ export default async function ContractsPage({
                   <li key={contract.id}>
                     <Link
                       href={`/contracts/${contract.id}`}
-                      className="glass-card flex items-center justify-between p-4 transition hover:border-[#00C8FF]/40"
+                      className="glass-card flex items-center justify-between p-4 transition hover:border-gold/40"
                     >
                       <span>
                         <span className="block text-sm text-white">{contract.fields.asset.title}</span>

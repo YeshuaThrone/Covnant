@@ -3,10 +3,12 @@ export const BRAND = {
   tagline: 'Own Your Creation.',
   descriptor: 'Automated Contract Vault & Smart Ledger Verification',
   colors: {
-    deepOnyx: '#0D0F12',
-    electricBlue: '#0066FF',
-    electricBlueBright: '#00C8FF',
+    obsidian: '#08080A',
+    obsidianDeep: '#000000',
+    darkSlate: '#121318',
     metallicGold: '#D4AF37',
-    metallicGoldBright: '#FFD700',
+    champagne: '#F3E5AB',
+    mutedGold: '#997A15',
+    emerald: '#10B981',
   },
 } as const;

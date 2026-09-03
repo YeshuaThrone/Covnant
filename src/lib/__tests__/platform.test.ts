@@ -3,12 +3,14 @@ import { BRAND } from '../brand';
 import { resolveDataSourceMode } from '../data-source';
 
 describe('brand tokens', () => {
-  it('carries the locked Deep Onyx / Electric Blue / Metallic Gold palette', () => {
-    expect(BRAND.colors.deepOnyx).toBe('#0D0F12');
-    expect(BRAND.colors.electricBlue).toBe('#0066FF');
-    expect(BRAND.colors.electricBlueBright).toBe('#00C8FF');
+  it('carries the locked Obsidian / Deep Gold palette', () => {
+    expect(BRAND.colors.obsidian).toBe('#08080A');
+    expect(BRAND.colors.obsidianDeep).toBe('#000000');
+    expect(BRAND.colors.darkSlate).toBe('#121318');
     expect(BRAND.colors.metallicGold).toBe('#D4AF37');
-    expect(BRAND.colors.metallicGoldBright).toBe('#FFD700');
+    expect(BRAND.colors.champagne).toBe('#F3E5AB');
+    expect(BRAND.colors.mutedGold).toBe('#997A15');
+    expect(BRAND.colors.emerald).toBe('#10B981');
   });
 
   it('carries the locked tagline and descriptor', () => {

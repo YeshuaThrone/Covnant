@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { saveAssetSplitsAction } from '@/app/assets/actions';
+import { saveAssetSplitsAction } from '@/lib/assets/actions';
 import { poolStateForUnits, sumPoolUnits, type PoolDraft } from '@/lib/splits/shared';
 import { PoolSplitEditor } from './PoolSplitEditor';
 
