@@ -8,10 +8,9 @@
  * generator re-renders deterministically from the saved fields.
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getTemplate, type ContractIndustry } from './templates';
 import { renderClauses, type AgreementContext } from './generator';
-import { SUPABASE_URL_ENV, SUPABASE_SERVICE_ROLE_KEY_ENV } from '../data-source';
+import { supabaseFromEnv } from '../supabase';
 
 export type ContractStatus = 'DRAFT' | 'FINAL';
 
@@ -30,12 +29,6 @@ export interface StoredContract {
 declare global {
   // eslint-disable-next-line no-var
   var __covnantContractStore: Map<string, StoredContract> | undefined;
-}
-
-function supabaseFromEnv(): SupabaseClient | undefined {
-  const url = process.env[SUPABASE_URL_ENV];
-  const key = process.env[SUPABASE_SERVICE_ROLE_KEY_ENV];
-  return url && key ? createClient(url, key) : undefined;
 }
 
 function memoryStore(): Map<string, StoredContract> {

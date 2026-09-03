@@ -6,10 +6,9 @@
  * at registration time. With Supabase credentials configured, listing reads
  * the DB directly instead.
  */
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { CovenantBlockAsset, MediaMedium, UniversalAssetIdentifier, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import { CovenantMasterSDK } from '@/engine/covenant-master-sdk';
-import { SUPABASE_URL_ENV, SUPABASE_SERVICE_ROLE_KEY_ENV } from './data-source';
+import { supabaseFromEnv } from './supabase';
 
 /** v1: 0% direct-path platform fee; the social path's 10% lives in the claim engine. */
 const PLATFORM_FEE_PERCENTAGE = 0;
@@ -19,12 +18,6 @@ declare global {
   var __covnantSdk: CovenantMasterSDK | undefined;
   // eslint-disable-next-line no-var
   var __covnantAssetIndex: CovenantBlockAsset[] | undefined;
-}
-
-function supabaseFromEnv(): SupabaseClient | undefined {
-  const url = process.env[SUPABASE_URL_ENV];
-  const key = process.env[SUPABASE_SERVICE_ROLE_KEY_ENV];
-  return url && key ? createClient(url, key) : undefined;
 }
 
 export function getSdk(): CovenantMasterSDK {
