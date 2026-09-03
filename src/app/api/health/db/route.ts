@@ -2,13 +2,16 @@
  * GET /api/health/db — read-only Supabase schema diagnostic.
  *
  * Per expected table this endpoint runs one probe through the server-only
- * service-role client: the exact select/order shape the application store
- * runs for that table (listAssets, listLedger, the allowlist lookup, and
- * listContracts), with an exact row count. This proves both that the
- * relation exists and that it is usable by the app — `create table if not
- * exists` silently skips creation when a same-named table already exists
- * with a different shape, and store reads that swallow errors would mask
- * the failure as a healthy empty ledger.
+ * service-role client: the exact WRITE-SHAPE column list the application store
+ * persists for that table (listAssets, listLedger, the allowlist lookup, and
+ * listContracts), with an exact row count. Selecting explicit columns (not *)
+ * means a drifted table — one that exists but is missing a column the store
+ * writes — fails the probe instead of reporting green the way a `select *`
+ * read would: a hand-built table missing cbt_code passed every read probe
+ * while every store write failed on it. `create table if not exists` also
+ * silently skips creation when a same-named table already exists with a
+ * different shape, and store reads that swallow errors would mask the
+ * failure as a healthy empty ledger.
  *
  * Deliberately does NOT use head-only counts for existence: a bodyless HEAD
  * response parses to no error in supabase-js regardless of status, so a
@@ -49,7 +52,10 @@ const STORE_PROBES: StoreProbe[] = [
     probe: async (db) => {
       const { count, error } = await db
         .from('cbt_assets')
-        .select('*', { count: 'exact' })
+        .select(
+          'id, cbt_code, title, medium, mapped_identifiers, rights_holders, created_timestamp, created_at',
+          { count: 'exact' },
+        )
         .order('created_timestamp', { ascending: false })
         .limit(1);
       return { count, error };
@@ -60,7 +66,10 @@ const STORE_PROBES: StoreProbe[] = [
     probe: async (db) => {
       const { count, error } = await db
         .from('universal_royalty_ledger')
-        .select('*', { count: 'exact' })
+        .select(
+          'id, transaction_id, cbt_code, platform, gross_settled, covenant_fee, corner_dust_collected, currency, disbursements, created_at',
+          { count: 'exact' },
+        )
         .order('created_at', { ascending: false })
         .limit(1);
       return { count, error };
@@ -81,7 +90,10 @@ const STORE_PROBES: StoreProbe[] = [
     probe: async (db) => {
       const { count, error } = await db
         .from('contracts')
-        .select('*', { count: 'exact' })
+        .select(
+          'id, cbt_code, template_id, industry, status, fields, document, created_at, updated_at',
+          { count: 'exact' },
+        )
         .order('updated_at', { ascending: false })
         .limit(1);
       return { count, error };
@@ -140,7 +152,7 @@ export async function GET() {
       ok,
       mode,
       tables,
-      note: 'Each probe is the exact select/order shape the application store runs, with an exact count; a GET (not a head-only count) so a 404 can never report as a healthy zero-row table.',
+      note: 'Each probe selects the exact WRITE-SHAPE column list the application store persists (column-explicit, so a drifted table cannot pass on select *), with an exact count; a GET (not a head-only count) so a 404 can never report as a healthy zero-row table.',
     },
     { headers: { 'cache-control': 'no-store' } },
   );
