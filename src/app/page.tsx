@@ -1,5 +1,6 @@
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
+import Link from 'next/link';
 import { BRAND } from '@/lib/brand';
 
 // Root route renders on demand in production (strict-execution directive):
@@ -23,10 +24,23 @@ const CAPABILITIES = [
 export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center px-6">
+      <header className="w-full max-w-5xl flex items-center justify-between py-6">
+        <div className="flex items-center gap-3">
+          <CvRibbonMonogram size={32} />
+          <span className="font-mono text-sm tracking-[0.3em] text-gold-champagne">COVNANT</span>
+        </div>
+        <Link
+          href="/dashboard"
+          className="rounded-full border border-gold/40 px-4 py-1.5 text-sm text-gold-champagne transition hover:bg-gold/10"
+        >
+          Enter the workspace
+        </Link>
+      </header>
+
       <section className="w-full max-w-4xl flex flex-col items-center text-center pt-20 pb-16">
         <CvRibbonMonogram size={112} />
-        <p className="mt-8 text-sm uppercase tracking-[0.35em] text-[#00C8FF]">{BRAND.name}</p>
-        <h1 className="mt-4 text-5xl md:text-6xl font-bold tracking-tight bg-gradient-to-r from-[#FFD700] via-[#F2F4F8] to-[#0066FF] bg-clip-text text-transparent">
+        <p className="mt-8 text-sm uppercase tracking-[0.35em] text-gold-champagne">{BRAND.name}</p>
+        <h1 className="mt-4 bg-gradient-to-r from-gold-champagne via-white to-gold bg-clip-text text-5xl font-bold tracking-tight text-transparent md:text-6xl">
           {BRAND.tagline}
         </h1>
         <p className="mt-6 text-lg text-white/60">{BRAND.descriptor}</p>
@@ -44,7 +58,7 @@ export default function Home() {
       <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24">
         {CAPABILITIES.map((c) => (
           <article key={c.title} className="glass-card p-6 flex flex-col gap-3">
-            <h2 className="text-lg font-semibold text-[#D4AF37]">{c.title}</h2>
+            <h2 className="text-lg font-semibold text-gold">{c.title}</h2>
             <p className="text-sm leading-relaxed text-white/60">{c.body}</p>
           </article>
         ))}

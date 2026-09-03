@@ -1,35 +1,53 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Covnant brand tokens — Deep Onyx shell, Electric Blue and
-   Metallic Gold accents. Locked per the production build spec.
+   Covnant brand tokens — Obsidian & Deep Gold luxury dark mode.
+   Backgrounds: Obsidian #08080A / #000000. Surfaces: Dark Slate
+   #121318. Accents: Deep Metallic Gold #D4AF37, Champagne
+   #F3E5AB, Muted Gold #997A15. Active verification badges carry
+   the Emerald Gold gradient (#10B981 → #D4AF37).
    ============================================================ */
 
 @theme inline {
-  --color-onyx-950: #07090b;
-  --color-onyx-900: #0d0f12;
-  --color-onyx-800: #14171c;
-  --color-onyx-700: #1c2027;
+  /* Obsidian grounds */
+  --color-obsidian-950: #000000;
+  --color-obsidian-900: #08080a;
 
-  --color-electric: #0066ff;
-  --color-electric-bright: #00c8ff;
+  /* Dark Slate surfaces */
+  --color-slate-card: #121318;
+  --color-slate-raised: #1a1b22;
 
+  /* Gold family */
   --color-gold: #d4af37;
+  --color-gold-champagne: #f3e5ab;
+  --color-gold-muted: #997a15;
   --color-gold-bright: #ffd700;
+
+  /* Emerald Gold gradient (active verification badges only) */
+  --gradient-emerald-gold: linear-gradient(90deg, #10b981 0%, #d4af37 100%);
+  --color-verdict-emerald: #10b981;
+
+  /* Legacy aliases — existing onyx- utility usages pick up the
+     Obsidian surfaces without code churn. */
+  --color-onyx-950: #000000;
+  --color-onyx-900: #08080a;
+  --color-onyx-800: #121318;
+  --color-onyx-700: #1a1b22;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-space-grotesk), var(--font-geist-sans), sans-serif;
 }
 
 :root {
-  --background: #0d0f12;
-  --foreground: #f2f4f8;
+  --background: #08080a;
+  --foreground: #f2efe6;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0d0f12;
-    --foreground: #f2f4f8;
+    --background: #08080a;
+    --foreground: #f2efe6;
   }
 }
 
@@ -39,17 +57,86 @@ body {
   color: var(--foreground);
 }
 
-/* Glassmorphic surface used across the platform shell. */
+/* Bold geometric display type for headings and the wordmark. */
+h1,
+h2 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* Dark Slate surface used across the platform shell. */
 .glass-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--color-slate-card);
+  border: 1px solid rgba(212, 175, 55, 0.14);
   border-radius: 1rem;
 }
 
 /* Metallic gold hairline for section rules and accents. */
 .gold-rule {
   height: 1px;
-  background: linear-gradient(90deg, rgba(212, 175, 55, 0) 0%, #d4af37 25%, #ffd700 50%, #d4af37 75%, rgba(212, 175, 55, 0) 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(212, 175, 55, 0) 0%,
+    #997a15 25%,
+    #f3e5ab 50%,
+    #d4af37 75%,
+    rgba(212, 175, 55, 0) 100%
+  );
+}
+
+/* Gold notification banner — platform-wide announcements surface. */
+.banner-gold {
+  background: linear-gradient(
+    90deg,
+    rgba(212, 175, 55, 0.16) 0%,
+    rgba(243, 229, 171, 0.08) 100%
+  );
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  border-left: 3px solid #d4af37;
+  border-radius: 0.75rem;
+}
+
+/* Status table — shared styling for settlement/compliance tables. */
+.status-table {
+  width: 100%;
+  text-align: left;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+
+.status-table thead th {
+  background: rgba(212, 175, 55, 0.07);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+  padding: 0.75rem 1rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(243, 229, 171, 0.75);
+  font-weight: 500;
+}
+
+.status-table tbody tr {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 150ms ease;
+}
+
+.status-table tbody tr:hover {
+  background: rgba(212, 175, 55, 0.05);
+}
+
+.status-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.status-table tbody td {
+  padding: 0.75rem 1rem;
+}
+
+/* Active verification badge — Emerald Gold gradient is reserved for
+   this state only; never use it for decorative accents. */
+.badge-verification-active {
+  background: linear-gradient(90deg, #10b981 0%, #d4af37 100%);
+  color: #08080a;
+  border: none;
 }

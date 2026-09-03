@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { markContractFinalAction, saveContractAction } from '@/app/contracts/actions';
+import { markContractFinalAction, saveContractAction } from '@/lib/contracts/actions';
+import { VerificationBadge } from '@/components/brand/VerificationBadge';
 import { renderClauses } from '@/lib/contracts/generator';
 import { getTemplate } from '@/lib/contracts/templates';
 import type { AgreementContext } from '@/lib/contracts/generator';
@@ -89,7 +90,7 @@ export function ContractEditor({
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
       <div className="space-y-6">
         <section className="glass-card p-6">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
             {template.industry === 'MUSIC' ? 'Music' : 'Film, Media & Merch'} · Template
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-white">{template.name}</h1>
@@ -103,7 +104,7 @@ export function ContractEditor({
         </section>
 
         <section className="glass-card p-6" aria-label="Agreement fields">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
             Agreement fields
           </p>
           <div className="mt-4 space-y-4">
@@ -115,7 +116,7 @@ export function ContractEditor({
                   onChange={(e) => setField(item.key, e.target.value)}
                   placeholder={item.placeholder}
                   disabled={isFinal}
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-[#00C8FF]/60 focus:outline-none disabled:opacity-50"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-gold/60 focus:outline-none disabled:opacity-50"
                 />
               </label>
             ))}
@@ -128,7 +129,7 @@ export function ContractEditor({
               type="button"
               onClick={save}
               disabled={saving}
-              className="rounded-lg border border-[#00C8FF]/40 bg-[#00C8FF]/10 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/20 disabled:opacity-50"
+              className="rounded-lg border border-gold/40 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:opacity-50"
             >
               {saving ? 'Saving…' : saved ? 'Save again' : 'Save draft'}
             </button>
@@ -137,7 +138,7 @@ export function ContractEditor({
                 type="button"
                 onClick={finalize}
                 disabled={finalizing}
-                className="rounded-lg border border-[#D4AF37]/50 bg-[#D4AF37]/10 px-4 py-2 text-sm text-[#D4AF37] hover:bg-[#D4AF37]/20 disabled:opacity-50"
+                className="rounded-lg border border-gold/50 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:opacity-50"
               >
                 {finalizing ? 'Finalizing…' : 'Mark final'}
               </button>
@@ -147,12 +148,10 @@ export function ContractEditor({
 
         {isFinal && contractId && (
           <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-emerald-400/40 px-3 py-1 font-mono text-xs text-emerald-300">
-              FINAL — immutable
-            </span>
+            <VerificationBadge variant="immutable-ledger-active" label="FINAL — immutable" />
             <a
               href={`/contracts/${contractId}/export`}
-              className="rounded-lg border border-[#00C8FF]/40 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/10"
+              className="rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"
             >
               Export agreement (.txt)
             </a>
@@ -167,7 +166,7 @@ export function ContractEditor({
       </div>
 
       <section className="glass-card p-6" aria-label="Agreement preview">
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
           Live preview
         </p>
         <pre className="mt-4 max-h-[70vh] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-white/70">

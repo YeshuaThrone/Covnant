@@ -29,7 +29,7 @@ export default async function NewContractPage({
         {assets.length === 0 ? (
           <p className="mt-8 rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-white/60">
             No assets registered yet.{' '}
-            <Link href="/assets" className="text-[#00C8FF] hover:underline">
+            <Link href="/assets" className="text-gold hover:underline">
               Register an asset in the Asset Studio
             </Link>{' '}
             first.
@@ -40,7 +40,7 @@ export default async function NewContractPage({
               <li key={asset.cbtCode}>
                 <Link
                   href={`/contracts/new?template=${template.id}&cbt=${encodeURIComponent(asset.cbtCode)}`}
-                  className="glass-card flex items-center justify-between p-4 transition hover:border-[#00C8FF]/40"
+                  className="glass-card flex items-center justify-between p-4 transition hover:border-gold/40"
                 >
                   <span className="text-sm text-white">{asset.title}</span>
                   <span className="font-mono text-xs text-white/40">{asset.cbtCode}</span>

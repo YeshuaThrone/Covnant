@@ -58,14 +58,14 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-16">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Covenant Block
       </p>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold text-[#F2F4F8]">{asset.title}</h1>
         <Link
           href={`/assets/${asset.cbtCode}/splits`}
-          className="rounded-lg border border-[#00C8FF]/40 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/10"
+          className="rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"
         >
           Edit split sheet
         </Link>
@@ -90,7 +90,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
         {pools.map((pool) => (
           <section key={pool.pool} className="glass-card p-6">
             <div className="flex items-center justify-between gap-4">
-              <h2 className="font-mono text-sm uppercase tracking-widest text-[#00C8FF]">
+              <h2 className="font-mono text-sm uppercase tracking-widest text-gold">
                 {POOL_LABELS[pool.pool]}
               </h2>
               {poolChip(pool.holders)}

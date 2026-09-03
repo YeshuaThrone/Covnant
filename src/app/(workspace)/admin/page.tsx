@@ -24,7 +24,7 @@ export default async function AdminPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Revenue &amp; Royalty Operations
       </p>
       <h1 className="mt-2 text-3xl font-semibold text-white">Admin Console</h1>
@@ -64,8 +64,8 @@ export default async function AdminPage() {
           </p>
         ) : (
           <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-white/40">
+            <table className="status-table">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 font-medium">Holder</th>
                   <th className="px-4 py-3 font-medium">Role</th>

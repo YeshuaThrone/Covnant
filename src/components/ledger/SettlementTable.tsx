@@ -11,7 +11,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { CURRENCY_DECIMALS } from '@/lib/ledger/currency-precision';
 import type { LedgerRow, LedgerTotals } from '@/lib/ledger/store';
-import { settleDirectAction } from '@/app/ledger/actions';
+import { settleDirectAction } from '@/lib/ledger/actions';
 
 function fmt(amount: number, currency: string): string {
   const decimals = CURRENCY_DECIMALS[currency] ?? 4;
@@ -44,7 +44,7 @@ export function SettlementTable({
         ].map(([label, value]) => (
           <div key={label} className="glass-card p-4">
             <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">{label}</dt>
-            <dd className="mt-1 font-mono text-sm text-[#00C8FF]">{value}</dd>
+            <dd className="mt-1 font-mono text-sm text-gold">{value}</dd>
           </div>
         ))}
       </dl>
@@ -58,9 +58,9 @@ export function SettlementTable({
 
       {/* Table */}
       <div className="glass-card overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        <table className="status-table min-w-[760px]">
           <thead>
-            <tr className="border-b border-white/10 font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
+            <tr>
               <th className="px-4 py-3">Transaction</th>
               <th className="px-4 py-3">Asset</th>
               <th className="px-4 py-3">Platform</th>
@@ -75,7 +75,7 @@ export function SettlementTable({
               <tr>
                 <td colSpan={7} className="px-4 py-10 text-center text-white/50">
                   No settlements recorded yet. Settle a registered asset above, or point a platform
-                  claims webhook at <code className="font-mono text-[#00C8FF]">/api/webhooks/claims</code>.
+                  claims webhook at <code className="font-mono text-gold">/api/webhooks/claims</code>.
                 </td>
               </tr>
             )}
@@ -106,7 +106,7 @@ function TableRow({ row, open, onToggle }: { row: LedgerRow; open: boolean; onTo
         aria-expanded={open}
       >
         <td className="px-4 py-3 font-mono text-xs text-white/80">{row.transactionId}</td>
-        <td className="px-4 py-3 font-mono text-xs text-[#00C8FF]">{row.cbtCode}</td>
+        <td className="px-4 py-3 font-mono text-xs text-gold">{row.cbtCode}</td>
         <td className="px-4 py-3 text-white/60">{row.platform}</td>
         <td className="px-4 py-3 text-right font-mono text-xs">
           {fmt(row.grossSettled, row.currency)} {row.currency}
@@ -150,7 +150,7 @@ function TableRow({ row, open, onToggle }: { row: LedgerRow; open: boolean; onTo
                     <td className="py-2 pr-4 text-right">{fmt(d.grossShare, row.currency)}</td>
                     <td className="py-2 pr-4 text-right">{(d.withholdingTaxRateApplied * 100).toFixed(2)}%</td>
                     <td className="py-2 pr-4 text-right">{fmt(d.withholdingTaxDeducted, row.currency)}</td>
-                    <td className="py-2 pr-4 text-right text-[#00C8FF]">{fmt(d.netShare, row.currency)}</td>
+                    <td className="py-2 pr-4 text-right text-gold">{fmt(d.netShare, row.currency)}</td>
                     <td className="py-2 pr-4">{d.taxFormRequired}</td>
                     <td className="py-2">
                       {d.routing?.railType ?? '—'} · {d.routing?.countryCode ?? '—'}
@@ -211,7 +211,7 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
 
   return (
     <form onSubmit={submit} className="glass-card p-6">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">Record direct settlement</p>
+      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Record direct settlement</p>
       <p className="mt-2 text-sm text-white/50">
         Settles through the engine on the direct path (0% platform fee). Social claims with the 10%
         fee arrive via the claims webhook.
@@ -222,7 +222,7 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
           <select
             value={cbtCode}
             onChange={(e) => setCbtCode(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-[#0066FF]"
+            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-gold"
           >
             {assets.length === 0 && <option value="">No assets registered</option>}
             {assets.map((a) => (
@@ -241,7 +241,7 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
             value={grossAmount}
             onChange={(e) => setGrossAmount(e.target.value)}
             placeholder="100"
-            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#0066FF]"
+            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-gold"
           />
         </label>
         <label className="block text-xs text-white/50">
@@ -249,7 +249,7 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
           <select
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-[#0066FF]"
+            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-gold"
           >
             {CURRENCY_CHOICES.map((c) => (
               <option key={c} value={c}>
@@ -264,14 +264,14 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
             value={territory}
             onChange={(e) => setTerritory(e.target.value.toUpperCase())}
             maxLength={2}
-            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#0066FF]"
+            className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-gold"
           />
         </label>
       </div>
       <button
         type="submit"
         disabled={!ready}
-        className="mt-4 rounded-full bg-[#0066FF] px-5 py-2 text-sm font-medium text-white transition enabled:hover:bg-[#00C8FF] disabled:cursor-not-allowed disabled:opacity-40"
+        className="mt-4 rounded-full bg-gold px-5 py-2 text-sm font-medium text-obsidian-900 transition enabled:hover:bg-gold-champagne disabled:cursor-not-allowed disabled:opacity-40"
       >
         {pending ? 'Settling…' : 'Settle'}
       </button>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { runVaultAuditAction } from '@/app/contracts/actions';
+import { runVaultAuditAction } from '@/lib/contracts/actions';
 import type { SystemAuditReport } from '@/engine/covenant-master-sdk';
 
 const STATUS_STYLES: Record<SystemAuditReport['status'], string> = {
@@ -32,7 +32,7 @@ export function AuditRunner() {
 
   return (
     <section className="glass-card p-6" aria-label="Smart Ledger Verification">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-[#00C8FF]">
+      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Smart Ledger Verification
       </p>
       <p className="mt-2 text-sm text-white/50">
@@ -43,7 +43,7 @@ export function AuditRunner() {
         type="button"
         onClick={run}
         disabled={pending}
-        className="mt-4 rounded-lg border border-[#00C8FF]/40 px-4 py-2 text-sm text-[#00C8FF] hover:bg-[#00C8FF]/10 disabled:opacity-50"
+        className="mt-4 rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10 disabled:opacity-50"
       >
         {pending ? 'Auditing…' : 'Run system audit'}
       </button>
