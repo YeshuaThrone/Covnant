@@ -10,7 +10,8 @@ import { toE164Phone } from '@/lib/gateway/phone';
  * Enforces strict inline styling rules to prevent external CSS resets
  * or framework defaults from overriding layout, font, or logic.
  *
- * Backend wiring: identity intake verifies through Supabase SMS OTP
+ * Backend wiring (currently DORMANT — see the PERMANENT OVERRIDE markers
+ * below): identity intake verifies through Supabase SMS OTP
  * (signInWithOtp / verifyOtp), verified creators register their telemetry via
  * POST /api/users/register (bearer-authenticated with the session token), and
  * the CEO admin vault reads its ledger from GET /api/admin/ledger — the
@@ -90,6 +91,13 @@ export default function CovnantSDK() {
     phone: '',
   });
 
+  // PERMANENT OVERRIDE UNTIL MANUALLY REVERTED — handshake state stays
+  // declared so the dormant step-2 screen and the world-view verification
+  // gate restore with zero edits. During the override step is pinned to 1
+  // (its only setStep(2) call lives in the commented handleInitiateSms) and
+  // isVerified stays false (only handleVerifyCode sets it true).
+  // Supabase + Twilio handshake disabled by user command.
+  // DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED.
   const [step, setStep] = useState(1);
   const [verificationCode, setVerificationCode] = useState('');
   const [isVerified, setIsVerified] = useState(false);
@@ -108,29 +116,59 @@ export default function CovnantSDK() {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
-  const handleInitiateSms = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    // UX pre-check only — the UI collects a NANP number under a fixed +1
-    // prefix. Supabase is the verification authority, never this check.
-    if (!userData.phone || userData.phone.replace(/\D/g, '').length !== 10) {
-      setErrorMsg('Please enter a valid 10-digit phone number.');
-      return;
-    }
-    setErrorMsg('');
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: toE164Phone(userData.phone),
-      });
-      if (error) {
-        setErrorMsg(`Device ping failed: ${error.message}`);
-        return;
-      }
-      setStep(2);
-    } catch (err) {
-      setErrorMsg(`Device ping failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  // PERMANENT OVERRIDE UNTIL MANUALLY REVERTED
+  // Supabase + Twilio handshake disabled by user command.
+  // DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED.
+  //
+  // The original SMS handshake sender is preserved verbatim below. Manual
+  // revert (uncomment-only):
+  //   1. Uncomment handleInitiateSms.
+  //   2. In the step-1 form below, swap `onSubmit={handleAuthSubmit}` back
+  //      to the commented `onSubmit={handleInitiateSms}` line.
+  // Nothing else was removed: the 6-digit step-2 screen, handleVerifyCode
+  // (verifyOtp + bearer POST /api/users/register + world-view unlock), and
+  // the isVerified nav gate all stay wired but unreachable while step is
+  // pinned to 1.
+  //
+  // const handleInitiateSms = async (e: FormEvent<HTMLFormElement>) => {
+  //   e.preventDefault();
+  //   // UX pre-check only — the UI collects a NANP number under a fixed +1
+  //   // prefix. Supabase is the verification authority, never this check.
+  //   if (!userData.phone || userData.phone.replace(/\D/g, '').length !== 10) {
+  //     setErrorMsg('Please enter a valid 10-digit phone number.');
+  //     return;
+  //   }
+  //   setErrorMsg('');
+  //   try {
+  //     const { error } = await supabase.auth.signInWithOtp({
+  //       phone: toE164Phone(userData.phone),
+  //     });
+  //     if (error) {
+  //       setErrorMsg(`Device ping failed: ${error.message}`);
+  //       return;
+  //     }
+  //     setStep(2);
+  //   } catch (err) {
+  //     setErrorMsg(`Device ping failed: ${err instanceof Error ? err.message : String(err)}`);
+  //   }
+  // };
+
+  // PERMANENT OVERRIDE UNTIL MANUALLY REVERTED
+  const handleAuthSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    if (e) e.preventDefault();
+    // Supabase + Twilio handshake disabled by user command.
+    // DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED.
+    // await supabase.auth.signInWithOtp({ phone });
+    // Direct advance to main UI state / router
+    router.push('/dashboard');
   };
 
+  // PERMANENT OVERRIDE UNTIL MANUALLY REVERTED — verification half of the
+  // handshake (verifyOtp, bearer-authenticated telemetry registration, and
+  // the world-view unlock). Supabase + Twilio handshake disabled by user
+  // command. DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED. Left fully intact
+  // and wired to the unreachable step-2 screen so the manual revert needs
+  // no code restoration.
   const handleVerifyCode = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (verificationCode.trim().length !== 6) {
@@ -249,7 +287,16 @@ export default function CovnantSDK() {
             )}
 
             {step === 1 && (
-              <form onSubmit={handleInitiateSms} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <form
+                // PERMANENT OVERRIDE UNTIL MANUALLY REVERTED
+                // Supabase + Twilio handshake disabled by user command.
+                // DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED.
+                // Manual revert: restore the line below and uncomment
+                // handleInitiateSms (preserved verbatim above the override).
+                // onSubmit={handleInitiateSms}
+                onSubmit={handleAuthSubmit}
+                style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
+              >
                 <div>
                   <label htmlFor="gateway-legal-name" style={{ ...labelStyle, ...fontReset }}>LEGAL NAME</label>
                   <input
@@ -326,6 +373,11 @@ export default function CovnantSDK() {
               </form>
             )}
 
+            {/* PERMANENT OVERRIDE UNTIL MANUALLY REVERTED — the 6-digit device
+                handshake screen. Unreachable while step is pinned to 1 (the
+                only setStep(2) call lives in the commented handleInitiateSms).
+                Supabase + Twilio handshake disabled by user command.
+                DO NOT RE-ENABLE UNTIL EXPLICITLY REQUESTED. */}
             {step === 2 && (
               <form onSubmit={handleVerifyCode} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <p style={{ fontSize: '14px', color: '#AAAAAA', textAlign: 'center', margin: '0 0 10px 0', ...fontReset }}>
