@@ -117,6 +117,13 @@ test('generates a Split Sheet from the asset of record, tracks signatures, saves
   await expect(page.getByTestId('contract-status-chip')).toHaveText('Pending');
   await expect(page.getByText('Requested').first()).toBeVisible();
 
+  // Verification strip rides the active contract editor, and the reconciled
+  // asset of record leaves posting unlocked (no amber lock notice, buttons live).
+  // (role="alert" is owned by Next's route announcer — match the lock text.)
+  await expect(page.locator('span[data-verification="pre-reconciled"]')).toHaveAttribute('data-state', 'active');
+  await expect(page.getByText(/Pre-posting reconciliation locked/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Save draft/ })).toBeEnabled();
+
   await page.getByRole('button', { name: /Save draft/ }).click();
   // The first save creates the contract and navigates to its own editor page
   // (the editor re-mounts, so the button label resets to "Save draft") — the

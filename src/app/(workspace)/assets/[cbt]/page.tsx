@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CovenantBlockAsset, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import { resolveRegistryPills } from '@/lib/assets/registry-keys';
+import { formatPercentValue } from '@/lib/fixed-point';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
 import { CATEGORY_LABELS, CATEGORY_ORDER, TEMPLATES } from '@/lib/contracts/templates';
 import {
@@ -10,10 +11,12 @@ import {
   MEDIUM_LABELS,
   POOL_LABELS,
   poolStateForUnits,
+  poolUnitsFromShares,
   sumPoolUnits,
 } from '@/lib/splits/shared';
 import { getSdk } from '@/lib/sdk';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
+import { AssetVerificationStrip } from '@/components/brand/AssetVerificationStrip';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +56,10 @@ export default async function AssetDetailPage({ params }: PageProps) {
   if (!asset) notFound();
 
   const pools = poolsFromSheet(asset);
+  // Exact per-pool unit sums (1 unit = 0.0001%) for the verification strip.
+  const poolUnits = pools.map((pool) =>
+    Number(poolUnitsFromShares(pool.holders.map((h) => h.splitPercentage))),
+  );
   const pills = resolveRegistryPills({
     cbtCode: asset.cbtCode,
     medium: asset.medium,
@@ -85,6 +92,10 @@ export default async function AssetDetailPage({ params }: PageProps) {
         external registry code is fabricated.
       </p>
 
+      <div className="mt-6">
+        <AssetVerificationStrip cbtCode={asset.cbtCode} poolUnits={poolUnits} />
+      </div>
+
       <div className="gold-rule my-8" />
 
       <p className="text-sm text-white/50">
@@ -113,7 +124,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     </p>
                   </div>
                   <span className="font-mono text-sm text-[#FFD700]">
-                    {formatUnitsAsPercent(holder.splitPercentage)}%
+                    {formatPercentValue(holder.splitPercentage)}%
                   </span>
                 </li>
               ))}

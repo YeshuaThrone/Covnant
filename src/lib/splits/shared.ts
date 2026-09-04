@@ -14,6 +14,7 @@
  * both use strict equality at the unit level.
  */
 import type { MediaMedium } from '@/engine/covenant-master-sdk';
+import { formatPercentUnits, percentNumberToUnits } from '@/lib/fixed-point';
 
 export const SPLIT_SCALE = 10000;
 /** 100.0000% in engine units (percentage × SPLIT_SCALE). */
@@ -113,9 +114,20 @@ export interface PoolDraft {
   holders: HolderDraft[];
 }
 
-/** Sum shares into the engine's integer unit space (1 unit = 0.0001%). */
+/**
+ * Sum shares into the engine's integer unit space (1 unit = 0.0001%).
+ *
+ * Returns a number only because the engine's `splitPercentage` is a number;
+ * the arithmetic itself runs in BigInt (via the fixed-point handler), so the
+ * result is the exact integer the float path could only approximate.
+ */
 export function sumPoolUnits(shares: number[]): number {
-  return shares.reduce((acc, pct) => acc + Math.round(pct * SPLIT_SCALE), 0);
+  return Number(poolUnitsFromShares(shares));
+}
+
+/** Exact per-pool unit sum in BigInt space (1 unit = 0.0001%). */
+export function poolUnitsFromShares(shares: number[]): bigint {
+  return shares.reduce((acc, pct) => acc + percentNumberToUnits(pct), 0n);
 }
 
 export type PoolState = 'UNDER' | 'EXACT' | 'OVER';
@@ -126,20 +138,21 @@ export type PoolState = 'UNDER' | 'EXACT' | 'OVER';
  * the stored sheet, but no pool may save while off by even a tenth of a
  * basis point.
  */
-export function poolStateForUnits(units: number): PoolState {
-  if (units === TARGET_UNITS) return 'EXACT';
-  return units < TARGET_UNITS ? 'UNDER' : 'OVER';
+export function poolStateForUnits(units: number | bigint): PoolState {
+  const value = BigInt(units);
+  if (value === BigInt(TARGET_UNITS)) return 'EXACT';
+  return value < BigInt(TARGET_UNITS) ? 'UNDER' : 'OVER';
 }
 
-/** Unit sum as a percentage string, e.g. 999_999 → "99.9999". */
-export function formatUnitsAsPercent(units: number): string {
-  return (units / SPLIT_SCALE).toFixed(4);
+/** Unit sum as a percentage string, e.g. 999_999 → "99.9999". Exact at 4 dp. */
+export function formatUnitsAsPercent(units: number | bigint): string {
+  return formatPercentUnits(BigInt(units));
 }
 
 /** Human gap for the pool chip: "needs 0.0001%" / "+0.0010% over"; empty when exact. */
-export function describePoolGap(units: number): string {
-  const delta = units - TARGET_UNITS;
-  if (delta === 0) return '';
-  const magnitude = (Math.abs(delta) / SPLIT_SCALE).toFixed(4);
-  return delta < 0 ? `needs ${magnitude}%` : `+${magnitude}% over`;
+export function describePoolGap(units: number | bigint): string {
+  const delta = BigInt(units) - BigInt(TARGET_UNITS);
+  if (delta === 0n) return '';
+  const magnitude = formatPercentUnits(delta < 0n ? -delta : delta);
+  return delta < 0n ? `needs ${magnitude}%` : `+${magnitude}% over`;
 }

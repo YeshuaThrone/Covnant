@@ -94,6 +94,15 @@ test.describe.serial('MUL gate, auto identifier pills, duplicate shield', () => 
     // No fabricated real-world registry codes: every derived value is a CVT key.
     await expect(page.getByText(/[A-Z]{2}-[A-Z0-9]{3}-[0-9]{2}-[0-9]{5}/)).toHaveCount(0);
     await expect(page.getByText(/10\.5240\//)).toHaveCount(0);
+
+    // Smart-ledger verification strip: Pre-Reconciled is active (pools are
+    // exact); Audited and Immutable stay pending until settlements exist.
+    // All three render their text label in every state — never color-only.
+    const strip = page.locator('span[data-verification]');
+    await expect(strip).toHaveCount(3);
+    await expect(page.locator('span[data-verification="pre-reconciled"]')).toHaveAttribute('data-state', 'active');
+    await expect(page.locator('span[data-verification="audited"]')).toHaveAttribute('data-state', 'pending');
+    await expect(page.locator('span[data-verification="immutable-ledger-active"]')).toHaveAttribute('data-state', 'pending');
   });
 
   test('registering the same asset twice shows the gold banner and preserves the form state', async ({

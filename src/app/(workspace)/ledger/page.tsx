@@ -10,7 +10,7 @@
  */
 
 import { listAssets } from '@/lib/sdk';
-import { listLedger, totalsFrom } from '@/lib/ledger/store';
+import { listLedger } from '@/lib/ledger/store';
 import { withRegistryPills, type RegistryPill } from '@/lib/assets/registry-keys';
 import { formatMinor, reconcileLedger } from '@/lib/ledger/reconciliation';
 import { SettlementTable } from '@/components/ledger/SettlementTable';
@@ -39,7 +39,6 @@ function attachRegistryPills(
 export default async function LedgerPage() {
   const rows = await listLedger();
   const assets = await listAssets();
-  const totals = totalsFrom(rows);
   const recon = reconcileLedger(rows);
 
   return (
@@ -136,7 +135,6 @@ export default async function LedgerPage() {
       <section aria-label="Settlement history" className="mt-8">
         <SettlementTable
           rows={attachRegistryPills(rows, assets)}
-          totals={totals}
           assets={assets.map((a) => ({ cbtCode: a.cbtCode, title: a.title }))}
         />
       </section>

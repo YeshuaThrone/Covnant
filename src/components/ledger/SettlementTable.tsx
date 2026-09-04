@@ -8,43 +8,38 @@
  * direct settlement form on the 0%-fee direct path.
  */
 
-import { useMemo, useState, useTransition } from 'react';
-import { CURRENCY_DECIMALS } from '@/lib/ledger/currency-precision';
-import type { LedgerRow, LedgerTotals } from '@/lib/ledger/store';
+import { useState, useTransition } from 'react';
+import type { LedgerRow } from '@/lib/ledger/store';
+import { formatLedgerAmount, formatMicroTotal, ledgerTotalsMicro } from '@/lib/ledger/micro-adapter';
+import { formatFractionAsPercent, microToNumber, tryParseMicro } from '@/lib/fixed-point';
 import type { RegistryPill } from '@/lib/assets/registry-keys';
 import { settleDirectAction } from '@/lib/ledger/actions';
 
 /** Ledger rows ride with their asset's registry pills (Black Box Shield). */
 type LedgerRowWithRegistry = LedgerRow & { registry: RegistryPill[] };
 
-function fmt(amount: number, currency: string): string {
-  const decimals = CURRENCY_DECIMALS[currency] ?? 4;
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
 export function SettlementTable({
   rows,
-  totals,
   assets,
 }: {
   rows: LedgerRowWithRegistry[];
-  totals: LedgerTotals;
   assets: { cbtCode: string; title: string }[];
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Totals sum in BigInt micro units — the float reduce in the store is not
+  // used for display.
+  const microTotals = ledgerTotalsMicro(rows);
+  const referenceCurrency = rows[0]?.currency ?? 'USD';
 
   return (
     <div className="space-y-4">
       {/* Totals strip */}
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          ['Settlements', String(totals.count)],
-          ['Gross settled', fmt(totals.gross, rows[0]?.currency ?? 'USD') + (rows.length ? ' mixed' : '')],
-          ['Covenant fees', fmt(totals.fees, rows[0]?.currency ?? 'USD') + (rows.length ? ' mixed' : '')],
-          ['Corner dust', fmt(totals.cornerDust, rows[0]?.currency ?? 'USD') + (rows.length ? ' mixed' : '')],
+          ['Settlements', String(microTotals.count)],
+          ['Gross settled', formatMicroTotal(microTotals.gross, referenceCurrency) + (rows.length ? ' mixed' : '')],
+          ['Covenant fees', formatMicroTotal(microTotals.fees, referenceCurrency) + (rows.length ? ' mixed' : '')],
+          ['Corner dust', formatMicroTotal(microTotals.cornerDust, referenceCurrency) + (rows.length ? ' mixed' : '')],
         ].map(([label, value]) => (
           <div key={label} className="glass-card p-4">
             <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">{label}</dt>
@@ -137,13 +132,13 @@ function TableRow({
         </td>
         <td className="px-4 py-3 text-white/60">{row.platform}</td>
         <td className="px-4 py-3 text-right font-mono text-xs">
-          {fmt(row.grossSettled, row.currency)} {row.currency}
+          {formatLedgerAmount(row.grossSettled, row.currency)} {row.currency}
         </td>
         <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
-          {fmt(row.covenantFee, row.currency)}
+          {formatLedgerAmount(row.covenantFee, row.currency)}
         </td>
         <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/80">
-          {fmt(row.cornerDustCollected, row.currency)}
+          {formatLedgerAmount(row.cornerDustCollected, row.currency)}
         </td>
         <td className="px-4 py-3">
           <span className="rounded-full border border-emerald-400/40 px-2 py-0.5 font-mono text-[10px] uppercase text-emerald-300">
@@ -175,10 +170,10 @@ function TableRow({
                   <tr key={d.rightsHolderId} className="border-t border-white/5">
                     <td className="py-2 pr-4 text-white/90">{d.rightsHolderName}</td>
                     <td className="py-2 pr-4">{d.role}</td>
-                    <td className="py-2 pr-4 text-right">{fmt(d.grossShare, row.currency)}</td>
-                    <td className="py-2 pr-4 text-right">{(d.withholdingTaxRateApplied * 100).toFixed(2)}%</td>
-                    <td className="py-2 pr-4 text-right">{fmt(d.withholdingTaxDeducted, row.currency)}</td>
-                    <td className="py-2 pr-4 text-right text-gold">{fmt(d.netShare, row.currency)}</td>
+                    <td className="py-2 pr-4 text-right">{formatLedgerAmount(d.grossShare, row.currency)}</td>
+                    <td className="py-2 pr-4 text-right">{formatFractionAsPercent(d.withholdingTaxRateApplied)}%</td>
+                    <td className="py-2 pr-4 text-right">{formatLedgerAmount(d.withholdingTaxDeducted, row.currency)}</td>
+                    <td className="py-2 pr-4 text-right text-gold">{formatLedgerAmount(d.netShare, row.currency)}</td>
                     <td className="py-2 pr-4">{d.taxFormRequired}</td>
                     <td className="py-2">
                       {d.routing?.railType ?? '—'} · {d.routing?.countryCode ?? '—'}
@@ -205,17 +200,20 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
   const [receipt, setReceipt] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const amount = useMemo(() => Number(grossAmount), [grossAmount]);
-  const ready = Boolean(cbtCode) && amount > 0 && !pending;
+  // Strict decimal parse — a raw Number() would accept '1e9' or ',' values and
+  // silently round >8dp inputs; the handler rejects both up front.
+  const parsedAmount = tryParseMicro(grossAmount);
+  const ready = Boolean(cbtCode) && parsedAmount !== null && parsedAmount > 0n && !pending;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (parsedAmount === null || parsedAmount <= 0n) return;
     setError(null);
     setReceipt(null);
     startTransition(async () => {
       const outcome = await settleDirectAction({
         cbtCode,
-        grossAmount: amount,
+        grossAmount: microToNumber(parsedAmount),
         currency,
         territoryCountryCode: territory,
         sourcePlatform: 'DIRECT',
@@ -224,10 +222,10 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
         setReceipt(
           `${outcome.result.transactionId} settled: ` +
             outcome.result.disbursements
-              .map((d) => `${d.rightsHolderName} net ${fmt(d.netShare, outcome.result.currency)}`)
+              .map((d) => `${d.rightsHolderName} net ${formatLedgerAmount(d.netShare, outcome.result.currency)}`)
               .join(', ') +
             (outcome.result.cornerDustCollected > 0
-              ? ` · corner dust ${fmt(outcome.result.cornerDustCollected, outcome.result.currency)}`
+              ? ` · corner dust ${formatLedgerAmount(outcome.result.cornerDustCollected, outcome.result.currency)}`
               : '')
         );
         setGrossAmount('');

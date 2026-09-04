@@ -5,6 +5,7 @@ import { generateAgreement, hydrateContext } from '@/lib/contracts/generator';
 import { getSdk, listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { payoutFlowsFor } from '@/lib/contracts/payouts';
+import { reconciliationSnapshotForAsset } from '@/lib/splits/reconciliation-server';
 import { ContractEditor } from '@/components/vault/ContractEditor';
 
 export const dynamic = 'force-dynamic';
@@ -74,6 +75,7 @@ export default async function NewContractPage({
   const agreement = generateAgreement(template, context);
   // Payout views read the existing ledger READ API — display shaping only.
   const payouts = payoutFlowsFor(asset.cbtCode, context, await listLedger());
+  const snapshot = reconciliationSnapshotForAsset(asset);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">
@@ -93,6 +95,8 @@ export default async function NewContractPage({
           assetTitle={asset.title}
           initialContext={agreement.fields}
           payouts={payouts}
+          poolUnits={snapshot.poolUnits}
+          reconciliationBlocker={snapshot.blocker}
         />
       </div>
     </div>

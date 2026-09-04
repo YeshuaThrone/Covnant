@@ -12,10 +12,11 @@
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
 import { cvtDisplayCode } from '@/lib/splits/codes';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
+import { percentUnitsToNumber, formatPercentValue } from '@/lib/fixed-point';
 import {
-  formatUnitsAsPercent,
   MEDIUM_LABELS,
   POOL_LABELS,
+  poolUnitsFromShares,
   type PoolName,
 } from '@/lib/splits/shared';
 import type { ContractTemplate } from './templates';
@@ -88,14 +89,15 @@ export function hydrateContext(
   const pools: AgreementPool[] = poolsFromSheet(asset).map((pool) => ({
     pool: pool.pool,
     label: POOL_LABELS[pool.pool],
-    totalPercent: formatUnitsAsPercent(
-      pool.holders.reduce((sum, h) => sum + h.splitPercentage, 0),
+    // Pool totals run through the exact BigInt unit sum — never a float reduce.
+    totalPercent: formatPercentValue(
+      percentUnitsToNumber(poolUnitsFromShares(pool.holders.map((h) => h.splitPercentage))),
     ),
     holders: pool.holders.map((h) => ({
       name: h.name,
       role: h.role,
       pools: POOL_LABELS[pool.pool],
-      sharePercent: formatUnitsAsPercent(h.splitPercentage),
+      sharePercent: formatPercentValue(h.splitPercentage),
       isni: h.isni,
       ipi: h.ipi,
     })),
