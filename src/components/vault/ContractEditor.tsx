@@ -7,6 +7,7 @@ import { VerificationBadge } from '@/components/brand/VerificationBadge';
 import { AutoFillPanel } from '@/components/vault/AutoFillPanel';
 import { SignatureTracker } from '@/components/vault/SignatureTracker';
 import { PayoutPanel } from '@/components/vault/PayoutPanel';
+import { AssetVerificationStrip } from '@/components/brand/AssetVerificationStrip';
 import { renderClauses } from '@/lib/contracts/generator';
 import { getTemplate, CATEGORY_LABELS } from '@/lib/contracts/templates';
 import type { AgreementContext } from '@/lib/contracts/generator';
@@ -40,6 +41,10 @@ export interface ContractEditorProps {
   initialStatus?: 'DRAFT' | 'FINAL';
   /** Shaped ledger READ rows for the asset of record — display only. */
   payouts?: AssetPayouts;
+  /** Exact per-pool unit sums from the asset's stored sheet (1 unit = 0.0001%). */
+  poolUnits: number[];
+  /** Pre-posting reconciliation lock: human-readable blocker, or null when unlocked. */
+  reconciliationBlocker: string | null;
 }
 
 export function ContractEditor({
@@ -51,6 +56,8 @@ export function ContractEditor({
   contractId,
   initialStatus = 'DRAFT',
   payouts,
+  poolUnits,
+  reconciliationBlocker,
 }: ContractEditorProps) {
   const router = useRouter();
   const template = getTemplate(templateId)!;
@@ -91,6 +98,10 @@ export function ContractEditor({
   const statusLabel = presentationStatus(status, anySignatureRequested);
   const signatureRowsForParties = signatureRows(initialContext.parties);
   const fillSummary = useMemo(() => autoFillSummary(initialContext), [initialContext]);
+
+  // Pre-posting reconciliation lock — creation (save) and posting (final)
+  // stay disabled until every pool of the asset of record reconciles exactly.
+  const reconciliationLocked = reconciliationBlocker !== null;
 
   // The preview re-renders deterministically from the same pure renderer the
   // server persists with — the preview and the stored document can never drift.
@@ -153,6 +164,9 @@ export function ContractEditor({
           <p className="mt-4 font-mono text-xs text-white/40">
             Clauses: {template.clauseOrder.length} · Pools hydrated from the asset of record
           </p>
+          <div className="mt-4 border-t border-white/5 pt-4">
+            <AssetVerificationStrip cbtCode={cbtCode} poolUnits={poolUnits} />
+          </div>
         </section>
 
         <AutoFillPanel summary={fillSummary} />
@@ -188,25 +202,37 @@ export function ContractEditor({
         {payouts && <PayoutPanel payouts={payouts} />}
 
         {!isFinal && (
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg border border-gold/40 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : saved ? 'Save again' : 'Save draft'}
-            </button>
-            {contractId && (
+          <div className="space-y-3">
+            {reconciliationLocked && (
+              <p
+                role="alert"
+                className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-200"
+              >
+                {reconciliationBlocker}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={finalize}
-                disabled={finalizing}
-                className="rounded-lg border border-gold/50 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:opacity-50"
+                onClick={save}
+                disabled={saving || reconciliationLocked}
+                aria-disabled={reconciliationLocked}
+                className="rounded-lg border border-gold/40 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {finalizing ? 'Finalizing…' : 'Mark final'}
+                {saving ? 'Saving…' : saved ? 'Save again' : 'Save draft'}
               </button>
-            )}
+              {contractId && (
+                <button
+                  type="button"
+                  onClick={finalize}
+                  disabled={finalizing || reconciliationLocked}
+                  aria-disabled={reconciliationLocked}
+                  className="rounded-lg border border-gold/50 bg-gold/10 px-4 py-2 text-sm text-gold hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {finalizing ? 'Finalizing…' : 'Mark final'}
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -25,15 +25,24 @@ const VARIANT_STYLES: Record<VerificationVariant, string> = {
 export function VerificationBadge({
   variant,
   label,
+  inactive = false,
 }: {
   variant: VerificationVariant;
   /** Override the default label (e.g. "FINAL — immutable"). */
   label?: string;
+  /**
+   * Pending state — muted hairline instead of the variant's active style.
+   * Callers keep the full text label so state is never color-only.
+   */
+  inactive?: boolean;
 }) {
   return (
     <span
       data-verification={variant}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs tracking-wide ${VARIANT_STYLES[variant]}`}
+      data-state={inactive ? 'pending' : 'active'}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs tracking-wide ${
+        inactive ? 'border-white/10 text-white/40' : VARIANT_STYLES[variant]
+      }`}
     >
       {label ?? VARIANT_LABELS[variant]}
     </span>

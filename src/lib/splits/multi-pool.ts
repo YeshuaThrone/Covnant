@@ -92,24 +92,29 @@ export type PoolTaggedHolder = SelfServeRightsHolder & {
  *
  * 1. The engine's own validateSplits (scale 10,000, ±1 unit tolerance) —
  *    the untouched validation the registration and audit paths run.
+ *    Pass `sdk: null` to skip this gate (client components cannot hold the
+ *    engine bundle); every server write path passes the SDK and re-validates.
  * 2. The directive's strict save gate: the pool must read EXACTLY
  *    100.0000% (1,000,000 units). The engine alone would accept 99.9999%
- *    or 100.0001% within its ±1-unit tolerance; the save gate does not.
+ *    or 100.0001% within its ±1-unit tolerance; the save gate does not —
+ *    and is therefore strictly tighter than gate 1 by construction.
  *
  * Never throws for invalid pools — returns per-pool results so the UI can
  * render all chips at once.
  */
 export function validateMultiPoolSplits(
-  sdk: CovenantMasterSDK,
+  sdk: CovenantMasterSDK | null,
   pools: SplitPool[],
 ): PoolValidationResult[] {
   return pools.map((p) => {
-    let engineOk: boolean;
-    try {
-      sdk.validateSplits(p.holders);
-      engineOk = true;
-    } catch {
-      engineOk = false;
+    let engineOk = true;
+    if (sdk) {
+      try {
+        sdk.validateSplits(p.holders);
+        engineOk = true;
+      } catch {
+        engineOk = false;
+      }
     }
     const units = sumPoolUnits(p.holders.map((h) => h.splitPercentage));
     const strictOk = units === TARGET_UNITS;

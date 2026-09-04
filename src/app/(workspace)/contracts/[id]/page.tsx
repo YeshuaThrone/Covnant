@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
 import { getTemplate } from '@/lib/contracts/templates';
 import { getContract } from '@/lib/contracts/store';
 import { listLedger } from '@/lib/ledger/store';
 import { payoutFlowsFor } from '@/lib/contracts/payouts';
+import { getSdk } from '@/lib/sdk';
+import { reconciliationSnapshotForAsset } from '@/lib/splits/reconciliation-server';
 import { ContractEditor } from '@/components/vault/ContractEditor';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +24,16 @@ export default async function ContractDetailPage({
 
   // Payout views read the existing ledger READ API — display shaping only.
   const payouts = payoutFlowsFor(contract.cbtCode, contract.fields, await listLedger());
+
+  // The asset of record feeds the verification strip and the pre-posting
+  // reconciliation lock; an unreadable asset fails closed to a locked editor.
+  let asset: CovenantBlockAsset | undefined;
+  try {
+    asset = await getSdk().getOrHydrateAsset(contract.cbtCode);
+  } catch {
+    asset = undefined;
+  }
+  const snapshot = reconciliationSnapshotForAsset(asset);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">
@@ -42,6 +55,8 @@ export default async function ContractDetailPage({
           contractId={contract.id}
           initialStatus={contract.status}
           payouts={payouts}
+          poolUnits={snapshot.poolUnits}
+          reconciliationBlocker={snapshot.blocker}
         />
       </div>
     </div>
