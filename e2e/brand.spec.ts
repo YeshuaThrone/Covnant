@@ -1,24 +1,23 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-
 /**
  * Spec §07 — Brand system gates: the Obsidian & Deep Gold shell, the
  * CV ribbon monogram, the no-blues rule, and sidebar route resolution.
  */
 
-test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.", and the Obsidian shell', async ({
+test('the Obsidian shell shows the CV ribbon monogram, the #08080A body, and the monogram favicon', async ({
   page,
 }) => {
-  await page.goto('/');
+  // The root '/' is now the CovnantSDK gateway (inline-styled, outside the
+  // brand shell) — the Obsidian & Deep Gold system lives on the workspace
+  // shell, so these gates are asserted on /dashboard.
+  await page.goto('/dashboard');
 
-  // Landing H1 carries the tagline.
-  await expect(page.locator('h1')).toHaveText(/Own Your Creation/);
-
-  // Monogram renders in the landing top bar and again in the hero.
+  // Monogram renders in the workspace shell top bar.
   const monograms = page.locator('svg[class*="monogram"], [data-monogram], svg[aria-label*="CV" i]');
   const count = await monograms.count();
-  expect(count).toBeGreaterThanOrEqual(2);
+  expect(count).toBeGreaterThanOrEqual(1);
 
   // Obsidian background token is applied to the page.
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
