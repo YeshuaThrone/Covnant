@@ -87,13 +87,13 @@ jobs:
           assert_cols platform_allowlists cbt_code
           assert_cols contracts id cbt_code template_id industry status fields document
           assert_cols creator_telemetry id auth_user_id legal_name artist_name regular_email business_email phone phone_verified verified_at created_at
-          assert_cols platform_admin_allowlists id auth_user_id granted_by note created_at
+          assert_cols platform_admin_allowlists id auth_user_id role created_at
 
           # Gateway tables are RLS-enabled and admin-gated (spec directives A/B).
           assert_rls creator_telemetry
           assert_rls platform_admin_allowlists
-          assert_policy creator_telemetry_insert_authenticated
-          assert_policy platform_admin_allowlists_select_authenticated
+          assert_policy "telemetry insert self"
+          assert_policy "admin allowlist read own"
 
   e2e:
     runs-on: ubuntu-latest
