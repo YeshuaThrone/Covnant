@@ -3,26 +3,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Spec §07 — Brand system gates: the Obsidian & Deep Gold shell, the
- * CV ribbon monogram, the no-blues rule, and sidebar route resolution.
+ * Spec §07 — Brand system gates: the landing identity (CV emblem,
+ * "Own Your Creation.", identity form with SMS device ping), the
+ * Obsidian & Deep Gold shell, the no-blues rule, and sidebar route
+ * resolution.
  */
 
-test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.", and the Obsidian shell', async ({
+test('landing shows the CV emblem, "Own Your Creation.", and reveals the identity form with SMS device ping', async ({
   page,
 }) => {
   await page.goto('/');
 
+  // Dialog handler registered before submit — the landing alerts on SMS ping.
+  let dialogMessage: string | null = null;
+  page.on('dialog', async (dialog) => {
+    dialogMessage = dialog.message();
+    await dialog.dismiss();
+  });
+
+  // CV emblem renders twice: the nav badge and the hero emblem.
+  await expect(page.getByText('CV', { exact: true })).toHaveCount(2);
+
   // Landing H1 carries the tagline.
   await expect(page.locator('h1')).toHaveText(/Own Your Creation/);
 
-  // Monogram renders in the landing top bar and again in the hero.
-  const monograms = page.locator('svg[class*="monogram"], [data-monogram], svg[aria-label*="CV" i]');
-  const count = await monograms.count();
-  expect(count).toBeGreaterThanOrEqual(2);
+  // 'Enter your world' reveals the identity form with its four fields.
+  await page.getByRole('button', { name: 'Enter your world' }).click();
+  const form = page.locator('form');
+  await expect(form).toBeVisible();
+  await expect(form.getByLabel('Legal Name')).toBeVisible();
+  await expect(form.getByLabel('Artist Name')).toBeVisible();
+  await expect(form.getByLabel('Business Email')).toBeVisible();
+  await expect(form.getByLabel('Phone Number (SMS Required)')).toBeVisible();
 
-  // Obsidian background token is applied to the page.
-  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  expect(bg).toBe('rgb(8, 8, 10)'); // #08080A
+  // Submitting pings the device and confirms via the SMS alert.
+  await form.getByLabel('Legal Name').fill('Test Creator');
+  await form.getByLabel('Artist Name').fill('Test Artist');
+  await form.getByLabel('Business Email').fill('creator@example.com');
+  await form.getByLabel('Phone Number (SMS Required)').fill('(000) 000-0000');
+  await form.getByRole('button', { name: 'Send SMS & Enter World' }).click();
+  await expect.poll(() => dialogMessage).toBe('SMS verification sent to (000) 000-0000');
 
   // Favicon ships the monogram (defined once, referenced by the app).
   const icon = fs.readFileSync(path.join(process.cwd(), 'src/app/icon.svg'), 'utf8');
