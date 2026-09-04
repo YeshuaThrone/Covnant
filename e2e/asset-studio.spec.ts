@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Spec §07 — Multi-pool save gate and identifier pills.
+ * Directive §2 — zero-friction MUL-gated registration.
  *
- * Serial: the asset registered here is the fixture for the vault flow test.
+ * Serial: the asset registered here ("E2E Pool Gate Song") is the fixture for
+ * the contract vault flow test.
  */
 
 const POOLS = ['Master Recording', 'Writer / Composition', 'Publisher Administration'];
@@ -12,6 +13,8 @@ const BANK_FIELDS: Array<[string, string]> = [
   ['Account number or IBAN', 'E2E-0001'],
   ['Routing number or BIC', '000000001'],
 ];
+const TITLE_INPUT = 'input[placeholder="Song, film, episode, book…"]';
+const ASSET_TITLE = 'E2E Pool Gate Song';
 
 function poolSection(page: import('@playwright/test').Page, label: string) {
   return page.locator('section.glass-card', { has: page.locator('h3', { hasText: label }) });
@@ -30,52 +33,92 @@ async function completePool(
   }
 }
 
-test.describe.serial('multi-pool gate and identifier pills', () => {
+/** Fill the identity + all three pools exactly as the studio requires. */
+async function fillRegistrationForm(page: import('@playwright/test').Page) {
+  await page.goto('/assets/new');
+  await page.locator(TITLE_INPUT).fill(ASSET_TITLE);
+  await completePool(page, POOLS[0], 'Alice E2E');
+  await completePool(page, POOLS[1], 'Bob E2E');
+  await completePool(page, POOLS[2], 'Cara E2E');
+}
+
+test.describe.serial('MUL gate, auto identifier pills, duplicate shield', () => {
   let cbtCode = '';
 
-  test('Save enables exactly when all three pools read 100.0000%, then registers the asset', async ({
+  test('MUL gate: no manual identifier inputs, license prompt opens before any registration', async ({
     page,
   }) => {
     await page.goto('/assets/new');
 
-    await page.locator('input[placeholder="Song, film, episode, book…"]').fill('E2E Pool Gate Song');
-    await page.locator('input[placeholder="US-XXX-26-00001"]').fill('US-S1M-26-77777');
-    await page.locator('input[placeholder="T-000.000.000-0"]').fill('T-900.266.233-7');
-    await page.locator('input[placeholder="10.5240/…"]').fill('10.5240/0000-7777');
+    // Zero-friction flow: the manual ISRC / ISWC / EIDR entry fields are gone.
+    await expect(page.locator('input[placeholder="US-XXX-26-00001"]')).toHaveCount(0);
+    await expect(page.locator('input[placeholder="T-000.000.000-0"]')).toHaveCount(0);
+    await expect(page.locator('input[placeholder="10.5240/…"]')).toHaveCount(0);
 
-    const save = page.getByRole('button', { name: /Register asset/ });
-    await expect(save).toBeDisabled();
+    // The save gate still applies: Register stays disabled until pools are exact.
+    const register = page.getByRole('button', { name: /Register asset/ });
+    await expect(register).toBeDisabled();
 
-    // Pool 1 alone: still gated.
-    await completePool(page, POOLS[0], 'Alice E2E');
-    await expect(save).toBeDisabled();
+    await fillRegistrationForm(page);
+    await expect(register).toBeEnabled();
+    await register.click();
 
-    // Pool 2: still gated.
-    await completePool(page, POOLS[1], 'Bob E2E');
-    await expect(save).toBeDisabled();
+    // The MUL agreement prompt is the registration gate — nothing is written yet.
+    const dialog = page.getByRole('dialog', {
+      name: /Master Recording & Universal Asset License/,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Accept MUL & Register Asset');
+    await expect(page).toHaveURL(/\/assets\/new$/);
+  });
 
-    // Per-pool chips read the running totals.
-    await expect(poolSection(page, POOLS[0]).locator('span.font-mono')).toHaveText(/100\.0000%/);
+  test('accepting MUL registers the asset and auto-provisions universal tracking pills', async ({
+    page,
+  }) => {
+    await fillRegistrationForm(page);
 
-    // Pool 3 completes the gate: now, and only now, Save enables.
-    await completePool(page, POOLS[2], 'Cara E2E');
-    await expect(save).toBeEnabled();
-
-    await save.click();
+    await page.getByRole('button', { name: /Register asset/ }).click();
+    await page.getByRole('button', { name: /Accept MUL & Register Asset/ }).click();
     await page.waitForURL(/\/assets\/CBT-/);
 
     cbtCode = new URL(page.url()).pathname.split('/').pop() ?? '';
     expect(cbtCode).toMatch(/^CBT-/);
+
+    // Auto pills on asset detail — Music & Audio: ISRC (Recording) + ISWC (Composition).
+    await expect(page.getByText('ISRC (Recording)')).toBeVisible();
+    await expect(page.getByText('ISWC (Composition)')).toBeVisible();
+    await expect(page.getByText(cbtCode)).toBeVisible();
+    await expect(page.getByText(/CVT-ISRC-[0-9A-F]{4}/)).toBeVisible();
+    await expect(page.getByText(/CVT-ISWC-[0-9A-F]{4}/)).toBeVisible();
+
+    // No fabricated real-world registry codes: every derived value is a CVT key.
+    await expect(page.getByText(/[A-Z]{2}-[A-Z0-9]{3}-[0-9]{2}-[0-9]{5}/)).toHaveCount(0);
+    await expect(page.getByText(/10\.5240\//)).toHaveCount(0);
   });
 
-  test('asset detail renders the CBT/CVT/ISRC/ISWC/EIDR identifier pills', async ({ page }) => {
-    await page.goto(`/assets/${cbtCode}`);
+  test('registering the same asset twice shows the gold banner and preserves the form state', async ({
+    page,
+  }) => {
+    await fillRegistrationForm(page);
 
-    // Pills: label + mono value pairs rendered by IdentifierBadge.
-    await expect(page.getByText('US-S1M-26-77777')).toBeVisible();
-    await expect(page.getByText('T-900.266.233-7')).toBeVisible();
-    await expect(page.getByText('10.5240/0000-7777')).toBeVisible();
-    // CVT display code: CVT-TRK for music tracks.
-    await expect(page.getByText(/^CVT-/)).toHaveCount(1);
+    await page.getByRole('button', { name: /Register asset/ }).click();
+    await page.getByRole('button', { name: /Accept MUL & Register Asset/ }).click();
+
+    // In-app gold banner — never a raw Postgres error.
+    const banner = page.locator('aside.banner-gold');
+    await expect(banner).toContainText('Asset already registered in CBT catalog');
+    await expect(page.getByText(/duplicate key/i)).toHaveCount(0);
+    await expect(page.getByText(/Database registration failed/i)).toHaveCount(0);
+
+    // UI state fully preserved: still on the form, title intact, pools still exact.
+    await expect(page).toHaveURL(/\/assets\/new$/);
+    await expect(page.locator(TITLE_INPUT)).toHaveValue(ASSET_TITLE);
+    await expect(poolSection(page, POOLS[0]).locator('span.font-mono')).toHaveText(/100\.0000%/);
+    await expect(poolSection(page, POOLS[2]).locator('span.font-mono')).toHaveText(/100\.0000%/);
+
+    // The Asset Studio's registered-asset list holds exactly one copy of the
+    // asset of record (the full catalog view is a stub in this release).
+    await page.goto('/assets');
+    await expect(page.getByText(ASSET_TITLE)).toHaveCount(1);
   });
 });

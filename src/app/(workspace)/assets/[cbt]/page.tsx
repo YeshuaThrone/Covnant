@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CovenantBlockAsset, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
-import { cvtDisplayCode } from '@/lib/splits/codes';
+import { resolveRegistryPills } from '@/lib/assets/registry-keys';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
 import {
   describePoolGap,
@@ -52,9 +52,11 @@ export default async function AssetDetailPage({ params }: PageProps) {
   if (!asset) notFound();
 
   const pools = poolsFromSheet(asset);
-  const identifierEntries = Object.entries(asset.mappedIdentifiers).filter(
-    (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0,
-  );
+  const pills = resolveRegistryPills({
+    cbtCode: asset.cbtCode,
+    medium: asset.medium,
+    mappedIdentifiers: asset.mappedIdentifiers,
+  });
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-16">
@@ -72,12 +74,15 @@ export default async function AssetDetailPage({ params }: PageProps) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <IdentifierBadge label="CBT" value={asset.cbtCode} />
-        <IdentifierBadge label="CVT" value={cvtDisplayCode(asset.cbtCode)} />
-        {identifierEntries.map(([key, value]) => (
-          <IdentifierBadge key={key} label={key.toUpperCase()} value={value} />
+        {pills.map((pill) => (
+          <IdentifierBadge key={pill.key} label={pill.label} value={pill.value} />
         ))}
       </div>
+      <p className="mt-3 max-w-2xl text-xs text-white/40">
+        Universal tracking keys are provisioned automatically — the CBT code is the engine&apos;s
+        canonical record and every CVT value is an internal audit key for ledger verification. No
+        external registry code is fabricated.
+      </p>
 
       <div className="gold-rule my-8" />
 

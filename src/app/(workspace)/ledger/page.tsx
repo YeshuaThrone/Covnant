@@ -7,10 +7,28 @@
 
 import { listAssets } from '@/lib/sdk';
 import { listLedger, totalsFrom } from '@/lib/ledger/store';
+import { withRegistryPills, type RegistryPill } from '@/lib/assets/registry-keys';
 import { SettlementTable } from '@/components/ledger/SettlementTable';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 
 export const dynamic = 'force-dynamic';
+
+type LedgerRowWithRegistry = Awaited<ReturnType<typeof listLedger>>[number] & {
+  registry: RegistryPill[];
+};
+
+/**
+ * Black Box Shield — every ledger-bound row rides with its asset's registry
+ * pills (canonical CBT/CVT audit keys plus sector keys), so payout views can
+ * always display the identifiers next to the amounts.
+ */
+function attachRegistryPills(
+  rows: Awaited<ReturnType<typeof listLedger>>,
+  assets: Awaited<ReturnType<typeof listAssets>>,
+): LedgerRowWithRegistry[] {
+  const assetByCode = new Map(assets.map((a) => [a.cbtCode, a]));
+  return rows.map((row) => withRegistryPills(row, assetByCode.get(row.cbtCode)));
+}
 
 export default async function LedgerPage() {
   const rows = await listLedger();
@@ -31,7 +49,7 @@ export default async function LedgerPage() {
 
       <section aria-label="Settlement history" className="mt-8">
         <SettlementTable
-          rows={rows}
+          rows={attachRegistryPills(rows, assets)}
           totals={totals}
           assets={assets.map((a) => ({ cbtCode: a.cbtCode, title: a.title }))}
         />

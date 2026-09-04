@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 import type { MediaMedium } from '@/engine/covenant-master-sdk';
-import { getSdk, indexAsset } from '@/lib/sdk';
+import { getSdk, indexAsset, listAssets } from '@/lib/sdk';
 import {
+  DUPLICATE_ASSET_MESSAGE,
+  DuplicateAssetRegistrationError,
   holdersFromDrafts,
   registerMultiPoolAsset,
   saveAssetSplits,
@@ -21,6 +23,8 @@ export interface ActionResult {
   ok: boolean;
   cbtCode?: string;
   error?: string;
+  /** True when the collision was classified as an already-registered identical asset. */
+  duplicate?: boolean;
 }
 
 /**
@@ -41,17 +45,30 @@ export async function registerAssetAction(payload: RegisterAssetPayload): Promis
       holders: holdersFromDrafts(p.holders),
     }));
     const sdk = getSdk();
-    const result = await registerMultiPoolAsset(sdk, {
-      title: payload.title.trim(),
-      medium: payload.medium as MediaMedium,
-      identifiers: payload.identifiers,
-      pools,
-    });
+    // Catalog snapshot for the adapter's pre-write duplicate probe — listAssets
+    // reads the DB in Supabase mode and the shadow index in memory mode.
+    const catalog = await listAssets(sdk);
+    const result = await registerMultiPoolAsset(
+      sdk,
+      {
+        title: payload.title.trim(),
+        medium: payload.medium as MediaMedium,
+        identifiers: payload.identifiers,
+        pools,
+      },
+      {
+        findExisting: (title, medium) =>
+          Promise.resolve(catalog.some((a) => a.title === title && a.medium === medium)),
+      },
+    );
     const asset = sdk.getInMemoryAsset(result.cbtCode);
     if (asset) indexAsset(asset);
     revalidatePath('/assets');
     return { ok: true, cbtCode: result.cbtCode };
   } catch (error) {
+    if (error instanceof DuplicateAssetRegistrationError) {
+      return { ok: false, duplicate: true, error: DUPLICATE_ASSET_MESSAGE };
+    }
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Registration failed.',
