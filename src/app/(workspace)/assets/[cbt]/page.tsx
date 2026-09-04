@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import type { CovenantBlockAsset, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import { resolveRegistryPills } from '@/lib/assets/registry-keys';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
-import { CATEGORY_LABELS, TEMPLATES, type ContractCategory } from '@/lib/contracts/templates';
+import { CATEGORY_LABELS, CATEGORY_ORDER, TEMPLATES } from '@/lib/contracts/templates';
 import {
   describePoolGap,
   formatUnitsAsPercent,
@@ -16,8 +16,6 @@ import { getSdk } from '@/lib/sdk';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 
 export const dynamic = 'force-dynamic';
-
-const CATEGORY_ORDER: readonly ContractCategory[] = ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS'];
 
 interface PageProps {
   params: Promise<{ cbt: string }>;

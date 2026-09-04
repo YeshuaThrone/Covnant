@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Spec §07 (directive §4) — Contract Vault gates: 16 deterministic agreements
- * across four categories (Music & Record Label, Film/TV & Hollywood, Gaming &
- * Interactive, Podcasts/Creators & Streamers), the /templates categorized
+ * Spec §07 (directive §4) — Contract Vault gates: 20 deterministic agreements
+ * across five categories (Music & Record Label, Film/TV & Hollywood, Gaming &
+ * Interactive, Podcasts/Creators & Streamers, Fashion & Apparel), the
+ * /templates categorized
  * library, auto-fill from the asset of record (names, splits, identifiers —
  * PRO/IPI never fabricated), Draft/Pending/Completed presentation, signature
  * tracking, and draft → final → export.
@@ -14,21 +15,22 @@ import { expect, test } from '@playwright/test';
  * invented numbers.
  */
 
-test('/templates lists 16 templates across the four industry sections', async ({ page }) => {
+test('/templates lists 20 templates across the five industry sections', async ({ page }) => {
   await page.goto('/templates');
 
-  // Four category sections render.
+  // Five category sections render.
   for (const label of [
     'Music & Record Label',
     'Film, TV & Hollywood',
     'Gaming & Interactive',
     'Podcasts, Creators & Streamers',
+    'Fashion & Apparel',
   ]) {
     await expect(page.getByRole('heading', { name: label })).toBeVisible();
   }
 
   const cards = page.locator('a[href^="/contracts/new?template="]');
-  await expect(cards).toHaveCount(16);
+  await expect(cards).toHaveCount(20);
 
   // One named agreement per category spot-check (scoped to card links —
   // category blurbs can contain the same words).
@@ -37,6 +39,7 @@ test('/templates lists 16 templates across the four industry sections', async ({
     'Film/TV Score Composer Contract',
     'Voiceover/MoCap Release',
     'Podcast Co-Host & Guest Split',
+    'Fashion Design License Agreement',
   ]) {
     await expect(page.locator('a[href^="/contracts/new?template="]', { hasText: name })).toBeVisible();
   }
@@ -60,11 +63,12 @@ test('/templates navigation generates an auto-filled agreement from the asset of
   await expect(page.getByText('Bob E2E').first()).toBeVisible();
   await expect(page.getByText('100.0000%').first()).toBeVisible();
 
-  // Registry identifiers map in; absent holder profile data renders as
+  // Registry identifiers map in: the MUL flow auto-provisions the canonical
+  // CBT and CVT tracking pills (codes derive per registration, so assert the
+  // pattern, not a literal). Absent holder-profile data renders as
   // to-be-completed — never fabricated.
-  // The ISRC appears in the auto-fill pill and again inside the agreement
-  // preview body — the first match (the pill) is the assertion target.
-  await expect(page.getByText('US-S1M-26-77777').first()).toBeVisible();
+  await expect(page.getByText(/CBT-TRK-[0-9A-F]{12}/).first()).toBeVisible();
+  await expect(page.getByText(/CVT-TRK-/).first()).toBeVisible();
   await expect(page.getByText('IPI (PRO): To be completed').first()).toBeVisible();
 
   // Status presentation maps the stored DRAFT to "Draft".
@@ -74,14 +78,14 @@ test('/templates navigation generates an auto-filled agreement from the asset of
   await expect(page.getByText('No settled revenue for this asset yet.')).toBeVisible();
 });
 
-test('vault lists 16 templates under the four category tabs', async ({ page }) => {
+test('vault lists 20 templates under the five category tabs', async ({ page }) => {
   await page.goto('/contracts');
 
   const templateCards = page.locator('a[href^="/contracts/new?template="]');
-  await expect(templateCards).toHaveCount(16);
+  await expect(templateCards).toHaveCount(20);
 
   // Category tabs (href-scoped — card names also contain category words).
-  for (const key of ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS']) {
+  for (const key of ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS', 'FASHION']) {
     await expect(page.locator(`a[href="/contracts?category=${key}"]`)).toBeVisible();
   }
 

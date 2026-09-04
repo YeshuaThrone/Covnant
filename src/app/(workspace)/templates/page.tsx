@@ -2,19 +2,17 @@ import Link from 'next/link';
 import {
   CATEGORY_BLURBS,
   CATEGORY_LABELS,
+  CATEGORY_ORDER,
   templatesByCategory,
-  type ContractCategory,
 } from '@/lib/contracts/templates';
 import { getSdk } from '@/lib/sdk';
 
 export const dynamic = 'force-dynamic';
 
-const CATEGORY_ORDER: readonly ContractCategory[] = ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS'];
-
 /**
  * /templates — the categorized agreement-template library (directive §4).
  *
- * Sixteen deterministic agreements across four industries. Every card starts
+ * Twenty deterministic agreements across five industries. Every card starts
  * the generation flow from the asset of record: with a `?cbt=` the cards
  * deep-link straight into the hydrated editor, otherwise the vault's asset
  * picker selects the asset first.
@@ -50,8 +48,8 @@ export default async function TemplatesPage({
           Agreement Template Library
         </h1>
         <p className="mt-4 max-w-2xl text-white/60">
-          Sixteen deterministic agreements across music, film &amp; TV, gaming, and the creator
-          economy. Each one auto-fills from the registered asset of record — legal names, exact
+          Twenty deterministic agreements across music, film &amp; TV, gaming, the creator
+          economy, and fashion. Each one auto-fills from the registered asset of record — legal names, exact
           percentage splits, and CBT/EIDR identifiers — with PRO/IPI numbers mapped only when
           they exist on holder profiles.
         </p>

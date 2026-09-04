@@ -1,12 +1,13 @@
 /**
- * Contract template catalog — directive §4 (sixteen deterministic agreements).
+ * Contract template catalog — directive §4 (twenty deterministic agreements).
  *
- * Four browsing categories span the industries the platform serves:
+ * Five browsing categories span the industries the platform serves:
  *
  *   - MUSIC    — Music & Record Label (6)
  *   - FILM_TV  — Film, TV & Hollywood (4)
  *   - GAMING   — Gaming & Interactive (3)
  *   - CREATORS — Podcasts, Creators & Streamers (3)
+ *   - FASHION  — Fashion & Apparel (4)
  *
  * The category is a catalog/presentation concept only. Persistence keeps the
  * `contracts.industry` column inside its existing CHECK domain
@@ -16,16 +17,26 @@
  * across renames so previously stored contracts still resolve.
  */
 
-export type ContractCategory = 'MUSIC' | 'FILM_TV' | 'GAMING' | 'CREATORS';
+export type ContractCategory = 'MUSIC' | 'FILM_TV' | 'GAMING' | 'CREATORS' | 'FASHION';
 
 /** Persisted domain — must stay inside the contracts.industry CHECK constraint. */
 export type ContractIndustry = 'MUSIC' | 'FILM_MEDIA_MERCH';
+
+/** Browsing order for the five-way /templates and vault grouping. */
+export const CATEGORY_ORDER: readonly ContractCategory[] = [
+  'MUSIC',
+  'FILM_TV',
+  'GAMING',
+  'CREATORS',
+  'FASHION',
+];
 
 export const CATEGORY_LABELS: Record<ContractCategory, string> = {
   MUSIC: 'Music & Record Label',
   FILM_TV: 'Film, TV & Hollywood',
   GAMING: 'Gaming & Interactive',
   CREATORS: 'Podcasts, Creators & Streamers',
+  FASHION: 'Fashion & Apparel',
 };
 
 /** Category blurbs shown atop each /templates section. */
@@ -34,9 +45,10 @@ export const CATEGORY_BLURBS: Record<ContractCategory, string> = {
   FILM_TV: 'Options, score, director, and on-screen talent agreements for scripted productions.',
   GAMING: 'Interactive sync, studio royalty splits, and voiceover/mocap releases for game audio and performance.',
   CREATORS: 'Co-host splits, brand deals, and channel revenue shares for podcasts, streamers, and channels.',
+  FASHION: 'Design licenses, production terms, brand collaborations, and runway talent releases for fashion houses and apparel lines.',
 };
 
-/** Industry persistence mapping — collapses the four categories onto the CHECK domain. */
+/** Industry persistence mapping — collapses the five categories onto the CHECK domain. */
 export function industryForCategory(category: ContractCategory): ContractIndustry {
   return category === 'MUSIC' ? 'MUSIC' : 'FILM_MEDIA_MERCH';
 }
@@ -50,7 +62,7 @@ export const INDUSTRY_LABELS: Record<ContractIndustry, string> = {
 export interface ContractTemplate {
   /** Stable machine id, e.g. 'MUSIC_SPLIT_SHEET' | 'GAMING_MUSIC_SYNC'. */
   id: string;
-  /** Browsing category driving the four-way /templates and vault grouping. */
+  /** Browsing category driving the five-way /templates and vault grouping. */
   category: ContractCategory;
   /** Persistence-safe industry (contracts.industry CHECK domain). */
   industry: ContractIndustry;
@@ -193,6 +205,35 @@ export const TEMPLATES: readonly ContractTemplate[] = [
     ['parties', 'workIdentified', 'poolSheets', 'channelShare', 'signatures'],
     'Releases channel and platform receipts to participants at recorded percentages.',
   ),
+  // ── Fashion & Apparel (4) ─────────────────────────────────────────────
+  template(
+    'FASHION_DESIGN_LICENSE',
+    'FASHION',
+    'Fashion Design License Agreement',
+    ['parties', 'workIdentified', 'designLicense', 'territory', 'term', 'fee', 'credit', 'signatures'],
+    'Licenses a fashion design for garment production and distribution.',
+  ),
+  template(
+    'FASHION_APPAREL_PRODUCTION',
+    'FASHION',
+    'Apparel Manufacturing & Production Agreement',
+    ['parties', 'production', 'apparelProduction', 'compensation', 'delivery', 'warranties', 'signatures'],
+    'Commissions manufacture of an apparel line to recorded specs and schedules.',
+  ),
+  template(
+    'FASHION_BRAND_COLLABORATION',
+    'FASHION',
+    'Brand Collaboration Agreement',
+    ['parties', 'campaign', 'collabContent', 'term', 'compensation', 'usage', 'signatures'],
+    'Fixes a co-branded capsule collaboration with credited contributions.',
+  ),
+  template(
+    'FASHION_RUNWAY_TALENT_RELEASE',
+    'FASHION',
+    'Runway/Event Talent Release',
+    ['parties', 'production', 'runwayRelease', 'consideration', 'publicity', 'signatures'],
+    'Releases a runway walk and event performance for documentation and promotion.',
+  ),
 ] as const;
 
 export function getTemplate(id: string): ContractTemplate | undefined {
@@ -262,4 +303,8 @@ export const CLAUSE_LABELS: Record<string, string> = {
   coHostEpisodes: 'Episodes & Contributions',
   sponsorshipDeliverables: 'Sponsorship Deliverables',
   studioRoyalty: 'Royalty Split',
+  designLicense: 'Design License',
+  apparelProduction: 'Production Terms',
+  collabContent: 'Collaboration Deliverables',
+  runwayRelease: 'Runway Performance Release',
 };

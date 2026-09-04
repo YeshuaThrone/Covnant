@@ -294,6 +294,14 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
       return `Proceeds of any sale are settled through the Covenant settlement pipeline: the commission stated below is deducted, and the balance is disbursed to the consignor at the recorded percentages and reconciled by the embedded auditor. Governing law: ${law}.`;
     case 'campaign':
       return `This Agreement engages the talent for the brand campaign in connection with ${work} (CBT ${asset.cbtCode}), on the terms below.`;
+    case 'designLicense':
+      return `The licensor grants the licensee the right to reproduce, produce, and distribute garments and accessories embodying the design ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), throughout the Territory (${fields.territory}) for the Term (${fields.term}), subject to the ownership recorded in the Covenant registry.`;
+    case 'apparelProduction':
+      return `The manufacturer produces the apparel line derived from ${work} (CBT ${asset.cbtCode}) strictly to the tech packs, materials, and sample approvals recorded in the Covenant registry, at the unit quantities and production schedule agreed in writing.`;
+    case 'collabContent':
+      return `The Parties collaborate on the co-branded capsule in connection with ${work} (CBT ${asset.cbtCode}); each Party's design and production contributions are credited exactly as recorded in the Covenant registry, and proceeds reconcile through the embedded auditor at the recorded percentages.`;
+    case 'runwayRelease':
+      return `The releasing Party's walk, likeness, and performance in the runway presentation of ${work} are captured and released for the event's documentation, archive, and promotion, in ${fields.territory}, with the identifiers registered for the Work in the Covenant registry incorporated by reference.`;
     case 'usage':
       return `All content produced under this Agreement may be used by the brand in ${fields.territory} for the Term (${fields.term}), credited to its creators as recorded in the Covenant registry.`;
     case 'expenses':

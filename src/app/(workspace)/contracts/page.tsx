@@ -15,6 +15,7 @@ const TABS: { key: 'ALL' | ContractCategory; label: string }[] = [
   { key: 'FILM_TV', label: CATEGORY_LABELS.FILM_TV },
   { key: 'GAMING', label: CATEGORY_LABELS.GAMING },
   { key: 'CREATORS', label: CATEGORY_LABELS.CREATORS },
+  { key: 'FASHION', label: CATEGORY_LABELS.FASHION },
 ];
 
 export default async function ContractsPage({
