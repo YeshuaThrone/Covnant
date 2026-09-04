@@ -1,12 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { markContractFinalAction, saveContractAction } from '@/lib/contracts/actions';
 import { VerificationBadge } from '@/components/brand/VerificationBadge';
+import { AutoFillPanel } from '@/components/vault/AutoFillPanel';
+import { SignatureTracker } from '@/components/vault/SignatureTracker';
+import { PayoutPanel } from '@/components/vault/PayoutPanel';
 import { renderClauses } from '@/lib/contracts/generator';
-import { getTemplate } from '@/lib/contracts/templates';
+import { getTemplate, CATEGORY_LABELS } from '@/lib/contracts/templates';
 import type { AgreementContext } from '@/lib/contracts/generator';
+import {
+  autoFillSummary,
+  presentationStatus,
+  signatureRows,
+  signatureStorageKey,
+  STATUS_CHIP_CLASSES,
+  type SignatureState,
+} from '@/lib/contracts/presentation';
+import type { AssetPayouts } from '@/lib/contracts/payouts';
 
 const FIELD_ITEMS = [
   { key: 'effectiveDate', label: 'Effective Date', placeholder: 'e.g. January 15, 2026' },
@@ -26,6 +38,8 @@ export interface ContractEditorProps {
   initialContext: AgreementContext;
   contractId?: string;
   initialStatus?: 'DRAFT' | 'FINAL';
+  /** Shaped ledger READ rows for the asset of record — display only. */
+  payouts?: AssetPayouts;
 }
 
 export function ContractEditor({
@@ -36,6 +50,7 @@ export function ContractEditor({
   initialContext,
   contractId,
   initialStatus = 'DRAFT',
+  payouts,
 }: ContractEditorProps) {
   const router = useRouter();
   const template = getTemplate(templateId)!;
@@ -46,7 +61,36 @@ export function ContractEditor({
   const [saving, setSaving] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
 
+  // Client-side signature tracking — display state only, never server state.
+  const storageKey = signatureStorageKey(contractId, cbtCode, templateId);
+  const [signatures, setSignatures] = useState<Record<string, SignatureState>>({});
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) setSignatures(JSON.parse(raw) as Record<string, SignatureState>);
+    } catch {
+      // Corrupt or unavailable local state degrades to the default display.
+    }
+  }, [storageKey]);
+
+  const updateSignature = (key: string, state: SignatureState) => {
+    setSignatures((prev) => {
+      const next = { ...prev, [key]: state };
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        // Storage unavailable (private mode) — keep the in-session display.
+      }
+      return next;
+    });
+  };
+
   const isFinal = status === 'FINAL';
+  const anySignatureRequested = Object.values(signatures).some((s) => s !== 'NOT_REQUESTED');
+  const statusLabel = presentationStatus(status, anySignatureRequested);
+  const signatureRowsForParties = signatureRows(initialContext.parties);
+  const fillSummary = useMemo(() => autoFillSummary(initialContext), [initialContext]);
 
   // The preview re-renders deterministically from the same pure renderer the
   // server persists with — the preview and the stored document can never drift.
@@ -90,9 +134,17 @@ export function ContractEditor({
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
       <div className="space-y-6">
         <section className="glass-card p-6">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
-            {template.industry === 'MUSIC' ? 'Music' : 'Film, Media & Merch'} · Template
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
+              {CATEGORY_LABELS[template.category]} · Template
+            </p>
+            <span
+              data-testid="contract-status-chip"
+              className={`rounded-full border px-3 py-1 font-mono text-xs ${STATUS_CHIP_CLASSES[statusLabel]}`}
+            >
+              {statusLabel}
+            </span>
+          </div>
           <h1 className="mt-2 text-2xl font-semibold text-white">{template.name}</h1>
           <p className="mt-1 text-sm text-white/50">
             Asset: {assetTitle} · <span className="font-mono">{cbtCode}</span>
@@ -102,6 +154,8 @@ export function ContractEditor({
             Clauses: {template.clauseOrder.length} · Pools hydrated from the asset of record
           </p>
         </section>
+
+        <AutoFillPanel summary={fillSummary} />
 
         <section className="glass-card p-6" aria-label="Agreement fields">
           <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
@@ -122,6 +176,16 @@ export function ContractEditor({
             ))}
           </div>
         </section>
+
+        <SignatureTracker
+          rows={signatureRowsForParties}
+          states={signatures}
+          disabled={isFinal}
+          onRequest={(key) => updateSignature(key, 'REQUESTED')}
+          onSign={(key) => updateSignature(key, 'SIGNED')}
+        />
+
+        {payouts && <PayoutPanel payouts={payouts} />}
 
         {!isFinal && (
           <div className="flex flex-wrap gap-3">

@@ -13,7 +13,7 @@ const MEDIA = ['Music', 'Film & TV', 'Publishing', 'Games & Social', 'Emerging M
 const CAPABILITIES = [
   {
     title: 'Automated Contract Vault',
-    body: 'Fourteen deterministic, auto-populating agreements — from split sheets to sync licenses — generated from your registered asset data.',
+    body: 'Sixteen deterministic, auto-populating agreements — from split sheets to sync licenses — generated from your registered asset data.',
   },
   {
     title: 'Smart Ledger Verification',

@@ -1,22 +1,58 @@
 /**
- * Contract template catalog — PR 3 (fourteen deterministic templates).
+ * Contract template catalog — directive §4 (sixteen deterministic agreements).
  *
- * Spec §Contract vault: templates live in two industries, ten music and four
- * film/media/merch. Each template assembles named clauses in order. The vault
- * replaces the former AI surface — generation is pure template hydration from
- * registered asset data, nothing more.
+ * Four browsing categories span the industries the platform serves:
+ *
+ *   - MUSIC    — Music & Record Label (6)
+ *   - FILM_TV  — Film, TV & Hollywood (4)
+ *   - GAMING   — Gaming & Interactive (3)
+ *   - CREATORS — Podcasts, Creators & Streamers (3)
+ *
+ * The category is a catalog/presentation concept only. Persistence keeps the
+ * `contracts.industry` column inside its existing CHECK domain
+ * ('MUSIC' | 'FILM_MEDIA_MERCH' — 0002_contracts.sql, untouched), so every
+ * template carries a persistence-safe `industry` derived from its category.
+ * Template ids are stable machine keys: ids of surviving agreements are kept
+ * across renames so previously stored contracts still resolve.
  */
 
+export type ContractCategory = 'MUSIC' | 'FILM_TV' | 'GAMING' | 'CREATORS';
+
+/** Persisted domain — must stay inside the contracts.industry CHECK constraint. */
 export type ContractIndustry = 'MUSIC' | 'FILM_MEDIA_MERCH';
 
+export const CATEGORY_LABELS: Record<ContractCategory, string> = {
+  MUSIC: 'Music & Record Label',
+  FILM_TV: 'Film, TV & Hollywood',
+  GAMING: 'Gaming & Interactive',
+  CREATORS: 'Podcasts, Creators & Streamers',
+};
+
+/** Category blurbs shown atop each /templates section. */
+export const CATEGORY_BLURBS: Record<ContractCategory, string> = {
+  MUSIC: 'Split sheets, producer and publishing terms, master purchases, and sync licenses for recorded music.',
+  FILM_TV: 'Options, score, director, and on-screen talent agreements for scripted productions.',
+  GAMING: 'Interactive sync, studio royalty splits, and voiceover/mocap releases for game audio and performance.',
+  CREATORS: 'Co-host splits, brand deals, and channel revenue shares for podcasts, streamers, and channels.',
+};
+
+/** Industry persistence mapping — collapses the four categories onto the CHECK domain. */
+export function industryForCategory(category: ContractCategory): ContractIndustry {
+  return category === 'MUSIC' ? 'MUSIC' : 'FILM_MEDIA_MERCH';
+}
+
+/** Labels for the persisted industry values (legacy rows render with these). */
 export const INDUSTRY_LABELS: Record<ContractIndustry, string> = {
-  MUSIC: 'Music',
-  FILM_MEDIA_MERCH: 'Film, Media & Merch',
+  MUSIC: 'Music & Record Label',
+  FILM_MEDIA_MERCH: 'Film, TV & Hollywood',
 };
 
 export interface ContractTemplate {
-  /** Stable machine id, e.g. 'MUSIC_SPLIT_SHEET' | 'FILM_SCREENPLAY_OPTION'. */
+  /** Stable machine id, e.g. 'MUSIC_SPLIT_SHEET' | 'GAMING_MUSIC_SYNC'. */
   id: string;
+  /** Browsing category driving the four-way /templates and vault grouping. */
+  category: ContractCategory;
+  /** Persistence-safe industry (contracts.industry CHECK domain). */
   industry: ContractIndustry;
   name: string;
   /** Named clauses the template assembles, in document order. */
@@ -25,115 +61,146 @@ export interface ContractTemplate {
   summary: string;
 }
 
+const template = (
+  id: string,
+  category: ContractCategory,
+  name: string,
+  clauseOrder: string[],
+  summary: string,
+): ContractTemplate => ({
+  id,
+  category,
+  industry: industryForCategory(category),
+  name,
+  clauseOrder,
+  summary,
+});
+
 export const TEMPLATES: readonly ContractTemplate[] = [
-  // ── Music (10) ────────────────────────────────────────────────────────────
-  {
-    id: 'MUSIC_SPLIT_SHEET',
-    industry: 'MUSIC',
-    name: 'Split Sheet',
-    clauseOrder: ['preamble', 'workIdentified', 'poolSheets', 'control', 'signatures'],
-    summary: 'Authoritative ownership percentages across all three Covenant pools.',
-  },
-  {
-    id: 'MUSIC_PRODUCER_AGREEMENT',
-    industry: 'MUSIC',
-    name: 'Producer Agreement',
-    clauseOrder: ['parties', 'engagement', 'deliverables', 'compensation', 'credit', 'masterOwnership', 'signatures'],
-    summary: 'Engages a producer on a master with ownership and credit terms.',
-  },
-  {
-    id: 'MUSIC_FEATURE_ARTIST',
-    industry: 'MUSIC',
-    name: 'Feature Artist Agreement',
-    clauseOrder: ['parties', 'engagement', 'contribution', 'compensation', 'credit', 'signatures'],
-    summary: 'Books a featured performance with compensation and billing.',
-  },
-  {
-    id: 'MUSIC_BEAT_LICENSE',
-    industry: 'MUSIC',
-    name: 'Beat License',
-    clauseOrder: ['parties', 'licensedWork', 'scope', 'territory', 'term', 'fee', 'restrictions', 'signatures'],
-    summary: 'Licenses an instrumental beat with scope, territory, and term.',
-  },
-  {
-    id: 'MUSIC_WORK_FOR_HIRE',
-    industry: 'MUSIC',
-    name: 'Work For Hire Agreement',
-    clauseOrder: ['parties', 'engagement', 'workMadeForHire', 'compensation', 'ownership', 'waiver', 'signatures'],
-    summary: 'Commissions a contribution as a work made for hire.',
-  },
-  {
-    id: 'MUSIC_PUBLISHING_SPLIT',
-    industry: 'MUSIC',
-    name: 'Publishing Split Agreement',
-    clauseOrder: ['parties', 'composition', 'writerShares', 'administration', 'collections', 'signatures'],
-    summary: 'Fixes writer and publisher shares of the composition copyright.',
-  },
-  {
-    id: 'MUSIC_SYNC_LICENSE',
-    industry: 'MUSIC',
-    name: 'Sync License',
-    clauseOrder: ['parties', 'licensedWork', 'use', 'territory', 'term', 'fee', 'credit', 'signatures'],
-    summary: 'Grants an audiovisual synchronization use of the work.',
-  },
-  {
-    id: 'MUSIC_MANAGEMENT',
-    industry: 'MUSIC',
-    name: 'Management Agreement',
-    clauseOrder: ['parties', 'engagement', 'term', 'commission', 'expenses', 'termination', 'signatures'],
-    summary: 'Retains a manager with commission and termination terms.',
-  },
-  {
-    id: 'MUSIC_MASTER_PURCHASE',
-    industry: 'MUSIC',
-    name: 'Master Purchase Agreement',
-    clauseOrder: ['parties', 'masters', 'purchasePrice', 'delivery', 'warranties', 'signatures'],
-    summary: 'Transfers ownership of masters for a fixed purchase price.',
-  },
-  {
-    id: 'MUSIC_REMIX_CLEARANCE',
-    industry: 'MUSIC',
-    name: 'Remix Clearance',
-    clauseOrder: ['parties', 'originalWork', 'remixScope', 'clearance', 'credit', 'compensation', 'signatures'],
-    summary: 'Clears a remix against the original work with credit terms.',
-  },
-  // ── Film / Media & Merch (4) ──────────────────────────────────────────────
-  {
-    id: 'FILM_SCREENPLAY_OPTION',
-    industry: 'FILM_MEDIA_MERCH',
-    name: 'Screenplay Option Agreement',
-    clauseOrder: ['parties', 'property', 'optionGrant', 'term', 'optionFee', 'purchasePrice', 'credit', 'signatures'],
-    summary: 'Options a screenplay with fee, term, and purchase price.',
-  },
-  {
-    id: 'FILM_TALENT_RELEASE',
-    industry: 'FILM_MEDIA_MERCH',
-    name: 'Talent Release',
-    clauseOrder: ['parties', 'production', 'releaseGrant', 'consideration', 'publicity', 'signatures'],
-    summary: 'Releases an on-screen performance for production and publicity use.',
-  },
-  {
-    id: 'FILM_FINE_ART_CONSIGNMENT',
-    industry: 'FILM_MEDIA_MERCH',
-    name: 'Fine Art Consignment Agreement',
-    clauseOrder: ['parties', 'artwork', 'consignmentTerm', 'commission', 'insurance', 'settlement', 'signatures'],
-    summary: 'Consigns artwork for sale with commission and insurance terms.',
-  },
-  {
-    id: 'FILM_BRAND_ENDORSEMENT',
-    industry: 'FILM_MEDIA_MERCH',
-    name: 'Brand Endorsement Agreement',
-    clauseOrder: ['parties', 'campaign', 'scope', 'term', 'compensation', 'usage', 'signatures'],
-    summary: 'Engages a creator to endorse a brand campaign.',
-  },
+  // ── Music & Record Label (6) ──────────────────────────────────────────────
+  template(
+    'MUSIC_SPLIT_SHEET',
+    'MUSIC',
+    'Songwriter Split Sheet',
+    ['preamble', 'workIdentified', 'poolSheets', 'control', 'signatures'],
+    'Authoritative ownership percentages across all three Covenant pools.',
+  ),
+  template(
+    'MUSIC_PRODUCER_AGREEMENT',
+    'MUSIC',
+    'Producer Agreement',
+    ['parties', 'engagement', 'deliverables', 'compensation', 'credit', 'masterOwnership', 'signatures'],
+    'Engages a producer on a master with ownership and credit terms.',
+  ),
+  template(
+    'MUSIC_MASTER_PURCHASE',
+    'MUSIC',
+    'Master Recording Rights Purchase',
+    ['parties', 'masters', 'purchasePrice', 'delivery', 'warranties', 'signatures'],
+    'Transfers ownership of master recording rights for a fixed price.',
+  ),
+  template(
+    'MUSIC_SYNC_LICENSE',
+    'MUSIC',
+    'Sync License Agreement',
+    ['parties', 'licensedWork', 'use', 'territory', 'term', 'fee', 'credit', 'signatures'],
+    'Grants an audiovisual synchronization use of the work.',
+  ),
+  template(
+    'MUSIC_PUBLISHING_SPLIT',
+    'MUSIC',
+    'Co-Publishing Agreement',
+    ['parties', 'composition', 'writerShares', 'administration', 'collections', 'signatures'],
+    'Fixes co-publisher and writer shares of the composition copyright.',
+  ),
+  template(
+    'MUSIC_WORK_FOR_HIRE',
+    'MUSIC',
+    'Work For Hire (Session Artist / Engineer)',
+    ['parties', 'engagement', 'workMadeForHire', 'compensation', 'ownership', 'waiver', 'signatures'],
+    'Commissions a session or engineering contribution as a work made for hire.',
+  ),
+  // ── Film, TV & Hollywood (4) ──────────────────────────────────────────────
+  template(
+    'FILM_SCREENPLAY_OPTION',
+    'FILM_TV',
+    'Screenplay Option & Purchase',
+    ['parties', 'property', 'optionGrant', 'term', 'optionFee', 'purchasePrice', 'credit', 'signatures'],
+    'Options a screenplay with fee, term, and purchase price.',
+  ),
+  template(
+    'FILM_SCORE_COMPOSER',
+    'FILM_TV',
+    'Film/TV Score Composer Contract',
+    ['parties', 'engagement', 'scoreDelivery', 'masterOwnership', 'credit', 'compensation', 'signatures'],
+    'Composes the original score with cue delivery and ownership terms.',
+  ),
+  template(
+    'FILM_DIRECTOR_ENGAGEMENT',
+    'FILM_TV',
+    'Director Engagement',
+    ['parties', 'directorialServices', 'credit', 'compensation', 'term', 'termination', 'signatures'],
+    'Engages a director on exclusive terms with credit and commissioning rights.',
+  ),
+  template(
+    'FILM_TALENT_RELEASE',
+    'FILM_TV',
+    'On-Screen Talent Release',
+    ['parties', 'production', 'releaseGrant', 'consideration', 'publicity', 'signatures'],
+    'Releases an on-screen performance for production and publicity use (EIDR-mapped works).',
+  ),
+  // ── Gaming & Interactive (3) ──────────────────────────────────────────────
+  template(
+    'GAMING_MUSIC_SYNC',
+    'GAMING',
+    'In-Game Music Sync Licensing',
+    ['parties', 'licensedWork', 'interactiveUse', 'territory', 'term', 'fee', 'restrictions', 'signatures'],
+    'Licenses music into interactive gameplay across platforms and builds.',
+  ),
+  template(
+    'GAMING_STUDIO_ROYALTY_SPLIT',
+    'GAMING',
+    'Video Game Developer/Studio Royalty Split',
+    ['parties', 'workIdentified', 'poolSheets', 'studioRoyalty', 'collections', 'signatures'],
+    'Fixes developer and studio shares of net game receipts.',
+  ),
+  template(
+    'GAMING_VOICEOVER_MOCAP_RELEASE',
+    'GAMING',
+    'Voiceover/MoCap Release',
+    ['parties', 'production', 'performanceRelease', 'consideration', 'publicity', 'signatures'],
+    'Releases voice and motion-capture performance for the game and its marketing.',
+  ),
+  // ── Podcasts, Creators & Streamers (3) ────────────────────────────────────
+  template(
+    'PODCAST_COHOST_GUEST_SPLIT',
+    'CREATORS',
+    'Podcast Co-Host & Guest Split',
+    ['parties', 'coHostEpisodes', 'poolSheets', 'compensation', 'collections', 'signatures'],
+    'Records co-host and guest shares of episode ownership and receipts.',
+  ),
+  template(
+    'FILM_BRAND_ENDORSEMENT',
+    'CREATORS',
+    'Sponsorship & Brand Deal Contract',
+    ['parties', 'campaign', 'sponsorshipDeliverables', 'term', 'compensation', 'usage', 'signatures'],
+    'Engages a creator to sponsor a brand across agreed content deliverables.',
+  ),
+  template(
+    'PODCAST_CHANNEL_REVENUE_SHARE',
+    'CREATORS',
+    'Channel Revenue Share Release',
+    ['parties', 'workIdentified', 'poolSheets', 'channelShare', 'signatures'],
+    'Releases channel and platform receipts to participants at recorded percentages.',
+  ),
 ] as const;
 
 export function getTemplate(id: string): ContractTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
 }
 
-export function templatesByIndustry(industry: ContractIndustry): readonly ContractTemplate[] {
-  return TEMPLATES.filter((t) => t.industry === industry);
+export function templatesByCategory(category: ContractCategory): readonly ContractTemplate[] {
+  return TEMPLATES.filter((t) => t.category === category);
 }
 
 /** Clause display labels shared across templates; renderers live in generator.ts. */
@@ -187,4 +254,12 @@ export const CLAUSE_LABELS: Record<string, string> = {
   expenses: 'Expenses',
   termination: 'Termination',
   signatures: 'Signatures',
+  interactiveUse: 'Interactive Use',
+  performanceRelease: 'Performance Release',
+  channelShare: 'Channel Revenue Share',
+  scoreDelivery: 'Score Delivery',
+  directorialServices: 'Directorial Services',
+  coHostEpisodes: 'Episodes & Contributions',
+  sponsorshipDeliverables: 'Sponsorship Deliverables',
+  studioRoyalty: 'Royalty Split',
 };
