@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { CovenantBlockAsset, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import { resolveRegistryPills } from '@/lib/assets/registry-keys';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
+import { CATEGORY_LABELS, CATEGORY_ORDER, TEMPLATES } from '@/lib/contracts/templates';
 import {
   describePoolGap,
   formatUnitsAsPercent,
@@ -120,6 +121,37 @@ export default async function AssetDetailPage({ params }: PageProps) {
           </section>
         ))}
       </div>
+
+      <section aria-label="Generate agreement from this asset" className="mt-10">
+        <h2 className="font-mono text-sm uppercase tracking-widest text-gold">
+          Generate agreement from this asset
+        </h2>
+        <p className="mt-2 text-sm text-white/50">
+          Every template auto-fills from this asset of record — names, exact splits, and
+          CBT/EIDR identifiers — with PRO/IPI numbers only where holder profiles carry them.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {CATEGORY_ORDER.map((category) => (
+            <div key={category} className="glass-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#D4AF37]">
+                {CATEGORY_LABELS[category]}
+              </p>
+              <ul className="mt-3 space-y-2">
+                {TEMPLATES.filter((t) => t.category === category).map((t) => (
+                  <li key={t.id}>
+                    <Link
+                      href={`/contracts/new?template=${t.id}&cbt=${encodeURIComponent(asset.cbtCode)}`}
+                      className="text-sm text-white/70 transition hover:text-[#FFD700]"
+                    >
+                      {t.name} →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }

@@ -1,28 +1,102 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Spec §07 — Contract Vault gates: 14 templates under two industries,
- * asset-of-record hydration, draft → final → export.
+ * Spec §07 (directive §4) — Contract Vault gates: 20 deterministic agreements
+ * across five categories (Music & Record Label, Film/TV & Hollywood, Gaming &
+ * Interactive, Podcasts/Creators & Streamers, Fashion & Apparel), the
+ * /templates categorized
+ * library, auto-fill from the asset of record (names, splits, identifiers —
+ * PRO/IPI never fabricated), Draft/Pending/Completed presentation, signature
+ * tracking, and draft → final → export.
  *
  * Runs after asset-studio.spec.ts (serial, single worker): the "E2E Pool
- * Gate Song" asset registered there is the asset of record here.
+ * Gate Song" asset registered there is the asset of record here. Its holders
+ * carry no ISNI/IPI — the auto-fill panels must show "To be completed", not
+ * invented numbers.
  */
 
-test('lists 14 templates under the Music and Film/Media/Merch tabs', async ({ page }) => {
+test('/templates lists 20 templates across the five industry sections', async ({ page }) => {
+  await page.goto('/templates');
+
+  // Five category sections render.
+  for (const label of [
+    'Music & Record Label',
+    'Film, TV & Hollywood',
+    'Gaming & Interactive',
+    'Podcasts, Creators & Streamers',
+    'Fashion & Apparel',
+  ]) {
+    await expect(page.getByRole('heading', { name: label })).toBeVisible();
+  }
+
+  const cards = page.locator('a[href^="/contracts/new?template="]');
+  await expect(cards).toHaveCount(20);
+
+  // One named agreement per category spot-check (scoped to card links —
+  // category blurbs can contain the same words).
+  for (const name of [
+    'Songwriter Split Sheet',
+    'Film/TV Score Composer Contract',
+    'Voiceover/MoCap Release',
+    'Podcast Co-Host & Guest Split',
+    'Fashion Design License Agreement',
+  ]) {
+    await expect(page.locator('a[href^="/contracts/new?template="]', { hasText: name })).toBeVisible();
+  }
+});
+
+test('/templates navigation generates an auto-filled agreement from the asset of record', async ({
+  page,
+}) => {
+  await page.goto('/templates');
+
+  await page.getByText('Songwriter Split Sheet').first().click();
+  await page.waitForURL(/template=MUSIC_SPLIT_SHEET/);
+
+  // Asset picker — choose the registered asset of record.
+  await page.locator('a[href*="cbt=CBT-"]').first().click();
+  await page.waitForURL(/template=MUSIC_SPLIT_SHEET&cbt=CBT-/);
+
+  // Auto-fill panel: legal names and exact recorded splits from the pools.
+  await expect(page.getByText('Auto-filled from the asset of record')).toBeVisible();
+  await expect(page.getByText('Alice E2E').first()).toBeVisible();
+  await expect(page.getByText('Bob E2E').first()).toBeVisible();
+  await expect(page.getByText('100.0000%').first()).toBeVisible();
+
+  // Registry identifiers map in: the MUL flow auto-provisions the canonical
+  // CBT and CVT tracking pills (codes derive per registration, so assert the
+  // pattern, not a literal). Absent holder-profile data renders as
+  // to-be-completed — never fabricated.
+  await expect(page.getByText(/CBT-TRK-[0-9A-F]{12}/).first()).toBeVisible();
+  await expect(page.getByText(/CVT-TRK-/).first()).toBeVisible();
+  await expect(page.getByText('IPI (PRO): To be completed').first()).toBeVisible();
+
+  // Status presentation maps the stored DRAFT to "Draft".
+  await expect(page.getByTestId('contract-status-chip')).toHaveText('Draft');
+
+  // Payout views render the (empty) ledger read for this asset.
+  await expect(page.getByText('No settled revenue for this asset yet.')).toBeVisible();
+});
+
+test('vault lists 20 templates under the five category tabs', async ({ page }) => {
   await page.goto('/contracts');
 
   const templateCards = page.locator('a[href^="/contracts/new?template="]');
-  await expect(templateCards).toHaveCount(14);
+  await expect(templateCards).toHaveCount(20);
 
-  // Industry tabs (href-scoped — template card names also contain "Music").
-  await expect(page.locator('a[href="/contracts?industry=MUSIC"]')).toBeVisible();
-  await expect(page.locator('a[href="/contracts?industry=FILM_MEDIA_MERCH"]')).toBeVisible();
+  // Category tabs (href-scoped — card names also contain category words).
+  for (const key of ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS', 'FASHION']) {
+    await expect(page.locator(`a[href="/contracts?category=${key}"]`)).toBeVisible();
+  }
 
-  // Both industries represented: at least one film template card is labelled.
-  await expect(page.getByText('Film, Media & Merch').first()).toBeVisible();
+  // Filtering: Gaming & Interactive shows exactly its three agreements.
+  await page.locator('a[href="/contracts?category=GAMING"]').click();
+  await page.waitForURL(/category=GAMING/);
+  await expect(page.locator('a[href^="/contracts/new?template="]')).toHaveCount(3);
+  await expect(page.getByText('In-Game Music Sync Licensing')).toBeVisible();
 });
 
-test('generates a Split Sheet from the asset of record, saves a draft, finalizes, and exports', async ({
+test('generates a Split Sheet from the asset of record, tracks signatures, saves a draft, finalizes, and exports', async ({
   page,
 }) => {
   await page.goto('/contracts');
@@ -38,6 +112,11 @@ test('generates a Split Sheet from the asset of record, saves a draft, finalizes
   await expect(page.getByText('Alice E2E').first()).toBeVisible();
   await expect(page.getByText('Bob E2E').first()).toBeVisible();
 
+  // Client-side signature tracking flips the presentation to Pending.
+  await page.getByRole('button', { name: 'Request signature' }).first().click();
+  await expect(page.getByTestId('contract-status-chip')).toHaveText('Pending');
+  await expect(page.getByText('Requested').first()).toBeVisible();
+
   await page.getByRole('button', { name: /Save draft/ }).click();
   // The first save creates the contract and navigates to its own editor page
   // (the editor re-mounts, so the button label resets to "Save draft") — the
@@ -45,6 +124,7 @@ test('generates a Split Sheet from the asset of record, saves a draft, finalizes
   await page.waitForURL(/\/contracts\/[a-zA-Z0-9_-]+$/);
 
   await page.getByRole('button', { name: /Mark final/ }).click();
+  await expect(page.getByTestId('contract-status-chip')).toHaveText('Completed');
   await expect(page.getByText('FINAL — immutable')).toBeVisible();
 
   const exportHref = await page.locator('a[href$="/export"]').getAttribute('href');

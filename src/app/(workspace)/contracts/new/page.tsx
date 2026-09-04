@@ -3,7 +3,11 @@ import { notFound, redirect } from 'next/navigation';
 import { getTemplate } from '@/lib/contracts/templates';
 import { generateAgreement, hydrateContext } from '@/lib/contracts/generator';
 import { getSdk, listAssets } from '@/lib/sdk';
+import { listLedger } from '@/lib/ledger/store';
+import { payoutFlowsFor } from '@/lib/contracts/payouts';
 import { ContractEditor } from '@/components/vault/ContractEditor';
+
+export const dynamic = 'force-dynamic';
 
 export default async function NewContractPage({
   searchParams,
@@ -18,9 +22,14 @@ export default async function NewContractPage({
     const assets = await listAssets();
     return (
       <div className="mx-auto w-full max-w-4xl px-6 py-12">
-        <Link href="/contracts" className="text-sm text-white/50 transition hover:text-white">
-          ← Contract Vault
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Link href="/contracts" className="text-sm text-white/50 transition hover:text-white">
+            ← Contract Vault
+          </Link>
+          <Link href="/templates" className="text-sm text-white/50 transition hover:text-white">
+            Template library →
+          </Link>
+        </div>
         <h1 className="mt-4 text-2xl font-semibold text-white">{template.name}</h1>
         <p className="mt-2 text-sm text-white/50">
           Choose the registered asset of record. The agreement hydrates from its stored pools,
@@ -63,12 +72,19 @@ export default async function NewContractPage({
 
   const context = hydrateContext(asset);
   const agreement = generateAgreement(template, context);
+  // Payout views read the existing ledger READ API — display shaping only.
+  const payouts = payoutFlowsFor(asset.cbtCode, context, await listLedger());
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">
-      <Link href="/contracts" className="text-sm text-white/50 transition hover:text-white">
-        ← Contract Vault
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Link href="/contracts" className="text-sm text-white/50 transition hover:text-white">
+          ← Contract Vault
+        </Link>
+        <Link href="/templates" className="text-sm text-white/50 transition hover:text-white">
+          Template library →
+        </Link>
+      </div>
       <div className="mt-4">
         <ContractEditor
           templateId={template.id}
@@ -76,6 +92,7 @@ export default async function NewContractPage({
           cbtCode={asset.cbtCode}
           assetTitle={asset.title}
           initialContext={agreement.fields}
+          payouts={payouts}
         />
       </div>
     </div>

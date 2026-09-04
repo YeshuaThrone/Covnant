@@ -244,6 +244,22 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
       return `The seller sells and the buyer purchases all of the seller's right, title, and interest in and to the masters embodying ${work}, identified by CBT code ${asset.cbtCode}.`;
     case 'purchasePrice':
       return `The purchase price for the masters is ${fields.fee}, payable through the Covenant settlement pipeline and disbursed to the sellers at their exact recorded percentages.`;
+    case 'interactiveUse':
+      return `The composition may be synchronized, reproduced, and distributed solely as interactive audiovisual content within the game or interactive product the Parties have agreed in writing, across all platforms, versions, patches, and downloadable releases of that product; no other use is licensed under this Agreement.`;
+    case 'performanceRelease':
+      return `The releasing Party grants a perpetual release of the recorded voice performance, motion-capture performance, and related likeness data captured for ${work}, in ${fields.territory}, for gameplay, streaming, promotional, and archival use by the production.`;
+    case 'channelShare':
+      return `Net receipts actually received by the channel or platform operator for ${work} are shared among the Parties at their exact recorded percentages in the Covenant pools. Settlement runs through the Covenant pipeline, and the embedded auditor reconciles every distribution against the split sheet before it posts.`;
+    case 'scoreDelivery':
+      return `The composing Party shall deliver the original score cues, stems, and session materials for ${work} in the formats customarily required for mixing and mastering, and shall make reasonable revisions within the agreed scope before final delivery.`;
+    case 'directorialServices':
+      return `The commissioning Party engages the directing Party as the sole and exclusive director of ${work}, and the directing Party accepts the engagement, for picture and allied rights on the terms of this Agreement.`;
+    case 'coHostEpisodes':
+      return `The Parties' co-hosting and guest contributions to episodes of ${work} are recorded in the Covenant pools; each Party's credit, ownership, and receipts follow its recorded percentage exactly.`;
+    case 'sponsorshipDeliverables':
+      return `The talent shall produce and publish the sponsored content pieces for the campaign in connection with ${work} as expressly agreed in writing between the Parties, each piece credited to its recorded creators in the Covenant registry.`;
+    case 'studioRoyalty':
+      return `Net receipts of the game or interactive product are shared between the developer and studio Parties at their exact recorded percentages in the Covenant pools, which are authoritative and sum to 100.0000%.`;
     case 'delivery':
       return `Delivery of the purchased masters and all related materials is complete upon the buyer's acceptance, after which the Covenant registry record of ownership governs all further exploitation.`;
     case 'warranties':
@@ -261,7 +277,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'optionFee':
       return `The option fee is ${fields.fee}, earned upon payment and non-refundable against the purchase price if the option is exercised.`;
     case 'production':
-      return `The Party's name, likeness, performance, and contribution in connection with the production of ${work} are released on the terms below.`;
+      return `The Party's name, likeness, performance, and contribution in connection with the production of ${work} are released on the terms below. The production is identified by Covenant Block code ${asset.cbtCode}${asset.identifiers.some((i) => i.label === 'EIDR') ? ` and by its EIDR ${asset.identifiers.find((i) => i.label === 'EIDR')!.value}` : ''}, and the identifiers registered for the Work in the Covenant registry are incorporated by reference.`;
     case 'releaseGrant':
       return `The releasing Party grants the production a perpetual release to record, reproduce, distribute, and exhibit the contribution in connection with ${work} and its advertising, in ${fields.territory}.`;
     case 'consideration':
@@ -278,6 +294,14 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
       return `Proceeds of any sale are settled through the Covenant settlement pipeline: the commission stated below is deducted, and the balance is disbursed to the consignor at the recorded percentages and reconciled by the embedded auditor. Governing law: ${law}.`;
     case 'campaign':
       return `This Agreement engages the talent for the brand campaign in connection with ${work} (CBT ${asset.cbtCode}), on the terms below.`;
+    case 'designLicense':
+      return `The licensor grants the licensee the right to reproduce, produce, and distribute garments and accessories embodying the design ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), throughout the Territory (${fields.territory}) for the Term (${fields.term}), subject to the ownership recorded in the Covenant registry.`;
+    case 'apparelProduction':
+      return `The manufacturer produces the apparel line derived from ${work} (CBT ${asset.cbtCode}) strictly to the tech packs, materials, and sample approvals recorded in the Covenant registry, at the unit quantities and production schedule agreed in writing.`;
+    case 'collabContent':
+      return `The Parties collaborate on the co-branded capsule in connection with ${work} (CBT ${asset.cbtCode}); each Party's design and production contributions are credited exactly as recorded in the Covenant registry, and proceeds reconcile through the embedded auditor at the recorded percentages.`;
+    case 'runwayRelease':
+      return `The releasing Party's walk, likeness, and performance in the runway presentation of ${work} are captured and released for the event's documentation, archive, and promotion, in ${fields.territory}, with the identifiers registered for the Work in the Covenant registry incorporated by reference.`;
     case 'usage':
       return `All content produced under this Agreement may be used by the brand in ${fields.territory} for the Term (${fields.term}), credited to its creators as recorded in the Covenant registry.`;
     case 'expenses':
