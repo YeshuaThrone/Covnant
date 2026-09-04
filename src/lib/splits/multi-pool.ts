@@ -42,6 +42,33 @@ import {
   type PoolName,
 } from './shared';
 
+/**
+ * The engine's DB insert is not idempotent (registerCBTAsset performs a plain
+ * INSERT on cbt_assets), so a duplicate collision would surface as a raw
+ * Postgres error. This adapter classifies the collision — via the pre-write
+ * catalog probe and the DB unique-constraint catch below — so the UI can
+ * render the gold banner instead. The engine file itself is never touched.
+ */
+export const DUPLICATE_ASSET_MESSAGE = 'Asset already registered in CBT catalog';
+
+export class DuplicateAssetRegistrationError extends Error {
+  readonly title: string;
+  readonly medium: string;
+
+  constructor(title: string, medium: string) {
+    super(DUPLICATE_ASSET_MESSAGE);
+    this.name = 'DuplicateAssetRegistrationError';
+    this.title = title;
+    this.medium = medium;
+  }
+}
+
+/** Postgres 23505 as surfaced through the engine's `Database registration failed:` wrapper. */
+export function isDuplicateKeyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate key/i.test(message) || /unique constraint/i.test(message);
+}
+
 export interface SplitPool {
   pool: PoolName;
   holders: SelfServeRightsHolder[];
@@ -147,6 +174,12 @@ export function buildPoolWeightedSheet(pools: SplitPool[]): PoolTaggedHolder[] {
  * 100.0000% BEFORE any write happens (the gate invariant, enforced
  * server-side so a stale client cannot bypass it); the flattened sheet is
  * then registered through the engine's single write path.
+ *
+ * Duplicate prevention (adapter only): `options.findExisting` probes the
+ * catalog for an identical medium+title BEFORE any write, and a raw DB
+ * unique-constraint error from the engine's non-idempotent INSERT is caught
+ * and rethrown as a DuplicateAssetRegistrationError — a Postgres error never
+ * escapes this adapter.
  */
 export async function registerMultiPoolAsset(
   sdk: CovenantMasterSDK,
@@ -156,7 +189,16 @@ export async function registerMultiPoolAsset(
     identifiers: UniversalAssetIdentifier;
     pools: SplitPool[];
   },
+  options: {
+    /** Catalog probe (works in both data modes); resolves true when an identical asset exists. */
+    findExisting?: (title: string, medium: string) => Promise<boolean>;
+  } = {},
 ): Promise<{ cbtCode: string; success: boolean }> {
+  const title = input.title.trim();
+  if (options.findExisting && (await options.findExisting(title, input.medium))) {
+    throw new DuplicateAssetRegistrationError(title, input.medium);
+  }
+
   const invalid = validateMultiPoolSplits(sdk, input.pools).filter((r) => !r.valid);
   if (invalid.length > 0) {
     throw new Error(
@@ -164,12 +206,20 @@ export async function registerMultiPoolAsset(
         invalid.map((r) => `${r.pool} at ${r.sum.toFixed(4)}%`).join(', '),
     );
   }
-  return sdk.registerCBTAsset(
-    input.title,
-    input.medium,
-    input.identifiers,
-    buildPoolWeightedSheet(input.pools),
-  );
+
+  try {
+    return await sdk.registerCBTAsset(
+      title,
+      input.medium,
+      input.identifiers,
+      buildPoolWeightedSheet(input.pools),
+    );
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw new DuplicateAssetRegistrationError(title, input.medium);
+    }
+    throw error;
+  }
 }
 
 /**

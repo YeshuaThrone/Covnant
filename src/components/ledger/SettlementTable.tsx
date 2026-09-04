@@ -11,7 +11,11 @@
 import { useMemo, useState, useTransition } from 'react';
 import { CURRENCY_DECIMALS } from '@/lib/ledger/currency-precision';
 import type { LedgerRow, LedgerTotals } from '@/lib/ledger/store';
+import type { RegistryPill } from '@/lib/assets/registry-keys';
 import { settleDirectAction } from '@/lib/ledger/actions';
+
+/** Ledger rows ride with their asset's registry pills (Black Box Shield). */
+type LedgerRowWithRegistry = LedgerRow & { registry: RegistryPill[] };
 
 function fmt(amount: number, currency: string): string {
   const decimals = CURRENCY_DECIMALS[currency] ?? 4;
@@ -26,7 +30,7 @@ export function SettlementTable({
   totals,
   assets,
 }: {
-  rows: LedgerRow[];
+  rows: LedgerRowWithRegistry[];
   totals: LedgerTotals;
   assets: { cbtCode: string; title: string }[];
 }) {
@@ -97,7 +101,15 @@ export function SettlementTable({
   );
 }
 
-function TableRow({ row, open, onToggle }: { row: LedgerRow; open: boolean; onToggle: () => void }) {
+function TableRow({
+  row,
+  open,
+  onToggle,
+}: {
+  row: LedgerRowWithRegistry;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
     <>
       <tr
@@ -106,7 +118,23 @@ function TableRow({ row, open, onToggle }: { row: LedgerRow; open: boolean; onTo
         aria-expanded={open}
       >
         <td className="px-4 py-3 font-mono text-xs text-white/80">{row.transactionId}</td>
-        <td className="px-4 py-3 font-mono text-xs text-gold">{row.cbtCode}</td>
+        <td className="px-4 py-3">
+          <span className="block font-mono text-xs text-gold">{row.cbtCode}</span>
+          <span className="mt-1 flex flex-wrap gap-1">
+            {/* Registry identifiers ride on the ledger-bound payload — shown next to the amounts. */}
+            {row.registry
+              .filter((pill) => pill.key !== 'cbt')
+              .map((pill) => (
+                <span
+                  key={pill.key}
+                  title={`${pill.label}: ${pill.value}`}
+                  className="rounded-full border border-gold/30 px-2 py-0.5 font-mono text-[10px] text-gold-champagne"
+                >
+                  {pill.label} · {pill.value}
+                </span>
+              ))}
+          </span>
+        </td>
         <td className="px-4 py-3 text-white/60">{row.platform}</td>
         <td className="px-4 py-3 text-right font-mono text-xs">
           {fmt(row.grossSettled, row.currency)} {row.currency}

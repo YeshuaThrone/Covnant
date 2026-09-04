@@ -2,7 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { registerAssetAction } from '@/lib/assets/actions';
+import { GoldNotificationBanner } from '@/components/brand/GoldNotificationBanner';
+import { generateCBTAsset } from '@/lib/splits/generate-cbt-asset';
 import {
   MEDIA_MEDIUMS,
   MEDIUM_LABELS,
@@ -20,9 +21,10 @@ export function AssetRegistrationForm() {
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [medium, setMedium] = useState('MUSIC_TRACK');
-  const [identifiers, setIdentifiers] = useState({ isrc: '', iswc: '', eidrCanonical: '' });
   const [pools, setPools] = useState<PoolDraft[]>(freshPools());
   const [error, setError] = useState<string | undefined>();
+  const [duplicate, setDuplicate] = useState(false);
+  const [mulOpen, setMulOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const allPoolsExact =
@@ -32,20 +34,36 @@ export function AssetRegistrationForm() {
         poolStateForUnits(sumPoolUnits(p.holders.map((h) => h.splitPercentage))) === 'EXACT',
     );
 
-  const submit = () => {
+  const openMulPrompt = () => {
     setError(undefined);
+    setDuplicate(false);
+    setMulOpen(true);
+  };
+
+  const acceptMulAndRegister = () => {
     startTransition(async () => {
-      const result = await registerAssetAction({ title, medium, identifiers, pools });
-      if (result.ok && result.cbtCode) {
-        router.push(`/assets/${result.cbtCode}`);
-      } else {
-        setError(result.error);
+      const result = await generateCBTAsset({ title, medium, pools });
+      if (!result.ok) {
+        // Keep the full UI state (form, splits, navigation) — duplicates render
+        // the gold banner; anything else renders the standard error strip.
+        setMulOpen(false);
+        setDuplicate(result.duplicate);
+        setError(result.duplicate ? undefined : result.error);
+        return;
       }
+      router.push(`/assets/${result.cbtCode}`);
     });
   };
 
   return (
     <div className="space-y-8">
+      {duplicate && (
+        <GoldNotificationBanner title="Asset already registered in CBT catalog">
+          The identical medium and title are already on the ledger — that catalog entry is the
+          asset of record. Adjust the title or medium to register a different work.
+        </GoldNotificationBanner>
+      )}
+
       <section className="glass-card p-6">
         <h2 className="font-mono text-sm uppercase tracking-widest text-gold">Identity</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -69,35 +87,10 @@ export function AssetRegistrationForm() {
             </select>
           </div>
         </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className={LABEL}>ISRC</label>
-            <input
-              className={FIELD}
-              value={identifiers.isrc}
-              placeholder="US-XXX-26-00001"
-              onChange={(e) => setIdentifiers({ ...identifiers, isrc: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className={LABEL}>ISWC</label>
-            <input
-              className={FIELD}
-              value={identifiers.iswc}
-              placeholder="T-000.000.000-0"
-              onChange={(e) => setIdentifiers({ ...identifiers, iswc: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className={LABEL}>EIDR</label>
-            <input
-              className={FIELD}
-              value={identifiers.eidrCanonical}
-              placeholder="10.5240/…"
-              onChange={(e) => setIdentifiers({ ...identifiers, eidrCanonical: e.target.value })}
-            />
-          </div>
-        </div>
+        <p className="mt-3 text-xs text-white/40">
+          Zero-friction registration: universal tracking identifiers (ISRC, ISWC, EIDR) resolve
+          automatically after you accept the MUL — no manual registry entry.
+        </p>
       </section>
 
       <PoolSplitEditor pools={pools} onChange={setPools} />
@@ -116,12 +109,59 @@ export function AssetRegistrationForm() {
         <button
           type="button"
           disabled={!allPoolsExact || pending}
-          onClick={submit}
+          onClick={openMulPrompt}
           className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {pending ? 'Registering…' : 'Register asset'}
+          Register asset
         </button>
       </div>
+
+      {mulOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Master Recording & Universal Asset License"
+            className="glass-card w-full max-w-2xl p-8"
+          >
+            <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
+              One-click agreement
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-[#F2F4F8]">
+              Master Recording &amp; Universal Asset License
+            </h2>
+            <p className="mt-4 text-sm text-white/60">
+              Accepting the MUL registers <span className="text-white/90">{title}</span> (
+              {MEDIUM_LABELS[medium as keyof typeof MEDIUM_LABELS] ?? medium}) under the universal
+              license terms: split-locked ownership for every pool, universal tracking across
+              platforms, settlement reconciled through the engine, and an immutable ledger record.
+            </p>
+            <p className="mt-3 text-sm text-white/60">
+              Registry identifiers are provisioned automatically — ISRC (Recording) and ISWC
+              (Composition) for Music &amp; Audio, EIDR for Film/TV/Video, plus CVT/CBT internal
+              audit keys for ledger verification. No external registry code is ever fabricated.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setMulOpen(false)}
+                className="rounded-lg border border-white/15 px-5 py-3 text-sm text-white/60 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={acceptMulAndRegister}
+                className="rounded-full bg-gold px-6 py-3 text-sm font-medium text-obsidian-900 transition enabled:hover:bg-gold-champagne disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {pending ? 'Registering…' : 'Accept MUL & Register Asset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
