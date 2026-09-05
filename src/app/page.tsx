@@ -7,8 +7,6 @@ import { BRAND } from '@/lib/brand';
 export const dynamic = 'force-dynamic';
 
 
-const MEDIA = ['Music', 'Film & TV', 'Publishing', 'Games & Social', 'Emerging Media'];
-
 const CAPABILITIES = [
   {
     title: 'Automated Contract Vault',
@@ -45,13 +43,7 @@ export default function Home() {
         <p className="mt-6 text-lg text-emerald-300">The Immutable Truth Engine</p>
         <div className="gold-rule mt-10 w-64" />
 
-        <ul className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Supported media">
-          {MEDIA.map((m) => (
-            <li key={m} className="glass-card px-3 py-1 text-xs text-white/70">
-              {m}
-            </li>
-          ))}
-        </ul>
+        <p className="font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
       </section>
 
@@ -62,10 +54,6 @@ export default function Home() {
             <p className="text-sm leading-relaxed text-white/60">{c.body}</p>
           </article>
         ))}
-      </section>
-
-      <section className="w-full max-w-4xl pb-24 text-center">
-        <p className="font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
       </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
