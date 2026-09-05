@@ -1,5 +1,4 @@
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
-import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import Link from 'next/link';
 import { BRAND } from '@/lib/brand';
 
@@ -7,8 +6,6 @@ import { BRAND } from '@/lib/brand';
 // no stale prerender of '/' on Vercel.
 export const dynamic = 'force-dynamic';
 
-
-const MEDIA = ['Music', 'Film & TV', 'Publishing', 'Games & Social', 'Emerging Media'];
 
 const CAPABILITIES = [
   {
@@ -46,13 +43,7 @@ export default function Home() {
         <p className="mt-6 text-lg text-emerald-300">The Immutable Truth Engine</p>
         <div className="gold-rule mt-10 w-64" />
 
-        <ul className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Supported media">
-          {MEDIA.map((m) => (
-            <li key={m} className="glass-card px-3 py-1 text-xs text-white/70">
-              {m}
-            </li>
-          ))}
-        </ul>
+        <p className="font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
       </section>
 
@@ -63,16 +54,6 @@ export default function Home() {
             <p className="text-sm leading-relaxed text-white/60">{c.body}</p>
           </article>
         ))}
-      </section>
-
-      <section className="w-full max-w-4xl pb-24">
-        <p className="text-xs uppercase tracking-[0.3em] text-white/40 mb-3">Registry codes render as pills</p>
-        <div className="flex flex-wrap gap-3">
-          <IdentifierBadge label="ISRC" value="US-S1M-24-00001" />
-          <IdentifierBadge label="ISWC" value="T-034.524.237-1" />
-          <IdentifierBadge label="EIDR" value="10.5240/1F2A-3B4C" />
-          <IdentifierBadge label="CVT" value="CBT-TRK-8F3A21C90D41" />
-        </div>
       </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
