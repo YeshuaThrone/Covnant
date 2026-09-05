@@ -43,7 +43,7 @@ export default function Home() {
         <p className="mt-6 text-lg text-emerald-300">The Immutable Truth Engine</p>
         <div className="gold-rule mt-10 w-64" />
 
-        <p className="font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
       </section>
 
