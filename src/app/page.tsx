@@ -33,7 +33,7 @@ export default function Home() {
           href="/dashboard"
           className="rounded-full border border-gold/40 px-4 py-1.5 text-sm text-gold-champagne transition hover:bg-gold/10"
         >
-          Enter the workspace
+          Enter your world
         </Link>
       </header>
 
