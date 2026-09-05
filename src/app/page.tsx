@@ -48,7 +48,7 @@ export default function Home() {
 
         <ul className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Supported media">
           {MEDIA.map((m) => (
-            <li key={m} className="glass-card px-3 py-1 font-mono text-xs text-gold-champagne">
+            <li key={m} className="glass-card px-3 py-1 font-mono text-xs uppercase text-gold-champagne">
               {m}
             </li>
           ))}
