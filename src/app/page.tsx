@@ -1,5 +1,4 @@
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
-import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import Link from 'next/link';
 import { BRAND } from '@/lib/brand';
 
@@ -65,14 +64,8 @@ export default function Home() {
         ))}
       </section>
 
-      <section className="w-full max-w-4xl pb-24">
-        <p className="text-xs uppercase tracking-[0.3em] text-white/40 mb-3">Registry codes render as pills</p>
-        <div className="flex flex-wrap gap-3">
-          <IdentifierBadge label="ISRC" value="US-S1M-24-00001" />
-          <IdentifierBadge label="ISWC" value="T-034.524.237-1" />
-          <IdentifierBadge label="EIDR" value="10.5240/1F2A-3B4C" />
-          <IdentifierBadge label="CVT" value="CBT-TRK-8F3A21C90D41" />
-        </div>
+      <section className="w-full max-w-4xl pb-24 text-center">
+        <p className="font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
       </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
