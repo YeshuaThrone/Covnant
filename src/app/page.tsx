@@ -38,9 +38,9 @@ export default function Home() {
       </header>
 
       <section className="w-full max-w-4xl flex flex-col items-center text-center pt-20 pb-16">
-        <CvRibbonMonogram size={112} />
+        <span className="drop-shadow-[0_0_14px_rgba(110,231,183,0.30)] block"><CvRibbonMonogram size={112} /></span>
         <p className="mt-8 text-sm uppercase tracking-[0.35em] text-gold-champagne">{BRAND.name}</p>
-        <h1 className="mt-4 bg-gradient-to-r from-gold-champagne via-white to-gold bg-clip-text text-5xl font-bold tracking-tight text-transparent md:text-6xl">
+        <h1 className="mt-4 bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-5xl font-bold tracking-tight text-transparent md:text-6xl">
           {BRAND.tagline}
         </h1>
         <p className="mt-6 text-lg text-emerald-300">The Immutable Truth Engine</p>
