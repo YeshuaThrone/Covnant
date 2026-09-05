@@ -43,7 +43,7 @@ export default function Home() {
         <h1 className="mt-4 bg-gradient-to-r from-gold-champagne via-white to-gold bg-clip-text text-5xl font-bold tracking-tight text-transparent md:text-6xl">
           {BRAND.tagline}
         </h1>
-        <p className="mt-6 text-lg text-white/60">The Immutable Truth Engine</p>
+        <p className="mt-6 text-lg text-emerald-300">The Immutable Truth Engine</p>
         <div className="gold-rule mt-10 w-64" />
 
         <ul className="mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Supported media">
