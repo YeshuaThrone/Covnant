@@ -53,6 +53,7 @@ export default function Home() {
             </li>
           ))}
         </ul>
+        <div className="gold-rule mt-10 w-64" />
       </section>
 
       <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24">
