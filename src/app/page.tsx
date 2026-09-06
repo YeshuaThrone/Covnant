@@ -7,17 +7,6 @@ import { BRAND } from '@/lib/brand';
 export const dynamic = 'force-dynamic';
 
 
-const CAPABILITIES = [
-  {
-    title: 'Automated Contract Vault',
-    body: 'Twenty deterministic, auto-populating agreements — from split sheets and sync licenses to brand collaborations and runway releases — generated from your registered asset data.',
-  },
-  {
-    title: 'Smart Ledger Verification',
-    body: 'Every settlement reconciles against its splits before it posts. BigInt-precision royalties, embedded auditor, zero silent drift.',
-  },
-];
-
 export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center px-6">
@@ -47,14 +36,10 @@ export default function Home() {
         <div className="gold-rule mt-10 w-64" />
       </section>
 
-      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24">
-        {CAPABILITIES.map((c) => (
-          <article key={c.title} className="glass-card p-6 flex flex-col gap-3">
-            <h2 className="text-lg font-semibold text-gold">{c.title}</h2>
-            <p className="text-sm leading-relaxed text-white/60">{c.body}</p>
-          </article>
-        ))}
-      </section>
+      {/* Reserved black-space region: the capability cards were removed, but this
+          area keeps their original 300px vertical footprint (measured on 9b34072
+          at 1440×900) for content that will be added here later. */}
+      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24 min-h-[300px]" />
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
         © {new Date().getFullYear()} {BRAND.name}. {BRAND.descriptor}.
