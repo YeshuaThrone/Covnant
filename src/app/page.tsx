@@ -36,6 +36,10 @@ export default function Home() {
         <div className="gold-rule mt-10 w-64" />
       </section>
 
+      {/* Reserved black-space region: the capability cards were removed, but this
+          area keeps their original 300px vertical footprint (measured on 9b34072
+          at 1440×900) for content that will be added here later. */}
+      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24 min-h-[300px]" />
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
         © {new Date().getFullYear()} {BRAND.name}. {BRAND.descriptor}.
