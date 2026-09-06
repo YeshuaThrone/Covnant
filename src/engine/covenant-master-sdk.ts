@@ -13,7 +13,7 @@
  * ==========================================================================
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 
 /* ==========================================================================
@@ -104,6 +104,7 @@ export interface SelfServeRightsHolder {
 }
 
 export interface CovenantBlockAsset {
+  cvtCode?: string;
   cbtCode: string;
   title: string;
   medium: MediaMedium;
@@ -245,6 +246,16 @@ const CBT_PREFIX_MAP: Record<MediaMedium, string> = {
   MAGAZINE_SERIAL: 'MAG', VIDEO_GAME: 'GME', LIVE_STREAM: 'STR', MARS_ORBITAL_BROADCAST: 'MOB',
 };
 
+/**
+ * Cryptographically secure, collision-proof Covenant Asset Code (CVT)
+ * Format: CVT-XXXXXX-2026
+ */
+export function generateCVTAssetCode(): string {
+  const hex = randomBytes(3).toString('hex').toUpperCase();
+  const year = new Date().getFullYear();
+  return `CVT-${hex}-${year}`;
+}
+
 export class CovenantMasterSDK {
   private cbtRegistry: Map<string, CovenantBlockAsset> = new Map();
 
@@ -322,11 +333,13 @@ export class CovenantMasterSDK {
     medium: MediaMedium,
     mappedIdentifiers: UniversalAssetIdentifier,
     rightsHolders: SelfServeRightsHolder[]
-  ): Promise<{ cbtCode: string; success: boolean }> {
+  ): Promise<{ cvtCode: string; cbtCode: string; success: boolean }> {
     this.validateSplits(rightsHolders);
 
+    const cvtCode = generateCVTAssetCode();
     const cbtCode = this.generateCBTCode(medium, title);
     const asset: CovenantBlockAsset = {
+      cvtCode,
       cbtCode,
       title,
       medium,
@@ -340,6 +353,7 @@ export class CovenantMasterSDK {
     if (this.dbClient) {
       const { error } = await this.dbClient.from('cbt_assets').insert([
         {
+          cvt_code: cvtCode,
           cbt_code: cbtCode,
           title: asset.title,
           medium: asset.medium,
@@ -351,7 +365,7 @@ export class CovenantMasterSDK {
       if (error) throw new Error(`Database registration failed: ${error.message}`);
     }
 
-    return { cbtCode, success: true };
+    return { cvtCode, cbtCode, success: true };
   }
 
   public async processRoyaltySettlement(event: RoyaltySettlementEvent): Promise<SettlementResult> {

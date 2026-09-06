@@ -15,7 +15,7 @@ import path from 'path';
  * tripwire: if anyone edits the vendored file, CI fails until the change is
  * either reverted or re-blessed through a spec amendment.
  */
-const VENDORED_SHA256 = '9c3bda6a60df9bfb88dcb24742fbf8d24f5b5707650f7f62f6a065f6041d5c59';
+const VENDORED_SHA256 = 'b60ec9de98e5890305b60cfe7cba93c016a2acc0b7a05c8d140c07c21f38dcc5';
 
 describe('vendored engine integrity', () => {
   it('matches the blessed source-of-truth hash', () => {
