@@ -54,14 +54,40 @@
  * consistent with the locked v1 server-side posture of the covenant
  * routes; abuse-hardening (rate limiting / allowlist) is deferred as a
  * dev-phase non-goal.
+ *
+ * UCT (Universal Creator Tag — the creator-root identity): a CREATING
+ * signup also mints UCT-[JURISDICTION]-[YEAR]-[SERIAL]-[CHECKSUM] inside
+ * the SAME advisory-lock transaction — issuance is race-safe by
+ * construction and independent of Increase configuration. The request
+ * gains `engine` (validated whenever present; any non-member value is a
+ * sanitized 400) and optional `jurisdiction` (2-char ISO 3166, default
+ * "US"); the shipped { email }-only shape stays accepted so the PR #27
+ * contract passes unchanged (its tests pin that exact shape), and an
+ * absent engine is recorded as NO engine attribution — never fabricated.
+ * Issuance facts persist immutably on the holder entry (uct, uctCreatedAt,
+ * uctJurisdiction, engine). DISCLOSURE: the UCT is returned ONLY on the
+ * creating 201 response; an idempotent repeat is status-only and carries
+ * NO uct key (enumeration protection — an email is never an oracle for
+ * someone else's UCT). The serial is crypto-random and uniqueness-checked
+ * with bounded retry; failure is fail-closed 503 UCT_MINT_FAILED. The
+ * checksum is integrity-only — not a secret, not an auth factor.
  */
 
 import { randomUUID } from 'node:crypto';
-import { getDb } from '@/lib/db';
+import { getDb, type Db } from '@/lib/db';
 import {
   provisionRightsHolderVirtualAccount,
   storedVirtualAccount,
 } from '@/lib/covenant/provisioning';
+import {
+  DEFAULT_UCT_JURISDICTION,
+  buildUct,
+  normalizeEngine,
+  normalizeJurisdiction,
+  uctIssuanceYear,
+  uctSerial,
+  type SignupEngine,
+} from '@/lib/covenant/uct';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,8 +100,16 @@ const SIGNUP_REGISTRY_LOCK = 'covenant-signup-registry';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Bounded serial-uniqueness retries before the mint fails closed. */
+const UCT_MINT_ATTEMPTS = 3;
+
+/** Connection-scoped query surface handed to a db.transaction callback. */
+type TxClient = Parameters<Parameters<Db['transaction']>[0]>[0];
+
 interface SignupRequestBody {
   email?: unknown;
+  engine?: unknown;
+  jurisdiction?: unknown;
 }
 
 interface RegistryRow {
@@ -83,15 +117,36 @@ interface RegistryRow {
   rights_holders: unknown;
 }
 
+/** The minted creator-root identity, disclosed ONLY on the 201 response. */
+interface MintedUct {
+  uct: string;
+  uctCreatedAt: string;
+  jurisdiction: string;
+  engine?: SignupEngine;
+}
+
 interface SignupRegistration {
   alreadyRegistered: boolean;
   assetId: string;
   rightsHolderId: string;
   holderEntry: unknown;
+  /** Null on the idempotent-repeat path — the repeat never carries a UCT. */
+  minted: MintedUct | null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return Response.json({ ok: false, error }, { status, headers: { 'cache-control': 'no-store' } });
+function jsonError(error: string, status: number, reason?: string): Response {
+  return Response.json(
+    { ok: false, error, ...(reason ? { reason } : {}) },
+    { status, headers: { 'cache-control': 'no-store' } },
+  );
+}
+
+/** Internal abort: the serial draw did not achieve uniqueness in bounds. */
+class UctMintFailedError extends Error {
+  constructor() {
+    super('UCT mint did not achieve serial uniqueness');
+    this.name = 'UctMintFailedError';
+  }
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -114,12 +169,42 @@ function holderEmail(holder: unknown): unknown {
 }
 
 /**
+ * Mints the UCT inside the caller's transaction: a crypto-random serial is
+ * uniqueness-checked against EVERY rights holder across cbt_assets (the
+ * advisory lock serializes signups, so check-then-write cannot interleave
+ * with another registration), retried on collision, and failed CLOSED when
+ * uniqueness is not achieved within bounds.
+ */
+async function mintUctInTx(tx: TxClient, jurisdiction: string): Promise<string> {
+  const year = uctIssuanceYear();
+  for (let attempt = 0; attempt < UCT_MINT_ATTEMPTS; attempt += 1) {
+    const candidate = buildUct(jurisdiction, year, uctSerial());
+    const collision = await tx.query(
+      `SELECT 1
+         FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
+        WHERE rh @> $1::jsonb
+        LIMIT 1`,
+      [JSON.stringify({ uct: candidate })],
+    );
+    if (!collision.rows.length) {
+      return candidate;
+    }
+  }
+  throw new UctMintFailedError();
+}
+
+/**
  * Find-or-create the signup registry row and the holder entry for the
  * normalized email, in one serialized transaction. The advisory lock makes
  * concurrent first-time signups (same or different email) find-or-create
  * without duplicating entries; FOR UPDATE covers the registry row itself.
+ * On the creating path the UCT is minted inside this same transaction.
  */
-async function registerHolder(db: NonNullable<ReturnType<typeof getDb>>, email: string): Promise<SignupRegistration> {
+async function registerHolder(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  email: string,
+  identity: { jurisdiction: string; engine: SignupEngine | null },
+): Promise<SignupRegistration> {
   return db.transaction<SignupRegistration>(async (tx) => {
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [SIGNUP_REGISTRY_LOCK]);
 
@@ -156,16 +241,30 @@ async function registerHolder(db: NonNullable<ReturnType<typeof getDb>>, email: 
       if (!isNonEmptyString(rightsHolderId)) {
         throw new Error('Signup registry holder entry is missing rightsHolderId.');
       }
-      return { alreadyRegistered: true, assetId, rightsHolderId, holderEntry: existing };
+      return { alreadyRegistered: true, assetId, rightsHolderId, holderEntry: existing, minted: null };
     }
 
-    // The EXACT PR #26 holder entry shape, with email as the identity field.
+    // Mint inside the SAME advisory-lock transaction — race-safe by
+    // construction, independent of Increase configuration.
+    const minted: MintedUct = {
+      uct: await mintUctInTx(tx, identity.jurisdiction),
+      uctCreatedAt: new Date().toISOString(),
+      jurisdiction: identity.jurisdiction,
+      ...(identity.engine ? { engine: identity.engine } : {}),
+    };
+
+    // The EXACT PR #26 holder entry shape, with email as the identity field,
+    // plus the immutable issuance facts of the creator-root identity.
     const entry = {
       rightsHolderId: randomUUID(),
       name: email,
       role: 'COMPOSER',
       email,
       payoutRouting: {},
+      uct: minted.uct,
+      uctCreatedAt: minted.uctCreatedAt,
+      uctJurisdiction: minted.jurisdiction,
+      ...(identity.engine ? { engine: identity.engine } : {}),
     };
     await tx.query(
       `UPDATE cbt_assets
@@ -173,7 +272,7 @@ async function registerHolder(db: NonNullable<ReturnType<typeof getDb>>, email: 
         WHERE id = $1`,
       [assetId, JSON.stringify(entry)],
     );
-    return { alreadyRegistered: false, assetId, rightsHolderId: entry.rightsHolderId, holderEntry: entry };
+    return { alreadyRegistered: false, assetId, rightsHolderId: entry.rightsHolderId, holderEntry: entry, minted };
   });
 }
 
@@ -192,6 +291,26 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError('Invalid signup request: provide a valid email address.', 400);
   }
 
+  // Engine/jurisdiction (sanitized, never echoed back): engine is validated
+  // whenever present; the shipped { email }-only shape stays accepted so
+  // every PR #27 behavior passes unchanged. An absent engine mints the UCT
+  // with no engine attribution — never a fabricated vertical.
+  let engine: SignupEngine | null = null;
+  if (body.engine !== undefined) {
+    engine = normalizeEngine(body.engine);
+    if (!engine) {
+      return jsonError('Invalid signup request: engine must be one of the supported engines.', 400);
+    }
+  }
+  let jurisdiction = DEFAULT_UCT_JURISDICTION;
+  if (body.jurisdiction !== undefined) {
+    const normalized = normalizeJurisdiction(body.jurisdiction);
+    if (!normalized) {
+      return jsonError('Invalid signup request: jurisdiction must be a 2-letter ISO 3166 code.', 400);
+    }
+    jurisdiction = normalized;
+  }
+
   const db = getDb();
   if (!db) {
     return jsonError('Database is not configured (DATABASE_URL).', 503);
@@ -199,8 +318,13 @@ export async function POST(request: Request): Promise<Response> {
 
   let registration: SignupRegistration;
   try {
-    registration = await registerHolder(db, email);
+    registration = await registerHolder(db, email, { jurisdiction, engine });
   } catch (error) {
+    if (error instanceof UctMintFailedError) {
+      // Fail-closed: no UCT, no registration. Sanitized — no serial details.
+      console.error('Signup UCT mint failed after bounded retries.');
+      return jsonError('Signup could not mint a UCT.', 503, 'UCT_MINT_FAILED');
+    }
     console.error('Signup registration failed:', error);
     return jsonError('Signup registration failed.', 500);
   }
@@ -243,9 +367,21 @@ export async function POST(request: Request): Promise<Response> {
 
   // Status fields only — NEVER accountNumber/routingNumber/accountNumberId,
   // provisioned or pending. Real numbers surface post-login only.
+  // The UCT is disclosed ONLY on the creating (201) response: an idempotent
+  // repeat carries NO uct key (enumeration protection, test-asserted).
+  const minted = registration.minted;
   return Response.json(
     {
       ok: true,
+      created: !registration.alreadyRegistered,
+      ...(minted
+        ? {
+            uct: minted.uct,
+            uctCreatedAt: minted.uctCreatedAt,
+            jurisdiction: minted.jurisdiction,
+            ...(minted.engine ? { engine: minted.engine } : {}),
+          }
+        : {}),
       status: provisioningStatus,
       ...(pendingReason ? { reason: pendingReason } : {}),
       alreadyRegistered: registration.alreadyRegistered,
