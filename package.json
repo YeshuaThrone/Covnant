@@ -14,7 +14,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.109.0",
+    "@types/pg": "^8.23.1",
     "next": "15.5.25",
+    "pg": "^8.23.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "^4.5.4"
