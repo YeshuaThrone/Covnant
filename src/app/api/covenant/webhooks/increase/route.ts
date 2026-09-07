@@ -88,11 +88,31 @@
  * written here is spendable (Lithic card authorizations, RTP payouts) the
  * moment this route returns 200. No banking-side changes.
  *
+ * Lineage (UCT identity layer): when a NEW credit row is inserted (the
+ * first-insert path ONLY — a replay never re-runs this), the transfer's
+ * memo/description fields are parsed for external identifiers (ISRC
+ * required-pattern, ISWC optional) and exact-matched against asset-level
+ * external identifiers in cbt_assets.mapped_identifiers. The resolved
+ * lineage — references, resolution 'exact'|'unmatched', the matched
+ * asset's CBT code, its holder's UCT (omitted for pre-UCT holders),
+ * parsedAt — is merged into the SAME metadata payload, preserving every
+ * provenance key. The lineage key is written ONLY when at least one
+ * reference was parsed. This is the parallel enrichment lane, never the
+ * money lane: no fuzzy matching, no auto-repair, no split execution, no
+ * asset mutation — and the lookup runs under its own savepoint so ANY
+ * failure (parse exception, missing column, lookup error) skips lineage
+ * while the credit stands.
+ *
  * Caller authentication: the HMAC signature IS the authentication.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getDb, type Db } from '@/lib/db';
+import {
+  buildLineageMetadata,
+  parseExternalReferences,
+  type ExternalReferenceKind,
+} from '@/lib/covenant/lineage';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,6 +122,7 @@ const POSTGRES_UNDEFINED_COLUMN = '42703';
 const DIRECTION_CREDIT = 'credit';
 const RETURN_TRANSACTION_TYPE = 'ROYALTY_INBOUND_RETURN';
 const ACH_RETURN_REFERENCE_PREFIX = 'inbound_ach_transfer_return:';
+const LINEAGE_SAVEPOINT = 'covenant_lineage_enrich';
 
 /**
  * The inbound credit rails Increase emits, all pinned from the official
@@ -182,6 +203,11 @@ interface InboundTransferObject {
 
 interface JsonbHolderRow {
   rights_holder_id: string;
+}
+
+interface LineageMatchRow {
+  cbt_code: string | null;
+  uct: string | null;
 }
 
 type TxClient = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -343,6 +369,33 @@ interface LedgerInsert {
 }
 
 /**
+ * The exact-match lineage lookup per reference kind: the stored asset-level
+ * external identifier is normalized with the SAME canonicalization the
+ * parser applies (uppercase, dash-stripped), so the comparison is exact
+ * identifier equality — never fuzzy. Resolves the matched asset's CBT code
+ * plus its first UCT-carrying rights holder (holders registered before
+ * UCTs carry none — the uct key is then omitted gracefully).
+ */
+const LINEAGE_LOOKUP_SQL: Record<ExternalReferenceKind, string> = {
+  ISRC: `SELECT a.cbt_code,
+           (SELECT rh->>'uct'
+              FROM jsonb_array_elements(a.rights_holders) AS rh
+             WHERE COALESCE(rh->>'uct', '') <> ''
+             LIMIT 1) AS uct
+      FROM cbt_assets a
+     WHERE UPPER(REPLACE(a.mapped_identifiers->>'isrc', '-', '')) = $1
+     LIMIT 1`,
+  ISWC: `SELECT a.cbt_code,
+           (SELECT rh->>'uct'
+              FROM jsonb_array_elements(a.rights_holders) AS rh
+             WHERE COALESCE(rh->>'uct', '') <> ''
+             LIMIT 1) AS uct
+      FROM cbt_assets a
+     WHERE UPPER(REPLACE(a.mapped_identifiers->>'iswc', '-', '')) = $1
+     LIMIT 1`,
+};
+
+/**
  * The provenance payload written alongside every royalty movement (plain
  * JSONB, no fixed key schema): the sender/ACH-originator name, the Increase
  * event category, the rail, the destination account number, and any
@@ -489,6 +542,37 @@ function provenanceMetadata(
 /** A validated sub-object of a transfer, or null. */
 function subObject(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+/**
+ * The lineage enrichment for a NEW credit row: parse the transfer's
+ * memo/description fields, exact-match every parsed reference against
+ * asset-level external identifiers, and build the lineage metadata object
+ * ({ lineage: { references, resolution, assetCode?, uct?, parsedAt } }).
+ * The first exact match wins; no match at all → resolution 'unmatched';
+ * nothing parseable → null, so NO lineage key is written. Reads cbt_assets
+ * only — no asset mutation, ever. Runs under the caller's savepoint: any
+ * throw (parse exception, lookup error) is caught by the enrichment block,
+ * lineage is skipped, and the credit stands.
+ */
+async function buildLineageMetadataInTx(
+  tx: TxClient,
+  transfer: InboundTransferObject,
+): Promise<Record<string, unknown> | null> {
+  const references = parseExternalReferences(transfer);
+  if (!references.length) {
+    return null;
+  }
+  let match: { assetCode: string; uct: string | null } | null = null;
+  for (const reference of references) {
+    const res = await tx.query<LineageMatchRow>(LINEAGE_LOOKUP_SQL[reference.kind], [reference.value]);
+    const row = res.rows[0];
+    if (row && isNonEmptyString(row.cbt_code)) {
+      match = { assetCode: row.cbt_code, uct: isNonEmptyString(row.uct) ? row.uct : null };
+      break;
+    }
+  }
+  return buildLineageMetadata({ references, match, parsedAt: new Date().toISOString() });
 }
 
 const LEDGER_INSERT_SQL =
@@ -661,12 +745,29 @@ export async function POST(request: Request): Promise<Response> {
       }
       await db.transaction(async (tx) => {
         const rightsHolderId = await resolveHolderIdInTx(tx, accountNumberId);
+        // Lineage lane — enrichment ONLY, never money. Savepoint-scoped
+        // exactly like the provenance fallback: ANY failure (parse
+        // exception, missing column, lookup error) skips lineage and the
+        // credit stands. First-insert path only — a replay 23505s before
+        // this point, so lineage is never duplicated.
+        await tx.query(`SAVEPOINT ${LINEAGE_SAVEPOINT}`);
+        let lineageMetadata: Record<string, unknown> | null = null;
+        try {
+          lineageMetadata = await buildLineageMetadataInTx(tx, transfer);
+        } catch (error) {
+          await tx.query(`ROLLBACK TO SAVEPOINT ${LINEAGE_SAVEPOINT}`);
+          console.warn('Lineage enrichment failed — the credit stands without lineage:', error);
+        }
+        await tx.query(`RELEASE SAVEPOINT ${LINEAGE_SAVEPOINT}`);
         await insertLedgerRowInTx(tx, {
           rightsHolderId,
           amountCents,
           transactionType: rail.royaltyType,
           referenceId: transferId,
-          metadata: provenanceMetadata(category, rail, transfer, accountNumberId),
+          metadata: {
+            ...provenanceMetadata(category, rail, transfer, accountNumberId),
+            ...(lineageMetadata ?? {}),
+          },
         });
       });
       return jsonOk();
