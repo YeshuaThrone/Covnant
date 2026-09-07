@@ -15,6 +15,7 @@
 import { processUniversalSocialWebhookAction } from '@/engine/covenant-master-sdk';
 import type { GlobalMatchClaimPayload } from '@/engine/covenant-master-sdk';
 import { resolveDataSourceMode } from '@/lib/data-source';
+import { stampEngineLedgerRowsCbt } from '@/lib/ledger/engine-stamp';
 import { rememberSettlement } from '@/lib/ledger/store';
 
 function isClaim(value: unknown): value is GlobalMatchClaimPayload {
@@ -68,6 +69,13 @@ export async function POST(request: Request) {
     for (let i = 0; i < settled.length; i++) {
       await rememberSettlement(settled[i], claims[i].platform);
     }
+  } else {
+    // DB mode: the engine action already upserted the ledger rows (the
+    // vendored SDK is hash-locked and cannot stamp). The repo-side boundary
+    // enriches each settled row's metadata.cbt by transaction_id — bounded,
+    // metadata-only, money-never-blocks: any enrichment failure skips the
+    // code while the settlement stands.
+    await stampEngineLedgerRowsCbt((result.data ?? []).map((r) => r.transactionId));
   }
 
   return Response.json({

@@ -66,3 +66,47 @@ export function cbtSettlementMetadataSql(referenceId: string): string {
   const code = generateCBTSettlementCode(referenceId);
   return `jsonb_build_object('cbt', jsonb_build_object('settlementCode', '${code}', 'derivedFrom', 'reference_id'))`;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Generation 9 — supabase-js stamping (same derivation, client-side write)  *
+ * ------------------------------------------------------------------------- */
+
+/** PostgreSQL undefined-column code (the raw-SQL paths' 42703 fallback). */
+export const POSTGRES_UNDEFINED_COLUMN = '42703';
+
+/** PostgREST's code when a column is absent from the schema cache. */
+export const POSTGREST_UNDEFINED_COLUMN = 'PGRST204';
+
+/**
+ * True when the error reports that the additive metadata column does not
+ * exist on the live table yet — PostgreSQL 42703 for the raw-SQL paths,
+ * PostgREST PGRST204 for the supabase-js paths. Every newly stamped client
+ * write treats it as "skip the code, complete the operation": money never
+ * blocks on provenance, mirroring the raw-SQL 42703 fallback.
+ */
+export function isMissingMetadataColumnError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code: unknown }).code;
+  return code === POSTGRES_UNDEFINED_COLUMN || code === POSTGREST_UNDEFINED_COLUMN;
+}
+
+/**
+ * Additive supabase-js payload stamp (Generation 9): the row payload with
+ * metadata.cbt merged in. The row's own keys are never reshaped, and any
+ * metadata keys the same payload already carries are preserved by
+ * construction (merge-only). The code is deterministic from the row's unique
+ * reference — for flat-schema rows that reference is the transaction_id, the
+ * only persisted unique identifier the legacy shapes carry; the tag literal
+ * stays the frozen Generation 8 shape.
+ */
+export function stampSupabaseLedgerRow<T extends Record<string, unknown>>(
+  row: T,
+  referenceId: string,
+): T & { metadata: Record<string, unknown> } {
+  const existing = (row as { metadata?: Record<string, unknown> }).metadata;
+  return { ...row, metadata: withCbtSettlementCode(existing ?? {}, referenceId) };
+}
+
+/** The required-for-provenance DDL note shared by every metadata fallback warn. */
+export const METADATA_COLUMN_DDL_NOTE =
+  "Required-for-provenance DDL: ALTER TABLE universal_royalty_ledger ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;";
