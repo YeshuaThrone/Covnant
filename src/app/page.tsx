@@ -34,6 +34,12 @@ export default function Home() {
 
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
+
+        {/* Empty band reserved for the next zone: mirrors the URD interior slot
+            exactly — statement margin (mt-8, 32px) + its text-sm line box (20px,
+            held open by min-h-5 with text omitted) + closing rule margin (mt-10,
+            40px) = the zone's 92px rhythm. */}
+        <div className="mt-8 min-h-5" />
         <div className="gold-rule mt-10 w-64" />
       </section>
 
