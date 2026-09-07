@@ -1,6 +1,15 @@
 /**
  * Shared Increase virtual-account provisioning core — CovnantRoyaltyTrackingAPI.
  *
+ * CBT · Covnant Banking & Tracker (canonical tier definition, Generation 8):
+ * "the primary outward-facing Covnant code attached to routing, banking, and
+ * royalty tracking so external entities recognize it as Covnant clearing
+ * infrastructure." Provisioning hands each rights holder the routing
+ * surface the CBT tier governs — the Increase Account Number distributors
+ * and PROs pay royalties into — while the ledger rows its credits produce
+ * carry the tier's deterministic settlement codes (metadata.cbt, see
+ * src/lib/ledger/cbt-settlement.ts).
+ *
  * Extracted verbatim from POST /api/covenant/accounts/provision (PR #26) so
  * that route and the instant sign-up route (/api/covenant/auth/signup) run
  * the EXACT same provisioning flow. Callers own their own request validation
