@@ -35,20 +35,23 @@ export default function Home() {
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
 
-        {/* Zone interior mirrors the URD slot: statement margin (mt-8, 32px) +
-            text-sm line box (20px), then the stage-name field (mt-4, 16px) as a
-            snug unit directly beneath the statement; the closing rule keeps its
-            mt-10 (40px). The field is totally invisible at rest — transparent
-            hairline (kept at 1px so focus causes no layout shift), no
-            placeholder, transparent background — and reveals its gold hairline
-            only on focus/typing. Accessible via aria-label. */}
+        {/* Stage Name entry in open black space below the URD zone — NOT a new
+            zone. The statement keeps the established 32px top gap; the invisible
+            input occupies the EXISTING 40px slot between statement and bottom
+            ruler (h-10, zero margins — zero net added height), so the band
+            interior stays EXACTLY 92px (32 + 20 + 40) and the bottom ruler sits
+            at the approved y. The ruler doubles as the entry area's bottom
+            line; nothing follows it. The input is fully chromeless at every
+            state — no border, no focus glow, no placeholder; only the typed
+            name (champagne mono) and the gold caret ever appear. cursor-text
+            keeps the invisible field discoverable; accessible via aria-label. */}
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
         <input
           type="text"
           aria-label="Stage Name"
-          className="mt-4 w-64 border-b border-transparent bg-transparent py-2 text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none transition duration-300 focus:border-amber-400/50 focus:shadow-[0_1px_0_0_rgba(251,191,36,0.25)]"
+          className="h-10 w-64 cursor-text bg-transparent text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none"
         />
-        <div className="gold-rule mt-10 w-64" />
+        <div className="gold-rule w-64" />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this

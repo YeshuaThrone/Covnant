@@ -29,10 +29,14 @@ test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.
   expect(icon).toContain('CV');
 });
 
-test('the zone carries the STAGE NAME statement with its invisible stage-name field', async ({
+test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({
   page,
 }) => {
   await page.goto('/');
+
+  // The entry area is NOT a new zone: the URD zone keeps its two rules, and
+  // the entry area ends with exactly ONE golden ruler as its bottom line.
+  await expect(page.locator('.gold-rule')).toHaveCount(3);
 
   // Statement carries the exact URD treatment.
   const statement = page.locator('p', { hasText: 'Stage Name' });
@@ -48,71 +52,95 @@ test('the zone carries the STAGE NAME statement with its invisible stage-name fi
     expect(statementClass, `statement class ${token}`).toContain(token);
   }
 
-  // Field is invisible chrome: transparent background, single hairline bottom
-  // border, no outline — a dark obsidian plaque, not a web form.
+  // Fully invisible field: transparent, borderless in EVERY state — the only
+  // things that ever become visible are the typed name and the gold caret.
   const input = page.getByRole('textbox', { name: 'Stage Name' });
   await expect(input).toBeVisible();
-
-  // TRUE INVISIBILITY at rest: no placeholder rendered, transparent hairline
-  // (still 1px so focus causes no layout shift), transparent background — the
-  // empty field reads as pure black space indistinguishable from nothing.
   expect(await input.getAttribute('placeholder')).toBeNull();
-  const atRest = await input.evaluate((el) => {
+
+  const chromeOf = (el: Element) => {
     const s = getComputedStyle(el);
     return {
       background: s.backgroundColor,
-      borderBottomWidth: s.borderBottomWidth,
-      borderBottomColor: s.borderBottomColor,
       borderTopWidth: s.borderTopWidth,
-      borderLeftWidth: s.borderLeftWidth,
       borderRightWidth: s.borderRightWidth,
+      borderBottomWidth: s.borderBottomWidth,
+      borderLeftWidth: s.borderLeftWidth,
       outlineStyle: s.outlineStyle,
+      boxShadow: s.boxShadow,
+      cursor: s.cursor,
     };
-  });
+  };
+
+  // At rest: no chrome at all, cursor-text for discoverability.
+  const atRest = await input.evaluate(chromeOf);
   expect(atRest.background).toBe('rgba(0, 0, 0, 0)');
-  expect(atRest.borderBottomWidth).toBe('1px');
-  expect(atRest.borderBottomColor).toBe('rgba(0, 0, 0, 0)');
   expect(atRest.borderTopWidth).toBe('0px');
-  expect(atRest.borderLeftWidth).toBe('0px');
   expect(atRest.borderRightWidth).toBe('0px');
+  expect(atRest.borderBottomWidth).toBe('0px');
+  expect(atRest.borderLeftWidth).toBe('0px');
   expect(atRest.outlineStyle).toBe('none');
+  expect(atRest.boxShadow).toBe('none');
+  expect(atRest.cursor).toBe('text');
 
-  // On focus the hairline appears and brightens gold with the under-glow.
+  // On focus: still no lines, no glow — every state chromeless.
   await input.focus();
-  await page.waitForTimeout(400); // let the 300ms focus transition settle
-  const focused = await input.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { borderBottomColor: s.borderBottomColor, boxShadow: s.boxShadow };
-  });
-  expect(focused.borderBottomColor).not.toBe('rgba(0, 0, 0, 0)');
-  expect(focused.boxShadow).toContain('251, 191, 36');
+  const onFocus = await input.evaluate(chromeOf);
+  expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
+  expect(onFocus.borderTopWidth).toBe('0px');
+  expect(onFocus.borderRightWidth).toBe('0px');
+  expect(onFocus.borderBottomWidth).toBe('0px');
+  expect(onFocus.borderLeftWidth).toBe('0px');
+  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.boxShadow).toBe('none');
 
-  // Placement: the field sits INSIDE the zone as a direct sibling directly
-  // beneath the statement — never in the reserved black region below the
-  // closing rule.
+  // Placement: the field sits directly beneath the statement in the open black
+  // space — never in the reserved region below.
   await expect(statement.locator('xpath=following-sibling::input[@aria-label="Stage Name"]')).toBeVisible();
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
-  const styles = await input.evaluate((el) => {
-    const s = getComputedStyle(el);
+
+  // The golden ruler directly below the input acts as the entry area's bottom
+  // line: it is the input's only following sibling and NOTHING follows it in
+  // the section — no elements, no spacing blocks, no further structure.
+  const bottomLine = statement.locator('xpath=following-sibling::div[contains(@class, "gold-rule")]');
+  await expect(bottomLine).toHaveCount(1);
+  await expect(bottomLine.first().locator('xpath=following-sibling::*')).toHaveCount(0);
+
+  // HARD ACCEPTANCE GEOMETRY: the band interior between the URD closing rule
+  // and the bottom golden ruler measures EXACTLY 92px (32 + 20 + 40) — the
+  // input occupies the existing 40px slot with zero net added height, fully
+  // inside that slot, centered on the zone axis.
+  const geometry = await page.evaluate(() => {
+    const rules = [...document.querySelectorAll('.gold-rule')];
+    const rule2 = rules[1].getBoundingClientRect();
+    const rule3 = rules[2].getBoundingClientRect();
+    const statement = [...document.querySelectorAll('p.font-mono')]
+      .find((p) => p.textContent?.includes('Stage Name'))!
+      .getBoundingClientRect();
+    const input = document.querySelector('input[aria-label="Stage Name"]')!.getBoundingClientRect();
     return {
-      background: s.backgroundColor,
-      borderBottomWidth: s.borderBottomWidth,
-      borderTopWidth: s.borderTopWidth,
-      borderLeftWidth: s.borderLeftWidth,
-      borderRightWidth: s.borderRightWidth,
-      outlineStyle: s.outlineStyle,
+      bandInterior: rule3.top - rule2.bottom,
+      statementGap: statement.top - rule2.bottom,
+      inputHeight: input.height,
+      inputTop: input.top,
+      inputBottom: input.bottom,
+      statementBottom: statement.bottom,
+      rulerTop: rule3.top,
+      ruleCenter: rule2.left + rule2.width / 2,
+      inputCenter: input.left + input.width / 2,
     };
   });
-  expect(styles.background).toBe('rgba(0, 0, 0, 0)');
-  expect(styles.borderBottomWidth).toBe('1px');
-  expect(styles.borderTopWidth).toBe('0px');
-  expect(styles.borderLeftWidth).toBe('0px');
-  expect(styles.borderRightWidth).toBe('0px');
-  expect(styles.outlineStyle).toBe('none');
+  expect(geometry.bandInterior).toBeCloseTo(92, 0);
+  expect(geometry.statementGap).toBeCloseTo(32, 0);
+  expect(geometry.inputHeight).toBeCloseTo(40, 0);
+  expect(geometry.inputTop).toBeGreaterThanOrEqual(geometry.statementBottom - 0.5);
+  expect(geometry.inputBottom).toBeLessThanOrEqual(geometry.rulerTop + 0.5);
+  expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
 
-  // Typing works.
+  // Typing renders the name in the champagne statement treatment.
   await input.fill('Test Artist');
   await expect(input).toHaveValue('Test Artist');
+  expect(await input.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(243, 229, 171)');
 });
 
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
