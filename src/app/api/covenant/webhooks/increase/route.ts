@@ -2,6 +2,15 @@
  * POST /api/covenant/webhooks/increase — CovnantRoyaltyTrackingAPI
  * (rail-agnostic inbound royalty ingestion).
  *
+ * CBT · Covnant Banking & Tracker (canonical tier definition, Generation 8):
+ * "the primary outward-facing Covnant code attached to routing, banking, and
+ * royalty tracking so external entities recognize it as Covnant clearing
+ * infrastructure." Every credit and compensating return this webhook writes
+ * carries metadata.cbt.settlementCode — the deterministic CBT-SETTLE tracker
+ * code derived from the row's own reference_id (same id ⇒ same code,
+ * forever), merged under the same savepoint discipline as provenance and
+ * lineage.
+ *
  * Signature verification (pinned from
  * https://increase.com/documentation/webhooks): Increase signs deliveries
  * per the Standard Webhooks specification with three request headers —
@@ -113,6 +122,7 @@ import {
   parseExternalReferences,
   type ExternalReferenceKind,
 } from '@/lib/covenant/lineage';
+import { withCbtSettlementCode } from '@/lib/ledger/cbt-settlement';
 
 export const dynamic = 'force-dynamic';
 
@@ -601,7 +611,11 @@ async function insertLedgerRowInTx(tx: TxClient, params: LedgerInsert): Promise<
       params.amountCents.toString(),
       params.transactionType,
       params.referenceId,
-      JSON.stringify(params.metadata),
+      // Merge-only CBT settlement stamp (Generation 8): the deterministic
+      // tracker code rides inside the same metadata payload, under the SAME
+      // savepoint as the provenance/lineage write — any 42703 fallback
+      // below skips the code and the money still moves.
+      JSON.stringify(withCbtSettlementCode(params.metadata, params.referenceId)),
     ]);
   } catch (error) {
     if (!isUndefinedColumn(error)) {
@@ -748,8 +762,10 @@ export async function POST(request: Request): Promise<Response> {
         // Lineage lane — enrichment ONLY, never money. Savepoint-scoped
         // exactly like the provenance fallback: ANY failure (parse
         // exception, missing column, lookup error) skips lineage and the
-        // credit stands. First-insert path only — a replay 23505s before
-        // this point, so lineage is never duplicated.
+        // credit stands. First-insert path only: on a replay the 23505
+        // fires at the INSERT below — AFTER these read-only lineage
+        // SELECTs have harmlessly re-run — so the replayed delivery never
+        // inserts a second row and lineage is never duplicated.
         await tx.query(`SAVEPOINT ${LINEAGE_SAVEPOINT}`);
         let lineageMetadata: Record<string, unknown> | null = null;
         try {

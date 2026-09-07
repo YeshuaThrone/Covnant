@@ -1,6 +1,13 @@
 /**
  * POST + PUT /api/banking — CovnantBankingAPI (Lithic cards + Increase RTP).
  *
+ * CBT · Covnant Banking & Tracker (canonical tier definition, Generation 8):
+ * "the primary outward-facing Covnant code attached to routing, banking, and
+ * royalty tracking so external entities recognize it as Covnant clearing
+ * infrastructure." Every ledger row this route writes carries
+ * metadata.cbt.settlementCode — the deterministic CBT-SETTLE tracker code
+ * derived from the row's own reference_id (same id ⇒ same code, forever).
+ *
  * Persistence model (authoritative live Supabase schema):
  * - Rights holders live in the GIN-indexed cbt_assets.rights_holders JSONB
  *   array; each entry carries rightsHolderId and payoutRouting{
@@ -61,6 +68,7 @@ import {
 } from '@/lib/escrow/balance';
 import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { centsToEngineUnits, engineUnitsToCents, SubUnitRemainderError } from './denomination';
+import { cbtSettlementMetadataSql } from '@/lib/ledger/cbt-settlement';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +76,7 @@ const INCREASE_RTP_URL = 'https://api.increase.com/real_time_payments_transfers'
 const LITHIC_AUTH_EVENT = 'card_authorization.request';
 const TRANSFER_FAILED_MESSAGE = 'Increase RTP transfer failed.';
 const POSTGRES_UNIQUE_VIOLATION = '23505';
+const POSTGRES_UNDEFINED_COLUMN = '42703';
 
 interface LedgerAvailableRow {
   /** pg BIGINT/NUMERIC arrive as strings — BigInt(str) only, never Number. */
@@ -125,6 +134,16 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/** Postgres undefined-column probe (universal_royalty_ledger.metadata not yet added). */
+function isUndefinedColumn(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === POSTGRES_UNDEFINED_COLUMN
+  );
+}
+
 /** Positive integer cents: a digit string or an integer number. Floats, signs, and zero are rejected — BigInt boundaries stay exact. */
 function parsePositiveCents(raw: unknown): bigint | null {
   if (typeof raw === 'number') {
@@ -162,6 +181,53 @@ async function availableCentsInTx(
     [rightsHolderId],
   );
   return BigInt(balanceRes.rows[0].available_cents);
+}
+
+/**
+ * The card-authorization transaction: lock the holder through the JSONB,
+ * derive the balance under the lock, and record the CARD_AUTHORIZATION debit.
+ * `withMetadata` selects the INSERT variant — carrying the deterministic CBT
+ * settlement code, or bare for the 42703 fallback retry. The parameter list
+ * stays exactly three values in both variants (frozen contract).
+ */
+async function authorizeCardInTx(
+  tx: Parameters<Parameters<Db['transaction']>[0]>[0],
+  params: {
+    cardToken: string;
+    requestAmountCents: bigint;
+    transactionToken: string;
+    withMetadata: boolean;
+  },
+): Promise<CardAuthOutcome> {
+  // Lock the matching asset row through the JSONB (the GIN index serves
+  // the filter): the per-holder serialization point for card auths and
+  // RTP holds alike.
+  const holderRes = await tx.query<CardHolderRow>(
+    `SELECT rh->>'rightsHolderId' AS rights_holder_id
+       FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
+      WHERE rh->'payoutRouting'->>'lithicCardToken' = $1
+      FOR UPDATE`,
+    [params.cardToken],
+  );
+  if (!holderRes.rows.length) return { approved: false, reason: 'CARD_NOT_FOUND' };
+  const rightsHolderId = holderRes.rows[0].rights_holder_id;
+
+  const availableCents = await availableCentsInTx(tx, rightsHolderId);
+  if (params.requestAmountCents > availableCents) {
+    return { approved: false, reason: 'INSUFFICIENT_FUNDS' };
+  }
+
+  await tx.query(
+    params.withMetadata
+      ? `INSERT INTO universal_royalty_ledger
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at, metadata)
+         VALUES ($1, $2, 'CARD_AUTHORIZATION', $3, NOW(), ${cbtSettlementMetadataSql(params.transactionToken)})`
+      : `INSERT INTO universal_royalty_ledger
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+         VALUES ($1, $2, 'CARD_AUTHORIZATION', $3, NOW())`,
+    [rightsHolderId, (-params.requestAmountCents).toString(), params.transactionToken],
+  );
+  return { approved: true };
 }
 
 interface LithicWebhookPayload {
@@ -222,32 +288,28 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const outcome = await db.transaction<CardAuthOutcome>(async (tx) => {
-      // Lock the matching asset row through the JSONB (the GIN index serves
-      // the filter): the per-holder serialization point for card auths and
-      // RTP holds alike.
-      const holderRes = await tx.query<CardHolderRow>(
-        `SELECT rh->>'rightsHolderId' AS rights_holder_id
-           FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
-          WHERE rh->'payoutRouting'->>'lithicCardToken' = $1
-          FOR UPDATE`,
-        [cardToken],
+    const outcome = await db.transaction<CardAuthOutcome>((tx) =>
+      authorizeCardInTx(tx, {
+        cardToken,
+        requestAmountCents,
+        transactionToken,
+        withMetadata: true,
+      }),
+    ).catch(async (error) => {
+      if (!isUndefinedColumn(error)) throw error;
+      // 42703: the additive metadata column is absent — re-run the whole
+      // reservation in a FRESH transaction without the settlement code. The
+      // failed transaction rolled back (nothing written; the ledger stays
+      // append-only), so the money still moves — the PR #26 fallback
+      // guarantee at transaction granularity.
+      return db.transaction<CardAuthOutcome>((tx) =>
+        authorizeCardInTx(tx, {
+          cardToken,
+          requestAmountCents,
+          transactionToken,
+          withMetadata: false,
+        }),
       );
-      if (!holderRes.rows.length) return { approved: false, reason: 'CARD_NOT_FOUND' };
-      const rightsHolderId = holderRes.rows[0].rights_holder_id;
-
-      const availableCents = await availableCentsInTx(tx, rightsHolderId);
-      if (requestAmountCents > availableCents) {
-        return { approved: false, reason: 'INSUFFICIENT_FUNDS' };
-      }
-
-      await tx.query(
-        `INSERT INTO universal_royalty_ledger
-           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
-         VALUES ($1, $2, 'CARD_AUTHORIZATION', $3, NOW())`,
-        [rightsHolderId, (-requestAmountCents).toString(), transactionToken],
-      );
-      return { approved: true };
     });
 
     if (!outcome.approved) {
@@ -273,24 +335,127 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Compensating DISBURSEMENT_REVERSAL after a rejected Increase dispatch: +net cents unwinds the failed hold under the flat SUM. Best-effort: a failed reversal keeps the hold and is logged for manual reconciliation — never thrown, never leaked. */
+/**
+ * Compensating DISBURSEMENT_REVERSAL after a rejected Increase dispatch: +net
+ * cents unwinds the failed hold under the flat SUM. Carries the deterministic
+ * CBT settlement code like every ledger write; on 42703 (the additive
+ * metadata column absent) the retry drops the code — an autocommit statement
+ * aborts only itself, so the unwind still lands. Best-effort: a failed
+ * reversal keeps the hold and is logged for manual reconciliation — never
+ * thrown, never leaked.
+ */
 async function recordDisbursementReversal(
   db: Db,
   params: { rightsHolderId: string; netCents: bigint; idempotencyKey: string },
 ): Promise<void> {
+  const referenceId = `reversal-${params.idempotencyKey}`;
   try {
     await db.query(
       `INSERT INTO universal_royalty_ledger
-         (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
-       VALUES ($1, $2, 'DISBURSEMENT_REVERSAL', $3, NOW())`,
-      [params.rightsHolderId, params.netCents.toString(), `reversal-${params.idempotencyKey}`],
+         (rights_holder_id, amount_cents, transaction_type, reference_id, created_at, metadata)
+       VALUES ($1, $2, 'DISBURSEMENT_REVERSAL', $3, NOW(), ${cbtSettlementMetadataSql(referenceId)})`,
+      [params.rightsHolderId, params.netCents.toString(), referenceId],
     );
   } catch (error) {
-    console.error(
-      'DISBURSEMENT_REVERSAL insert failed — the PENDING_DISBURSEMENT hold remains and needs manual reconciliation:',
-      error,
-    );
+    if (!isUndefinedColumn(error)) {
+      console.error(
+        'DISBURSEMENT_REVERSAL insert failed — the PENDING_DISBURSEMENT hold remains and needs manual reconciliation:',
+        error,
+      );
+      return;
+    }
+    try {
+      await db.query(
+        `INSERT INTO universal_royalty_ledger
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+         VALUES ($1, $2, 'DISBURSEMENT_REVERSAL', $3, NOW())`,
+        [params.rightsHolderId, params.netCents.toString(), referenceId],
+      );
+    } catch (retryError) {
+      console.error(
+        'DISBURSEMENT_REVERSAL insert failed — the PENDING_DISBURSEMENT hold remains and needs manual reconciliation:',
+        retryError,
+      );
+    }
   }
+}
+
+/**
+ * The RTP reservation transaction: lock the holder, derive the balance and
+ * engine tax under the lock, and record the PENDING_DISBURSEMENT hold.
+ * `withMetadata` selects the INSERT variant — carrying the deterministic CBT
+ * settlement code, or bare for the 42703 fallback retry. The parameter list
+ * stays exactly three values in both variants (frozen contract).
+ */
+async function reserveDisbursementInTx(
+  tx: Parameters<Parameters<Db['transaction']>[0]>[0],
+  params: {
+    rightsHolderId: string;
+    requestedPayoutCents: bigint;
+    idempotencyKey: string;
+    withMetadata: boolean;
+  },
+): Promise<RtpReservation> {
+  // Lock the matching asset row first (per-holder serialization point),
+  // then derive the balance under that lock.
+  const holderRes = await tx.query<JsonbHolderRow>(
+    `SELECT rh AS holder
+       FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
+      WHERE rh->>'rightsHolderId' = $1
+      FOR UPDATE`,
+    [params.rightsHolderId],
+  );
+  if (!holderRes.rows.length) {
+    throw new PayoutReservationError('Rights holder not found.', 404);
+  }
+  const holder = parseHolderEntry(holderRes.rows[0].holder);
+
+  const availableCents = await availableCentsInTx(tx, params.rightsHolderId);
+  if (params.requestedPayoutCents > availableCents) {
+    throw new PayoutReservationError('Insufficient escrow balance for withdrawal.', 422);
+  }
+  const routingNumber = holder?.routingNumber;
+  const accountNumber = holder?.accountNumber;
+  if (
+    typeof routingNumber !== 'string' ||
+    routingNumber === '' ||
+    typeof accountNumber !== 'string' ||
+    accountNumber === ''
+  ) {
+    throw new PayoutReservationError('No verified banking destination found for Increase payout.', 409);
+  }
+
+  // Identical withholding treatment to the withdraw route: verified
+  // profiles pay nothing now; unverified profiles withhold at the
+  // engine's effective rate. Cents convert to engine smallest units
+  // (×10⁶), the rate applies in exact BigInt, and the net converts back
+  // with a whole-cent exactness assertion — a sub-cent remainder fails
+  // closed instead of rounding escrow dust. Withheld tax never leaves
+  // escrow: only the net is debited.
+  const taxProfile = holder?.taxProfile ?? UNVERIFIED_FALLBACK_TAX_PROFILE;
+  const requestedUnits = centsToEngineUnits(params.requestedPayoutCents);
+  const withheldUnits = taxProfile.isVerified
+    ? 0n
+    : withholdingUnitsOn(requestedUnits, taxRateForProfile(taxProfile));
+  const netCents = engineUnitsToCents(requestedUnits - withheldUnits);
+
+  await tx.query(
+    params.withMetadata
+      ? `INSERT INTO universal_royalty_ledger
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at, metadata)
+         VALUES ($1, $2, 'PENDING_DISBURSEMENT', $3, NOW(), ${cbtSettlementMetadataSql(params.idempotencyKey)})`
+      : `INSERT INTO universal_royalty_ledger
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+         VALUES ($1, $2, 'PENDING_DISBURSEMENT', $3, NOW())`,
+    [params.rightsHolderId, (-netCents).toString(), params.idempotencyKey],
+  );
+  return {
+    routingNumber,
+    accountNumber,
+    withheldCents: params.requestedPayoutCents - netCents,
+    netCents,
+    timestamp: Date.now(),
+  };
 }
 
 interface IncreasePayoutBody {
@@ -308,6 +473,7 @@ export async function PUT(request: Request): Promise<Response> {
     return jsonError('Request body must be valid JSON with rightsHolderId and amountInCents.', 400);
   }
   const rightsHolderId = body.rightsHolderId;
+
   if (typeof rightsHolderId !== 'string' || rightsHolderId.trim() === '') {
     return jsonError('Invalid payout parameters', 400);
   }
@@ -336,63 +502,28 @@ export async function PUT(request: Request): Promise<Response> {
 
   let reservation: RtpReservation;
   try {
-    reservation = await db.transaction<RtpReservation>(async (tx) => {
-      // Lock the matching asset row first (per-holder serialization point),
-      // then derive the balance under that lock.
-      const holderRes = await tx.query<JsonbHolderRow>(
-        `SELECT rh AS holder
-           FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
-          WHERE rh->>'rightsHolderId' = $1
-          FOR UPDATE`,
-        [rightsHolderId],
+    reservation = await db.transaction<RtpReservation>((tx) =>
+      reserveDisbursementInTx(tx, {
+        rightsHolderId,
+        requestedPayoutCents,
+        idempotencyKey,
+        withMetadata: true,
+      }),
+    ).catch(async (error) => {
+      if (!isUndefinedColumn(error)) throw error;
+      // 42703: the additive metadata column is absent — re-reserve in a
+      // FRESH transaction without the settlement code. The failed
+      // transaction rolled back (nothing written; the ledger stays
+      // append-only), so the money still moves — the PR #26 fallback
+      // guarantee at transaction granularity.
+      return db.transaction<RtpReservation>((tx) =>
+        reserveDisbursementInTx(tx, {
+          rightsHolderId,
+          requestedPayoutCents,
+          idempotencyKey,
+          withMetadata: false,
+        }),
       );
-      if (!holderRes.rows.length) {
-        throw new PayoutReservationError('Rights holder not found.', 404);
-      }
-      const holder = parseHolderEntry(holderRes.rows[0].holder);
-
-      const availableCents = await availableCentsInTx(tx, rightsHolderId);
-      if (requestedPayoutCents > availableCents) {
-        throw new PayoutReservationError('Insufficient escrow balance for withdrawal.', 422);
-      }
-      const routingNumber = holder?.routingNumber;
-      const accountNumber = holder?.accountNumber;
-      if (
-        typeof routingNumber !== 'string' ||
-        routingNumber === '' ||
-        typeof accountNumber !== 'string' ||
-        accountNumber === ''
-      ) {
-        throw new PayoutReservationError('No verified banking destination found for Increase payout.', 409);
-      }
-
-      // Identical withholding treatment to the withdraw route: verified
-      // profiles pay nothing now; unverified profiles withhold at the
-      // engine's effective rate. Cents convert to engine smallest units
-      // (×10⁶), the rate applies in exact BigInt, and the net converts back
-      // with a whole-cent exactness assertion — a sub-cent remainder fails
-      // closed instead of rounding escrow dust. Withheld tax never leaves
-      // escrow: only the net is debited.
-      const taxProfile = holder?.taxProfile ?? UNVERIFIED_FALLBACK_TAX_PROFILE;
-      const requestedUnits = centsToEngineUnits(requestedPayoutCents);
-      const withheldUnits = taxProfile.isVerified
-        ? 0n
-        : withholdingUnitsOn(requestedUnits, taxRateForProfile(taxProfile));
-      const netCents = engineUnitsToCents(requestedUnits - withheldUnits);
-
-      await tx.query(
-        `INSERT INTO universal_royalty_ledger
-           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
-         VALUES ($1, $2, 'PENDING_DISBURSEMENT', $3, NOW())`,
-        [rightsHolderId, (-netCents).toString(), idempotencyKey],
-      );
-      return {
-        routingNumber,
-        accountNumber,
-        withheldCents: requestedPayoutCents - netCents,
-        netCents,
-        timestamp: Date.now(),
-      };
     });
   } catch (error) {
     if (error instanceof PayoutReservationError) {
