@@ -29,6 +29,52 @@ test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.
   expect(icon).toContain('CV');
 });
 
+test('the reserved band carries the STAGE NAME statement and an invisible obsidian stage-name field', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Statement carries the exact URD treatment.
+  const statement = page.locator('p', { hasText: 'Stage Name' });
+  await expect(statement).toHaveText('Stage Name');
+  const statementClass = await statement.getAttribute('class');
+  for (const token of [
+    'font-mono',
+    'text-sm',
+    'uppercase',
+    'tracking-[0.3em]',
+    'text-gold-champagne',
+  ]) {
+    expect(statementClass, `statement class ${token}`).toContain(token);
+  }
+
+  // Field is invisible chrome: transparent background, single hairline bottom
+  // border, no outline — a dark obsidian plaque, not a web form.
+  const input = page.getByRole('textbox', { name: 'Stage Name' });
+  await expect(input).toBeVisible();
+  const styles = await input.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      background: s.backgroundColor,
+      borderBottomWidth: s.borderBottomWidth,
+      borderTopWidth: s.borderTopWidth,
+      borderLeftWidth: s.borderLeftWidth,
+      borderRightWidth: s.borderRightWidth,
+      outlineStyle: s.outlineStyle,
+    };
+  });
+  expect(styles.background).toBe('rgba(0, 0, 0, 0)');
+  expect(styles.borderBottomWidth).toBe('1px');
+  expect(styles.borderTopWidth).toBe('0px');
+  expect(styles.borderLeftWidth).toBe('0px');
+  expect(styles.borderRightWidth).toBe('0px');
+  expect(styles.outlineStyle).toBe('none');
+
+  // Typing works.
+  await input.fill('Test Artist');
+  await expect(input).toHaveValue('Test Artist');
+});
+
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
   request,
 }) => {

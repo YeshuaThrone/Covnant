@@ -35,18 +35,25 @@ export default function Home() {
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
 
-        {/* Empty band reserved for the next zone: mirrors the URD interior slot
-            exactly — statement margin (mt-8, 32px) + its text-sm line box (20px,
-            held open by min-h-5 with text omitted) + closing rule margin (mt-10,
-            40px) = the zone's 92px rhythm. */}
-        <div className="mt-8 min-h-5" />
+        {/* Band mirrors the URD interior slot exactly: statement margin (mt-8,
+            32px) + text-sm line box (20px) + closing rule margin (mt-10, 40px)
+            = the zone's approved 92px rhythm. */}
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
         <div className="gold-rule mt-10 w-64" />
       </section>
 
-      {/* Reserved black-space region: the capability cards were removed, but this
-          area keeps their original 300px vertical footprint (measured on 9b34072
-          at 1440×900) for content that will be added here later. */}
-      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24 min-h-[300px]" />
+      {/* Reserved black-space region: keeps the capability cards' original 300px
+          vertical footprint (measured on 9b34072 at 1440×900). Hosts the stage-
+          name field as an obsidian plaque: borderless, single hairline bottom
+          accent, no form chrome. */}
+      <section className="w-full max-w-4xl flex items-center justify-center pb-24 min-h-[300px]">
+        <input
+          type="text"
+          aria-label="Stage Name"
+          placeholder="Stage Name"
+          className="w-64 border-b border-white/10 bg-transparent py-2 text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none transition duration-300 placeholder:text-white/30 focus:border-amber-400/50 focus:shadow-[0_1px_0_0_rgba(251,191,36,0.25)]"
+        />
+      </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
         © {new Date().getFullYear()} {BRAND.name}. {BRAND.descriptor}.
