@@ -43,13 +43,15 @@ export default function Home() {
             at the approved y. The ruler doubles as the entry area's bottom
             line; nothing follows it. The input is fully chromeless at every
             state — no border, no focus glow, no placeholder; only the typed
-            name (champagne mono) and the gold caret ever appear. cursor-text
-            keeps the invisible field discoverable; accessible via aria-label. */}
+            name (hero-subtitle treatment: text-lg text-emerald-300, displayed
+            exactly as the artist types it) and the gold caret ever appear.
+            cursor-text keeps the invisible field discoverable; accessible via
+            aria-label. */}
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
         <input
           type="text"
           aria-label="Stage Name"
-          className="h-10 w-64 cursor-text bg-transparent text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none"
+          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
         />
         <div className="gold-rule w-64" />
       </section>

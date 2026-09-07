@@ -137,10 +137,46 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(geometry.inputBottom).toBeLessThanOrEqual(geometry.rulerTop + 0.5);
   expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
 
-  // Typing renders the name in the champagne statement treatment.
+  // Typing renders the name exactly like the hero subtitle treatment —
+  // "The Immutable Truth Engine" (text-lg text-emerald-300, default font, no
+  // uppercase, normal letter-spacing): the name displays as the artist types
+  // it, matched field-by-field against the subtitle's computed styles.
   await input.fill('Test Artist');
   await expect(input).toHaveValue('Test Artist');
-  expect(await input.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(243, 229, 171)');
+  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
+  const subtitleStyles = await subtitle.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+    };
+  });
+  const typedStyles = await input.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+      caretColor: s.caretColor,
+    };
+  });
+  // Not the old champagne treatment; color serialization varies by browser
+  // (Tailwind v4 emerald is lab-space), so pin the subtitle match instead of
+  // a literal rgb string.
+  expect(typedStyles.color).not.toBe('rgb(243, 229, 171)');
+  expect(typedStyles.fontSize).toBe('18px');
+  expect(typedStyles.textTransform).toBe('none');
+  expect(typedStyles.color).toBe(subtitleStyles.color);
+  expect(typedStyles.fontSize).toBe(subtitleStyles.fontSize);
+  expect(typedStyles.letterSpacing).toBe(subtitleStyles.letterSpacing);
+  expect(typedStyles.fontFamily).toBe(subtitleStyles.fontFamily);
+  // The caret stays gold — distinct from the jade text color.
+  expect(typedStyles.caretColor).not.toBe(typedStyles.color);
 });
 
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
