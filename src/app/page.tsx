@@ -35,25 +35,26 @@ export default function Home() {
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
 
-        {/* Band mirrors the URD interior slot exactly: statement margin (mt-8,
-            32px) + text-sm line box (20px) + closing rule margin (mt-10, 40px)
-            = the zone's approved 92px rhythm. */}
+        {/* Zone interior mirrors the URD slot: statement margin (mt-8, 32px) +
+            text-sm line box (20px), then the stage-name field (mt-4, 16px) as a
+            snug unit directly beneath the statement; the closing rule keeps its
+            mt-10 (40px). The field is totally invisible at rest — transparent
+            hairline (kept at 1px so focus causes no layout shift), no
+            placeholder, transparent background — and reveals its gold hairline
+            only on focus/typing. Accessible via aria-label. */}
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
-        <div className="gold-rule mt-10 w-64" />
-      </section>
-
-      {/* Reserved black-space region: keeps the capability cards' original 300px
-          vertical footprint (measured on 9b34072 at 1440×900). Hosts the stage-
-          name field as an obsidian plaque: borderless, single hairline bottom
-          accent, no form chrome. */}
-      <section className="w-full max-w-4xl flex items-center justify-center pb-24 min-h-[300px]">
         <input
           type="text"
           aria-label="Stage Name"
-          placeholder="Stage Name"
-          className="w-64 border-b border-white/10 bg-transparent py-2 text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none transition duration-300 placeholder:text-white/30 focus:border-amber-400/50 focus:shadow-[0_1px_0_0_rgba(251,191,36,0.25)]"
+          className="mt-4 w-64 border-b border-transparent bg-transparent py-2 text-center font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne caret-amber-400/70 outline-none transition duration-300 focus:border-amber-400/50 focus:shadow-[0_1px_0_0_rgba(251,191,36,0.25)]"
         />
+        <div className="gold-rule mt-10 w-64" />
       </section>
+
+      {/* Reserved black-space region: the capability cards were removed, but this
+          area keeps their original 300px vertical footprint (measured on 9b34072
+          at 1440×900) for content that will be added here later. */}
+      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24 min-h-[300px]" />
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
         © {new Date().getFullYear()} {BRAND.name}. {BRAND.descriptor}.

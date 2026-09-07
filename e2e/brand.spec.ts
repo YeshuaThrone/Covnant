@@ -29,7 +29,7 @@ test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.
   expect(icon).toContain('CV');
 });
 
-test('the reserved band carries the STAGE NAME statement and an invisible obsidian stage-name field', async ({
+test('the zone carries the STAGE NAME statement with its invisible stage-name field', async ({
   page,
 }) => {
   await page.goto('/');
@@ -52,6 +52,46 @@ test('the reserved band carries the STAGE NAME statement and an invisible obsidi
   // border, no outline — a dark obsidian plaque, not a web form.
   const input = page.getByRole('textbox', { name: 'Stage Name' });
   await expect(input).toBeVisible();
+
+  // TRUE INVISIBILITY at rest: no placeholder rendered, transparent hairline
+  // (still 1px so focus causes no layout shift), transparent background — the
+  // empty field reads as pure black space indistinguishable from nothing.
+  expect(await input.getAttribute('placeholder')).toBeNull();
+  const atRest = await input.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      background: s.backgroundColor,
+      borderBottomWidth: s.borderBottomWidth,
+      borderBottomColor: s.borderBottomColor,
+      borderTopWidth: s.borderTopWidth,
+      borderLeftWidth: s.borderLeftWidth,
+      borderRightWidth: s.borderRightWidth,
+      outlineStyle: s.outlineStyle,
+    };
+  });
+  expect(atRest.background).toBe('rgba(0, 0, 0, 0)');
+  expect(atRest.borderBottomWidth).toBe('1px');
+  expect(atRest.borderBottomColor).toBe('rgba(0, 0, 0, 0)');
+  expect(atRest.borderTopWidth).toBe('0px');
+  expect(atRest.borderLeftWidth).toBe('0px');
+  expect(atRest.borderRightWidth).toBe('0px');
+  expect(atRest.outlineStyle).toBe('none');
+
+  // On focus the hairline appears and brightens gold with the under-glow.
+  await input.focus();
+  await page.waitForTimeout(400); // let the 300ms focus transition settle
+  const focused = await input.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { borderBottomColor: s.borderBottomColor, boxShadow: s.boxShadow };
+  });
+  expect(focused.borderBottomColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(focused.boxShadow).toContain('251, 191, 36');
+
+  // Placement: the field sits INSIDE the zone as a direct sibling directly
+  // beneath the statement — never in the reserved black region below the
+  // closing rule.
+  await expect(statement.locator('xpath=following-sibling::input[@aria-label="Stage Name"]')).toBeVisible();
+  await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
   const styles = await input.evaluate((el) => {
     const s = getComputedStyle(el);
     return {
