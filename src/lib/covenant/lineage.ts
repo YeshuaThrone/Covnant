@@ -44,7 +44,7 @@ const ISRC_CANONICAL_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{2}\d{5}$/;
  * Canonical ISWC: T-<10 digits>-<1 check digit>. Matched only in its
  * canonical dashed form — ISWCs in free text are always dashed.
  */
-const ISWC_PATTERN = /\b(T-\d{10}-\d)\b/;
+const ISWC_PATTERN = /\b(T-\d{10}-\d)\b/g;
 
 /**
  * ISRC shapes in memo text, tried in order so the raw capture includes the
