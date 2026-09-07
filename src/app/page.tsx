@@ -34,6 +34,7 @@ export default function Home() {
 
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
+        <div className="gold-rule mt-10 w-64" />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this
