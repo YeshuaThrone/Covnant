@@ -55,7 +55,10 @@
  * routes; abuse-hardening (rate limiting / allowlist) is deferred as a
  * dev-phase non-goal.
  *
- * UCT (Universal Creator Tag — the creator-root identity): a CREATING
+ * UCT (Universal Covnant Tag — the creator-root identity; the canonical
+ * Generation 8 expansion of "the universal root identity that follows the
+ * creator everywhere; the ultimate fallback that tracks and claims the
+ * creator's assets globally"): a CREATING
  * signup also mints UCT-[JURISDICTION]-[YEAR]-[SERIAL]-[CHECKSUM] inside
  * the SAME advisory-lock transaction — issuance is race-safe by
  * construction and independent of Increase configuration. The request

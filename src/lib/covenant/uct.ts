@@ -1,5 +1,11 @@
 /**
- * UCT — Universal Creator Tag (the creator-root identity).
+ * UCT — Universal Covnant Tag (the creator-root identity).
+ *
+ * Canonical tier definition (Generation 8, user-locked): UCT is "the
+ * universal root identity that follows the creator everywhere; the ultimate
+ * fallback that tracks and claims the creator's assets globally." The
+ * expansion is Universal Covnant Tag — earlier materials said "Universal
+ * Creator Tag"; the user's latest wording is canonical.
  *
  * The UCT is minted at signup and parents every asset, engine registration,
  * and ledger row a creator will ever touch. It embeds issuance facts only —
