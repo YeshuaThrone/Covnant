@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
+import { IdentityBadge } from '@/components/brand/IdentityBadge';
 import { SidebarNav, type NavItem } from './SidebarNav';
 
 /**
@@ -41,9 +42,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="gold-rule mx-5 mb-4 opacity-60" />
           <SidebarNav items={WORKSPACE_NAV} />
         </div>
-        <p className="px-5 pb-6 font-mono text-[10px] uppercase tracking-[0.25em] text-white/30">
-          Own Your Creation.
-        </p>
+        {/* Flex-spacer zone: the identity badge sits above the tagline, inside
+            the bottom-pinned block so the justify-between column keeps its
+            two-child rhythm. Unregistered until an identity source exists. */}
+        <div className="px-5 pb-6">
+          <div className="hidden pb-4 lg:block">
+            <IdentityBadge state={{ kind: 'unregistered' }} />
+          </div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/30">
+            Own Your Creation.
+          </p>
+        </div>
       </aside>
 
       <div className="flex min-h-screen flex-col">
