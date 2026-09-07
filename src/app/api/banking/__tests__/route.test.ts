@@ -5,10 +5,12 @@ import { POST, PUT } from '../route';
 import { getDb } from '@/lib/db';
 
 /**
- * POST/PUT /api/banking contract tests. Mocks only — no network, no database.
- * getDb is mocked with a fake pool/transaction covering rights_holders reads,
- * cbt_assets reads, ledger aggregate reads, the in-transaction ledger INSERTs,
- * and the pool-level reversal INSERT; fetch is stubbed for the Increase call.
+ * POST/PUT /api/banking contract tests against the authoritative live schema:
+ * holders resolve through the GIN-indexed cbt_assets.rights_holders JSONB
+ * (payoutRouting / taxProfile), balances are the flat SUM(amount_cents) over
+ * the holder's ledger rows, and reference_id carries the database idempotency
+ * (23505 replay/duplicate handling). pg + fetch are mocked — no network, no
+ * database, no env vars.
  */
 
 vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
@@ -33,40 +35,64 @@ function verifiedUsProfile(): TaxProfile {
   return { ...unverifiedUsProfile(), isVerified: true };
 }
 
-/** Ledger gross of 2.00 for rh_1 → 24% tax 0.48 → available 1.52 (152000000 units). */
-const grossLedgerRows = [{ disbursements: [{ rightsHolderId: 'rh_1', grossShare: 2.0 }] }];
+/** Unverified foreign profile → 30% engine rate (same shape as the conservative fallback). */
+function unverifiedForeignProfile(): TaxProfile {
+  return {
+    taxFormType: 'W8BEN_FOREIGN_INDIVIDUAL',
+    taxIdentifierEncrypted: 'test-identifier',
+    usTaxResident: false,
+    isBackupWithholdingRequired: false,
+    isVerified: false,
+  };
+}
 
-const holderAssets = [
-  { rights_holders: [{ id: 'rh_1', name: 'Test Holder', role: 'COMPOSER', taxProfile: unverifiedUsProfile() }] },
-];
+/** Full rights_holders JSONB element as stored on a cbt_assets row. */
+function holderEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    rightsHolderId: 'rh_1',
+    name: 'Test Holder',
+    role: 'COMPOSER',
+    taxProfile: unverifiedUsProfile(),
+    payoutRouting: { routingNumber: '021000021', accountNumber: '123456789' },
+    ...overrides,
+  };
+}
 
 interface QueryCall {
   sql: string;
   params: unknown[] | undefined;
 }
 
+/** A pg unique-violation error (the ledger's UNIQUE reference_id). */
+function uniqueViolation(): Error {
+  return Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+}
+
 function fakeDb(options: {
-  holderByToken?: { id: string } | null;
-  holderById?: { id: string; routing_number: string | null; account_number: string | null } | null;
-  assetRows?: unknown[];
-  ledgerRows?: { disbursements: unknown }[];
+  /** rights_holder_id resolved by the JSONB card-token lookup (null → no match) */
+  holderByToken?: string | null;
+  /** full JSONB holder entry resolved by the rightsHolderId lookup (null → no match) */
+  holderById?: Record<string, unknown> | null;
+  /** SUM(amount_cents) result as pg returns it: a string */
+  availableCents?: string;
   transactionError?: Error;
 } = {}) {
   const txQueries: QueryCall[] = [];
   const poolQueries: QueryCall[] = [];
   const txQuery = vi.fn((sql: string, params?: unknown[]) => {
     txQueries.push({ sql, params });
-    if (sql.includes('FROM rights_holders')) {
-      const row = sql.includes('lithic_card_token')
-        ? (options.holderByToken ?? null)
-        : (options.holderById ?? null);
-      return Promise.resolve({ rows: row ? [row] : [] });
+    if (sql.includes('jsonb_array_elements')) {
+      if (sql.includes('lithicCardToken')) {
+        return Promise.resolve(
+          options.holderByToken ? { rows: [{ rights_holder_id: options.holderByToken }] } : { rows: [] },
+        );
+      }
+      return Promise.resolve(
+        options.holderById ? { rows: [{ holder: options.holderById }] } : { rows: [] },
+      );
     }
-    if (sql.includes('FROM cbt_assets')) {
-      return Promise.resolve({ rows: options.assetRows ?? [] });
-    }
-    if (sql.includes('FROM universal_royalty_ledger')) {
-      return Promise.resolve({ rows: options.ledgerRows ?? [] });
+    if (sql.includes('SUM(amount_cents)')) {
+      return Promise.resolve({ rows: [{ available_cents: options.availableCents ?? '0' }] });
     }
     return Promise.resolve({ rows: [] });
   });
@@ -103,7 +129,7 @@ function authPayload(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     event_type: AUTH_EVENT,
     card_token: 'card_1',
-    amount: '100000000',
+    amount: '2500',
     transaction_token: 'lithic_txn_1',
     ...overrides,
   });
@@ -121,14 +147,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-const connectedHolder = { id: 'rh_1', routing_number: '021000021', account_number: '123456789' };
-
 function happyDb(overrides: Parameters<typeof fakeDb>[0] = {}) {
   return fakeDb({
-    holderByToken: { id: 'rh_1' },
-    holderById: connectedHolder,
-    assetRows: holderAssets,
-    ledgerRows: grossLedgerRows,
+    holderByToken: 'rh_1',
+    holderById: holderEntry(),
+    availableCents: '100000',
     ...overrides,
   });
 }
@@ -174,7 +197,30 @@ describe('POST /api/banking — Lithic authorization webhook', () => {
     expect(mockGetDb).not.toHaveBeenCalled();
   });
 
-  it('declines CARD_NOT_FOUND (200) when no holder owns the card token', async () => {
+  it('resolves the holder through the JSONB with FOR UPDATE and sums the flat ledger', async () => {
+    const fake = happyDb();
+    mockGetDb.mockReturnValue(fake.db as never);
+    const body = authPayload();
+    await POST(lithicSignedRequest(body, { 'lithic-signature': signLithic(body) }));
+
+    const [holderQuery, balanceQuery, insertQuery] = fake.txQueries;
+    expect(holderQuery.sql).toContain('jsonb_array_elements(rights_holders)');
+    expect(holderQuery.sql).toContain("rh->'payoutRouting'->>'lithicCardToken' = $1");
+    expect(holderQuery.sql).toContain('FOR UPDATE');
+    expect(holderQuery.params).toEqual(['card_1']);
+    expect(balanceQuery.sql).toContain('COALESCE(SUM(amount_cents), 0)');
+    expect(balanceQuery.sql).toContain('WHERE rights_holder_id = $1');
+    expect(balanceQuery.params).toEqual(['rh_1']);
+    // Database calls align exactly to the live schema: no legacy tables/columns.
+    for (const q of [...fake.txQueries, ...fake.poolQueries]) {
+      expect(q.sql).not.toContain('FROM rights_holders');
+      expect(q.sql).not.toContain('gross_settled');
+      expect(q.sql).not.toContain('disbursements');
+    }
+    expect(insertQuery.sql).toContain('INSERT INTO universal_royalty_ledger');
+  });
+
+  it('declines CARD_NOT_FOUND (200) when no holder routes the card token', async () => {
     const fake = happyDb({ holderByToken: null });
     mockGetDb.mockReturnValue(fake.db as never);
     const body = authPayload();
@@ -184,10 +230,10 @@ describe('POST /api/banking — Lithic authorization webhook', () => {
     expect(fake.txQueries.some((q) => q.sql.includes('INSERT INTO'))).toBe(false);
   });
 
-  it('declines INSUFFICIENT_FUNDS (200) when the request exceeds the derived balance', async () => {
-    const fake = happyDb();
+  it('declines INSUFFICIENT_FUNDS (200) against an empty ledger without writing a debit', async () => {
+    const fake = happyDb({ availableCents: '0' });
     mockGetDb.mockReturnValue(fake.db as never);
-    const body = authPayload({ amount: '200000000' });
+    const body = authPayload();
     const res = await POST(lithicSignedRequest(body, { 'lithic-signature': signLithic(body) }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: 'DECLINED', reason: 'INSUFFICIENT_FUNDS' });
@@ -205,29 +251,37 @@ describe('POST /api/banking — Lithic authorization webhook', () => {
     const inserts = fake.txQueries.filter((q) => q.sql.includes('INSERT INTO'));
     expect(inserts).toHaveLength(1);
     expect(inserts[0].sql).toContain("'CARD_AUTHORIZATION'");
-    const [entry] = JSON.parse(inserts[0].params?.[2] as string) as [
-      {
-        type: string;
-        rightsHolderId: string;
-        payoutAmount: string;
-        remainingNetBalance: string;
-        referenceId?: string;
-      },
-    ];
-    expect(entry.type).toBe('DISBURSEMENT');
-    expect(entry.rightsHolderId).toBe('rh_1');
-    expect(entry.payoutAmount).toBe('100000000');
-    expect(entry.remainingNetBalance).toBe('52000000');
-    expect(entry.referenceId).toBe('lithic_txn_1');
+    expect(inserts[0].sql).toContain('reference_id');
+    // amount_cents = −amount as a BigInt string; reference_id = transaction_token.
+    expect(inserts[0].params).toEqual(['rh_1', '-2500', 'lithic_txn_1']);
+  });
+
+  it('treats a 23505 unique-violation as a webhook replay and returns APPROVED', async () => {
+    const fake = happyDb({ transactionError: uniqueViolation() });
+    mockGetDb.mockReturnValue(fake.db as never);
+    const body = authPayload();
+    const res = await POST(lithicSignedRequest(body, { 'lithic-signature': signLithic(body) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: 'APPROVED' });
   });
 
   it('accepts the alternate x-lithic-signature header and integer amounts', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const body = authPayload({ amount: 100000000 });
+    const body = authPayload({ amount: 2500 });
     const res = await POST(lithicSignedRequest(body, { 'x-lithic-signature': signLithic(body) }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: 'APPROVED' });
+  });
+
+  it('returns 200 DECLINED/INTERNAL_ERROR for a malformed payload', async () => {
+    const fake = happyDb();
+    mockGetDb.mockReturnValue(fake.db as never);
+    const body = authPayload({ amount: null });
+    const res = await POST(lithicSignedRequest(body, { 'lithic-signature': signLithic(body) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: 'DECLINED', reason: 'INTERNAL_ERROR' });
+    expect(fake.txQueries).toHaveLength(0);
   });
 
   it('returns 200 DECLINED/INTERNAL_ERROR (never 5xx) when the database transaction fails', async () => {
@@ -257,7 +311,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
       expect(res.status).toBe(400);
     }
     for (const rightsHolderId of [undefined, '', 42]) {
-      const res = await PUT(putRequest({ rightsHolderId, amountInCents: '100000000' }));
+      const res = await PUT(putRequest({ rightsHolderId, amountInCents: '100000' }));
       expect(res.status).toBe(400);
     }
   });
@@ -273,59 +327,63 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     vi.stubEnv('INCREASE_API_KEY', '');
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(503);
   });
 
-  it('returns 404 when the rights holder does not exist', async () => {
+  it('returns 503 when DATABASE_URL is unconfigured', async () => {
+    mockGetDb.mockReturnValue(null);
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    expect(res.status).toBe(503);
+  });
+
+  it('returns 404 when the holder is on no cbt_assets JSONB array', async () => {
     const fake = happyDb({ holderById: null });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_missing', amountInCents: '100000000' }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_missing', amountInCents: '100000' }));
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe('Rights holder not found.');
   });
 
-  it('returns 422 when the payout exceeds the derived escrow balance', async () => {
-    const fake = happyDb();
+  it('returns 422 when the payout exceeds the SUM-derived balance of an empty ledger', async () => {
+    const fake = happyDb({ availableCents: '0' });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '200000000' }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('Insufficient escrow balance for withdrawal.');
+    expect(fake.txQueries.some((q) => q.sql.includes('INSERT INTO'))).toBe(false);
   });
 
-  it('returns 409 when the holder has no full account number for RTP', async () => {
-    const fake = happyDb({ holderById: { id: 'rh_1', routing_number: '021000021', account_number: null } });
+  it('returns 409 when payoutRouting has no full account number for RTP', async () => {
+    const fake = happyDb({ holderById: holderEntry({ payoutRouting: { routingNumber: '021000021' } }) });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('No verified banking destination found for Increase payout.');
   });
 
-  it('reserves the hold, withholds 24% tax, dispatches the net payable, and returns ok', async () => {
+  it('reserves the net, withholds 24% for an unverified US profile, and dispatches net cents', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_1', status: 'succeeded' })]);
 
     const res = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }, { 'Idempotency-Key': 'idem-1' }),
+      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-1' }),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.disbursementId).toBe('rtp_1');
-    expect(body.amountCents).toBe('100000000');
-    expect(body.taxWithheld).toBe('24000000');
-    expect(body.netAmountCents).toBe('76000000');
+    expect(body.amountCents).toBe('100000');
+    expect(body.taxWithheld).toBe('24000');
+    expect(body.netAmountCents).toBe('76000');
 
     const holdInserts = fake.txQueries.filter((q) => q.sql.includes('INSERT INTO'));
     expect(holdInserts).toHaveLength(1);
     expect(holdInserts[0].sql).toContain("'PENDING_DISBURSEMENT'");
-    const [entry] = JSON.parse(holdInserts[0].params?.[2] as string) as [
-      { payoutAmount: string; taxWithheld: string; idempotencyKey?: string },
-    ];
-    expect(entry.payoutAmount).toBe('100000000');
-    expect(entry.taxWithheld).toBe('24000000');
-    expect(entry.idempotencyKey).toBe('idem-1');
+    expect(holdInserts[0].sql).toContain('reference_id');
+    // Hold = −net cents, reference_id = the client's idempotency key.
+    expect(holdInserts[0].params).toEqual(['rh_1', '-76000', 'idem-1']);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0][1] as RequestInit & { headers: Record<string, string>; body: string };
@@ -337,36 +395,88 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
       source_account_id: string;
       remittance_information: string;
     };
-    expect(sentBody.amount).toBe(76000000);
+    expect(sentBody.amount).toBe(76000);
     expect(sentBody.destination_account_number).toBe('123456789');
     expect(sentBody.destination_routing_number).toBe('021000021');
     expect(sentBody.source_account_id).toBe('src_acc_1');
     expect(sentBody.remittance_information).toBe('Covenant Royalty Escrow Disbursement');
   });
 
-  it('withholds nothing for verified profiles and dispatches the gross amount', async () => {
-    const fake = happyDb({
-      assetRows: [
-        { rights_holders: [{ id: 'rh_1', name: 'Test Holder', role: 'COMPOSER', taxProfile: verifiedUsProfile() }] },
-      ],
-    });
+  it('withholds 30% for an unverified foreign profile', async () => {
+    const fake = happyDb({ holderById: holderEntry({ taxProfile: unverifiedForeignProfile() }) });
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_2', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: 100000000 }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const body = await res.json();
+    expect(body.taxWithheld).toBe('30000');
+    expect(body.netAmountCents).toBe('70000');
+    const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string };
+    expect((JSON.parse(init.body) as { amount: number }).amount).toBe(70000);
+  });
+
+  it('falls back to the conservative 30% rate when the JSONB entry carries no tax profile', async () => {
+    const entryWithoutProfile: Record<string, unknown> = holderEntry();
+    delete entryWithoutProfile.taxProfile;
+    const fake = happyDb({ holderById: entryWithoutProfile });
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_3', status: 'succeeded' })]);
+
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const body = await res.json();
+    expect(body.taxWithheld).toBe('30000');
+    expect(body.netAmountCents).toBe('70000');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds nothing for verified profiles and dispatches the gross amount', async () => {
+    const fake = happyDb({ holderById: holderEntry({ taxProfile: verifiedUsProfile() }) });
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_4', status: 'succeeded' })]);
+
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: 100000 }));
     const body = await res.json();
     expect(body.taxWithheld).toBe('0');
-    expect(body.netAmountCents).toBe('100000000');
+    expect(body.netAmountCents).toBe('100000');
     const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string };
-    expect((JSON.parse(init.body) as { amount: number }).amount).toBe(100000000);
+    expect((JSON.parse(init.body) as { amount: number }).amount).toBe(100000);
+    const holdInserts = fake.txQueries.filter((q) => q.sql.includes('INSERT INTO'));
+    expect(holdInserts[0].params).toEqual(['rh_1', '-100000', expect.any(String)]);
+  });
+
+  it('fails closed with a sanitized 500 when the net is not a whole-cent multiple', async () => {
+    // 100001 cents at 24% → net 76,000,760,000 units → 76000.76 cents: not exact.
+    const fake = happyDb({ availableCents: '100001' });
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_x', status: 'succeeded' })]);
+
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100001' }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('Payout cannot be represented in whole cents.');
+    expect(fake.txQueries.some((q) => q.sql.includes('INSERT INTO'))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 on a 23505 duplicate submission and never holds twice', async () => {
+    const fake = happyDb({ transactionError: uniqueViolation() });
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_5', status: 'succeeded' })]);
+
+    const res = await PUT(
+      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-dup' }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('disbursement already in progress for this idempotency key');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('falls back to a fresh UUID idempotency key when the client supplies none', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_3', status: 'succeeded' })]);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_6', status: 'succeeded' })]);
 
-    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }));
+    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const init = fetchMock.mock.calls[0][1] as RequestInit & { headers: Record<string, string> };
     expect(init.headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -374,20 +484,22 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
   it('honors the idempotencyKey body field when no header is present', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_4', status: 'succeeded' })]);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_7', status: 'succeeded' })]);
 
-    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000', idempotencyKey: 'key-body-1' }));
+    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000', idempotencyKey: 'key-body-1' }));
+    const holdInserts = fake.txQueries.filter((q) => q.sql.includes('INSERT INTO'));
+    expect(holdInserts[0].params?.[2]).toBe('key-body-1');
     const init = fetchMock.mock.calls[0][1] as RequestInit & { headers: Record<string, string> };
     expect(init.headers['Idempotency-Key']).toBe('key-body-1');
   });
 
-  it('records a DISBURSEMENT_REVERSAL and fails sanitized when Increase rejects the transfer', async () => {
+  it('records a +net DISBURSEMENT_REVERSAL and fails sanitized when Increase rejects the transfer', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
     stubFetch([jsonResponse({ detail: 'Insufficient source balance — internal upstream detail' }, 422)]);
 
     const res = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }, { 'Idempotency-Key': 'idem-2' }),
+      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-2' }),
     );
     expect(res.status).toBe(502);
     const body = await res.json();
@@ -399,19 +511,17 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     const reversals = fake.poolQueries.filter((q) => q.sql.includes('INSERT INTO'));
     expect(reversals).toHaveLength(1);
     expect(reversals[0].sql).toContain("'DISBURSEMENT_REVERSAL'");
-    const [entry] = JSON.parse(reversals[0].params?.[2] as string) as [
-      { payoutAmount: string; reversalOf?: string },
-    ];
-    expect(entry.payoutAmount).toBe('-100000000');
-    expect(entry.reversalOf).toBe('idem-2');
+    expect(reversals[0].sql).toContain('reference_id');
+    // +net cents unwinds the −net hold; reference_id = 'reversal-' + key.
+    expect(reversals[0].params).toEqual(['rh_1', '76000', 'reversal-idem-2']);
   });
 
   it('never leaks the full account number in a successful response', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    stubFetch([jsonResponse({ id: 'rtp_5', status: 'succeeded' })]);
+    stubFetch([jsonResponse({ id: 'rtp_8', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000000' }));
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const serialized = JSON.stringify(await res.json());
     expect(serialized).not.toContain('123456789');
   });

@@ -1,43 +1,52 @@
 /**
  * POST + PUT /api/banking — CovnantBankingAPI (Lithic cards + Increase RTP).
  *
+ * Persistence model (authoritative live Supabase schema):
+ * - Rights holders live in the GIN-indexed cbt_assets.rights_holders JSONB
+ *   array; each entry carries rightsHolderId and payoutRouting{
+ *   lithicCardToken, routingNumber, accountNumber }. There is no standalone
+ *   rights_holders table in scope for these routes — every holder lookup
+ *   flows through the JSONB, and the matching asset row is locked FOR UPDATE
+ *   so concurrent card auths and RTP holds for the same holder serialize.
+ * - universal_royalty_ledger is flat: rights_holder_id, amount_cents (BIGINT
+ *   integer cents, negative = debit), transaction_type, reference_id (UNIQUE
+ *   + indexed), created_at. A holder's available balance is
+ *   COALESCE(SUM(amount_cents), 0) over their rows — there is no stored
+ *   balance column.
+ *
  * POST — Lithic real-time card authorization webhook:
  *   HMAC-SHA256 over the raw body vs LITHIC_WEBHOOK_SECRET (length-guarded
  *   timingSafeEqual). Missing secret/signature → 401, bad signature → 403.
  *   Non-authorization events → 200 {result:'CONTINUE'}. For
- *   card_authorization.request the holder is resolved by lithic_card_token,
- *   the available escrow balance is DERIVED from the universal_royalty_ledger
- *   disbursements JSONB (shared escrow math — no stored balance column), and
- *   an approval records a CARD_AUTHORIZATION debit. Every internal error on
- *   the auth path returns 200 {result:'DECLINED', reason:'INTERNAL_ERROR'} —
- *   never a 5xx, because Lithic retries 5xx and would storm a failing
- *   endpoint. Failures are logged server-side instead.
+ *   card_authorization.request the holder is resolved through the JSONB by
+ *   payoutRouting.lithicCardToken, the balance is the locked SUM over the
+ *   holder's ledger rows, and an approval records a CARD_AUTHORIZATION debit
+ *   (amount_cents = −amount, reference_id = transaction_token). A 23505
+ *   unique-violation on reference_id is a webhook replay: the exact event was
+ *   already recorded, so it returns 200 APPROVED without a second debit.
+ *   Every internal error on the auth path returns 200 {result:'DECLINED',
+ *   reason:'INTERNAL_ERROR'} — never a 5xx, because Lithic retries 5xx and
+ *   would storm a failing endpoint. Failures are logged server-side instead.
  *
  * PUT — Increase RTP instant disbursement:
- *   Validate → withhold engine tax for unverified profiles (identical rates
- *   and verification logic as the withdraw route) → reserve the gross amount
- *   in-transaction as a PENDING_DISBURSEMENT hold → dispatch the NET payable
- *   to Increase over RTP (Idempotency-Key honored from the client, falling
- *   back to a fresh UUID) → on rejection record a compensating
- *   DISBURSEMENT_REVERSAL and fail with a sanitized error.
+ *   Validate integer cents (MAX_SAFE_INTEGER guarded) → withhold engine tax
+ *   for unverified profiles (identical rates and verification logic as the
+ *   withdraw route: cents convert to engine smallest units ×10⁶, and the net
+ *   converts back through an exact whole-cent division — a sub-cent remainder
+ *   fails closed with a sanitized 500 rather than rounding escrow dust) →
+ *   reserve the net in-transaction as a PENDING_DISBURSEMENT hold
+ *   (amount_cents = −net, reference_id = idempotency key; a 23505 there means
+ *   a duplicate submission and returns 409 — never a second hold) → dispatch
+ *   the net to Increase over RTP with the client's Idempotency-Key (UUID
+ *   fallback) → on rejection record a compensating DISBURSEMENT_REVERSAL
+ *   (amount_cents = +net, reference_id = 'reversal-' + key) and fail with a
+ *   sanitized error.
  *
- * Balance model: the ledger's disbursements JSONB is the single source of
- * truth. Banking debits are written with the same entry shape as the withdraw
- * route's DISBURSEMENT entries (type 'DISBURSEMENT', smallest-unit payoutAmount
- * strings), so the shared prior-payout math automatically subtracts them.
- * A reversal entry carries a negative payoutAmount — the exact compensating
- * credit under that same sum.
- *
- * Concurrency: there is no per-holder balance row to lock, so both handlers
- * take FOR UPDATE on the holder's rights_holders row first. Concurrent card
- * auths and RTP holds for the SAME holder serialize on that lock (the second
- * transaction reads the ledger aggregate only after the first commits), while
- * different holders never contend.
- *
- * Account numbers: rights_holders.account_number is the FULL destination
- * account number — a deliberate, user-accepted design requirement for Increase
- * RTP (masked numbers cannot drive RTP). It is consumed only by the outbound
- * Increase call and is NEVER returned from any API response or logged.
+ * Account numbers: payoutRouting.accountNumber is the FULL destination
+ * account number — a deliberate, user-accepted design requirement for
+ * Increase RTP (masked numbers cannot drive RTP). It is consumed only by the
+ * outbound Increase call and is NEVER returned from any API response or
+ * logged.
  *
  * Caller authentication: none, consistent with the locked v1 server-side
  * posture of the PR #23 routes.
@@ -45,53 +54,38 @@
 
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getDb, type Db } from '@/lib/db';
-import { formatMicro } from '@/lib/fixed-point';
 import {
-  escrowBalanceForHolder,
-  findRightsHolder,
   UNVERIFIED_FALLBACK_TAX_PROFILE,
+  taxRateForProfile,
   withholdingUnitsOn,
 } from '@/lib/escrow/balance';
+import type { TaxProfile } from '@/engine/covenant-master-sdk';
+import { centsToEngineUnits, engineUnitsToCents, SubUnitRemainderError } from './denomination';
 
 export const dynamic = 'force-dynamic';
 
 const INCREASE_RTP_URL = 'https://api.increase.com/real_time_payments_transfers';
 const LITHIC_AUTH_EVENT = 'card_authorization.request';
 const TRANSFER_FAILED_MESSAGE = 'Increase RTP transfer failed.';
+const POSTGRES_UNIQUE_VIOLATION = '23505';
 
-/** Disbursements-JSONB audit entry for banking debits/holds/reversals — same core shape as the withdraw route's DISBURSEMENT entries, so the shared escrow math counts them identically. */
-interface BankingLedgerEntry {
-  type: 'DISBURSEMENT';
-  rightsHolderId: string;
-  /** Smallest-unit string. Positive = debit (card spend / RTP hold); negative = compensating credit (reversal). */
-  payoutAmount: string;
-  amountPaid: string;
-  taxWithheld: string;
-  /** Lithic transaction token (card auth) or the idempotency key (RTP). */
-  referenceId?: string;
-  idempotencyKey?: string;
-  /** Set on reversals: the idempotency key of the failed hold. */
-  reversalOf?: string;
-  timestamp: number;
-  remainingNetBalance: string;
+interface LedgerAvailableRow {
+  /** pg BIGINT/NUMERIC arrive as strings — BigInt(str) only, never Number. */
+  available_cents: string;
 }
 
-interface RightsHolderCardRow {
-  id: string;
+interface CardHolderRow {
+  rights_holder_id: string;
 }
 
-interface RightsHolderBankingRow {
-  id: string;
-  routing_number: string | null;
-  account_number: string | null;
+interface JsonbHolderRow {
+  holder: unknown;
 }
 
-interface LedgerDisbursementsRow {
-  disbursements: unknown;
-}
-
-interface CbtAssetRow {
-  rights_holders: unknown;
+interface ParsedHolder {
+  routingNumber: unknown;
+  accountNumber: unknown;
+  taxProfile: TaxProfile | null;
 }
 
 type CardAuthOutcome =
@@ -101,9 +95,8 @@ type CardAuthOutcome =
 interface RtpReservation {
   routingNumber: string;
   accountNumber: string;
-  withheldUnits: bigint;
-  netPayableUnits: bigint;
-  remainingUnits: bigint;
+  withheldCents: bigint;
+  netCents: bigint;
   timestamp: number;
 }
 
@@ -122,40 +115,53 @@ function jsonError(error: string, status: number): Response {
   return Response.json({ ok: false, error }, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-/** Positive amount in smallest ledger units: a digit string or an integer number. Floats, signs, and zero are rejected — BigInt boundaries stay exact. */
-function parsePositiveUnits(raw: unknown): bigint | null {
+/** Postgres unique-violation probe (e.g. the ledger's UNIQUE reference_id). */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === POSTGRES_UNIQUE_VIOLATION
+  );
+}
+
+/** Positive integer cents: a digit string or an integer number. Floats, signs, and zero are rejected — BigInt boundaries stay exact. */
+function parsePositiveCents(raw: unknown): bigint | null {
   if (typeof raw === 'number') {
     return Number.isInteger(raw) && raw > 0 ? BigInt(raw) : null;
   }
   if (typeof raw === 'string' && /^\d+$/.test(raw)) {
-    const units = BigInt(raw);
-    return units > 0n ? units : null;
+    const cents = BigInt(raw);
+    return cents > 0n ? cents : null;
   }
   return null;
 }
 
-/** Tax profile from the holder's asset memberships; a holder on no asset withholds at the conservative unverified-foreign rate. */
-function taxProfileForHolder(assetRows: CbtAssetRow[], rightsHolderId: string) {
-  const holder = findRightsHolder(assetRows, rightsHolderId);
-  return holder?.taxProfile ?? UNVERIFIED_FALLBACK_TAX_PROFILE;
+/** Holder entry as stored in cbt_assets.rights_holders JSONB — untrusted data, fields validated before use. */
+function parseHolderEntry(raw: unknown): ParsedHolder | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const entry = raw as { payoutRouting?: unknown; taxProfile?: unknown };
+  const routing =
+    typeof entry.payoutRouting === 'object' && entry.payoutRouting !== null
+      ? (entry.payoutRouting as { routingNumber?: unknown; accountNumber?: unknown })
+      : null;
+  return {
+    routingNumber: routing?.routingNumber,
+    accountNumber: routing?.accountNumber,
+    taxProfile: (entry.taxProfile ?? null) as TaxProfile | null,
+  };
 }
 
-/** Derived available balance for the holder, read inside an open transaction after the holder-row lock. Reads ONLY the disbursements column, so it works identically before and after any transaction_type DDL. */
-async function derivedBalanceInTx(
+/** The per-holder available balance: the flat ledger SUM, read inside an open transaction after the holder lock. */
+async function availableCentsInTx(
   tx: Parameters<Parameters<Db['transaction']>[0]>[0],
   rightsHolderId: string,
-  taxProfile: ReturnType<typeof taxProfileForHolder>,
-) {
-  const ledgerRes = await tx.query<LedgerDisbursementsRow>(
-    'SELECT disbursements FROM universal_royalty_ledger',
+): Promise<bigint> {
+  const balanceRes = await tx.query<LedgerAvailableRow>(
+    'SELECT COALESCE(SUM(amount_cents), 0) AS available_cents FROM universal_royalty_ledger WHERE rights_holder_id = $1',
+    [rightsHolderId],
   );
-  return escrowBalanceForHolder({
-    disbursementsByRow: ledgerRes.rows.map((row) =>
-      Array.isArray(row.disbursements) ? row.disbursements : [],
-    ),
-    rightsHolderId,
-    taxProfile,
-  });
+  return BigInt(balanceRes.rows[0].available_cents);
 }
 
 interface LithicWebhookPayload {
@@ -193,10 +199,15 @@ export async function POST(request: Request): Promise<Response> {
     if (payload.event_type !== LITHIC_AUTH_EVENT) {
       return Response.json({ result: 'CONTINUE' }, { status: 200, headers: { 'cache-control': 'no-store' } });
     }
-    const requestAmount = parsePositiveUnits(payload.amount);
+    const requestAmountCents = parsePositiveCents(payload.amount);
     const cardToken = payload.card_token;
-    if (requestAmount === null || typeof cardToken !== 'string') {
-      console.error('Lithic webhook: malformed authorization payload (amount/card_token).');
+    const transactionToken = payload.transaction_token;
+    if (
+      requestAmountCents === null ||
+      typeof cardToken !== 'string' ||
+      typeof transactionToken !== 'string'
+    ) {
+      console.error('Lithic webhook: malformed authorization payload (amount/card_token/transaction_token).');
       return Response.json(
         { result: 'DECLINED', reason: 'INTERNAL_ERROR' },
         { status: 200, headers: { 'cache-control': 'no-store' } },
@@ -212,39 +223,29 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const outcome = await db.transaction<CardAuthOutcome>(async (tx) => {
-      // Lock the holder row: the per-holder serialization point replacing the
-      // user draft's FOR UPDATE on the (absent) net_balance_cents column.
-      const holderRes = await tx.query<RightsHolderCardRow>(
-        'SELECT id FROM rights_holders WHERE lithic_card_token = $1 FOR UPDATE',
+      // Lock the matching asset row through the JSONB (the GIN index serves
+      // the filter): the per-holder serialization point for card auths and
+      // RTP holds alike.
+      const holderRes = await tx.query<CardHolderRow>(
+        `SELECT rh->>'rightsHolderId' AS rights_holder_id
+           FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
+          WHERE rh->'payoutRouting'->>'lithicCardToken' = $1
+          FOR UPDATE`,
         [cardToken],
       );
       if (!holderRes.rows.length) return { approved: false, reason: 'CARD_NOT_FOUND' };
-      const rightsHolderId = holderRes.rows[0].id;
+      const rightsHolderId = holderRes.rows[0].rights_holder_id;
 
-      const assetRes = await tx.query<CbtAssetRow>('SELECT rights_holders FROM cbt_assets');
-      const taxProfile = taxProfileForHolder(assetRes.rows, rightsHolderId);
-      const balance = await derivedBalanceInTx(tx, rightsHolderId, taxProfile);
-      if (requestAmount > balance.availableUnits) {
+      const availableCents = await availableCentsInTx(tx, rightsHolderId);
+      if (requestAmountCents > availableCents) {
         return { approved: false, reason: 'INSUFFICIENT_FUNDS' };
       }
 
-      const timestamp = Date.now();
-      const remainingUnits = balance.availableUnits - requestAmount;
-      const entry: BankingLedgerEntry = {
-        type: 'DISBURSEMENT',
-        rightsHolderId,
-        payoutAmount: requestAmount.toString(),
-        amountPaid: requestAmount.toString(),
-        taxWithheld: '0',
-        referenceId: typeof payload.transaction_token === 'string' ? payload.transaction_token : undefined,
-        timestamp,
-        remainingNetBalance: remainingUnits.toString(),
-      };
       await tx.query(
         `INSERT INTO universal_royalty_ledger
-           (transaction_id, transaction_type, cbt_code, platform, gross_settled, currency, disbursements)
-         VALUES ($1, 'CARD_AUTHORIZATION', 'BANKING-CARD-AUTH', 'LITHIC', $2, 'USD', $3)`,
-        [`BANKING-CARD-${timestamp}-${randomUUID()}`, formatMicro(requestAmount), JSON.stringify([entry])],
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+         VALUES ($1, $2, 'CARD_AUTHORIZATION', $3, NOW())`,
+        [rightsHolderId, (-requestAmountCents).toString(), transactionToken],
       );
       return { approved: true };
     });
@@ -257,6 +258,11 @@ export async function POST(request: Request): Promise<Response> {
     }
     return Response.json({ result: 'APPROVED' }, { status: 200, headers: { 'cache-control': 'no-store' } });
   } catch (error) {
+    if (isUniqueViolation(error)) {
+      // UNIQUE (reference_id) rejected the debit: this transaction_token was
+      // already recorded — a webhook replay. Approve without a second debit.
+      return Response.json({ result: 'APPROVED' }, { status: 200, headers: { 'cache-control': 'no-store' } });
+    }
     // Internal errors on the auth path NEVER return 5xx — Lithic retries
     // those and would storm a failing endpoint. Decline fail-closed instead.
     console.error('Lithic card authorization failed:', error);
@@ -267,33 +273,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Compensating DISBURSEMENT_REVERSAL after a rejected Increase dispatch. The negative payoutAmount unwinds the failed hold under the shared prior-payout sum. Best-effort: a failed reversal keeps the hold and is logged for manual reconciliation — never thrown, never leaked. */
+/** Compensating DISBURSEMENT_REVERSAL after a rejected Increase dispatch: +net cents unwinds the failed hold under the flat SUM. Best-effort: a failed reversal keeps the hold and is logged for manual reconciliation — never thrown, never leaked. */
 async function recordDisbursementReversal(
   db: Db,
-  params: { rightsHolderId: string; grossUnits: bigint; idempotencyKey: string; restoredUnits: bigint },
+  params: { rightsHolderId: string; netCents: bigint; idempotencyKey: string },
 ): Promise<void> {
-  const timestamp = Date.now();
   try {
-    const entry: BankingLedgerEntry = {
-      type: 'DISBURSEMENT',
-      rightsHolderId: params.rightsHolderId,
-      payoutAmount: (-params.grossUnits).toString(),
-      amountPaid: '0',
-      taxWithheld: '0',
-      idempotencyKey: params.idempotencyKey,
-      reversalOf: params.idempotencyKey,
-      timestamp,
-      remainingNetBalance: params.restoredUnits.toString(),
-    };
     await db.query(
       `INSERT INTO universal_royalty_ledger
-         (transaction_id, transaction_type, cbt_code, platform, gross_settled, currency, disbursements)
-       VALUES ($1, 'DISBURSEMENT_REVERSAL', 'BANKING-RTP', 'INCREASE', $2, 'USD', $3)`,
-      [
-        `BANKING-RTP-REVERSAL-${timestamp}-${randomUUID()}`,
-        formatMicro(params.grossUnits),
-        JSON.stringify([entry]),
-      ],
+         (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+       VALUES ($1, $2, 'DISBURSEMENT_REVERSAL', $3, NOW())`,
+      [params.rightsHolderId, params.netCents.toString(), `reversal-${params.idempotencyKey}`],
     );
   } catch (error) {
     console.error(
@@ -321,10 +311,10 @@ export async function PUT(request: Request): Promise<Response> {
   if (typeof rightsHolderId !== 'string' || rightsHolderId.trim() === '') {
     return jsonError('Invalid payout parameters', 400);
   }
-  const requestedPayout = parsePositiveUnits(body.amountInCents);
+  const requestedPayoutCents = parsePositiveCents(body.amountInCents);
   // The ONLY Number conversion in this file is the integer amount inside
   // Increase's JSON body; refuse anything that would not survive it exactly.
-  if (requestedPayout === null || requestedPayout > BigInt(Number.MAX_SAFE_INTEGER)) {
+  if (requestedPayoutCents === null || requestedPayoutCents > BigInt(Number.MAX_SAFE_INTEGER)) {
     return jsonError('Invalid payout parameters', 400);
   }
 
@@ -347,56 +337,75 @@ export async function PUT(request: Request): Promise<Response> {
   let reservation: RtpReservation;
   try {
     reservation = await db.transaction<RtpReservation>(async (tx) => {
-      // Lock the holder row first (per-holder serialization point), then
-      // derive the balance under that lock.
-      const holderRes = await tx.query<RightsHolderBankingRow>(
-        'SELECT id, routing_number, account_number FROM rights_holders WHERE id = $1 FOR UPDATE',
+      // Lock the matching asset row first (per-holder serialization point),
+      // then derive the balance under that lock.
+      const holderRes = await tx.query<JsonbHolderRow>(
+        `SELECT rh AS holder
+           FROM cbt_assets, jsonb_array_elements(rights_holders) AS rh
+          WHERE rh->>'rightsHolderId' = $1
+          FOR UPDATE`,
         [rightsHolderId],
       );
       if (!holderRes.rows.length) {
         throw new PayoutReservationError('Rights holder not found.', 404);
       }
-      const { routing_number: routingNumber, account_number: accountNumber } = holderRes.rows[0];
+      const holder = parseHolderEntry(holderRes.rows[0].holder);
 
-      const assetRes = await tx.query<CbtAssetRow>('SELECT rights_holders FROM cbt_assets');
-      const taxProfile = taxProfileForHolder(assetRes.rows, rightsHolderId);
-      const balance = await derivedBalanceInTx(tx, rightsHolderId, taxProfile);
-      if (requestedPayout > balance.availableUnits) {
+      const availableCents = await availableCentsInTx(tx, rightsHolderId);
+      if (requestedPayoutCents > availableCents) {
         throw new PayoutReservationError('Insufficient escrow balance for withdrawal.', 422);
       }
-      if (!routingNumber || !accountNumber) {
+      const routingNumber = holder?.routingNumber;
+      const accountNumber = holder?.accountNumber;
+      if (
+        typeof routingNumber !== 'string' ||
+        routingNumber === '' ||
+        typeof accountNumber !== 'string' ||
+        accountNumber === ''
+      ) {
         throw new PayoutReservationError('No verified banking destination found for Increase payout.', 409);
       }
 
       // Identical withholding treatment to the withdraw route: verified
       // profiles pay nothing now; unverified profiles withhold at the
-      // engine's effective rate. Withheld tax stays in escrow for remittance.
-      const withheldUnits = taxProfile.isVerified ? 0n : withholdingUnitsOn(requestedPayout, balance.taxRate);
-      const netPayableUnits = requestedPayout - withheldUnits;
-      const remainingUnits = balance.availableUnits - requestedPayout;
-      const timestamp = Date.now();
-      const entry: BankingLedgerEntry = {
-        type: 'DISBURSEMENT',
-        rightsHolderId,
-        payoutAmount: requestedPayout.toString(),
-        amountPaid: netPayableUnits.toString(),
-        taxWithheld: withheldUnits.toString(),
-        referenceId: idempotencyKey,
-        idempotencyKey,
-        timestamp,
-        remainingNetBalance: remainingUnits.toString(),
-      };
+      // engine's effective rate. Cents convert to engine smallest units
+      // (×10⁶), the rate applies in exact BigInt, and the net converts back
+      // with a whole-cent exactness assertion — a sub-cent remainder fails
+      // closed instead of rounding escrow dust. Withheld tax never leaves
+      // escrow: only the net is debited.
+      const taxProfile = holder?.taxProfile ?? UNVERIFIED_FALLBACK_TAX_PROFILE;
+      const requestedUnits = centsToEngineUnits(requestedPayoutCents);
+      const withheldUnits = taxProfile.isVerified
+        ? 0n
+        : withholdingUnitsOn(requestedUnits, taxRateForProfile(taxProfile));
+      const netCents = engineUnitsToCents(requestedUnits - withheldUnits);
+
       await tx.query(
         `INSERT INTO universal_royalty_ledger
-           (transaction_id, transaction_type, cbt_code, platform, gross_settled, currency, disbursements)
-         VALUES ($1, 'PENDING_DISBURSEMENT', 'BANKING-RTP', 'INCREASE', $2, 'USD', $3)`,
-        [`BANKING-RTP-${timestamp}-${randomUUID()}`, formatMicro(requestedPayout), JSON.stringify([entry])],
+           (rights_holder_id, amount_cents, transaction_type, reference_id, created_at)
+         VALUES ($1, $2, 'PENDING_DISBURSEMENT', $3, NOW())`,
+        [rightsHolderId, (-netCents).toString(), idempotencyKey],
       );
-      return { routingNumber, accountNumber, withheldUnits, netPayableUnits, remainingUnits, timestamp };
+      return {
+        routingNumber,
+        accountNumber,
+        withheldCents: requestedPayoutCents - netCents,
+        netCents,
+        timestamp: Date.now(),
+      };
     });
   } catch (error) {
     if (error instanceof PayoutReservationError) {
       return jsonError(error.sanitizedMessage, error.status);
+    }
+    if (error instanceof SubUnitRemainderError) {
+      console.error('Increase RTP payout is not representable in whole cents:', error);
+      return jsonError('Payout cannot be represented in whole cents.', 500);
+    }
+    if (isUniqueViolation(error)) {
+      // UNIQUE (reference_id) rejected the hold: this idempotency key has
+      // already reserved a disbursement. Never hold twice for one key.
+      return jsonError('disbursement already in progress for this idempotency key', 409);
     }
     console.error('Increase RTP reservation failed:', error);
     return jsonError('Failed to reserve the disbursement.', 502);
@@ -415,7 +424,7 @@ export async function PUT(request: Request): Promise<Response> {
       },
       body: JSON.stringify({
         source_account_id: sourceAccountId,
-        amount: Number(reservation.netPayableUnits),
+        amount: Number(reservation.netCents),
         destination_account_number: reservation.accountNumber,
         destination_routing_number: reservation.routingNumber,
         remittance_information: 'Covenant Royalty Escrow Disbursement',
@@ -425,9 +434,8 @@ export async function PUT(request: Request): Promise<Response> {
     console.error('Increase RTP request failed:', error);
     await recordDisbursementReversal(db, {
       rightsHolderId,
-      grossUnits: requestedPayout,
+      netCents: reservation.netCents,
       idempotencyKey,
-      restoredUnits: reservation.remainingUnits + requestedPayout,
     });
     return jsonError(TRANSFER_FAILED_MESSAGE, 502);
   }
@@ -435,9 +443,8 @@ export async function PUT(request: Request): Promise<Response> {
     console.error('Increase RTP transfer rejected:', increaseRes.status);
     await recordDisbursementReversal(db, {
       rightsHolderId,
-      grossUnits: requestedPayout,
+      netCents: reservation.netCents,
       idempotencyKey,
-      restoredUnits: reservation.remainingUnits + requestedPayout,
     });
     return jsonError(TRANSFER_FAILED_MESSAGE, 502);
   }
@@ -455,9 +462,9 @@ export async function PUT(request: Request): Promise<Response> {
     {
       ok: true,
       disbursementId: increaseData.id ?? null,
-      amountCents: requestedPayout.toString(),
-      taxWithheld: reservation.withheldUnits.toString(),
-      netAmountCents: reservation.netPayableUnits.toString(),
+      amountCents: requestedPayoutCents.toString(),
+      taxWithheld: reservation.withheldCents.toString(),
+      netAmountCents: reservation.netCents.toString(),
       status: increaseData.status ?? null,
       timestamp: reservation.timestamp,
     },
