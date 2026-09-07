@@ -11,6 +11,7 @@
 
 import type { DisbursementDetail, SettlementResult } from '@/engine/covenant-master-sdk';
 import { supabaseFromEnv } from '../supabase';
+import { isMissingMetadataColumnError, METADATA_COLUMN_DDL_NOTE, stampSupabaseLedgerRow } from './cbt-settlement';
 
 export interface LedgerRow {
   transactionId: string;
@@ -92,10 +93,29 @@ export async function rememberSettlement(
 
   const db = supabaseFromEnv();
   if (db) {
+    // Generation 9: additive metadata.cbt stamp, deterministic from the row's
+    // transaction_id (the flat schema's unique row reference). A live table
+    // without the additive metadata column (42703/PGRST204) retries the
+    // upsert WITHOUT the stamp — money never blocks on provenance, the same
+    // fallback rule the raw-SQL paths follow. Replay-safe by construction:
+    // the upsert conflicts on transaction_id and the same id re-derives the
+    // same code.
     const { error } = await db
       .from('universal_royalty_ledger')
-      .upsert([toDbRow(row)], { onConflict: 'transaction_id' });
-    if (error) throw new Error(`Ledger upsert failed: ${error.message}`);
+      .upsert([stampSupabaseLedgerRow(toDbRow(row), row.transactionId)], {
+        onConflict: 'transaction_id',
+      });
+    if (error && isMissingMetadataColumnError(error)) {
+      console.warn(
+        `universal_royalty_ledger.metadata is missing — the settlement is recorded WITHOUT the CBT stamp. ${METADATA_COLUMN_DDL_NOTE}`,
+      );
+      const fallback = await db
+        .from('universal_royalty_ledger')
+        .upsert([toDbRow(row)], { onConflict: 'transaction_id' });
+      if (fallback.error) throw new Error(`Ledger upsert failed: ${fallback.error.message}`);
+    } else if (error) {
+      throw new Error(`Ledger upsert failed: ${error.message}`);
+    }
   }
   return row;
 }

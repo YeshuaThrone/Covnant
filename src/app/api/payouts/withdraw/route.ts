@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import { supabaseFromEnv } from '@/lib/supabase';
 import { formatMicro } from '@/lib/fixed-point';
+import { isMissingMetadataColumnError, METADATA_COLUMN_DDL_NOTE, stampSupabaseLedgerRow } from '@/lib/ledger/cbt-settlement';
 import {
   fetchEscrowBalance,
   findRightsHolder,
@@ -173,7 +174,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const timestamp = Date.now();
   const transactionId = `ESCROW-PAYOUT-${timestamp}-${randomUUID()}`;
-  const { error: insertError } = await db.from('universal_royalty_ledger').insert({
+  // The legacy DISBURSEMENT payload (transaction_id, transaction_type,
+  // cbt_code, platform, gross_settled, currency, disbursements) is never
+  // reshaped. Generation 9 adds ONLY the metadata.cbt stamp to the primary
+  // attempt, deterministic from the row's own transaction_id. A live table
+  // without the additive metadata column (42703/PGRST204) retries the row
+  // WITHOUT the stamp so the payout — the money already moved — is still
+  // recorded (the same money-never-blocks rule the raw-SQL paths follow).
+  const ledgerRow = {
     transaction_id: transactionId,
     transaction_type: 'DISBURSEMENT',
     cbt_code: 'ESCROW-PAYOUT',
@@ -193,8 +201,22 @@ export async function POST(request: Request): Promise<Response> {
         remainingNetBalance: remainingUnits.toString(),
       },
     ],
-  });
-  if (insertError) {
+  };
+  const { error: insertError } = await db
+    .from('universal_royalty_ledger')
+    .insert(stampSupabaseLedgerRow(ledgerRow, transactionId));
+  if (insertError && isMissingMetadataColumnError(insertError)) {
+    console.warn(
+      `universal_royalty_ledger.metadata is missing — the payout is recorded WITHOUT the CBT stamp. ${METADATA_COLUMN_DDL_NOTE}`,
+    );
+    const { error: fallbackError } = await db
+      .from('universal_royalty_ledger')
+      .insert(ledgerRow);
+    if (fallbackError) {
+      console.error('universal_royalty_ledger insert failed:', fallbackError.message);
+      return jsonError('Failed to record payout.', 502);
+    }
+  } else if (insertError) {
     console.error('universal_royalty_ledger insert failed:', insertError.message);
     return jsonError('Failed to record payout.', 502);
   }
