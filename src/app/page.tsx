@@ -1,6 +1,7 @@
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import Link from 'next/link';
 import { BRAND } from '@/lib/brand';
+import { EntryZones } from '@/components/landing/EntryZones';
 
 // Root route renders on demand in production (strict-execution directive):
 // no stale prerender of '/' on Vercel.
@@ -35,81 +36,7 @@ export default function Home() {
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
 
-        {/* Stage Name entry in open black space below the URD zone — NOT a new
-            zone. The statement keeps the established 32px top gap; the invisible
-            input occupies the EXISTING 40px slot between statement and bottom
-            ruler (h-10, zero margins — zero net added height), so the band
-            interior stays EXACTLY 92px (32 + 20 + 40) and the bottom ruler sits
-            at the approved y. The ruler doubles as the entry area's bottom
-            line; nothing follows it. The input is fully chromeless at every
-            state — no border, no focus glow, no placeholder; only the typed
-            name (hero-subtitle treatment: text-lg text-emerald-300, displayed
-            exactly as the artist types it) and the gold caret ever appear.
-            cursor-text keeps the invisible field discoverable; accessible via
-            aria-label. */}
-        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
-        <input
-          type="text"
-          aria-label="Stage Name"
-          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
-        />
-        <div className="gold-rule w-64" />
-
-        {/* Legal Name entry zone — a straight mirror of the Stage Name zone.
-            The ruler above doubles as this zone's SHARED TOP RULE (untouched,
-            same y as approved). The statement repeats the exact champagne mono
-            treatment and the same 32px top gap below the shared rule; the
-            invisible input repeats the Stage Name field byte-for-byte
-            (chromeless h-10 w-64, jade typed text, gold caret, aria-label
-            only, local-only — no submission wiring); a new bottom golden
-            ruler closes the zone HUGGING the input — zero margin above it,
-            a true pixel mirror of the Stage Name zone. NOTHING follows the
-            ruler — the region below stays empty black space. */}
-        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Legal Name</p>
-        <input
-          type="text"
-          aria-label="Legal Name"
-          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
-        />
-        <div className="gold-rule w-64" />
-
-        {/* Email entry zone — a straight mirror of the Legal Name zone.
-            The ruler above doubles as this zone's SHARED TOP RULE (untouched,
-            same y as approved). The statement repeats the exact champagne mono
-            treatment and the same 32px top gap below the shared rule; the
-            invisible input repeats the Legal Name field byte-for-byte
-            (chromeless h-10 w-64, jade typed text, gold caret, aria-label
-            only, local-only — no email validation, no submission wiring); a
-            new bottom golden ruler closes the zone HUGGING the input — zero
-            margin above it, a true pixel mirror of the Legal Name zone.
-            NOTHING follows the ruler — the region below stays empty black
-            space. */}
-        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Email</p>
-        <input
-          type="text"
-          aria-label="Email"
-          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
-        />
-        <div className="gold-rule w-64" />
-
-        {/* Core Industry & Title entry zone — a straight mirror of the Email
-            zone. The ruler above doubles as this zone's SHARED TOP RULE
-            (untouched, same y as approved). The statement repeats the exact
-            champagne mono treatment and the same 32px top gap below the
-            shared rule; the invisible input repeats the Email field
-            byte-for-byte (chromeless h-10 w-64, jade typed text, gold caret,
-            aria-label only, local-only — no validation, no submission
-            wiring); a new bottom golden ruler closes the zone HUGGING the
-            input — zero margin above it, a true pixel mirror of the Email
-            zone. NOTHING follows the ruler — the region below stays empty
-            black space. */}
-        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Core Industry &amp; Title</p>
-        <input
-          type="text"
-          aria-label="Core Industry & Title"
-          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
-        />
-        <div className="gold-rule w-64" />
+        <EntryZones />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this

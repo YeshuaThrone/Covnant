@@ -38,11 +38,14 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   // the shared top rule of the mirrored Legal Name zone beneath it
   // (micro-edit 9), whose own bottom ruler doubles as the shared top rule of
   // the mirrored Email zone (micro-edit 10), whose own bottom ruler doubles
-  // as the shared top rule of the mirrored Core Industry & Title zone
-  // (micro-edit 10): hero threshold, URD close, shared rule, Legal Name
-  // bottom ruler, Email bottom ruler, Core Industry & Title bottom ruler —
-  // SIX golden rulers total.
-  await expect(page.locator('.gold-rule')).toHaveCount(6);
+  // as the shared top rule of the mirrored Password zone (micro-edit 10),
+  // whose own bottom ruler doubles as the shared top rule of the mirrored
+  // Core Industry & Title zone (micro-edit 10), whose own bottom ruler opens
+  // the final Agreement & Seal zone: hero threshold, URD close, shared rule,
+  // Legal Name bottom ruler, Email bottom ruler, Password bottom ruler, Core
+  // Industry & Title bottom ruler, Agreement bottom ruler — EIGHT golden
+  // rulers total.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement carries the exact URD treatment.
   const statement = page.locator('p', { hasText: 'Stage Name' });
@@ -108,11 +111,12 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   // The golden ruler directly below the input remains the Stage Name zone's
   // bottom line: it is the input's immediate next sibling, and it now doubles
   // as the shared top rule of the Legal Name zone that opens directly beneath
-  // it — byte-identical ruler, same approved y. Four golden rulers follow
+  // it — byte-identical ruler, same approved y. Six golden rulers follow
   // the statement: the Stage Name bottom line, the Legal Name bottom ruler,
-  // the Email bottom ruler, and the Core Industry & Title bottom ruler.
+  // the Email bottom ruler, the Password bottom ruler, the Core Industry &
+  // Title bottom ruler, and the Agreement bottom ruler.
   const bottomLine = statement.locator('xpath=following-sibling::div[contains(@class, "gold-rule")]');
-  await expect(bottomLine).toHaveCount(4);
+  await expect(bottomLine).toHaveCount(6);
   const sharedRule = input.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedRule).toHaveCount(1);
   await expect(sharedRule.locator('xpath=following-sibling::*[1]')).toHaveText('Legal Name');
@@ -195,10 +199,11 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
 }) => {
   await page.goto('/');
 
-  // Six golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, and the Core
-  // Industry & Title bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(6);
+  // Eight golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Password
+  // bottom ruler, the Core Industry & Title bottom ruler, and the Agreement
+  // bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -297,7 +302,7 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   const sharedTopRule = legalInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Email');
-  const finalRuler = page.locator('.gold-rule').nth(5);
+  const finalRuler = page.locator('.gold-rule').nth(7);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
@@ -343,10 +348,11 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
 }) => {
   await page.goto('/');
 
-  // Six golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, and the Core
-  // Industry & Title bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(6);
+  // Eight golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Password
+  // bottom ruler, the Core Industry & Title bottom ruler, and the Agreement
+  // bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -437,13 +443,13 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
-  // The Email bottom ruler now doubles as the shared top rule of the Core
-  // Industry & Title zone that opens directly beneath it — the same
-  // byte-identical ruler, same approved y. And no entry inputs leak into
-  // the reserved region below.
+  // The Email bottom ruler now doubles as the shared top rule of the
+  // Password zone that opens directly beneath it — the same byte-identical
+  // ruler, same approved y. And no entry inputs leak into the reserved
+  // region below.
   const sharedTopRule = emailInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
-  await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Core Industry & Title');
+  await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Password');
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
   // Typing renders with the same jade typed treatment as the other fields —
@@ -487,10 +493,11 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
 }) => {
   await page.goto('/');
 
-  // Six golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, and the Core
-  // Industry & Title bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(6);
+  // Eight golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Password
+  // bottom ruler, the Core Industry & Title bottom ruler, and the Agreement
+  // bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -501,7 +508,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(await industryStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
 
   // Placement: the Core Industry & Title zone opens DIRECTLY below the
-  // shared rule (the Email bottom ruler) with the same 32px statement gap
+  // shared rule (the Password bottom ruler) with the same 32px statement gap
   // the other statements use below their top rule; the input fills the h-10
   // slot below the statement and the bottom ruler HUGS the input exactly as
   // the Email zone's ruler hugs its own — interior 32 + 20 + 40 = 92px, a
@@ -513,16 +520,16 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
       .getBoundingClientRect();
     const input = document.querySelector('input[aria-label="Core Industry & Title"]')!.getBoundingClientRect();
     return {
-      sharedRuleBottom: rules[4].bottom,
-      statementGap: statement.top - rules[4].bottom,
+      sharedRuleBottom: rules[5].bottom,
+      statementGap: statement.top - rules[5].bottom,
       statementHeight: statement.height,
       inputHeight: input.height,
       statementBottom: statement.bottom,
       inputTop: input.top,
-      rulerTop: rules[5].top,
-      rulerGap: rules[5].top - input.bottom,
-      bandInterior: rules[5].top - rules[4].bottom,
-      ruleCenter: rules[4].left + rules[4].width / 2,
+      rulerTop: rules[6].top,
+      rulerGap: rules[6].top - input.bottom,
+      bandInterior: rules[6].top - rules[5].bottom,
+      ruleCenter: rules[5].left + rules[5].width / 2,
       inputCenter: input.left + input.width / 2,
     };
   });
@@ -580,12 +587,15 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
-  // The Core Industry & Title bottom ruler is the composition's last element:
-  // NOTHING follows it in the section — no elements, no spacing blocks, no
-  // further structure. And no entry inputs leak into the reserved region
-  // below.
-  const finalRuler = page.locator('.gold-rule').nth(5);
-  await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
+  // The Core Industry & Title bottom ruler now doubles as the shared top
+  // rule of the Agreement & Seal zone that opens directly beneath it — the
+  // same byte-identical ruler, same approved y. And no entry inputs leak
+  // into the reserved region below.
+  const sharedTopRule = industryInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
+  await expect(sharedTopRule).toHaveCount(1);
+  await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText(
+    'I agree to the Universal Distribution & Royalty Administration Terms'
+  );
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
   // Typing renders with the same jade typed treatment as the other fields —
@@ -622,6 +632,264 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(typedStyles.letterSpacing).toBe(subtitleStyles.letterSpacing);
   expect(typedStyles.fontFamily).toBe(subtitleStyles.fontFamily);
   expect(typedStyles.caretColor).not.toBe(typedStyles.color);
+});
+
+test('the mirrored Password zone repeats the Email treatment between Email and Core Industry & Title: identical statement, chromeless jade type-in pre-filled with Covenant, and an input-hugging bottom ruler', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Eight golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Password
+  // bottom ruler, the Core Industry & Title bottom ruler, and the Agreement
+  // bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
+
+  // Statement repeats the Stage Name statement's treatment EXACTLY — the
+  // source class string and every computed style match field-for-field.
+  const stageStatement = page.locator('p', { hasText: 'Stage Name' });
+  await expect(stageStatement).toHaveText('Stage Name');
+  const passwordStatement = page.locator('p', { hasText: 'Password' });
+  await expect(passwordStatement).toHaveText('Password');
+  expect(await passwordStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
+
+  // Placement: the Password zone opens DIRECTLY below the shared rule (the
+  // Email bottom ruler) with the same 32px statement gap; interior
+  // 32 + 20 + 40 = 92px, a true pixel mirror of the Email zone, all centered
+  // on the zone axis.
+  const geometry = await page.evaluate(() => {
+    const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
+    const statement = [...document.querySelectorAll('p.font-mono')]
+      .find((p) => p.textContent?.trim() === 'Password')!
+      .getBoundingClientRect();
+    const input = document.querySelector('input[aria-label="Password"]')!.getBoundingClientRect();
+    return {
+      statementGap: statement.top - rules[4].bottom,
+      statementHeight: statement.height,
+      inputHeight: input.height,
+      rulerGap: rules[5].top - input.bottom,
+      bandInterior: rules[5].top - rules[4].bottom,
+      ruleCenter: rules[4].left + rules[4].width / 2,
+      inputCenter: input.left + input.width / 2,
+    };
+  });
+  expect(geometry.statementGap).toBeCloseTo(32, 0);
+  expect(geometry.statementHeight).toBeCloseTo(20, 0);
+  expect(geometry.inputHeight).toBeCloseTo(40, 0);
+  expect(geometry.rulerGap).toBeCloseTo(0, 0);
+  expect(geometry.bandInterior).toBeCloseTo(92, 0);
+  expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
+
+  // Fully invisible field, byte-identical to the Stage Name input, PRE-FILLED
+  // with 'Covenant' (exactly 8 letters) as the delegated starting value:
+  // type text so the jade letters show, editable, no placeholder, local-only.
+  const stageInput = page.getByRole('textbox', { name: 'Stage Name' });
+  const passwordInput = page.getByRole('textbox', { name: 'Password' });
+  await expect(passwordInput).toBeVisible();
+  await expect(passwordInput).toHaveValue('Covenant');
+  expect(await passwordInput.getAttribute('type')).toBe('text');
+  expect(await passwordInput.getAttribute('placeholder')).toBeNull();
+  expect(await passwordInput.getAttribute('class')).toBe(await stageInput.getAttribute('class'));
+
+  // The Password bottom ruler doubles as the shared top rule of the Core
+  // Industry & Title zone that opens directly beneath it — the same
+  // byte-identical ruler, same approved y.
+  const sharedTopRule = passwordInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
+  await expect(sharedTopRule).toHaveCount(1);
+  await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Core Industry & Title');
+
+  // The pre-filled value renders with the same jade typed treatment as the
+  // other fields — matched field-for-field against the hero subtitle; the
+  // caret stays gold.
+  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
+  const subtitleStyles = await subtitle.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { color: s.color, fontSize: s.fontSize, fontFamily: s.fontFamily };
+  });
+  const prefilledStyles = await passwordInput.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { color: s.color, fontSize: s.fontSize, fontFamily: s.fontFamily, caretColor: s.caretColor };
+  });
+  expect(prefilledStyles.color).toBe(subtitleStyles.color);
+  expect(prefilledStyles.fontSize).toBe(subtitleStyles.fontSize);
+  expect(prefilledStyles.fontFamily).toBe(subtitleStyles.fontFamily);
+  expect(prefilledStyles.caretColor).not.toBe(prefilledStyles.color);
+});
+
+test('the final Agreement & Seal zone: identical statement voice, an Enter Your World button in the input slot, and a local-only seal that freezes all five entries', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Eight golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Password
+  // bottom ruler, the Core Industry & Title bottom ruler, and the Agreement
+  // bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(8);
+
+  // Statement repeats the Stage Name statement's treatment EXACTLY — the
+  // source class string matches field-for-field; the longer copy wraps
+  // naturally with no font, tracking, or color adjustment.
+  const stageStatement = page.locator('p', { hasText: 'Stage Name' });
+  await expect(stageStatement).toHaveText('Stage Name');
+  const agreementStatement = page.locator('p', {
+    hasText: 'I agree to the Universal Distribution & Royalty Administration Terms',
+  });
+  await expect(agreementStatement).toHaveText('I agree to the Universal Distribution & Royalty Administration Terms');
+  expect(await agreementStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
+
+  // Placement: the Agreement zone opens DIRECTLY below the shared rule (the
+  // Core Industry & Title bottom ruler) with the same 32px statement gap; the
+  // button fills the EXACT input slot (h-10 w-64) and the bottom ruler HUGS
+  // the button with zero margin, centered on the zone axis.
+  const geometry = await page.evaluate(() => {
+    const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
+    const statement = [...document.querySelectorAll('p.font-mono')]
+      .find((p) => p.textContent?.includes('Universal Distribution'))!
+      .getBoundingClientRect();
+    const button = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Enter Your World'
+    )!
+      .getBoundingClientRect();
+    return {
+      statementGap: statement.top - rules[6].bottom,
+      buttonHeight: button.height,
+      buttonWidth: button.width,
+      statementBottom: statement.bottom,
+      buttonTop: button.top,
+      rulerGap: rules[7].top - button.bottom,
+      ruleCenter: rules[6].left + rules[6].width / 2,
+      buttonCenter: button.left + button.width / 2,
+    };
+  });
+  expect(geometry.statementGap).toBeCloseTo(32, 0);
+  expect(geometry.buttonHeight).toBeCloseTo(40, 0);
+  expect(geometry.buttonWidth).toBeCloseTo(256, 0);
+  expect(geometry.buttonTop).toBeGreaterThanOrEqual(geometry.statementBottom - 0.5);
+  expect(geometry.rulerGap).toBeCloseTo(0, 0);
+  expect(Math.abs(geometry.buttonCenter - geometry.ruleCenter)).toBeLessThan(1);
+
+  // Button treatment at rest: statement-voice label, 1px champagne hairline
+  // at low opacity, transparent background, square corners, pointer cursor.
+  const button = page.getByRole('button', { name: 'Enter Your World' });
+  await expect(button).toBeVisible();
+  expect(await button.getAttribute('type')).toBe('button');
+  const REST_BUTTON_CLASS =
+    'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer border-gold-champagne/40 text-gold-champagne/90 hover:border-gold-champagne hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+  expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
+  const restStyles = await button.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      borderTopWidth: s.borderTopWidth,
+      borderRadius: s.borderRadius,
+      background: s.backgroundColor,
+      cursor: s.cursor,
+      textTransform: s.textTransform,
+    };
+  });
+  expect(restStyles.borderTopWidth).toBe('1px');
+  expect(restStyles.borderRadius).toBe('0px');
+  expect(restStyles.background).toBe('rgba(0, 0, 0, 0)');
+  expect(restStyles.cursor).toBe('pointer');
+  expect(restStyles.textTransform).toBe('uppercase');
+
+  // The hairline is the champagne token at low opacity — it must differ from
+  // the full-strength statement gold until the seal solidifies it. Compared
+  // against the statement's computed color so the assertion is independent of
+  // Tailwind v4's oklab output format.
+  const restBorderColor = await button.evaluate((el) => getComputedStyle(el).borderTopColor);
+  const statementColor = await agreementStatement.evaluate((el) => getComputedStyle(el).color);
+  expect(restBorderColor).not.toBe(statementColor);
+
+  // Seal flow: type into all five entries, then click Enter Your World.
+  await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
+  await page.getByRole('textbox', { name: 'Legal Name' }).fill('Nova Reign');
+  await page.getByRole('textbox', { name: 'Email' }).fill('nova@example.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('Nova Reign Studio');
+  await page.getByRole('textbox', { name: 'Core Industry & Title' }).fill('Producer');
+  await button.click();
+
+  // All five inputs are sealed: readOnly with values kept, jade styling kept,
+  // caret suppressed, cursor-default.
+  const sealedEntries = [
+    { label: 'Stage Name', value: 'Nova Reign' },
+    { label: 'Legal Name', value: 'Nova Reign' },
+    { label: 'Email', value: 'nova@example.com' },
+    { label: 'Password', value: 'Nova Reign Studio' },
+    { label: 'Core Industry & Title', value: 'Producer' },
+  ] as const;
+  const SEALED_INPUT_CLASS =
+    'h-10 w-64 cursor-default bg-transparent text-center text-lg text-emerald-300 caret-transparent outline-none';
+  for (const entry of sealedEntries) {
+    const input = page.getByRole('textbox', { name: entry.label });
+    await expect(input).toHaveValue(entry.value);
+    await expect(input).toHaveAttribute('readonly', '');
+    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
+  }
+
+  // The jade typed styling is kept when sealed — matched against the hero
+  // subtitle.
+  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
+  const subtitleColor = await subtitle.evaluate((el) => getComputedStyle(el).color);
+  const sealedColor = await page
+    .getByRole('textbox', { name: 'Stage Name' })
+    .evaluate((el) => getComputedStyle(el).color);
+  expect(sealedColor).toBe(subtitleColor);
+
+  // The five values plus the sealed flag persist locally under one key.
+  const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  expect(JSON.parse(stored ?? 'null')).toEqual({
+    sealed: true,
+    values: {
+      stageName: 'Nova Reign',
+      legalName: 'Nova Reign',
+      email: 'nova@example.com',
+      password: 'Nova Reign Studio',
+      coreIndustryTitle: 'Producer',
+    },
+  });
+
+  // The button enters the sealed state: label UNCHANGED, border solidified to
+  // full champagne gold, label dimmed slightly.
+  await expect(button).toHaveText('Enter Your World');
+  const SEALED_BUTTON_CLASS =
+    'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default border-gold-champagne text-gold-champagne/70';
+  expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
+  // Border solidified to FULL champagne gold — the exact computed color the
+  // statement text renders in. Polled until the 200ms color transition
+  // finishes; comparison is independent of Tailwind v4's oklab format.
+  await expect(async () => {
+    const sealedBorderColor = await button.evaluate((el) => getComputedStyle(el).borderTopColor);
+    expect(sealedBorderColor).toBe(statementColor);
+  }).toPass({ timeout: 2000 });
+
+  // A refresh rehydrates the sealed composition: values restored, fields
+  // still readOnly, button still sealed.
+  await page.reload();
+  for (const entry of sealedEntries) {
+    const input = page.getByRole('textbox', { name: entry.label });
+    await expect(input).toHaveValue(entry.value);
+    await expect(input).toHaveAttribute('readonly', '');
+    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
+  }
+  await expect(button).toHaveText('Enter Your World');
+  expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
+
+  // A second click is a no-op: the stored state is untouched and everything
+  // stays sealed.
+  const storedBefore = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  await button.click();
+  const storedAfter = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  expect(storedAfter).toBe(storedBefore);
+  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
+  await expect(button).toHaveText('Enter Your World');
+
+  // The Agreement bottom ruler is the composition's last element: NOTHING
+  // follows it in the section — no elements, no spacing blocks, no further
+  // structure. And no entry inputs leak into the reserved region below.
+  const finalRuler = page.locator('.gold-rule').nth(7);
+  await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
+  await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 });
 
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
