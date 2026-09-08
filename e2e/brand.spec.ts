@@ -86,7 +86,8 @@ test('the COMPANY ID statement fills the former reserved black-space region: cap
 
   // TWO interior gold rules separate the paragraphs inside the panel
   // (same grammar as every other rule, centered), and the section's
-  // closing rule stays after the panel — the composition's twelfth.
+  // closing rule stays after the panel — the composition's twelfth, which
+  // doubles as the ENTERPRISE DIRECT zone's top ruler (micro-edit 13).
   const interiorRules = panel.locator('div.gold-rule');
   await expect(interiorRules).toHaveCount(2);
   for (const ruleClass of await interiorRules.evaluateAll((els) => els.map((el) => el.getAttribute('class') ?? ''))) {
@@ -97,8 +98,63 @@ test('the COMPANY ID statement fills the former reserved black-space region: cap
   const section = page.locator('section[class*="min-h-[300px]"]');
   const closerRules = section.locator('xpath=./div[contains(@class, "gold-rule")]');
   await expect(closerRules).toHaveCount(1);
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Page-wide the composition counts THIRTEEN golden rulers: the closer
+  // stays the twelfth; the ENTERPRISE DIRECT bottom ruler (micro-edit 13)
+  // is the thirteenth.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
   await expect(section.locator('input')).toHaveCount(0);
+});
+
+test("the ENTERPRISE DIRECT zone closes the page beneath the Company ID section: one champagne mono statement and the composition's thirteenth golden ruler", async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // The user's own digits render exactly once, case-insensitive on the
+  // rendered page — the uppercase class lifts the Title Case literal into
+  // the ENTERPRISE DIRECT statement voice.
+  const statement = page.getByText(/enterprise direct: 830-567-4850/i);
+  await expect(statement).toHaveCount(1);
+
+  // Canonical champagne mono zone treatment — the statement's class string
+  // is BYTE-IDENTICAL to the Universal Royalty Distribution statement's.
+  const urdStatement = page.locator('p', { hasText: 'Universal Royalty Distribution' });
+  await expect(urdStatement).toHaveText('Universal Royalty Distribution');
+  expect(await statement.getAttribute('class')).toBe(await urdStatement.getAttribute('class'));
+  const statementClass = (await statement.getAttribute('class')) ?? '';
+  for (const token of ['mt-8', 'font-mono', 'text-sm', 'uppercase', 'tracking-[0.3em]', 'text-gold-champagne']) {
+    expect(statementClass).toContain(token);
+  }
+
+  // The zone is its OWN section directly before the footer. The statement
+  // is the section's FIRST element: the Company ID section's closing golden
+  // ruler (the composition's twelfth) doubles as the zone's top ruler, so
+  // NO second adjacent rule sits above the statement — the section holds
+  // exactly ONE gold rule, the bottom ruler after the statement. Display
+  // statement only: no input, no glass card, no tel: link.
+  const zone = statement.locator('xpath=ancestor::section[1]');
+  const firstChild = zone.locator('xpath=./*[1]');
+  await expect(firstChild).toHaveText(/enterprise direct: 830-567-4850/i);
+  const zoneRules = zone.locator('div.gold-rule');
+  await expect(zoneRules).toHaveCount(1);
+  await expect(zone.locator('input, .glass-card, a[href^="tel:"]')).toHaveCount(0);
+
+  // The bottom ruler repeats the URD zone's mt-10 rhythm below the
+  // statement and is the composition's THIRTEENTH golden ruler — nothing
+  // follows it in its section, and the footer is the zone's next sibling.
+  const bottomRule = zoneRules.first();
+  const bottomRuleClass = (await bottomRule.getAttribute('class')) ?? '';
+  for (const token of ['gold-rule', 'mt-10', 'w-64']) {
+    expect(bottomRuleClass).toContain(token);
+  }
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
+  await expect(bottomRule.locator('xpath=following-sibling::*')).toHaveCount(0);
+  const zoneIsLastSection = await page.evaluate(() => {
+    const sections = document.querySelectorAll('main > section');
+    const enterpriseZone = [...sections].find((s) => /enterprise direct: 830-567-4850/i.test(s.textContent ?? ''));
+    return !!enterpriseZone && enterpriseZone.nextElementSibling?.tagName === 'FOOTER';
+  });
+  expect(zoneIsLastSection).toBe(true);
 });
 
 test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({
@@ -121,8 +177,9 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   // Phone Number bottom ruler, Core Industry & Title bottom ruler, Password
   // bottom ruler, Agreement bottom ruler, Company ID closing ruler, plus
   // the TWO interior paragraph rules inside the Company ID panel
-  // (amendments 12.1–12.3) — TWELVE golden rulers total.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // (amendments 12.1–12.3), and the ENTERPRISE DIRECT bottom ruler
+  // (micro-edit 13) — THIRTEEN golden rulers total.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement carries the exact URD treatment.
   const statement = page.locator('p', { hasText: 'Stage Name' });
@@ -277,11 +334,14 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
-  // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
-  // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers: hero threshold, URD close, shared Stage Name
+  // bottom rule, the Legal Name bottom ruler, the Email bottom ruler, the
+  // Phone Number bottom ruler (amendment 11.2), the Core Industry & Title
+  // bottom ruler, the Password bottom ruler, the Agreement bottom ruler,
+  // the Company ID closing ruler (micro-edit 12), and the ENTERPRISE
+  // DIRECT bottom ruler (micro-edit 13), plus the TWO interior paragraph
+  // rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -374,13 +434,18 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   // The Legal Name bottom ruler now doubles as the shared top rule of the
   // Email zone that opens directly beneath it (micro-edit 10) — the same
   // byte-identical ruler, same approved y. The composition's last element
-  // is now the COMPANY ID statement's closing golden ruler (micro-edit 12):
-  // NOTHING follows it in its section — no elements, no spacing blocks, no
-  // further structure. And no entry inputs leak into that section below.
+  // is now the ENTERPRISE DIRECT zone's bottom golden ruler (micro-edit
+  // 13): NOTHING follows it in its section — no elements, no spacing
+  // blocks, no further structure. The COMPANY ID closing ruler (micro-edit
+  // 12) remains the last element of its OWN section — the ENTERPRISE
+  // DIRECT zone is a sibling section, not an append inside it. And no
+  // entry inputs leak into that section below.
   const sharedTopRule = legalInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Email');
-  const finalRuler = page.locator('.gold-rule').nth(11);
+  const companyCloser = page.locator('.gold-rule').nth(11);
+  await expect(companyCloser.locator('xpath=following-sibling::*')).toHaveCount(0);
+  const finalRuler = page.locator('.gold-rule').nth(12);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
@@ -426,11 +491,14 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
-  // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
-  // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers: hero threshold, URD close, shared Stage Name
+  // bottom rule, the Legal Name bottom ruler, the Email bottom ruler, the
+  // Phone Number bottom ruler (amendment 11.2), the Core Industry & Title
+  // bottom ruler, the Password bottom ruler, the Agreement bottom ruler,
+  // the Company ID closing ruler (micro-edit 12), and the ENTERPRISE
+  // DIRECT bottom ruler (micro-edit 13), plus the TWO interior paragraph
+  // rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -571,9 +639,11 @@ test('the mirrored Phone Number zone sits UNDER the Email zone (amendment 11.2):
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers — the Phone Number bottom ruler inserts between the
-  // Email and Core Industry & Title rulers (amendment 11.2).
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers — the Phone Number bottom ruler inserts between
+  // the Email and Core Industry & Title rulers (amendment 11.2), and the
+  // ENTERPRISE DIRECT bottom ruler (micro-edit 13) closes the page, plus
+  // the TWO interior paragraph rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string matches field-for-field.
@@ -647,11 +717,14 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
-  // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
-  // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers: hero threshold, URD close, shared Stage Name
+  // bottom rule, the Legal Name bottom ruler, the Email bottom ruler, the
+  // Phone Number bottom ruler (amendment 11.2), the Core Industry & Title
+  // bottom ruler, the Password bottom ruler, the Agreement bottom ruler,
+  // the Company ID closing ruler (micro-edit 12), and the ENTERPRISE
+  // DIRECT bottom ruler (micro-edit 13), plus the TWO interior paragraph
+  // rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -791,11 +864,14 @@ test('the mirrored Password zone closes the entry column above the consent compo
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
-  // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
-  // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers: hero threshold, URD close, shared Stage Name
+  // bottom rule, the Legal Name bottom ruler, the Email bottom ruler, the
+  // Phone Number bottom ruler (amendment 11.2), the Core Industry & Title
+  // bottom ruler, the Password bottom ruler, the Agreement bottom ruler,
+  // the Company ID closing ruler (micro-edit 12), and the ENTERPRISE
+  // DIRECT bottom ruler (micro-edit 13), plus the TWO interior paragraph
+  // rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -873,11 +949,14 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
 }) => {
   await page.goto('/');
 
-  // Nine golden rulers: hero threshold, URD close, shared Stage Name bottom
-  // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
-  // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
-  // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  // Thirteen golden rulers: hero threshold, URD close, shared Stage Name
+  // bottom rule, the Legal Name bottom ruler, the Email bottom ruler, the
+  // Phone Number bottom ruler (amendment 11.2), the Core Industry & Title
+  // bottom ruler, the Password bottom ruler, the Agreement bottom ruler,
+  // the Company ID closing ruler (micro-edit 12), and the ENTERPRISE
+  // DIRECT bottom ruler (micro-edit 13), plus the TWO interior paragraph
+  // rules inside the Company ID panel.
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
 
   // The wide agreement statement is GONE (micro-edit 11): neither the full
   // string nor any fragment of it appears anywhere on the page.
@@ -1049,14 +1128,14 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
 
   // The discoverability hint line sits directly beneath the sealed button:
   // statement voice, exact text, present ONLY while sealed. It lives INSIDE
-  // the closing composition — the final ruler still closes the zone (nine
-  // golden rulers, unchanged).
+  // the closing composition — the final ruler still closes the zone
+  // (thirteen golden rulers, unchanged by the seal — micro-edit 13).
   const unsealHint = page.locator('p.font-mono', { hasText: 'Double-click to unseal' });
   await expect(unsealHint).toHaveText('Double-click to unseal');
   expect(await unsealHint.getAttribute('class')).toBe(
     'mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne',
   );
-  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  await expect(page.locator('.gold-rule')).toHaveCount(13);
   const SEALED_BUTTON_CLASS =
     'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default text-gold-champagne/50';
   expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
@@ -1094,11 +1173,15 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
   await expect(button).toHaveText('SEALED');
 
-  // The COMPANY ID closing ruler (micro-edit 12) is the composition's last
-  // element: NOTHING follows it in its section — no elements, no spacing
-  // blocks, no further structure. And no entry inputs leak into that
-  // section below.
-  const finalRuler = page.locator('.gold-rule').nth(11);
+  // The ENTERPRISE DIRECT bottom ruler (micro-edit 13) is the composition's
+  // last element: NOTHING follows it in its section — no elements, no
+  // spacing blocks, no further structure. The COMPANY ID closing ruler
+  // (micro-edit 12) remains the last element of ITS OWN section — the
+  // ENTERPRISE DIRECT zone is a sibling section, not an append inside it.
+  // And no entry inputs leak into that section below.
+  const companyCloser = page.locator('.gold-rule').nth(11);
+  await expect(companyCloser.locator('xpath=following-sibling::*')).toHaveCount(0);
+  const finalRuler = page.locator('.gold-rule').nth(12);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 });
