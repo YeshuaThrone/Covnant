@@ -594,7 +594,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   const sharedTopRule = industryInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText(
-    'I agree to the Universal Distribution & Royalty Administration Terms'
+    'IagreetoUniversalDistribution&RoyaltyAdministrationTerms'
   );
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
@@ -728,14 +728,17 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
-  // source class string matches field-for-field; the longer copy wraps
-  // naturally with no font, tracking, or color adjustment.
+  // source class string matches field-for-field. The copy is one continuous
+  // string: no word spaces, no 'the' — compared case-insensitively since CSS
+  // uppercases the render.
   const stageStatement = page.locator('p', { hasText: 'Stage Name' });
   await expect(stageStatement).toHaveText('Stage Name');
   const agreementStatement = page.locator('p', {
-    hasText: 'I agree to the Universal Distribution & Royalty Administration Terms',
+    hasText: 'IagreetoUniversalDistribution&RoyaltyAdministrationTerms',
   });
-  await expect(agreementStatement).toHaveText('I agree to the Universal Distribution & Royalty Administration Terms');
+  expect((await agreementStatement.textContent())?.toLowerCase()).toBe(
+    'iagreetouniversaldistribution&royaltyadministrationterms'
+  );
   expect(await agreementStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
 
   // Placement: the Agreement zone opens DIRECTLY below the shared rule (the
@@ -745,7 +748,7 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   const geometry = await page.evaluate(() => {
     const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
     const statement = [...document.querySelectorAll('p.font-mono')]
-      .find((p) => p.textContent?.includes('Universal Distribution'))!
+      .find((p) => p.textContent?.includes('UniversalDistribution'))!
       .getBoundingClientRect();
     const button = [...document.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === 'Submit'
@@ -769,37 +772,32 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   expect(geometry.rulerGap).toBeCloseTo(0, 0);
   expect(Math.abs(geometry.buttonCenter - geometry.ruleCenter)).toBeLessThan(1);
 
-  // Button treatment at rest: statement-voice label, 1px champagne hairline
-  // at low opacity, transparent background, square corners, pointer cursor.
+  // Button treatment at rest: statement-voice label, NO box — a borderless
+  // pressable label (transparent background, pointer cursor) whose label
+  // brightens on hover so people know to press it.
   const button = page.getByRole('button', { name: 'Submit' });
   await expect(button).toBeVisible();
   expect(await button.getAttribute('type')).toBe('button');
   const REST_BUTTON_CLASS =
-    'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer border-gold-champagne/40 text-gold-champagne/90 hover:border-gold-champagne hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
   expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
+  // ABSENCE of a border: no border class in the string, and the computed
+  // box renders zero-width edges.
+  expect(await button.getAttribute('class')).not.toContain('border');
   const restStyles = await button.evaluate((el) => {
     const s = getComputedStyle(el);
     return {
       borderTopWidth: s.borderTopWidth,
-      borderRadius: s.borderRadius,
       background: s.backgroundColor,
       cursor: s.cursor,
       textTransform: s.textTransform,
     };
   });
-  expect(restStyles.borderTopWidth).toBe('1px');
-  expect(restStyles.borderRadius).toBe('0px');
+  expect(restStyles.borderTopWidth).toBe('0px');
   expect(restStyles.background).toBe('rgba(0, 0, 0, 0)');
   expect(restStyles.cursor).toBe('pointer');
   expect(restStyles.textTransform).toBe('uppercase');
-
-  // The hairline is the champagne token at low opacity — it must differ from
-  // the full-strength statement gold until the seal solidifies it. Compared
-  // against the statement's computed color so the assertion is independent of
-  // Tailwind v4's oklab output format.
-  const restBorderColor = await button.evaluate((el) => getComputedStyle(el).borderTopColor);
-  const statementColor = await agreementStatement.evaluate((el) => getComputedStyle(el).color);
-  expect(restBorderColor).not.toBe(statementColor);
+  const restLabelColor = await button.evaluate((el) => getComputedStyle(el).color);
 
   // Seal flow: type into all five entries, then click Submit.
   await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
@@ -849,18 +847,22 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
     },
   });
 
-  // The button enters the sealed state: label UNCHANGED, border solidified to
-  // full champagne gold, label dimmed slightly.
+  // The button enters the sealed state: label UNCHANGED, borderless (no box
+  // to solidify), label dimmed slightly.
   await expect(button).toHaveText('Submit');
   const SEALED_BUTTON_CLASS =
-    'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default border-gold-champagne text-gold-champagne/70';
+    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default text-gold-champagne/50';
   expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
-  // Border solidified to FULL champagne gold — the exact computed color the
-  // statement text renders in. Polled until the 200ms color transition
-  // finishes; comparison is independent of Tailwind v4's oklab format.
+  expect(await button.getAttribute('class')).not.toContain('border');
+  // Label dimmed: after the 200ms color transition the sealed label differs
+  // from both the rest-state /90 label and the statement's full-strength
+  // gold — computed-color comparison, independent of Tailwind v4's oklab
+  // format.
   await expect(async () => {
-    const sealedBorderColor = await button.evaluate((el) => getComputedStyle(el).borderTopColor);
-    expect(sealedBorderColor).toBe(statementColor);
+    const sealedLabelColor = await button.evaluate((el) => getComputedStyle(el).color);
+    expect(sealedLabelColor).not.toBe(restLabelColor);
+    const statementColor = await agreementStatement.evaluate((el) => getComputedStyle(el).color);
+    expect(sealedLabelColor).not.toBe(statementColor);
   }).toPass({ timeout: 2000 });
 
   // A refresh rehydrates the sealed composition: values restored, fields

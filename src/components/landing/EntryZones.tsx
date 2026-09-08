@@ -63,7 +63,7 @@ const SEALED_INPUT_CLASS =
   'h-10 w-64 cursor-default bg-transparent text-center text-lg text-emerald-300 caret-transparent outline-none';
 
 const BUTTON_BASE_CLASS =
-  'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
+  'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
 
 export function EntryZones() {
   const [sealed, setSealed] = useState(false);
@@ -124,8 +124,8 @@ export function EntryZones() {
   const buttonClass = [
     BUTTON_BASE_CLASS,
     sealed
-      ? 'cursor-default border-gold-champagne text-gold-champagne/70'
-      : 'cursor-pointer border-gold-champagne/40 text-gold-champagne/90 hover:border-gold-champagne hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne',
+      ? 'cursor-default text-gold-champagne/50'
+      : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne',
   ].join(' ');
 
   return (
@@ -240,21 +240,24 @@ export function EntryZones() {
       {/* Universal Agreement & Seal — the final mirrored zone. The ruler
           above doubles as this zone's SHARED TOP RULE (untouched, same y as
           approved). The statement repeats the exact champagne mono treatment
-          and the same 32px top gap below the shared rule; the longer copy
-          wraps naturally — font, tracking, and color are untouched. In the
-          input slot: the 'Submit' button, a 1px champagne hairline
-          at low opacity (hover brightens to full gold; focus-visible gold
-          outline; square corners). Clicking seals EVERYTHING the visitor
+          and the same 32px top gap below the shared rule; the copy is one
+          continuous string — no word spaces, no 'the' — rendered as a single
+          unbroken champagne line; font, tracking, and color are untouched
+          (the 0.3em tracking is the treatment, not word spacing). In the
+          input slot: the 'Submit' button, a BORDERLESS pressable label —
+          no box, no hairline (the label brightens on hover so it reads as
+          pressable; focus-visible gold outline for keyboard access).
+          Clicking seals EVERYTHING the visitor
           wrote: all five entries are captured to localStorage and frozen
           readOnly with the jade styling kept and the caret suppressed; the
-          button keeps its label while its border solidifies to full gold and
-          its label dims slightly; a second click is a no-op; a refresh
-          rehydrates the sealed composition. Local only — no POST, no signup
+          button keeps its label while it dims slightly; a second click is a
+          no-op; a refresh rehydrates the sealed composition. Local only —
+          no POST, no signup
           wiring. A new bottom golden ruler closes the zone HUGGING the
           button — zero margin above it. NOTHING follows the ruler — the
           region below stays empty black space. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">
-        I agree to the Universal Distribution &amp; Royalty Administration Terms
+        IagreetoUniversalDistribution&amp;RoyaltyAdministrationTerms
       </p>
       <button type="button" onClick={sealWorld} className={buttonClass}>
         Submit
