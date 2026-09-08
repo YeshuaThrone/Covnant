@@ -79,14 +79,14 @@ export default function Home() {
           statement is now flanked by twin w-64 rulers. The statement
           repeats the canonical champagne mono zone treatment — the
           identical class string of Universal Royalty Distribution / Stage
-          Name / Legal Name — carrying the user's own digits, 830-567-4850,
+          Name / Legal Name — carrying the user's own digits, 830-358-2306,
           rendered uppercase by the class. The zone closes on the bottom
           ruler with the URD zone's mt-10 rhythm; the composition now counts
           fourteen golden rulers. Display statement only: no glass card, no
           input, no tel: link. */}
       <section className="w-full max-w-4xl flex flex-col items-center">
         <div className="gold-rule w-64" />
-        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Enterprise Direct: 830-567-4850</p>
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Enterprise Direct: 830-358-2306</p>
         <div className="gold-rule mt-10 w-64" />
       </section>
 

@@ -113,7 +113,7 @@ test("the ENTERPRISE DIRECT zone closes the page beneath the Company ID section:
   // The user's own digits render exactly once, case-insensitive on the
   // rendered page — the uppercase class lifts the Title Case literal into
   // the ENTERPRISE DIRECT statement voice.
-  const statement = page.getByText(/enterprise direct: 830-567-4850/i);
+  const statement = page.getByText(/enterprise direct: 830-358-2306/i);
   await expect(statement).toHaveCount(1);
 
   // Canonical champagne mono zone treatment — the statement's class string
@@ -158,7 +158,7 @@ test("the ENTERPRISE DIRECT zone closes the page beneath the Company ID section:
   await expect(bottomRule.locator('xpath=following-sibling::*')).toHaveCount(0);
   const zoneIsLastSection = await page.evaluate(() => {
     const sections = document.querySelectorAll('main > section');
-    const enterpriseZone = [...sections].find((s) => /enterprise direct: 830-567-4850/i.test(s.textContent ?? ''));
+    const enterpriseZone = [...sections].find((s) => /enterprise direct: 830-358-2306/i.test(s.textContent ?? ''));
     return !!enterpriseZone && enterpriseZone.nextElementSibling?.tagName === 'FOOTER';
   });
   expect(zoneIsLastSection).toBe(true);
