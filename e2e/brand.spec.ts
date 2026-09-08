@@ -34,9 +34,11 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
 }) => {
   await page.goto('/');
 
-  // The entry area is NOT a new zone: the URD zone keeps its two rules, and
-  // the entry area ends with exactly ONE golden ruler as its bottom line.
-  await expect(page.locator('.gold-rule')).toHaveCount(3);
+  // The Stage Name zone closes with its own golden ruler, which doubles as
+  // the shared top rule of the mirrored Legal Name zone beneath it
+  // (micro-edit 9): hero threshold, URD close, shared rule, Legal Name
+  // bottom ruler — FOUR golden rulers total.
+  await expect(page.locator('.gold-rule')).toHaveCount(4);
 
   // Statement carries the exact URD treatment.
   const statement = page.locator('p', { hasText: 'Stage Name' });
@@ -99,12 +101,15 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   await expect(statement.locator('xpath=following-sibling::input[@aria-label="Stage Name"]')).toBeVisible();
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
-  // The golden ruler directly below the input acts as the entry area's bottom
-  // line: it is the input's only following sibling and NOTHING follows it in
-  // the section — no elements, no spacing blocks, no further structure.
+  // The golden ruler directly below the input remains the Stage Name zone's
+  // bottom line: it is the input's immediate next sibling, and it now doubles
+  // as the shared top rule of the Legal Name zone that opens directly beneath
+  // it — byte-identical ruler, same approved y.
   const bottomLine = statement.locator('xpath=following-sibling::div[contains(@class, "gold-rule")]');
-  await expect(bottomLine).toHaveCount(1);
-  await expect(bottomLine.first().locator('xpath=following-sibling::*')).toHaveCount(0);
+  await expect(bottomLine).toHaveCount(2);
+  const sharedRule = input.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
+  await expect(sharedRule).toHaveCount(1);
+  await expect(sharedRule.locator('xpath=following-sibling::*[1]')).toHaveText('Legal Name');
 
   // HARD ACCEPTANCE GEOMETRY: the band interior between the URD closing rule
   // and the bottom golden ruler measures EXACTLY 92px (32 + 20 + 40) — the
@@ -176,6 +181,147 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(typedStyles.letterSpacing).toBe(subtitleStyles.letterSpacing);
   expect(typedStyles.fontFamily).toBe(subtitleStyles.fontFamily);
   // The caret stays gold — distinct from the jade text color.
+  expect(typedStyles.caretColor).not.toBe(typedStyles.color);
+});
+
+test('the mirrored Legal Name zone repeats the Stage Name treatment: identical statement, chromeless jade type-in, and an input-hugging bottom ruler with nothing beneath it', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Four golden rulers: hero threshold, URD close, shared Stage Name bottom
+  // rule, and the Legal Name bottom ruler.
+  await expect(page.locator('.gold-rule')).toHaveCount(4);
+
+  // Statement repeats the Stage Name statement's treatment EXACTLY — the
+  // source class string and every computed style match field-for-field.
+  const stageStatement = page.locator('p', { hasText: 'Stage Name' });
+  await expect(stageStatement).toHaveText('Stage Name');
+  const legalStatement = page.locator('p', { hasText: 'Legal Name' });
+  await expect(legalStatement).toHaveText('Legal Name');
+  expect(await legalStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
+
+  // Placement: the Legal Name zone opens DIRECTLY below the shared rule with
+  // the same 32px statement gap the Stage Name statement uses below its top
+  // rule; the input fills the h-10 slot below the statement and the bottom
+  // ruler HUGS the input exactly as the Stage Name zone's ruler hugs its own
+  // — interior 32 + 20 + 40 = 92px, a true pixel mirror of the Stage Name
+  // zone, all centered on the zone axis.
+  const geometry = await page.evaluate(() => {
+    const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
+    const statement = [...document.querySelectorAll('p.font-mono')]
+      .find((p) => p.textContent?.includes('Legal Name'))!
+      .getBoundingClientRect();
+    const input = document.querySelector('input[aria-label="Legal Name"]')!.getBoundingClientRect();
+    return {
+      sharedRuleBottom: rules[2].bottom,
+      statementGap: statement.top - rules[2].bottom,
+      statementHeight: statement.height,
+      inputHeight: input.height,
+      inputTop: input.top,
+      inputBottom: input.bottom,
+      statementBottom: statement.bottom,
+      rulerTop: rules[3].top,
+      rulerGap: rules[3].top - input.bottom,
+      bandInterior: rules[3].top - rules[2].bottom,
+      ruleCenter: rules[2].left + rules[2].width / 2,
+      inputCenter: input.left + input.width / 2,
+    };
+  });
+  expect(geometry.statementGap).toBeCloseTo(32, 0);
+  expect(geometry.statementHeight).toBeCloseTo(20, 0);
+  expect(geometry.inputHeight).toBeCloseTo(40, 0);
+  expect(geometry.inputTop).toBeGreaterThanOrEqual(geometry.statementBottom - 0.5);
+  expect(geometry.rulerGap).toBeCloseTo(0, 0);
+  expect(geometry.bandInterior).toBeCloseTo(92, 0);
+  expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
+
+  // Fully invisible field, byte-identical to the Stage Name input: same class
+  // string, transparent and borderless in EVERY state — only the typed name
+  // and the gold caret ever appear.
+  const stageInput = page.getByRole('textbox', { name: 'Stage Name' });
+  const legalInput = page.getByRole('textbox', { name: 'Legal Name' });
+  await expect(legalInput).toBeVisible();
+  expect(await legalInput.getAttribute('placeholder')).toBeNull();
+  expect(await legalInput.getAttribute('class')).toBe(await stageInput.getAttribute('class'));
+
+  const chromeOf = (el: Element) => {
+    const s = getComputedStyle(el);
+    return {
+      background: s.backgroundColor,
+      borderTopWidth: s.borderTopWidth,
+      borderRightWidth: s.borderRightWidth,
+      borderBottomWidth: s.borderBottomWidth,
+      borderLeftWidth: s.borderLeftWidth,
+      outlineStyle: s.outlineStyle,
+      boxShadow: s.boxShadow,
+      cursor: s.cursor,
+    };
+  };
+
+  // At rest: no chrome at all, cursor-text for discoverability.
+  const atRest = await legalInput.evaluate(chromeOf);
+  expect(atRest.background).toBe('rgba(0, 0, 0, 0)');
+  expect(atRest.borderTopWidth).toBe('0px');
+  expect(atRest.borderRightWidth).toBe('0px');
+  expect(atRest.borderBottomWidth).toBe('0px');
+  expect(atRest.borderLeftWidth).toBe('0px');
+  expect(atRest.outlineStyle).toBe('none');
+  expect(atRest.boxShadow).toBe('none');
+  expect(atRest.cursor).toBe('text');
+
+  // On focus: still no lines, no glow — every state chromeless.
+  await legalInput.focus();
+  const onFocus = await legalInput.evaluate(chromeOf);
+  expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
+  expect(onFocus.borderTopWidth).toBe('0px');
+  expect(onFocus.borderRightWidth).toBe('0px');
+  expect(onFocus.borderBottomWidth).toBe('0px');
+  expect(onFocus.borderLeftWidth).toBe('0px');
+  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.boxShadow).toBe('none');
+
+  // The new bottom ruler is the zone's last element: NOTHING follows it in
+  // the section — no elements, no spacing blocks, no further structure. And
+  // no entry inputs leak into the reserved region below.
+  const newRuler = page.locator('.gold-rule').nth(3);
+  await expect(newRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
+  await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
+
+  // Typing renders the name with the same jade typed treatment as the Stage
+  // Name field — matched field-for-field against the hero subtitle; the
+  // caret stays gold.
+  await legalInput.fill('Test Holder');
+  await expect(legalInput).toHaveValue('Test Holder');
+  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
+  const subtitleStyles = await subtitle.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+    };
+  });
+  const typedStyles = await legalInput.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+      caretColor: s.caretColor,
+    };
+  });
+  expect(typedStyles.color).not.toBe('rgb(243, 229, 171)');
+  expect(typedStyles.fontSize).toBe('18px');
+  expect(typedStyles.textTransform).toBe('none');
+  expect(typedStyles.color).toBe(subtitleStyles.color);
+  expect(typedStyles.fontSize).toBe(subtitleStyles.fontSize);
+  expect(typedStyles.letterSpacing).toBe(subtitleStyles.letterSpacing);
+  expect(typedStyles.fontFamily).toBe(subtitleStyles.fontFamily);
   expect(typedStyles.caretColor).not.toBe(typedStyles.color);
 });
 
