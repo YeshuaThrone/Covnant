@@ -162,6 +162,13 @@ test("the ENTERPRISE DIRECT zone closes the page beneath the Company ID section:
     return !!enterpriseZone && enterpriseZone.nextElementSibling?.tagName === 'FOOTER';
   });
   expect(zoneIsLastSection).toBe(true);
+
+  // Amendment 13.3: the zone sits 76px higher — the Company ID section's
+  // bottom padding is pb-5 (20px), tightened from pb-24 (96px) at the
+  // user's direction ('bring the whole zone up like 2 centimeters').
+  const companyIdClass = (await page.locator('section[class*="min-h-[300px]"]').getAttribute('class')) ?? '';
+  expect(companyIdClass).toContain('pb-5');
+  expect(companyIdClass).not.toContain('pb-24');
 });
 
 test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({

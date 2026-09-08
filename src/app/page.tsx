@@ -61,7 +61,11 @@ export default function Home() {
           closing rule stays after the panel. The 300px floor measured on
           9b34072 at 1440×900 is kept as a minimum — the section grows
           naturally with the statement content. */}
-      <section className="w-full max-w-4xl flex flex-col items-center pb-24 min-h-[300px]">
+      {/* Amendment 13.3 — the zone below is raised ~2cm at the user's
+          direction ('bring the whole zone up like 2 centimeters'): this
+          section's bottom padding is pb-5 (20px), tightened from pb-24
+          (96px) — the Enterprise Direct zone moves up exactly 76px. */}
+      <section className="w-full max-w-4xl flex flex-col items-center pb-5 min-h-[300px]">
         <div className="glass-card p-6 flex flex-col gap-3 max-w-3xl mx-auto text-center">
           <h2 className="text-lg font-semibold text-gold">Company ID</h2>
           <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P1}</p>
