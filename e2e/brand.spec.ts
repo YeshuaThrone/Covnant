@@ -184,7 +184,7 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(typedStyles.caretColor).not.toBe(typedStyles.color);
 });
 
-test('the mirrored Legal Name zone repeats the Stage Name treatment: identical statement, chromeless jade type-in, and a 40px-spaced bottom ruler with nothing beneath it', async ({
+test('the mirrored Legal Name zone repeats the Stage Name treatment: identical statement, chromeless jade type-in, and an input-hugging bottom ruler with nothing beneath it', async ({
   page,
 }) => {
   await page.goto('/');
@@ -203,9 +203,10 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
 
   // Placement: the Legal Name zone opens DIRECTLY below the shared rule with
   // the same 32px statement gap the Stage Name statement uses below its top
-  // rule; the input fills the h-10 slot below the statement and the new
-  // bottom ruler closes the zone with the standard 40px spacing above it —
-  // interior 32 + 20 + 40 + 40 = 132px, all centered on the zone axis.
+  // rule; the input fills the h-10 slot below the statement and the bottom
+  // ruler HUGS the input exactly as the Stage Name zone's ruler hugs its own
+  // — interior 32 + 20 + 40 = 92px, a true pixel mirror of the Stage Name
+  // zone, all centered on the zone axis.
   const geometry = await page.evaluate(() => {
     const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
     const statement = [...document.querySelectorAll('p.font-mono')]
@@ -231,8 +232,8 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   expect(geometry.statementHeight).toBeCloseTo(20, 0);
   expect(geometry.inputHeight).toBeCloseTo(40, 0);
   expect(geometry.inputTop).toBeGreaterThanOrEqual(geometry.statementBottom - 0.5);
-  expect(geometry.rulerGap).toBeCloseTo(40, 0);
-  expect(geometry.bandInterior).toBeCloseTo(132, 0);
+  expect(geometry.rulerGap).toBeCloseTo(0, 0);
+  expect(geometry.bandInterior).toBeCloseTo(92, 0);
   expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
 
   // Fully invisible field, byte-identical to the Stage Name input: same class

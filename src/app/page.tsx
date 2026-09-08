@@ -62,16 +62,16 @@ export default function Home() {
             invisible input repeats the Stage Name field byte-for-byte
             (chromeless h-10 w-64, jade typed text, gold caret, aria-label
             only, local-only — no submission wiring); a new bottom golden
-            ruler closes the zone with the standard 40px spacing above it.
-            NOTHING follows the ruler — the region below stays empty black
-            space. */}
+            ruler closes the zone HUGGING the input — zero margin above it,
+            a true pixel mirror of the Stage Name zone. NOTHING follows the
+            ruler — the region below stays empty black space. */}
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Legal Name</p>
         <input
           type="text"
           aria-label="Legal Name"
           className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
         />
-        <div className="gold-rule mt-10 w-64" />
+        <div className="gold-rule w-64" />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this
