@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 /*
- * Entry composition — the five mirrored entry zones and the Universal
- * Agreement & Seal zone, rendered as direct children of the landing section.
- * This is a client island: the seal interaction needs state over all five
+ * Entry composition — the six mirrored entry zones and the Universal
+ * Consent & Seal zone, rendered as direct children of the landing section.
+ * This is a client island: the seal interaction needs state over all six
  * inputs (readOnly freezing, value rehydration), which only a client
  * component can own. The rendered markup of every pre-existing zone is
  * byte-identical to the server-rendered version it replaces.
@@ -17,6 +17,7 @@ type SealedEntryValues = {
   stageName: string;
   legalName: string;
   email: string;
+  phoneNumber: string;
   password: string;
   coreIndustryTitle: string;
 };
@@ -30,10 +31,14 @@ const isSealedEntry = (value: unknown): value is SealedEntry => {
     return false;
   }
   const values = candidate.values as Record<string, unknown>;
+  // Every CURRENT value key must be present — a legacy seal missing any of
+  // them (e.g. a pre-Phone-Number seal) fails the guard and is treated as
+  // absent: the composition starts unsealed rather than half-restoring.
   return (
     typeof values.stageName === 'string' &&
     typeof values.legalName === 'string' &&
     typeof values.email === 'string' &&
+    typeof values.phoneNumber === 'string' &&
     typeof values.password === 'string' &&
     typeof values.coreIndustryTitle === 'string'
   );
@@ -70,6 +75,7 @@ export function EntryZones() {
   const stageNameRef = useRef<HTMLInputElement>(null);
   const legalNameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
+  const phoneNumberRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const coreIndustryTitleRef = useRef<HTMLInputElement>(null);
 
@@ -82,17 +88,25 @@ export function EntryZones() {
       entry.values.stageName,
       entry.values.legalName,
       entry.values.email,
+      entry.values.phoneNumber,
       entry.values.password,
       entry.values.coreIndustryTitle,
     ];
-    const refs = [stageNameRef, legalNameRef, emailRef, passwordRef, coreIndustryTitleRef];
+    const refs = [
+      stageNameRef,
+      legalNameRef,
+      emailRef,
+      phoneNumberRef,
+      passwordRef,
+      coreIndustryTitleRef,
+    ];
     refs.forEach((ref, index) => {
       if (ref.current) ref.current.value = saved[index];
     });
     setSealed(true);
   }, []);
 
-  /* Seal: persist the five entries locally and freeze the fields. Idempotent
+  /* Seal: persist the six entries locally and freeze the fields. Idempotent
    * — a second click on an already-sealed composition changes nothing.
    * Local only: no POST, no signup wiring; the backend field-support
    * decision belongs to the Information Gate wave. */
@@ -104,6 +118,7 @@ export function EntryZones() {
         stageName: stageNameRef.current?.value ?? '',
         legalName: legalNameRef.current?.value ?? '',
         email: emailRef.current?.value ?? '',
+        phoneNumber: phoneNumberRef.current?.value ?? '',
         password: passwordRef.current?.value ?? '',
         coreIndustryTitle: coreIndustryTitleRef.current?.value ?? '',
       },
@@ -209,24 +224,24 @@ export function EntryZones() {
       />
       <div className="gold-rule w-64" />
 
-      {/* Password entry zone — a straight mirror of the Email zone, inserted
-          directly beneath it (under the email portion, before the Universal
-          agreement). The ruler above doubles as this zone's SHARED TOP RULE
-          (untouched, same y as approved). The statement repeats the exact
-          champagne mono treatment and the same 32px top gap below the shared
-          rule; the invisible input repeats the Email field byte-for-byte and
-          arrives PRE-FILLED with 'Covenant' (exactly 8 letters) as the
-          delegated starting value — type text so the jade letters show, and
-          the field stays fully editable until the seal; a new bottom golden
-          ruler closes the zone HUGGING the input — zero margin above it, a
-          true pixel mirror of the Email zone. The Core Industry & Title zone
+      {/* Phone Number entry zone — a straight mirror of the Email zone,
+          inserted UNDER the Email zone (amendment 11.2). The ruler above
+          doubles as this zone's SHARED TOP RULE (untouched, same y as
+          approved). The statement repeats the exact champagne mono treatment
+          and the same 32px top gap below the shared rule; the invisible
+          input repeats the Email field byte-for-byte (chromeless h-10 w-64,
+          jade typed text, gold caret, aria-label only, local-only — no
+          validation, no submission wiring) with NO prefill — it opens empty
+          like the other collected fields. Type tel: semantically correct for
+          a phone entry, zero styling change. A new bottom golden ruler
+          closes the zone HUGGING the input — zero margin above it, a true
+          pixel mirror of the Email zone. The Core Industry & Title zone
           follows below this ruler. */}
-      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Password</p>
+      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Phone Number</p>
       <input
-        ref={passwordRef}
-        type="text"
-        aria-label="Password"
-        defaultValue="Covenant"
+        ref={phoneNumberRef}
+        type="tel"
+        aria-label="Phone Number"
         className={inputClass}
         readOnly={sealed}
       />
@@ -241,8 +256,8 @@ export function EntryZones() {
           aria-label only, local-only — no validation, no submission
           wiring); a new bottom golden ruler closes the zone HUGGING the
           input — zero margin above it, a true pixel mirror of the Email
-          zone. NOTHING follows the ruler — the region below stays empty
-          black space. */}
+          zone. The Password zone follows below this ruler (micro-edit 11
+          reorder). */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Core Industry &amp; Title</p>
       <input
         ref={coreIndustryTitleRef}
@@ -253,20 +268,57 @@ export function EntryZones() {
       />
       <div className="gold-rule w-64" />
 
-      {/* Universal Agreement & Seal — the final mirrored zone. The ruler
+      {/* Password entry zone — a straight mirror of the Email zone, MOVED
+          here (micro-edit 11) to close the entry column: the visual flow
+          collects user data first (Stage Name → Legal Name → Email → Core
+          Industry & Title) and closes with security/consent (Password →
+          consent → Submit). The ruler above doubles as this zone's SHARED
+          TOP RULE (untouched, same y as approved). The statement repeats the
+          exact champagne mono treatment and the same 32px top gap below the
+          shared rule; the invisible input repeats the Email field
+          byte-for-byte and arrives PRE-FILLED with 'Covenant' (exactly 8
+          letters) as the delegated starting value — type text so the jade
+          letters show, and the field stays fully editable until the seal; a
+          new bottom golden ruler closes the zone HUGGING the input — zero
+          margin above it, a true pixel mirror of the Email zone. The consent
+          composition follows below this ruler. */}
+      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Password</p>
+      <input
+        ref={passwordRef}
+        type="text"
+        aria-label="Password"
+        defaultValue="Covenant"
+        className={inputClass}
+        readOnly={sealed}
+      />
+      <div className="gold-rule w-64" />
+
+      {/* Universal Consent & Seal — the final mirrored zone. The ruler
           above doubles as this zone's SHARED TOP RULE (untouched, same y as
-          approved). The statement repeats the exact champagne mono treatment
-          and the same 32px top gap below the shared rule; the spaced copy
-          wraps naturally — font, tracking, and color are untouched. In the
+          approved). The wide agreement statement was replaced (micro-edit
+          11) by a native consent checkbox + 'Accept UDR Terms' label: the
+          label carries the EXACT statement treatment (mt-8 font-mono
+          text-sm uppercase tracking-[0.3em] text-gold-champagne), keeping
+          the 32px gap and mono voice of the statements it joins; the
+          checkbox is the native box — champagne accent-color, focus-visible
+          gold outline matching the Submit pattern, no added chrome —
+          unchecked by default, persisting nothing, NOT part of the seal
+          payload, and the seal flow is NOT gated on it. In the
           input slot: the 'Submit' button, a BORDERLESS pressable label —
           no box, no hairline (the label brightens on hover so it reads as
           pressable; focus-visible gold outline for keyboard access).
           Clicking seals EVERYTHING the visitor
-          wrote: all five entries are captured to localStorage and frozen
+          wrote: all six entries are captured to localStorage and frozen
           readOnly with the jade styling kept and the caret suppressed; the
-          button keeps its label while it dims slightly (with a native
-          'Double-click to unseal' tooltip); a second single click is a
-          no-op; DOUBLE-CLICKING the sealed button UNSEALS — the local key
+          button reads SEALED while it dims slightly (with a native
+          'Double-click to unseal' tooltip) and ONE hint line — the exact
+          statement voice (mono, uppercase, 0.3em tracking, champagne) —
+          appears DIRECTLY BENEATH it reading 'Double-click to unseal',
+          making the escape discoverable (amendment 11.1: the tooltip alone
+          was invisible on touch and hover-only); the hint exists in the DOM
+          ONLY while sealed and sits INSIDE the closing composition above the
+          final ruler (zone-content-placement rule). A second single click is
+          a no-op; DOUBLE-CLICKING the sealed button UNSEALS — the local key
           is cleared, the fields turn editable again, and the button returns
           to its bright pressable state (a refresh then stays unsealed); a
           refresh of a sealed composition rehydrates it sealed. Local only —
@@ -274,9 +326,19 @@ export function EntryZones() {
           wiring. A new bottom golden ruler closes the zone HUGGING the
           button — zero margin above it. NOTHING follows the ruler — the
           region below stays empty black space. */}
-      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">
-        I agree to the Universal Distribution &amp; Royalty Administration Terms
-      </p>
+      <div className="flex items-center justify-center gap-3">
+        <input
+          type="checkbox"
+          id="udr-terms"
+          className="mt-8 h-4 w-4 shrink-0 cursor-pointer accent-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne"
+        />
+        <label
+          htmlFor="udr-terms"
+          className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne"
+        >
+          Accept UDR Terms
+        </label>
+      </div>
       <button
         type="button"
         onClick={sealWorld}
@@ -284,8 +346,13 @@ export function EntryZones() {
         title={sealed ? 'Double-click to unseal' : undefined}
         className={buttonClass}
       >
-        Submit
+        {sealed ? 'SEALED' : 'Submit'}
       </button>
+      {sealed && (
+        <p className="mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">
+          Double-click to unseal
+        </p>
+      )}
       <div className="gold-rule w-64" />
     </>
   );
