@@ -121,6 +121,22 @@ export function EntryZones() {
 
   const inputClass = sealed ? SEALED_INPUT_CLASS : UNSEALED_INPUT_CLASS;
 
+  /* Unseal: the escape hatch for a sealed composition — a double-click on
+   * the sealed button clears the local seal so the fields become editable
+   * again and the button returns to its bright pressable state. Local only;
+   * the next single click re-seals as normal. */
+  const unsealWorld = () => {
+    try {
+      window.localStorage.removeItem(SEALED_ENTRY_KEY);
+    } catch (error) {
+      // Blocked storage never persisted the seal in the first place —
+      // clearing the in-memory state still frees the fields; surface why
+      // the key may reappear on a future seal.
+      console.warn('Covnant: the local seal could not be cleared.', error);
+    }
+    setSealed(false);
+  };
+
   const buttonClass = [
     BUTTON_BASE_CLASS,
     sealed
@@ -240,26 +256,34 @@ export function EntryZones() {
       {/* Universal Agreement & Seal — the final mirrored zone. The ruler
           above doubles as this zone's SHARED TOP RULE (untouched, same y as
           approved). The statement repeats the exact champagne mono treatment
-          and the same 32px top gap below the shared rule; the copy is one
-          continuous string — no word spaces, no 'the' — rendered as a single
-          unbroken champagne line; font, tracking, and color are untouched
-          (the 0.3em tracking is the treatment, not word spacing). In the
+          and the same 32px top gap below the shared rule; the spaced copy
+          wraps naturally — font, tracking, and color are untouched. In the
           input slot: the 'Submit' button, a BORDERLESS pressable label —
           no box, no hairline (the label brightens on hover so it reads as
           pressable; focus-visible gold outline for keyboard access).
           Clicking seals EVERYTHING the visitor
           wrote: all five entries are captured to localStorage and frozen
           readOnly with the jade styling kept and the caret suppressed; the
-          button keeps its label while it dims slightly; a second click is a
-          no-op; a refresh rehydrates the sealed composition. Local only —
+          button keeps its label while it dims slightly (with a native
+          'Double-click to unseal' tooltip); a second single click is a
+          no-op; DOUBLE-CLICKING the sealed button UNSEALS — the local key
+          is cleared, the fields turn editable again, and the button returns
+          to its bright pressable state (a refresh then stays unsealed); a
+          refresh of a sealed composition rehydrates it sealed. Local only —
           no POST, no signup
           wiring. A new bottom golden ruler closes the zone HUGGING the
           button — zero margin above it. NOTHING follows the ruler — the
           region below stays empty black space. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">
-        IagreetoUniversalDistribution&amp;RoyaltyAdministrationTerms
+        I agree to the Universal Distribution &amp; Royalty Administration Terms
       </p>
-      <button type="button" onClick={sealWorld} className={buttonClass}>
+      <button
+        type="button"
+        onClick={sealWorld}
+        onDoubleClick={sealed ? unsealWorld : undefined}
+        title={sealed ? 'Double-click to unseal' : undefined}
+        className={buttonClass}
+      >
         Submit
       </button>
       <div className="gold-rule w-64" />

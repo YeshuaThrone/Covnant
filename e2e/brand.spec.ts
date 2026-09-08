@@ -594,7 +594,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   const sharedTopRule = industryInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText(
-    'IagreetoUniversalDistribution&RoyaltyAdministrationTerms'
+    'I agree to the Universal Distribution & Royalty Administration Terms'
   );
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
@@ -728,17 +728,14 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   await expect(page.locator('.gold-rule')).toHaveCount(8);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
-  // source class string matches field-for-field. The copy is one continuous
-  // string: no word spaces, no 'the' — compared case-insensitively since CSS
-  // uppercases the render.
+  // source class string matches field-for-field; the spaced copy wraps
+  // naturally with no font, tracking, or color adjustment.
   const stageStatement = page.locator('p', { hasText: 'Stage Name' });
   await expect(stageStatement).toHaveText('Stage Name');
   const agreementStatement = page.locator('p', {
-    hasText: 'IagreetoUniversalDistribution&RoyaltyAdministrationTerms',
+    hasText: 'I agree to the Universal Distribution & Royalty Administration Terms',
   });
-  expect((await agreementStatement.textContent())?.toLowerCase()).toBe(
-    'iagreetouniversaldistribution&royaltyadministrationterms'
-  );
+  await expect(agreementStatement).toHaveText('I agree to the Universal Distribution & Royalty Administration Terms');
   expect(await agreementStatement.getAttribute('class')).toBe(await stageStatement.getAttribute('class'));
 
   // Placement: the Agreement zone opens DIRECTLY below the shared rule (the
@@ -748,7 +745,7 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   const geometry = await page.evaluate(() => {
     const rules = [...document.querySelectorAll('.gold-rule')].map((r) => r.getBoundingClientRect());
     const statement = [...document.querySelectorAll('p.font-mono')]
-      .find((p) => p.textContent?.includes('UniversalDistribution'))!
+      .find((p) => p.textContent?.includes('Universal Distribution'))!
       .getBoundingClientRect();
     const button = [...document.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === 'Submit'
@@ -892,6 +889,73 @@ test('the final Agreement & Seal zone: identical statement voice, a Submit butto
   const finalRuler = page.locator('.gold-rule').nth(7);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
+});
+
+test('the sealed composition UNSEALS on a double-click: fields turn editable again, the local key is cleared, and a refresh stays unsealed', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Seal first: type into all five entries, then click Submit once.
+  await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
+  await page.getByRole('textbox', { name: 'Legal Name' }).fill('Nova Reign');
+  await page.getByRole('textbox', { name: 'Email' }).fill('nova@example.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('Nova Reign Studio');
+  await page.getByRole('textbox', { name: 'Core Industry & Title' }).fill('Producer');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  const SEALED_INPUT_CLASS =
+    'h-10 w-64 cursor-default bg-transparent text-center text-lg text-emerald-300 caret-transparent outline-none';
+  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Password', 'Core Industry & Title']) {
+    const input = page.getByRole('textbox', { name: label });
+    await expect(input).toHaveAttribute('readonly', '');
+    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
+  }
+  const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  expect(JSON.parse(stored ?? 'null')).toMatchObject({ sealed: true });
+
+  // The sealed button carries the discoverability tooltip ONLY while sealed.
+  const button = page.getByRole('button', { name: 'Submit' });
+  expect(await button.getAttribute('title')).toBe('Double-click to unseal');
+
+  // Double-click unseals: the seal key is removed and every field turns
+  // editable again with the jade unsealed styling.
+  await button.dblclick();
+  const UNSEALED_INPUT_CLASS =
+    'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none';
+  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Password', 'Core Industry & Title']) {
+    const input = page.getByRole('textbox', { name: label });
+    await expect(input).not.toHaveAttribute('readonly', '');
+    expect(await input.getAttribute('class')).toBe(UNSEALED_INPUT_CLASS);
+  }
+  expect(await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'))).toBeNull();
+
+  // The button returns to the bright pressable rest state and loses the
+  // tooltip.
+  const REST_BUTTON_CLASS =
+    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+  expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
+  expect(await button.getAttribute('title')).toBeNull();
+
+  // The fields kept their values through the unseal — they are editable, not
+  // wiped.
+  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveValue('Nova Reign');
+
+  // A refresh stays unsealed: no stored key, nothing rehydrates to readOnly.
+  await page.reload();
+  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Password', 'Core Industry & Title']) {
+    await expect(page.getByRole('textbox', { name: label })).not.toHaveAttribute('readonly', '');
+  }
+  expect(await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'))).toBeNull();
+
+  // Re-seal with a single click — and the sealed single click is STILL a
+  // no-op.
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
+  const storedBefore = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  await page.getByRole('button', { name: 'Submit' }).click();
+  const storedAfter = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
+  expect(storedAfter).toBe(storedBefore);
+  expect(await button.getAttribute('title')).toBe('Double-click to unseal');
 });
 
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
