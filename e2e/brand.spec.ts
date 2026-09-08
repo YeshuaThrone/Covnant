@@ -29,26 +29,38 @@ test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.
   expect(icon).toContain('CV');
 });
 
-test('the COMPANY ID statement fills the former reserved black-space region: canonical header, three gradient paragraphs, frozen copy, and the tenth golden ruler', async ({
+test('the COMPANY ID statement fills the former reserved black-space region: capability-card panel, sans gold header, two interior rules, frozen copy, and the twelfth golden ruler', async ({
   page,
 }) => {
   await page.goto('/');
 
-  // Statement header in the canonical zone-statement treatment — rendered
-  // exactly once across the whole composition.
-  const header = page.locator('p', { hasText: 'COMPANY ID' });
-  await expect(header).toHaveCount(1);
-  await expect(header).toHaveText('COMPANY ID');
-  const headerClass = (await header.getAttribute('class')) ?? '';
-  for (const token of ['mt-8', 'font-mono', 'text-sm', 'uppercase', 'tracking-[0.3em]', 'text-gold-champagne']) {
-    expect(headerClass).toContain(token);
+  // ONE glass panel page-wide, recovered verbatim from the removed
+  // capability cards (133ec05): glass-card p-6 flex flex-col gap-3,
+  // holding the centered max-w-3xl column.
+  const panel = page.locator('.glass-card');
+  await expect(panel).toHaveCount(1);
+  const panelClass = (await panel.getAttribute('class')) ?? '';
+  for (const token of ['glass-card', 'p-6', 'flex', 'flex-col', 'gap-3', 'max-w-3xl', 'text-center']) {
+    expect(panelClass).toContain(token);
   }
 
-  // Three paragraphs carry the exact hero-headline gradient sweep (static
-  // — no animation), inside the section's centered column: the first spaced
-  // mt-10 off the header, its siblings mt-8.
-  const companyIdSection = page.locator('section[class*="min-h-[300px]"]');
-  const paragraphs = companyIdSection.locator('p.bg-gradient-to-r');
+  // Header in the cards' exact title voice (text-lg font-semibold
+  // text-gold, Title Case) — the mono statement treatment is gone: no
+  // font-mono, no tracking-[0.3em], no uppercase, no champagne.
+  const header = panel.locator('h2');
+  await expect(header).toHaveCount(1);
+  await expect(header).toHaveText('Company ID');
+  const headerClass = (await header.getAttribute('class')) ?? '';
+  for (const token of ['text-lg', 'font-semibold', 'text-gold']) {
+    expect(headerClass).toContain(token);
+  }
+  for (const token of ['font-mono', 'tracking-[0.3em]', 'uppercase', 'text-gold-champagne']) {
+    expect(headerClass).not.toContain(token);
+  }
+
+  // Three paragraphs keep the exact hero-headline gradient sweep (static
+  // — no animation), now inside the panel.
+  const paragraphs = panel.locator('p.bg-gradient-to-r');
   await expect(paragraphs).toHaveCount(3);
   const paragraphTokens = [
     'from-gold-champagne',
@@ -59,30 +71,34 @@ test('the COMPANY ID statement fills the former reserved black-space region: can
     'font-bold',
     'tracking-tight',
   ];
-  for (const [index, expectedMargin] of [
-    [0, 'mt-10'],
-    [1, 'mt-8'],
-    [2, 'mt-8'],
-  ] as const) {
-    const paragraphClass = (await paragraphs.nth(index).getAttribute('class')) ?? '';
+  for (const paragraphClass of await paragraphs.evaluateAll((els) => els.map((el) => el.getAttribute('class') ?? ''))) {
     for (const token of paragraphTokens) {
       expect(paragraphClass).toContain(token);
     }
-    expect(paragraphClass).toContain(expectedMargin);
   }
 
-  // The user's copy is frozen: the key phrases render verbatim — no
-  // copyediting, exact punctuation.
-  await expect(companyIdSection).toContainText('autonomous clearinghouse built with Integrity');
-  await expect(companyIdSection).toContainText('in house clearing framework protocol');
-  await expect(companyIdSection).toContainText('Own Your Creation!');
-  await expect(companyIdSection).toContainText('etc., every, any & all global enterprises');
+  // The user's copy is frozen and renders exactly once in the DOM —
+  // no copyediting, exact punctuation.
+  await expect(page.getByText('autonomous clearinghouse built with Integrity')).toHaveCount(1);
+  await expect(page.getByText('in house clearing framework protocol')).toHaveCount(1);
+  await expect(page.getByText('Own Your Creation!')).toHaveCount(1);
+  await expect(page.getByText('etc., every, any & all global enterprises')).toHaveCount(1);
 
-  // The statement closes with the composition's tenth golden ruler, and no
-  // entry inputs leak into the statement section.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
-  await expect(companyIdSection.locator('.gold-rule')).toHaveCount(1);
-  await expect(companyIdSection.locator('input')).toHaveCount(0);
+  // TWO interior gold rules separate the paragraphs inside the panel
+  // (same grammar as every other rule, centered), and the section's
+  // closing rule stays after the panel — the composition's twelfth.
+  const interiorRules = panel.locator('div.gold-rule');
+  await expect(interiorRules).toHaveCount(2);
+  for (const ruleClass of await interiorRules.evaluateAll((els) => els.map((el) => el.getAttribute('class') ?? ''))) {
+    for (const token of ['gold-rule', 'w-64', 'mx-auto']) {
+      expect(ruleClass).toContain(token);
+    }
+  }
+  const section = page.locator('section[class*="min-h-[300px]"]');
+  const closerRules = section.locator('xpath=./div[contains(@class, "gold-rule")]');
+  await expect(closerRules).toHaveCount(1);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
+  await expect(section.locator('input')).toHaveCount(0);
 });
 
 test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({
@@ -103,9 +119,10 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   // 12) closes with the composition's final golden ruler: hero threshold,
   // URD close, shared rule, Legal Name bottom ruler, Email bottom ruler,
   // Phone Number bottom ruler, Core Industry & Title bottom ruler, Password
-  // bottom ruler, Agreement bottom ruler, Company ID closing ruler — TEN
-  // golden rulers total.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  // bottom ruler, Agreement bottom ruler, Company ID closing ruler, plus
+  // the TWO interior paragraph rules inside the Company ID panel
+  // (amendments 12.1–12.3) — TWELVE golden rulers total.
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement carries the exact URD treatment.
   const statement = page.locator('p', { hasText: 'Stage Name' });
@@ -264,7 +281,7 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
   // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
   // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -363,7 +380,7 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   const sharedTopRule = legalInput.locator('xpath=following-sibling::*[1][contains(@class, "gold-rule")]');
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Email');
-  const finalRuler = page.locator('.gold-rule').nth(9);
+  const finalRuler = page.locator('.gold-rule').nth(11);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 
@@ -413,7 +430,7 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
   // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
   // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -556,7 +573,7 @@ test('the mirrored Phone Number zone sits UNDER the Email zone (amendment 11.2):
 
   // Nine golden rulers — the Phone Number bottom ruler inserts between the
   // Email and Core Industry & Title rulers (amendment 11.2).
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string matches field-for-field.
@@ -634,7 +651,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
   // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
   // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -778,7 +795,7 @@ test('the mirrored Password zone closes the entry column above the consent compo
   // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
   // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
   // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // Statement repeats the Stage Name statement's treatment EXACTLY — the
   // source class string and every computed style match field-for-field.
@@ -860,7 +877,7 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   // rule, the Legal Name bottom ruler, the Email bottom ruler, the Phone
   // Number bottom ruler (amendment 11.2), the Core Industry & Title bottom
   // ruler, the Password bottom ruler, and the Agreement bottom ruler.
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
 
   // The wide agreement statement is GONE (micro-edit 11): neither the full
   // string nor any fragment of it appears anywhere on the page.
@@ -1039,7 +1056,7 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   expect(await unsealHint.getAttribute('class')).toBe(
     'mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne',
   );
-  await expect(page.locator('.gold-rule')).toHaveCount(10);
+  await expect(page.locator('.gold-rule')).toHaveCount(12);
   const SEALED_BUTTON_CLASS =
     'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default text-gold-champagne/50';
   expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
@@ -1081,7 +1098,7 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   // element: NOTHING follows it in its section — no elements, no spacing
   // blocks, no further structure. And no entry inputs leak into that
   // section below.
-  const finalRuler = page.locator('.gold-rule').nth(9);
+  const finalRuler = page.locator('.gold-rule').nth(11);
   await expect(finalRuler.locator('xpath=following-sibling::*')).toHaveCount(0);
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 });

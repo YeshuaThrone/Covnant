@@ -51,16 +51,24 @@ export default function Home() {
         <EntryZones />
       </section>
 
-      {/* Former reserved black-space region (micro-edit 12): the COMPANY ID
-          statement fills the capability cards' original footprint. The 300px
-          floor measured on 9b34072 at 1440×900 is kept as a minimum — the
-          section grows naturally with the statement content. */}
+      {/* Former reserved black-space region (micro-edit 12, amendments
+          12.1–12.3): the COMPANY ID statement fills the capability cards'
+          original footprint inside ONE panel recovered verbatim from the
+          removed cards (133ec05): glass-card p-6 flex flex-col gap-3. The
+          header reuses the cards' exact title classes (text-lg font-semibold
+          text-gold, sans, Title Case) — the mono statement treatment is gone.
+          Two interior gold rules separate the frozen paragraphs; the section's
+          closing rule stays after the panel. The 300px floor measured on
+          9b34072 at 1440×900 is kept as a minimum — the section grows
+          naturally with the statement content. */}
       <section className="w-full max-w-4xl flex flex-col items-center pb-24 min-h-[300px]">
-        <div className="max-w-3xl mx-auto text-center">
-          <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">COMPANY ID</p>
-          <p className="mt-10 bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P1}</p>
-          <p className="mt-8 bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P2}</p>
-          <p className="mt-8 bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P3}</p>
+        <div className="glass-card p-6 flex flex-col gap-3 max-w-3xl mx-auto text-center">
+          <h2 className="text-lg font-semibold text-gold">Company ID</h2>
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P1}</p>
+          <div className="gold-rule w-64 mx-auto" />
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P2}</p>
+          <div className="gold-rule w-64 mx-auto" />
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P3}</p>
         </div>
         <div className="gold-rule w-64" />
       </section>
