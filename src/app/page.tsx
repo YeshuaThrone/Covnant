@@ -72,6 +72,25 @@ export default function Home() {
           className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
         />
         <div className="gold-rule w-64" />
+
+        {/* Email entry zone — a straight mirror of the Legal Name zone.
+            The ruler above doubles as this zone's SHARED TOP RULE (untouched,
+            same y as approved). The statement repeats the exact champagne mono
+            treatment and the same 32px top gap below the shared rule; the
+            invisible input repeats the Legal Name field byte-for-byte
+            (chromeless h-10 w-64, jade typed text, gold caret, aria-label
+            only, local-only — no email validation, no submission wiring); a
+            new bottom golden ruler closes the zone HUGGING the input — zero
+            margin above it, a true pixel mirror of the Legal Name zone.
+            NOTHING follows the ruler — the region below stays empty black
+            space. */}
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Email</p>
+        <input
+          type="text"
+          aria-label="Email"
+          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
+        />
+        <div className="gold-rule w-64" />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this
