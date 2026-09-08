@@ -7,6 +7,18 @@ import { EntryZones } from '@/components/landing/EntryZones';
 // no stale prerender of '/' on Vercel.
 export const dynamic = 'force-dynamic';
 
+// Micro-edit 12 — the COMPANY ID statement. The user's copy is FROZEN: it
+// renders verbatim with no copyediting (capital-I 'Integrity', unhyphenated
+// 'in house clearing framework protocol', the 'etc.,' enumeration, and the
+// 'Own Your Creation!' motto). Held as string constants rendered via {expr}
+// so the apostrophes never trip react/no-unescaped-entities.
+const COMPANY_ID_P1 =
+  'Whether you create or operate in Music, Gaming & Interactive, Podcasting, Streaming, Social Media, Publishing, Film, TV & Video, Sports & Athletics, Fashion & Apparel, Modeling & CAD, Visual Arts & Design, Books & Literature, Digital Assets & Software, VTubing & Virtual Avatars, or all of the above, Covnant is the autonomous clearinghouse built with Integrity for your absolute independence. Your assets, your identity, and your equity remain uncompromised. This engine doesn\'t bend, alter, or negotiate with or from outside pressure.';
+const COMPANY_ID_P2 =
+  'Existing industry pipelines force modern creators to navigate fragmented networks, opaque accounting, and delayed earnings. Covnant replaces that friction with a unified, institutional-grade infrastructure that consolidates multi-channel distribution, and contractual execution into a single, high-performance in house clearing framework protocol.';
+const COMPANY_ID_P3 =
+  'By automating clearance across every sector and every nook & cranny within them. Covnant ensures that independent artists, IP owners, record labels, publishers, studios, production companies, retail stores, lounges, nightclubs, hotels, fashion houses, sports teams & brands, Interactive Media & Immersive Tech, Storytelling & Gamified Platforms, VTubing & Virtual Avatars, Simulations & CAD Asset Stores, Professional Leagues & Governing Bodies, Broadcasters & Media Rights Holders, Sports Franchises & Clubs, Talent & Management Agencies, Apparel, Gear & Equipment Manufacturers, Venues, Stadiums & Event Promoters, Arena operators, tournament organizers, motorsport circuits etc., every, any & all global enterprises retain total authority over their assets, eliminate administrative bloat, and command immediate control over their cash flow. We honor execution over promises. Infrastructure isn\'t built on theory; it\'s forged through relentless precision, unbroken focus, and zero tolerance for inefficiency. We ensure your creation and assets are owned by you hence our company motto: Own Your Creation!';
+
 
 export default function Home() {
   return (
@@ -39,10 +51,27 @@ export default function Home() {
         <EntryZones />
       </section>
 
-      {/* Reserved black-space region: the capability cards were removed, but this
-          area keeps their original 300px vertical footprint (measured on 9b34072
-          at 1440×900) for content that will be added here later. */}
-      <section className="w-full max-w-4xl grid md:grid-cols-2 gap-6 pb-24 min-h-[300px]" />
+      {/* Former reserved black-space region (micro-edit 12, amendments
+          12.1–12.3): the COMPANY ID statement fills the capability cards'
+          original footprint inside ONE panel recovered verbatim from the
+          removed cards (133ec05): glass-card p-6 flex flex-col gap-3. The
+          header reuses the cards' exact title classes (text-lg font-semibold
+          text-gold, sans, Title Case) — the mono statement treatment is gone.
+          Two interior gold rules separate the frozen paragraphs; the section's
+          closing rule stays after the panel. The 300px floor measured on
+          9b34072 at 1440×900 is kept as a minimum — the section grows
+          naturally with the statement content. */}
+      <section className="w-full max-w-4xl flex flex-col items-center pb-24 min-h-[300px]">
+        <div className="glass-card p-6 flex flex-col gap-3 max-w-3xl mx-auto text-center">
+          <h2 className="text-lg font-semibold text-gold">Company ID</h2>
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P1}</p>
+          <div className="gold-rule w-64 mx-auto" />
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P2}</p>
+          <div className="gold-rule w-64 mx-auto" />
+          <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P3}</p>
+        </div>
+        <div className="gold-rule w-64" />
+      </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
         © {new Date().getFullYear()} {BRAND.name}. {BRAND.descriptor}.
