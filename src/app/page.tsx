@@ -61,7 +61,12 @@ export default function Home() {
           closing rule stays after the panel. The 300px floor measured on
           9b34072 at 1440×900 is kept as a minimum — the section grows
           naturally with the statement content. */}
-      <section className="w-full max-w-4xl flex flex-col items-center pb-24 min-h-[300px]">
+      {/* Amendment 13.3 — the zone below is raised at the user's direction.
+          First '~2cm' (pb-5), then revised to 'or maybe pull it up 1 inch'
+          — 1in = 96px = the entire former pb-24, so the bottom padding is
+          removed entirely (pb-0): the ENTERPRISE DIRECT top ruler sits
+          flush beneath this section's closing gold rule with zero gap. */}
+      <section className="w-full max-w-4xl flex flex-col items-center pb-0 min-h-[300px]">
         <div className="glass-card p-6 flex flex-col gap-3 max-w-3xl mx-auto text-center">
           <h2 className="text-lg font-semibold text-gold">Company ID</h2>
           <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P1}</p>
@@ -71,6 +76,23 @@ export default function Home() {
           <p className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent font-bold tracking-tight text-base md:text-lg leading-relaxed">{COMPANY_ID_P3}</p>
         </div>
         <div className="gold-rule w-64" />
+      </section>
+
+      {/* Micro-edit 13 — the ENTERPRISE DIRECT zone. Amendment 13.1 gives
+          the zone its OWN top golden ruler as the section's first child,
+          mirroring the URD zone grammar (rule → statement → rule): the
+          statement is now flanked by twin w-64 rulers. The statement
+          repeats the canonical champagne mono zone treatment — the
+          identical class string of Universal Royalty Distribution / Stage
+          Name / Legal Name — carrying the user's own digits, 830-358-2306,
+          rendered uppercase by the class. The zone closes on the bottom
+          ruler with the URD zone's mt-10 rhythm; the composition now counts
+          fourteen golden rulers. Display statement only: no glass card, no
+          input, no tel: link. */}
+      <section className="w-full max-w-4xl flex flex-col items-center">
+        <div className="gold-rule w-64" />
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Enterprise Direct: 830-358-2306</p>
+        <div className="gold-rule mt-10 w-64" />
       </section>
 
       <footer className="w-full max-w-4xl py-10 text-center text-xs text-white/30">
