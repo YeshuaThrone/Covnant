@@ -163,12 +163,16 @@ test("the ENTERPRISE DIRECT zone closes the page beneath the Company ID section:
   });
   expect(zoneIsLastSection).toBe(true);
 
-  // Amendment 13.3: the zone sits 76px higher — the Company ID section's
-  // bottom padding is pb-5 (20px), tightened from pb-24 (96px) at the
-  // user's direction ('bring the whole zone up like 2 centimeters').
-  const companyIdClass = (await page.locator('section[class*="min-h-[300px]"]').getAttribute('class')) ?? '';
-  expect(companyIdClass).toContain('pb-5');
+  // Amendment 13.3 (revised): the zone is pulled up 1 inch — the Company ID
+  // section's bottom padding is removed entirely (pb-0; 1in = 96px = the
+  // entire former pb-24), so the ENTERPRISE DIRECT top ruler sits flush
+  // beneath the Company ID closing rule with zero gap.
+  const companyIdSection = page.locator('section[class*="min-h-[300px]"]');
+  const companyIdClass = (await companyIdSection.getAttribute('class')) ?? '';
+  expect(companyIdClass).toContain('pb-0');
   expect(companyIdClass).not.toContain('pb-24');
+  expect(companyIdClass).not.toContain('pb-5');
+  await expect(companyIdSection).toHaveCSS('padding-bottom', '0px');
 });
 
 test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({
