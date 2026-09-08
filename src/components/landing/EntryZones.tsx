@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /*
  * Entry composition — the five mirrored entry zones and the Universal
- * Agreement & Seal zone, rendered as direct children of the landing section.
+ * Consent & Seal zone, rendered as direct children of the landing section.
  * This is a client island: the seal interaction needs state over all five
  * inputs (readOnly freezing, value rehydration), which only a client
  * component can own. The rendered markup of every pre-existing zone is
@@ -209,18 +209,41 @@ export function EntryZones() {
       />
       <div className="gold-rule w-64" />
 
-      {/* Password entry zone — a straight mirror of the Email zone, inserted
-          directly beneath it (under the email portion, before the Universal
-          agreement). The ruler above doubles as this zone's SHARED TOP RULE
+      {/* Core Industry & Title entry zone — a straight mirror of the Email
+          zone. The ruler above doubles as this zone's SHARED TOP RULE
           (untouched, same y as approved). The statement repeats the exact
-          champagne mono treatment and the same 32px top gap below the shared
-          rule; the invisible input repeats the Email field byte-for-byte and
-          arrives PRE-FILLED with 'Covenant' (exactly 8 letters) as the
-          delegated starting value — type text so the jade letters show, and
-          the field stays fully editable until the seal; a new bottom golden
-          ruler closes the zone HUGGING the input — zero margin above it, a
-          true pixel mirror of the Email zone. The Core Industry & Title zone
-          follows below this ruler. */}
+          champagne mono treatment and the same 32px top gap below the
+          shared rule; the invisible input repeats the Email field
+          byte-for-byte (chromeless h-10 w-64, jade typed text, gold caret,
+          aria-label only, local-only — no validation, no submission
+          wiring); a new bottom golden ruler closes the zone HUGGING the
+          input — zero margin above it, a true pixel mirror of the Email
+          zone. The Password zone follows below this ruler (micro-edit 11
+          reorder). */}
+      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Core Industry &amp; Title</p>
+      <input
+        ref={coreIndustryTitleRef}
+        type="text"
+        aria-label="Core Industry & Title"
+        className={inputClass}
+        readOnly={sealed}
+      />
+      <div className="gold-rule w-64" />
+
+      {/* Password entry zone — a straight mirror of the Email zone, MOVED
+          here (micro-edit 11) to close the entry column: the visual flow
+          collects user data first (Stage Name → Legal Name → Email → Core
+          Industry & Title) and closes with security/consent (Password →
+          consent → Submit). The ruler above doubles as this zone's SHARED
+          TOP RULE (untouched, same y as approved). The statement repeats the
+          exact champagne mono treatment and the same 32px top gap below the
+          shared rule; the invisible input repeats the Email field
+          byte-for-byte and arrives PRE-FILLED with 'Covenant' (exactly 8
+          letters) as the delegated starting value — type text so the jade
+          letters show, and the field stays fully editable until the seal; a
+          new bottom golden ruler closes the zone HUGGING the input — zero
+          margin above it, a true pixel mirror of the Email zone. The consent
+          composition follows below this ruler. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Password</p>
       <input
         ref={passwordRef}
@@ -232,32 +255,17 @@ export function EntryZones() {
       />
       <div className="gold-rule w-64" />
 
-      {/* Core Industry & Title entry zone — a straight mirror of the Email
-          zone. The ruler above doubles as this zone's SHARED TOP RULE
-          (untouched, same y as approved). The statement repeats the exact
-          champagne mono treatment and the same 32px top gap below the
-          shared rule; the invisible input repeats the Email field
-          byte-for-byte (chromeless h-10 w-64, jade typed text, gold caret,
-          aria-label only, local-only — no validation, no submission
-          wiring); a new bottom golden ruler closes the zone HUGGING the
-          input — zero margin above it, a true pixel mirror of the Email
-          zone. NOTHING follows the ruler — the region below stays empty
-          black space. */}
-      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Core Industry &amp; Title</p>
-      <input
-        ref={coreIndustryTitleRef}
-        type="text"
-        aria-label="Core Industry & Title"
-        className={inputClass}
-        readOnly={sealed}
-      />
-      <div className="gold-rule w-64" />
-
-      {/* Universal Agreement & Seal — the final mirrored zone. The ruler
+      {/* Universal Consent & Seal — the final mirrored zone. The ruler
           above doubles as this zone's SHARED TOP RULE (untouched, same y as
-          approved). The statement repeats the exact champagne mono treatment
-          and the same 32px top gap below the shared rule; the spaced copy
-          wraps naturally — font, tracking, and color are untouched. In the
+          approved). The wide agreement statement was replaced (micro-edit
+          11) by a native consent checkbox + 'Accept UDR Terms' label: the
+          label carries the EXACT statement treatment (mt-8 font-mono
+          text-sm uppercase tracking-[0.3em] text-gold-champagne), keeping
+          the 32px gap and mono voice of the statements it joins; the
+          checkbox is the native box — champagne accent-color, focus-visible
+          gold outline matching the Submit pattern, no added chrome —
+          unchecked by default, persisting nothing, NOT part of the seal
+          payload, and the seal flow is NOT gated on it. In the
           input slot: the 'Submit' button, a BORDERLESS pressable label —
           no box, no hairline (the label brightens on hover so it reads as
           pressable; focus-visible gold outline for keyboard access).
@@ -274,9 +282,19 @@ export function EntryZones() {
           wiring. A new bottom golden ruler closes the zone HUGGING the
           button — zero margin above it. NOTHING follows the ruler — the
           region below stays empty black space. */}
-      <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">
-        I agree to the Universal Distribution &amp; Royalty Administration Terms
-      </p>
+      <div className="flex items-center justify-center gap-3">
+        <input
+          type="checkbox"
+          id="udr-terms"
+          className="mt-8 h-4 w-4 shrink-0 cursor-pointer accent-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne"
+        />
+        <label
+          htmlFor="udr-terms"
+          className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne"
+        >
+          Accept UDR Terms
+        </label>
+      </div>
       <button
         type="button"
         onClick={sealWorld}
