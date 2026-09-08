@@ -242,7 +242,7 @@ export function EntryZones() {
           approved). The statement repeats the exact champagne mono treatment
           and the same 32px top gap below the shared rule; the longer copy
           wraps naturally — font, tracking, and color are untouched. In the
-          input slot: the 'Enter Your World' button, a 1px champagne hairline
+          input slot: the 'Submit' button, a 1px champagne hairline
           at low opacity (hover brightens to full gold; focus-visible gold
           outline; square corners). Clicking seals EVERYTHING the visitor
           wrote: all five entries are captured to localStorage and frozen
@@ -257,7 +257,7 @@ export function EntryZones() {
         I agree to the Universal Distribution &amp; Royalty Administration Terms
       </p>
       <button type="button" onClick={sealWorld} className={buttonClass}>
-        Enter Your World
+        Submit
       </button>
       <div className="gold-rule w-64" />
     </>

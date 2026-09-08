@@ -716,7 +716,7 @@ test('the mirrored Password zone repeats the Email treatment between Email and C
   expect(prefilledStyles.caretColor).not.toBe(prefilledStyles.color);
 });
 
-test('the final Agreement & Seal zone: identical statement voice, an Enter Your World button in the input slot, and a local-only seal that freezes all five entries', async ({
+test('the final Agreement & Seal zone: identical statement voice, a Submit button in the input slot, and a local-only seal that freezes all five entries', async ({
   page,
 }) => {
   await page.goto('/');
@@ -748,7 +748,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
       .find((p) => p.textContent?.includes('Universal Distribution'))!
       .getBoundingClientRect();
     const button = [...document.querySelectorAll('button')].find(
-      (b) => b.textContent?.trim() === 'Enter Your World'
+      (b) => b.textContent?.trim() === 'Submit'
     )!
       .getBoundingClientRect();
     return {
@@ -771,7 +771,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
 
   // Button treatment at rest: statement-voice label, 1px champagne hairline
   // at low opacity, transparent background, square corners, pointer cursor.
-  const button = page.getByRole('button', { name: 'Enter Your World' });
+  const button = page.getByRole('button', { name: 'Submit' });
   await expect(button).toBeVisible();
   expect(await button.getAttribute('type')).toBe('button');
   const REST_BUTTON_CLASS =
@@ -801,7 +801,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
   const statementColor = await agreementStatement.evaluate((el) => getComputedStyle(el).color);
   expect(restBorderColor).not.toBe(statementColor);
 
-  // Seal flow: type into all five entries, then click Enter Your World.
+  // Seal flow: type into all five entries, then click Submit.
   await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
   await page.getByRole('textbox', { name: 'Legal Name' }).fill('Nova Reign');
   await page.getByRole('textbox', { name: 'Email' }).fill('nova@example.com');
@@ -851,7 +851,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
 
   // The button enters the sealed state: label UNCHANGED, border solidified to
   // full champagne gold, label dimmed slightly.
-  await expect(button).toHaveText('Enter Your World');
+  await expect(button).toHaveText('Submit');
   const SEALED_BUTTON_CLASS =
     'h-10 w-64 border bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default border-gold-champagne text-gold-champagne/70';
   expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
@@ -872,7 +872,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
     await expect(input).toHaveAttribute('readonly', '');
     expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
   }
-  await expect(button).toHaveText('Enter Your World');
+  await expect(button).toHaveText('Submit');
   expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
 
   // A second click is a no-op: the stored state is untouched and everything
@@ -882,7 +882,7 @@ test('the final Agreement & Seal zone: identical statement voice, an Enter Your 
   const storedAfter = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
   expect(storedAfter).toBe(storedBefore);
   await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
-  await expect(button).toHaveText('Enter Your World');
+  await expect(button).toHaveText('Submit');
 
   // The Agreement bottom ruler is the composition's last element: NOTHING
   // follows it in the section — no elements, no spacing blocks, no further
