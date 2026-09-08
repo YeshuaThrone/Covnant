@@ -29,6 +29,156 @@ test('landing shows the CV ribbon monogram, gold gradient H1 "Own Your Creation.
   expect(icon).toContain('CV');
 });
 
+test('the open black space beneath the URD zone carries the STAGE NAME statement and a fully invisible type-in field', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // The entry area is NOT a new zone: the URD zone keeps its two rules, and
+  // the entry area ends with exactly ONE golden ruler as its bottom line.
+  await expect(page.locator('.gold-rule')).toHaveCount(3);
+
+  // Statement carries the exact URD treatment.
+  const statement = page.locator('p', { hasText: 'Stage Name' });
+  await expect(statement).toHaveText('Stage Name');
+  const statementClass = await statement.getAttribute('class');
+  for (const token of [
+    'font-mono',
+    'text-sm',
+    'uppercase',
+    'tracking-[0.3em]',
+    'text-gold-champagne',
+  ]) {
+    expect(statementClass, `statement class ${token}`).toContain(token);
+  }
+
+  // Fully invisible field: transparent, borderless in EVERY state — the only
+  // things that ever become visible are the typed name and the gold caret.
+  const input = page.getByRole('textbox', { name: 'Stage Name' });
+  await expect(input).toBeVisible();
+  expect(await input.getAttribute('placeholder')).toBeNull();
+
+  const chromeOf = (el: Element) => {
+    const s = getComputedStyle(el);
+    return {
+      background: s.backgroundColor,
+      borderTopWidth: s.borderTopWidth,
+      borderRightWidth: s.borderRightWidth,
+      borderBottomWidth: s.borderBottomWidth,
+      borderLeftWidth: s.borderLeftWidth,
+      outlineStyle: s.outlineStyle,
+      boxShadow: s.boxShadow,
+      cursor: s.cursor,
+    };
+  };
+
+  // At rest: no chrome at all, cursor-text for discoverability.
+  const atRest = await input.evaluate(chromeOf);
+  expect(atRest.background).toBe('rgba(0, 0, 0, 0)');
+  expect(atRest.borderTopWidth).toBe('0px');
+  expect(atRest.borderRightWidth).toBe('0px');
+  expect(atRest.borderBottomWidth).toBe('0px');
+  expect(atRest.borderLeftWidth).toBe('0px');
+  expect(atRest.outlineStyle).toBe('none');
+  expect(atRest.boxShadow).toBe('none');
+  expect(atRest.cursor).toBe('text');
+
+  // On focus: still no lines, no glow — every state chromeless.
+  await input.focus();
+  const onFocus = await input.evaluate(chromeOf);
+  expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
+  expect(onFocus.borderTopWidth).toBe('0px');
+  expect(onFocus.borderRightWidth).toBe('0px');
+  expect(onFocus.borderBottomWidth).toBe('0px');
+  expect(onFocus.borderLeftWidth).toBe('0px');
+  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.boxShadow).toBe('none');
+
+  // Placement: the field sits directly beneath the statement in the open black
+  // space — never in the reserved region below.
+  await expect(statement.locator('xpath=following-sibling::input[@aria-label="Stage Name"]')).toBeVisible();
+  await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
+
+  // The golden ruler directly below the input acts as the entry area's bottom
+  // line: it is the input's only following sibling and NOTHING follows it in
+  // the section — no elements, no spacing blocks, no further structure.
+  const bottomLine = statement.locator('xpath=following-sibling::div[contains(@class, "gold-rule")]');
+  await expect(bottomLine).toHaveCount(1);
+  await expect(bottomLine.first().locator('xpath=following-sibling::*')).toHaveCount(0);
+
+  // HARD ACCEPTANCE GEOMETRY: the band interior between the URD closing rule
+  // and the bottom golden ruler measures EXACTLY 92px (32 + 20 + 40) — the
+  // input occupies the existing 40px slot with zero net added height, fully
+  // inside that slot, centered on the zone axis.
+  const geometry = await page.evaluate(() => {
+    const rules = [...document.querySelectorAll('.gold-rule')];
+    const rule2 = rules[1].getBoundingClientRect();
+    const rule3 = rules[2].getBoundingClientRect();
+    const statement = [...document.querySelectorAll('p.font-mono')]
+      .find((p) => p.textContent?.includes('Stage Name'))!
+      .getBoundingClientRect();
+    const input = document.querySelector('input[aria-label="Stage Name"]')!.getBoundingClientRect();
+    return {
+      bandInterior: rule3.top - rule2.bottom,
+      statementGap: statement.top - rule2.bottom,
+      inputHeight: input.height,
+      inputTop: input.top,
+      inputBottom: input.bottom,
+      statementBottom: statement.bottom,
+      rulerTop: rule3.top,
+      ruleCenter: rule2.left + rule2.width / 2,
+      inputCenter: input.left + input.width / 2,
+    };
+  });
+  expect(geometry.bandInterior).toBeCloseTo(92, 0);
+  expect(geometry.statementGap).toBeCloseTo(32, 0);
+  expect(geometry.inputHeight).toBeCloseTo(40, 0);
+  expect(geometry.inputTop).toBeGreaterThanOrEqual(geometry.statementBottom - 0.5);
+  expect(geometry.inputBottom).toBeLessThanOrEqual(geometry.rulerTop + 0.5);
+  expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
+
+  // Typing renders the name exactly like the hero subtitle treatment —
+  // "The Immutable Truth Engine" (text-lg text-emerald-300, default font, no
+  // uppercase, normal letter-spacing): the name displays as the artist types
+  // it, matched field-by-field against the subtitle's computed styles.
+  await input.fill('Test Artist');
+  await expect(input).toHaveValue('Test Artist');
+  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
+  const subtitleStyles = await subtitle.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+    };
+  });
+  const typedStyles = await input.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      fontSize: s.fontSize,
+      color: s.color,
+      textTransform: s.textTransform,
+      letterSpacing: s.letterSpacing,
+      fontFamily: s.fontFamily,
+      caretColor: s.caretColor,
+    };
+  });
+  // Not the old champagne treatment; color serialization varies by browser
+  // (Tailwind v4 emerald is lab-space), so pin the subtitle match instead of
+  // a literal rgb string.
+  expect(typedStyles.color).not.toBe('rgb(243, 229, 171)');
+  expect(typedStyles.fontSize).toBe('18px');
+  expect(typedStyles.textTransform).toBe('none');
+  expect(typedStyles.color).toBe(subtitleStyles.color);
+  expect(typedStyles.fontSize).toBe(subtitleStyles.fontSize);
+  expect(typedStyles.letterSpacing).toBe(subtitleStyles.letterSpacing);
+  expect(typedStyles.fontFamily).toBe(subtitleStyles.fontFamily);
+  // The caret stays gold — distinct from the jade text color.
+  expect(typedStyles.caretColor).not.toBe(typedStyles.color);
+});
+
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
   request,
 }) => {

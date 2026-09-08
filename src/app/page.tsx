@@ -34,6 +34,26 @@ export default function Home() {
 
         <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Universal Royalty Distribution</p>
         <div className="gold-rule mt-10 w-64" />
+
+        {/* Stage Name entry in open black space below the URD zone — NOT a new
+            zone. The statement keeps the established 32px top gap; the invisible
+            input occupies the EXISTING 40px slot between statement and bottom
+            ruler (h-10, zero margins — zero net added height), so the band
+            interior stays EXACTLY 92px (32 + 20 + 40) and the bottom ruler sits
+            at the approved y. The ruler doubles as the entry area's bottom
+            line; nothing follows it. The input is fully chromeless at every
+            state — no border, no focus glow, no placeholder; only the typed
+            name (hero-subtitle treatment: text-lg text-emerald-300, displayed
+            exactly as the artist types it) and the gold caret ever appear.
+            cursor-text keeps the invisible field discoverable; accessible via
+            aria-label. */}
+        <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Stage Name</p>
+        <input
+          type="text"
+          aria-label="Stage Name"
+          className="h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none"
+        />
+        <div className="gold-rule w-64" />
       </section>
 
       {/* Reserved black-space region: the capability cards were removed, but this
