@@ -148,6 +148,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       '0001_covenant_init.sql',
       '0002_contracts.sql',
       '0003_creator_profiles.sql',
+      '0004_creator_compliance.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
