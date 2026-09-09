@@ -79,10 +79,10 @@ test('the COMPANY ID statement fills the former reserved black-space region: cap
 
   // The user's copy is frozen and renders exactly once in the DOM —
   // no copyediting, exact punctuation.
-  await expect(page.getByText('autonomous clearinghouse built with Integrity')).toHaveCount(1);
-  await expect(page.getByText('in house clearing framework protocol')).toHaveCount(1);
+  await expect(page.getByText('autonomous clearinghouse built for your absolute independence with integrity')).toHaveCount(1);
+  await expect(page.getByText('in-house clearing framework protocol')).toHaveCount(1);
   await expect(page.getByText('Own Your Creation!')).toHaveCount(1);
-  await expect(page.getByText('etc., every, any & all global enterprises')).toHaveCount(1);
+  await expect(page.getByText('etc. — all global enterprises')).toHaveCount(1);
 
   // TWO interior gold rules separate the paragraphs inside the panel
   // (same grammar as every other rule, centered), and the section's
