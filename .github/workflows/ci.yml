@@ -54,7 +54,7 @@ jobs:
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0001_covenant_init.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0002_contracts.sql
           # Supabase-auth shim (test-only, never shipped as a migration):
-          # migrations 0003/0004 assume the Supabase environment — the
+          # migrations 0003/0004/0005 assume the Supabase environment — the
           # auth.users table, the auth.uid() helper, and the
           # authenticated/service_role roles — which vanilla Postgres lacks.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 <<'SQL'
@@ -72,6 +72,7 @@ jobs:
           SQL
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0003_creator_profiles.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0004_creator_compliance.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0005_admin_action_log.sql
 
       - name: Assert the engine's exact columns exist
         env:

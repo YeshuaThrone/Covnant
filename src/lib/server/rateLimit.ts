@@ -23,6 +23,9 @@ export type RateLimitConfig = {
 /** Signup registration: 5 requests per client address per minute. */
 export const REGISTER_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
 
+/** Admin console sign-in: 5 attempts per client address per minute (the shared secret's brute-force window). */
+export const ADMIN_LOGIN_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
+
 export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 type Bucket = { count: number; windowStart: number };
