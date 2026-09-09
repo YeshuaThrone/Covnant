@@ -11,7 +11,9 @@
  */
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { CovenantAuditorAgent, type SystemAuditReport } from '@/engine/covenant-master-sdk';
+import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { markContractFinal, saveContract } from '@/lib/contracts/store';
 import type { AgreementContext } from '@/lib/contracts/generator';
 import type { ContractIndustry } from '@/lib/contracts/templates';
@@ -28,6 +30,16 @@ export interface AuditActionFailure {
 }
 
 export async function runVaultAuditAction(): Promise<AuditActionResult | AuditActionFailure> {
+  // Gated from day one (admin console PR): this action ran unauthenticated
+  // until now. Every invocation must carry a valid admin session cookie —
+  // unset secret → admin_not_configured (fail closed), absent/expired/
+  // forged cookie → admin_not_authenticated. The failure rides the same
+  // shape the audit runner already renders.
+  const cookieStore = await cookies();
+  const verdict = verifyAdminSession(cookieStore.get(ADMIN_COOKIE_NAME)?.value);
+  if (!verdict.ok) {
+    return { success: false, error: verdict.code };
+  }
   try {
     const auditor = new CovenantAuditorAgent(getSdk());
     const report = await auditor.RunFullSystemAudit();
