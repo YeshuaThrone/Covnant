@@ -72,9 +72,9 @@ const INVENTORIED_FILES: Record<string, string> = {
   'app/api/artist/dashboard/route.ts': 'READ — escrow dashboard balance source',
   'app/api/banking/denomination.ts': 'DOC — cents/decimal storage note',
   'app/api/banking/route.ts': 'RAW_SQL ×6 — Gen 8 stamped INSERTs (3 wired paths)',
-  'app/api/covenant/accounts/provision/route.ts': 'DOC — webhook crediting note',
-  'app/api/covenant/auth/signup/route.ts': 'DOC — scope guard (never touches the ledger)',
-  'app/api/covenant/webhooks/increase/route.ts': 'RAW_SQL ×2 — Gen 8 stamped INSERTs (1 wired merge)',
+  'app/api/covnant/accounts/provision/route.ts': 'DOC — webhook crediting note',
+  'app/api/covnant/auth/signup/route.ts': 'DOC — scope guard (never touches the ledger)',
+  'app/api/covnant/webhooks/increase/route.ts': 'RAW_SQL ×2 — Gen 8 stamped INSERTs (1 wired merge)',
   'app/api/health/db/route.ts': 'READ — count probe',
   'app/api/ledger/route.ts': 'READ — store-backed listing',
   'app/api/payouts/withdraw/route.ts': 'SUPABASE_JS ×2 — Gen 9 stamped DISBURSEMENT insert (1 wired site)',
@@ -89,7 +89,7 @@ const INVENTORIED_FILES: Record<string, string> = {
 describe('T1 extended — the universal_royalty_ledger write inventory is pinned', () => {
   it('pins mechanism 1 at exactly 8 raw-SQL INSERT statements (banking 6 + webhook 2)', () => {
     const banking = read('app/api/banking/route.ts');
-    const webhook = read('app/api/covenant/webhooks/increase/route.ts');
+    const webhook = read('app/api/covnant/webhooks/increase/route.ts');
     expect(countMatches(banking, /INSERT INTO universal_royalty_ledger/g)).toBe(6);
     expect(countMatches(webhook, /INSERT INTO universal_royalty_ledger/g)).toBe(2);
     // Gen 8 stamps stay wired exactly as shipped.
@@ -121,7 +121,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
   it('pins the full inventory at 13 ledger-write call expressions across 7 wired paths', () => {
     const raw =
       countMatches(read('app/api/banking/route.ts'), /INSERT INTO universal_royalty_ledger/g) +
-      countMatches(read('app/api/covenant/webhooks/increase/route.ts'), /INSERT INTO universal_royalty_ledger/g);
+      countMatches(read('app/api/covnant/webhooks/increase/route.ts'), /INSERT INTO universal_royalty_ledger/g);
     const supabaseJs =
       countMatches(read('app/api/payouts/withdraw/route.ts'), /from\('universal_royalty_ledger'\)\s*\.insert\(/g) +
       countMatches(read('lib/ledger/store.ts'), /from\('universal_royalty_ledger'\)\s*\.upsert\(/g);
