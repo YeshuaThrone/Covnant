@@ -4,7 +4,7 @@
  * Purpose: register a self-serve rights holder from nothing but an email
  * address, then trigger the SAME Increase virtual-account provisioning flow
  * the provision route runs — through the shared core in
- * src/lib/covenant/provisioning.ts (no internal HTTP self-calls).
+ * src/lib/covnant/provisioning.ts (no internal HTTP self-calls).
  *
  * Identity model (stated choice, see PR body): cbt_assets rows are creative
  * works in this platform — the SDK registers works and their collaborating
@@ -81,7 +81,7 @@ import { getDb, type Db } from '@/lib/db';
 import {
   provisionRightsHolderVirtualAccount,
   storedVirtualAccount,
-} from '@/lib/covenant/provisioning';
+} from '@/lib/covnant/provisioning';
 import {
   DEFAULT_UCT_JURISDICTION,
   buildUct,
@@ -90,7 +90,7 @@ import {
   uctIssuanceYear,
   uctSerial,
   type SignupEngine,
-} from '@/lib/covenant/uct';
+} from '@/lib/covnant/uct';
 
 export const dynamic = 'force-dynamic';
 

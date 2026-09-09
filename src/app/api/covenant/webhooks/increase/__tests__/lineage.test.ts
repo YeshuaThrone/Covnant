@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
 import { getDb } from '@/lib/db';
-import { parseExternalReferences } from '@/lib/covenant/lineage';
+import { parseExternalReferences } from '@/lib/covnant/lineage';
 
 /**
  * POST /api/covenant/webhooks/increase — ledger lineage acceptance tests
@@ -15,8 +15,8 @@ import { parseExternalReferences } from '@/lib/covenant/lineage';
  */
 
 vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
-vi.mock('@/lib/covenant/lineage', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/covenant/lineage')>();
+vi.mock('@/lib/covnant/lineage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/covnant/lineage')>();
   return { ...actual, parseExternalReferences: vi.fn(actual.parseExternalReferences) };
 });
 

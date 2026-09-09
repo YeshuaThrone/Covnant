@@ -41,7 +41,7 @@
  *
  * The three-phase provisioning flow (FOR UPDATE serialization, external
  * call outside any transaction, deterministic idempotency key, sibling-
- * preserving JSONB rewrite) lives in src/lib/covenant/provisioning.ts and
+ * preserving JSONB rewrite) lives in src/lib/covnant/provisioning.ts and
  * is shared verbatim with the instant sign-up route
  * (/api/covenant/auth/signup). This route keeps only request validation,
  * environment fail-closed checks, and the HTTP mapping of the returned
@@ -58,7 +58,7 @@ import { getDb } from '@/lib/db';
 import {
   provisionRightsHolderVirtualAccount,
   type ProvisioningOutcome,
-} from '@/lib/covenant/provisioning';
+} from '@/lib/covnant/provisioning';
 
 export const dynamic = 'force-dynamic';
 

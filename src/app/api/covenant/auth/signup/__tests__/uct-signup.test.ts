@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
 import { getDb } from '@/lib/db';
-import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covenant/uct';
+import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covnant/uct';
 
 /**
  * POST /api/covenant/auth/signup — UCT (creator-root identity) acceptance
@@ -18,8 +18,8 @@ import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covenant/uct';
  */
 
 const uctModule = vi.hoisted(() => ({ realUctSerial: undefined as (() => string) | undefined }));
-vi.mock('@/lib/covenant/uct', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/covenant/uct')>();
+vi.mock('@/lib/covnant/uct', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/covnant/uct')>();
   uctModule.realUctSerial = actual.uctSerial;
   return { ...actual, uctSerial: vi.fn(actual.uctSerial) };
 });

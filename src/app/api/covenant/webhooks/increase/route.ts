@@ -121,7 +121,7 @@ import {
   buildLineageMetadata,
   parseExternalReferences,
   type ExternalReferenceKind,
-} from '@/lib/covenant/lineage';
+} from '@/lib/covnant/lineage';
 import { withCbtSettlementCode } from '@/lib/ledger/cbt-settlement';
 
 export const dynamic = 'force-dynamic';
