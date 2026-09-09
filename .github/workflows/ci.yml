@@ -53,6 +53,25 @@ jobs:
         run: |
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0001_covenant_init.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0002_contracts.sql
+          # Supabase-auth shim (test-only, never shipped as a migration):
+          # migrations 0003/0004 assume the Supabase environment — the
+          # auth.users table, the auth.uid() helper, and the
+          # authenticated/service_role roles — which vanilla Postgres lacks.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 <<'SQL'
+            create schema if not exists auth;
+            create table if not exists auth.users (id uuid primary key);
+            create or replace function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
+            do $$ begin
+              if not exists (select from pg_roles where rolname = 'authenticated') then
+                create role authenticated nologin;
+              end if;
+              if not exists (select from pg_roles where rolname = 'service_role') then
+                create role service_role nologin;
+              end if;
+            end $$;
+          SQL
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0003_creator_profiles.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0004_creator_compliance.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -71,6 +90,21 @@ jobs:
           assert_cols universal_royalty_ledger transaction_id cbt_code platform gross_settled covenant_fee corner_dust_collected currency disbursements created_at
           assert_cols platform_allowlists cbt_code
           assert_cols contracts id cbt_code template_id industry status fields document
+          assert_cols creator_profiles id stage_name legal_name email phone phone_verified_at core_industry title udr_terms_accepted_at created_at kyc_status tax_form_type tax_verified bank_account_linked
+
+          # Compliance columns: exact defaults + nullability (migration 0004),
+          # checked against information_schema on the real scratch Postgres.
+          assert_col_shape() {
+            local table="$1" col="$2" want="$3"
+            local got=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select is_nullable || '|' || coalesce(column_default, '<none>') from information_schema.columns where table_schema='public' and table_name='$table' and column_name='$col'")
+            [ "$got" = "$want" ] || { echo "BAD $table.$col: got '$got', want '$want'"; exit 1; }
+            echo "OK: $table.$col = $want"
+          }
+          assert_col_shape creator_profiles kyc_status "YES|'PENDING_INITIALIZATION'::character varying"
+          assert_col_shape creator_profiles tax_form_type "YES|'W9'::character varying"
+          assert_col_shape creator_profiles tax_verified "YES|false"
+          assert_col_shape creator_profiles bank_account_linked "YES|false"
 
   e2e:
     runs-on: ubuntu-latest
