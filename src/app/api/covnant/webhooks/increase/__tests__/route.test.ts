@@ -4,7 +4,7 @@ import { POST } from '../route';
 import { getDb } from '@/lib/db';
 
 /**
- * POST /api/covenant/webhooks/increase contract tests
+ * POST /api/covnant/webhooks/increase contract tests
  * (CovnantRoyaltyTrackingAPI, rail-agnostic).
  *
  * Covers the pinned Standard Webhooks HMAC verification, the per-rail
@@ -153,7 +153,7 @@ function signedHeaders(
 }
 
 function webhookRequest(rawBody: string, headers: Record<string, string> = {}): Request {
-  return new Request('http://localhost/api/covenant/webhooks/increase', {
+  return new Request('http://localhost/api/covnant/webhooks/increase', {
     method: 'POST',
     headers,
     body: rawBody,
@@ -310,7 +310,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('POST /api/covenant/webhooks/increase', () => {
+describe('POST /api/covnant/webhooks/increase', () => {
   describe('HMAC verification (fail closed)', () => {
     const rawBody = JSON.stringify(eventEnvelope('inbound_ach_transfer.created', ACH_TRANSFER_ID));
 
@@ -736,8 +736,8 @@ describe('POST /api/covenant/webhooks/increase', () => {
         reference_id: ACH_TRANSFER_ID,
       });
       const sqlSequence = txQueries.map((q) => q.sql).join('\n');
-      expect(sqlSequence).toContain('SAVEPOINT covenant_royalty_ledger_insert');
-      expect(sqlSequence).toContain('ROLLBACK TO SAVEPOINT covenant_royalty_ledger_insert');
+      expect(sqlSequence).toContain('SAVEPOINT covnant_royalty_ledger_insert');
+      expect(sqlSequence).toContain('ROLLBACK TO SAVEPOINT covnant_royalty_ledger_insert');
       expect(warnSpy).toHaveBeenCalledTimes(1);
       warnSpy.mockRestore();
     });

@@ -73,7 +73,7 @@ function signedHeaders(rawBody: string): Record<string, string> {
 
 function signedRequest(envelope: unknown): Request {
   const rawBody = JSON.stringify(envelope);
-  return new Request('http://localhost/api/covenant/webhooks/increase', {
+  return new Request('http://localhost/api/covnant/webhooks/increase', {
     method: 'POST',
     headers: signedHeaders(rawBody),
     body: rawBody,

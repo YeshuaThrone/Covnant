@@ -4,7 +4,7 @@ import { getDb } from '@/lib/db';
 import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covnant/uct';
 
 /**
- * POST /api/covenant/auth/signup — UCT (creator-root identity) acceptance
+ * POST /api/covnant/auth/signup — UCT (creator-root identity) acceptance
  * tests: S1 mint+disclosure, S2 repeat-without-uct, S3 sanitized input
  * rejection, S5 race safety (distinct UCTs, bounded-retry collision
  * recovery), and the fail-closed UCT_MINT_FAILED 503. The shipped PR #27
@@ -113,7 +113,7 @@ function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } 
 }
 
 function signupRequest(body: unknown): Request {
-  return new Request('http://localhost/api/covenant/auth/signup', {
+  return new Request('http://localhost/api/covnant/auth/signup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
