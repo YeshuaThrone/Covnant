@@ -2,6 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import {
+  buildSignupPayload,
+  mapSignupResponse,
+  networkFailureState,
+  type ProvisioningStatus,
+  type SealRequestState,
+} from '@/components/landing/signupRequest';
+
 /*
  * Entry composition — the six mirrored entry zones and the Universal
  * Consent & Seal zone, rendered as direct children of the landing section.
@@ -70,8 +78,25 @@ const SEALED_INPUT_CLASS =
 const BUTTON_BASE_CLASS =
   'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
 
+/* The signup response-state lines — the exact statement voice of the unseal
+ * hint, in the same slot. No boxes, no error chrome: the design language of
+ * the composition is the rendering for every contract branch. */
+const RESPONSE_LINE_CLASS =
+  'mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne';
+
+/* The provisioning status, stated in the composition's fragment voice. */
+function provisioningLine(status: ProvisioningStatus): string {
+  return status === 'PROVISIONED' ? 'Provisioning complete' : 'Provisioning queued';
+}
+
 export function EntryZones() {
   const [sealed, setSealed] = useState(false);
+  // The signup request state — one renderable contract branch at a time.
+  // sealedRef mirrors `sealed` for the async completion: the unseal escape
+  // hatch stays live mid-flight, and a response that outlives its unsealed
+  // composition is discarded rather than rendered into it.
+  const [request, setRequest] = useState<SealRequestState>({ phase: 'idle' });
+  const sealedRef = useRef(false);
   const stageNameRef = useRef<HTMLInputElement>(null);
   const legalNameRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -106,10 +131,40 @@ export function EntryZones() {
     setSealed(true);
   }, []);
 
-  /* Seal: persist the six entries locally and freeze the fields. Idempotent
-   * — a second click on an already-sealed composition changes nothing.
-   * Local only: no POST, no signup wiring; the backend field-support
-   * decision belongs to the Information Gate wave. */
+  /* Submit the sealed values to POST /api/covnant/auth/signup and map the
+   * response to a renderable contract state. The local seal record is
+   * already written by the time this runs — it stays the offline/fallback
+   * record of the seal regardless of the network outcome. A response is
+   * rendered only if the composition is still sealed (unsealing mid-flight
+   * abandons the attempt's rendering). */
+  const submitSignup = async (values: SealedEntryValues) => {
+    setRequest({ phase: 'submitting' });
+    try {
+      const response = await fetch('/api/covnant/auth/signup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(buildSignupPayload(values)),
+        cache: 'no-store',
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (!sealedRef.current) return;
+      setRequest(mapSignupResponse(response.status, body));
+    } catch (error) {
+      // Transport failure (offline, connection reset) — the composition is
+      // still sealed; render the recovery line. Surfaced as state, never
+      // swallowed.
+      console.warn('Covnant: the seal could not reach the signup API.', error);
+      if (!sealedRef.current) return;
+      setRequest(networkFailureState());
+    }
+  };
+
+  /* Seal: persist the six entries locally and freeze the fields, then
+   * submit the same values to the signup API — the local record is written
+   * FIRST, so the offline/fallback record exists even when the network
+   * fails. Idempotent — a second click on an already-sealed composition
+   * changes nothing (the retry path is the unseal escape hatch, then
+   * Submit again). */
   const sealWorld = () => {
     if (sealed) return;
     const entry: SealedEntry = {
@@ -132,6 +187,8 @@ export function EntryZones() {
       return;
     }
     setSealed(true);
+    sealedRef.current = true;
+    void submitSignup(entry.values);
   };
 
   const inputClass = sealed ? SEALED_INPUT_CLASS : UNSEALED_INPUT_CLASS;
@@ -150,6 +207,10 @@ export function EntryZones() {
       console.warn('Covnant: the local seal could not be cleared.', error);
     }
     setSealed(false);
+    sealedRef.current = false;
+    // The rendered response state described the sealed attempt — clear it
+    // with the seal so an unsealed composition starts clean.
+    setRequest({ phase: 'idle' });
   };
 
   const buttonClass = [
@@ -353,6 +414,48 @@ export function EntryZones() {
           Double-click to unseal
         </p>
       )}
+
+      {/* The signup response state — one contract branch at a time, rendered
+          in the statement voice INSIDE the closing composition above the
+          final ruler (the unseal hint's slot discipline). No boxes, no error
+          chrome: the composition's design language renders every branch.
+          The created state leads with the primary next step (check-your-
+          inbox when session-less, per the contract), discloses the UCT once,
+          and states provisioning; the 200 repeat never renders a UCT or a
+          retry-the-UCT affordance; the 409 routes to sign-in framing. */}
+      {request.phase === 'submitting' && (
+        <p className={RESPONSE_LINE_CLASS}>Sealing your entry</p>
+      )}
+      {request.phase === 'created' && (
+        <>
+          {request.sessionless && (
+            <p className={RESPONSE_LINE_CLASS}>Check your inbox to activate your account</p>
+          )}
+          {request.uct !== null && (
+            <p className={RESPONSE_LINE_CLASS}>Your Covnant Tag {request.uct}</p>
+          )}
+          <p className={RESPONSE_LINE_CLASS}>{provisioningLine(request.provisioning)}</p>
+          {!request.sessionless && (
+            <p className={RESPONSE_LINE_CLASS}>Your account is live — you are signed in</p>
+          )}
+        </>
+      )}
+      {request.phase === 'repeat' && (
+        <>
+          <p className={RESPONSE_LINE_CLASS}>This email already holds its Covnant Tag</p>
+          <p className={RESPONSE_LINE_CLASS}>{provisioningLine(request.provisioning)}</p>
+        </>
+      )}
+      {request.phase === 'duplicate' && (
+        <p className={RESPONSE_LINE_CLASS}>
+          An account with this email already exists — try signing in
+        </p>
+      )}
+      {request.phase === 'invalid' && <p className={RESPONSE_LINE_CLASS}>{request.message}</p>}
+      {request.phase === 'rate_limited' && (
+        <p className={RESPONSE_LINE_CLASS}>Too many attempts — wait a minute and try again</p>
+      )}
+      {request.phase === 'failed' && <p className={RESPONSE_LINE_CLASS}>{request.message}</p>}
       <div className="gold-rule w-64" />
     </>
   );
