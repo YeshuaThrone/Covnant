@@ -1346,4 +1346,13 @@ test('the Obsidian shell carries the full sidebar and every workspace route reso
     const res = await request.get(route);
     expect(res.status(), `route ${route}`).toBe(200);
   }
+
+  // /admin resolves to the GATE for an anonymous visitor — the console
+  // itself must never render without the signed session cookie. This pin
+  // replaces the old anonymous-200-only pin now that the route is gated.
+  const admin = await request.get('/admin');
+  expect(admin.status()).toBe(200);
+  const adminBody = await admin.text();
+  expect(adminBody).toContain('data-admin="gate"');
+  expect(adminBody).not.toContain('data-admin="console"');
 });

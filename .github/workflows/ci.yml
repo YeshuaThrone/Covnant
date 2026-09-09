@@ -128,3 +128,7 @@ jobs:
 
       - name: E2E suite
         run: npm run test:e2e
+        env:
+          # Throwaway e2e password — deliberately NOT the production secret.
+          # The production ADMIN_DASHBOARD_PASSWORD is set in Vercel after merge.
+          ADMIN_DASHBOARD_PASSWORD: e2e-admin-test-password
