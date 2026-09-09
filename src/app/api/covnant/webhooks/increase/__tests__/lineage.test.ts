@@ -2,10 +2,10 @@ import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
 import { getDb } from '@/lib/db';
-import { parseExternalReferences } from '@/lib/covenant/lineage';
+import { parseExternalReferences } from '@/lib/covnant/lineage';
 
 /**
- * POST /api/covenant/webhooks/increase — ledger lineage acceptance tests
+ * POST /api/covnant/webhooks/increase — ledger lineage acceptance tests
  * (W1–W6). The credit lane is PR #26's, unchanged: Standard Webhooks HMAC,
  * authoritative transfer GET, account-number holder resolution, replay
  * idempotency. Lineage is the NEW parallel lane: memo identifiers parsed
@@ -15,8 +15,8 @@ import { parseExternalReferences } from '@/lib/covenant/lineage';
  */
 
 vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
-vi.mock('@/lib/covenant/lineage', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/covenant/lineage')>();
+vi.mock('@/lib/covnant/lineage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/covnant/lineage')>();
   return { ...actual, parseExternalReferences: vi.fn(actual.parseExternalReferences) };
 });
 
@@ -108,7 +108,7 @@ function signedHeaders(
 
 function signedRequest(envelope: unknown): Request {
   const rawBody = JSON.stringify(envelope);
-  return new Request('http://localhost/api/covenant/webhooks/increase', {
+  return new Request('http://localhost/api/covnant/webhooks/increase', {
     method: 'POST',
     headers: signedHeaders(rawBody),
     body: rawBody,
@@ -363,10 +363,10 @@ describe('W4 — malformed memo / parse exception / missing column: credit unaff
     expect('lineage' in insertedMetadata[0]).toBe(false);
     // The savepoint pattern ran: rolled back, then released.
     expect(
-      txQueries.some((q) => q.sql.includes('ROLLBACK TO SAVEPOINT covenant_lineage_enrich')),
+      txQueries.some((q) => q.sql.includes('ROLLBACK TO SAVEPOINT covnant_lineage_enrich')),
     ).toBe(true);
     expect(
-      txQueries.some((q) => q.sql.includes('RELEASE SAVEPOINT covenant_lineage_enrich')),
+      txQueries.some((q) => q.sql.includes('RELEASE SAVEPOINT covnant_lineage_enrich')),
     ).toBe(true);
   });
 

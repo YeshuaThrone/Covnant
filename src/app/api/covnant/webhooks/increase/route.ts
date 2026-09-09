@@ -1,5 +1,5 @@
 /**
- * POST /api/covenant/webhooks/increase — CovnantRoyaltyTrackingAPI
+ * POST /api/covnant/webhooks/increase — CovnantRoyaltyTrackingAPI
  * (rail-agnostic inbound royalty ingestion).
  *
  * CBT · Covnant Banking & Tracker (canonical tier definition, Generation 8):
@@ -37,7 +37,7 @@
  * atomic idempotent pattern — resolve destination account_number_id →
  * rights holder via the GIN-indexed cbt_assets.rights_holders JSONB
  * (payoutRouting.covenantVirtualAccount.accountNumberId, written by
- * /api/covenant/accounts/provision) under FOR UPDATE, then insert inside
+ * /api/covnant/accounts/provision) under FOR UPDATE, then insert inside
  * the same transaction:
  *
  * | rail (event stem)                  | GET resource                      | transaction_type        | created | failure statuses (compensating debit) |
@@ -121,7 +121,7 @@ import {
   buildLineageMetadata,
   parseExternalReferences,
   type ExternalReferenceKind,
-} from '@/lib/covenant/lineage';
+} from '@/lib/covnant/lineage';
 import { withCbtSettlementCode } from '@/lib/ledger/cbt-settlement';
 
 export const dynamic = 'force-dynamic';
@@ -132,7 +132,7 @@ const POSTGRES_UNDEFINED_COLUMN = '42703';
 const DIRECTION_CREDIT = 'credit';
 const RETURN_TRANSACTION_TYPE = 'ROYALTY_INBOUND_RETURN';
 const ACH_RETURN_REFERENCE_PREFIX = 'inbound_ach_transfer_return:';
-const LINEAGE_SAVEPOINT = 'covenant_lineage_enrich';
+const LINEAGE_SAVEPOINT = 'covnant_lineage_enrich';
 
 /**
  * The inbound credit rails Increase emits, all pinned from the official
@@ -604,7 +604,7 @@ const LEDGER_INSERT_WITHOUT_METADATA_SQL =
  * preserving the replay semantics.
  */
 async function insertLedgerRowInTx(tx: TxClient, params: LedgerInsert): Promise<void> {
-  await tx.query('SAVEPOINT covenant_royalty_ledger_insert');
+  await tx.query('SAVEPOINT covnant_royalty_ledger_insert');
   try {
     await tx.query(LEDGER_INSERT_SQL, [
       params.rightsHolderId,
@@ -621,7 +621,7 @@ async function insertLedgerRowInTx(tx: TxClient, params: LedgerInsert): Promise<
     if (!isUndefinedColumn(error)) {
       throw error;
     }
-    await tx.query('ROLLBACK TO SAVEPOINT covenant_royalty_ledger_insert');
+    await tx.query('ROLLBACK TO SAVEPOINT covnant_royalty_ledger_insert');
     console.warn(
       "universal_royalty_ledger.metadata is missing — the row is recorded WITHOUT provenance. Required-for-provenance DDL: ALTER TABLE universal_royalty_ledger ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;",
     );
@@ -632,7 +632,7 @@ async function insertLedgerRowInTx(tx: TxClient, params: LedgerInsert): Promise<
       params.referenceId,
     ]);
   }
-  await tx.query('RELEASE SAVEPOINT covenant_royalty_ledger_insert');
+  await tx.query('RELEASE SAVEPOINT covnant_royalty_ledger_insert');
 }
 
 /**

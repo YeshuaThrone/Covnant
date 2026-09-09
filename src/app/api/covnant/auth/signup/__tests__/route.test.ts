@@ -3,7 +3,7 @@ import { POST } from '../route';
 import { getDb } from '@/lib/db';
 
 /**
- * POST /api/covenant/auth/signup contract tests (instant sign-up).
+ * POST /api/covnant/auth/signup contract tests (instant sign-up).
  *
  * Against the authoritative live schema: the holder is registered in a
  * designated cbt_assets registry row (cbt_code 'CBT-SIGNUP-REGISTRY') with
@@ -134,7 +134,7 @@ function increaseAccountNumberResponse(overrides: Record<string, unknown> = {}):
 }
 
 function signupRequest(body: unknown): Request {
-  return new Request('http://localhost/api/covenant/auth/signup', {
+  return new Request('http://localhost/api/covnant/auth/signup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -161,7 +161,7 @@ function expectNoAccountNumbers(bodyJson: unknown): void {
   expect(text).not.toContain('account_number_');
 }
 
-describe('POST /api/covenant/auth/signup', () => {
+describe('POST /api/covnant/auth/signup', () => {
   describe('request validation', () => {
     it.each([
       ['missing email', {}],

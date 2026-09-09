@@ -1,11 +1,11 @@
 /**
- * POST /api/covenant/accounts/provision — CovnantRoyaltyTrackingAPI
+ * POST /api/covnant/accounts/provision — CovnantRoyaltyTrackingAPI
  * (Increase virtual account number provisioning).
  *
  * Purpose: give each rights holder a dedicated Increase Account Number that
  * distributors, PROs, and licensees can pay royalties into. Inbound ACH to
  * that number is ingested by the sibling webhook route
- * /api/covenant/webhooks/increase, which resolves the number back to the
+ * /api/covnant/webhooks/increase, which resolves the number back to the
  * holder and credits universal_royalty_ledger.
  *
  * Increase resource (field names pinned from the official API reference,
@@ -41,9 +41,9 @@
  *
  * The three-phase provisioning flow (FOR UPDATE serialization, external
  * call outside any transaction, deterministic idempotency key, sibling-
- * preserving JSONB rewrite) lives in src/lib/covenant/provisioning.ts and
+ * preserving JSONB rewrite) lives in src/lib/covnant/provisioning.ts and
  * is shared verbatim with the instant sign-up route
- * (/api/covenant/auth/signup). This route keeps only request validation,
+ * (/api/covnant/auth/signup). This route keeps only request validation,
  * environment fail-closed checks, and the HTTP mapping of the returned
  * ProvisioningOutcome — including echoing the account numbers: provisioning
  * is the product surface that hands a rights holder the routing
@@ -58,7 +58,7 @@ import { getDb } from '@/lib/db';
 import {
   provisionRightsHolderVirtualAccount,
   type ProvisioningOutcome,
-} from '@/lib/covenant/provisioning';
+} from '@/lib/covnant/provisioning';
 
 export const dynamic = 'force-dynamic';
 

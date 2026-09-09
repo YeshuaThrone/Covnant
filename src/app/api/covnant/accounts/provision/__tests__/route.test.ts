@@ -3,7 +3,7 @@ import { POST } from '../route';
 import { getDb } from '@/lib/db';
 
 /**
- * POST /api/covenant/accounts/provision contract tests (CovnantRoyaltyTrackingAPI).
+ * POST /api/covnant/accounts/provision contract tests (CovnantRoyaltyTrackingAPI).
  *
  * Against the authoritative live schema: the holder resolves through the
  * GIN-indexed cbt_assets.rights_holders JSONB (rightsHolderId),
@@ -100,7 +100,7 @@ function increaseAccountNumberResponse(overrides: Record<string, unknown> = {}):
 }
 
 function provisionRequest(body: unknown): Request {
-  return new Request('http://localhost/api/covenant/accounts/provision', {
+  return new Request('http://localhost/api/covnant/accounts/provision', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -118,7 +118,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('POST /api/covenant/accounts/provision', () => {
+describe('POST /api/covnant/accounts/provision', () => {
   describe('request validation', () => {
     it.each([
       ['missing assetId', { rightsHolderId: HOLDER_ID }],

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
 import { getDb } from '@/lib/db';
-import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covenant/uct';
+import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covnant/uct';
 
 /**
- * POST /api/covenant/auth/signup — UCT (creator-root identity) acceptance
+ * POST /api/covnant/auth/signup — UCT (creator-root identity) acceptance
  * tests: S1 mint+disclosure, S2 repeat-without-uct, S3 sanitized input
  * rejection, S5 race safety (distinct UCTs, bounded-retry collision
  * recovery), and the fail-closed UCT_MINT_FAILED 503. The shipped PR #27
@@ -18,8 +18,8 @@ import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covenant/uct';
  */
 
 const uctModule = vi.hoisted(() => ({ realUctSerial: undefined as (() => string) | undefined }));
-vi.mock('@/lib/covenant/uct', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/covenant/uct')>();
+vi.mock('@/lib/covnant/uct', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/covnant/uct')>();
   uctModule.realUctSerial = actual.uctSerial;
   return { ...actual, uctSerial: vi.fn(actual.uctSerial) };
 });
@@ -113,7 +113,7 @@ function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } 
 }
 
 function signupRequest(body: unknown): Request {
-  return new Request('http://localhost/api/covenant/auth/signup', {
+  return new Request('http://localhost/api/covnant/auth/signup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

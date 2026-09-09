@@ -1,5 +1,5 @@
 /**
- * Data source resolution for the Covenant platform.
+ * Data source resolution for the Covnant platform.
  *
  * The engine persists to Supabase when credentials are present; without them
  * it runs purely in-memory (v1 ships without authentication, and Supabase

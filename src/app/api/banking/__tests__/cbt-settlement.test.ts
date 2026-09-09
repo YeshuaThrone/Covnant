@@ -162,7 +162,7 @@ describe('T1 — the enumerated universal_royalty_ledger INSERT site count is pi
 
   it('pins the webhook route at exactly two INSERT statements (one wired merge, two paths)', () => {
     const source = readFileSync(
-      path.join(__dirname, '..', '..', 'covenant', 'webhooks', 'increase', 'route.ts'),
+      path.join(__dirname, '..', '..', 'covnant', 'webhooks', 'increase', 'route.ts'),
       'utf8',
     );
     expect(countMatches(source)).toBe(WEBHOOK_INSERT_STATEMENTS);

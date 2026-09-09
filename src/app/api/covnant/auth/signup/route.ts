@@ -1,10 +1,10 @@
 /**
- * POST /api/covenant/auth/signup — CovnantRoyaltyTrackingAPI instant sign-up.
+ * POST /api/covnant/auth/signup — CovnantRoyaltyTrackingAPI instant sign-up.
  *
  * Purpose: register a self-serve rights holder from nothing but an email
  * address, then trigger the SAME Increase virtual-account provisioning flow
  * the provision route runs — through the shared core in
- * src/lib/covenant/provisioning.ts (no internal HTTP self-calls).
+ * src/lib/covnant/provisioning.ts (no internal HTTP self-calls).
  *
  * Identity model (stated choice, see PR body): cbt_assets rows are creative
  * works in this platform — the SDK registers works and their collaborating
@@ -51,7 +51,7 @@
  * (zero money movement), touches no Supabase auth-user machinery (PR #11's
  * /api/users/register owns that — this endpoint registers the rights
  * holder only), and adds no env vars. Caller authentication: none,
- * consistent with the locked v1 server-side posture of the covenant
+ * consistent with the locked v1 server-side posture of the Covnant
  * routes; abuse-hardening (rate limiting / allowlist) is deferred as a
  * dev-phase non-goal.
  *
@@ -81,7 +81,7 @@ import { getDb, type Db } from '@/lib/db';
 import {
   provisionRightsHolderVirtualAccount,
   storedVirtualAccount,
-} from '@/lib/covenant/provisioning';
+} from '@/lib/covnant/provisioning';
 import {
   DEFAULT_UCT_JURISDICTION,
   buildUct,
@@ -90,7 +90,7 @@ import {
   uctIssuanceYear,
   uctSerial,
   type SignupEngine,
-} from '@/lib/covenant/uct';
+} from '@/lib/covnant/uct';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,7 +99,7 @@ const SIGNUP_REGISTRY_CBT_CODE = 'CBT-SIGNUP-REGISTRY';
 const SIGNUP_REGISTRY_TITLE = 'Covnant Instant Sign-Up';
 const SIGNUP_REGISTRY_MEDIUM = 'SIGNUP_REGISTRY';
 /** Advisory-lock key serializing registry find-or-create across signups. */
-const SIGNUP_REGISTRY_LOCK = 'covenant-signup-registry';
+const SIGNUP_REGISTRY_LOCK = 'covnant-signup-registry';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

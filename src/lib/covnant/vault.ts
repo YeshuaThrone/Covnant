@@ -28,7 +28,7 @@
  */
 
 import type { Db } from '@/lib/db';
-import { normalizeIsrc } from '@/lib/covenant/lineage';
+import { normalizeIsrc } from '@/lib/covnant/lineage';
 
 /** The external-code kinds the vault ingests (Generation 8 kinds list). */
 export type VaultExternalIdentifierKind = 'ISRC' | 'ISWC' | 'UPC';

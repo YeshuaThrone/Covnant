@@ -10,8 +10,8 @@
  * carry the tier's deterministic settlement codes (metadata.cbt, see
  * src/lib/ledger/cbt-settlement.ts).
  *
- * Extracted verbatim from POST /api/covenant/accounts/provision (PR #26) so
- * that route and the instant sign-up route (/api/covenant/auth/signup) run
+ * Extracted verbatim from POST /api/covnant/accounts/provision (PR #26) so
+ * that route and the instant sign-up route (/api/covnant/auth/signup) run
  * the EXACT same provisioning flow. Callers own their own request validation
  * and environment checks; this module owns the three phases:
  *
@@ -38,7 +38,7 @@ import type { Db } from '@/lib/db';
 
 export const INCREASE_ACCOUNT_NUMBERS_URL = 'https://api.increase.com/account_numbers';
 
-/** The covenant virtual-account block persisted under payoutRouting. */
+/** The Covnant virtual-account block persisted under payoutRouting. */
 export interface CovenantVirtualAccount {
   accountNumberId: string;
   accountNumber: string;
@@ -108,7 +108,7 @@ interface IncreaseAccountNumber {
   created_at?: unknown;
 }
 
-/** Reads the holder's stored covenant virtual account, if fully provisioned. */
+/** Reads the holder's stored Covnant virtual account, if fully provisioned. */
 export function storedVirtualAccount(holder: unknown): CovenantVirtualAccount | null {
   if (typeof holder !== 'object' || holder === null) return null;
   const payoutRouting = (holder as { payoutRouting?: unknown }).payoutRouting;
