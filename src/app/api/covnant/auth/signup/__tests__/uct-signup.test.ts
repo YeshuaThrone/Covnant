@@ -2,20 +2,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
 import { getDb } from '@/lib/db';
 import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covnant/uct';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 
 /**
  * POST /api/covnant/auth/signup — UCT (creator-root identity) acceptance
- * tests: S1 mint+disclosure, S2 repeat-without-uct, S3 sanitized input
- * rejection, S5 race safety (distinct UCTs, bounded-retry collision
- * recovery), and the fail-closed UCT_MINT_FAILED 503. The shipped PR #27
- * contract ({ email }-only) is covered by route.test.ts, which stays
- * unmodified and green.
+ * tests: S1 mint+disclosure, S2 repeat-without-uct (enumeration protection),
+ * S3 sanitized input rejection, S5 race safety (distinct UCTs, bounded-retry
+ * collision recovery), and the fail-closed UCT_MINT_FAILED 503 — all on the
+ * merged full-payload route.
  *
  * Against the db fake the mint's serial-uniqueness check is evaluated
  * against the LIVE registry state, so a forced serial collision exercises
  * the real check-then-retry loop. The uct module is partially mocked so
- * tests can force serial draws while buildUct/checksum stay real.
+ * tests can force serial draws while buildUct/checksum stay real. The
+ * Supabase auth core is mocked at the client boundary (the union fields
+ * ride the 201 but the UCT semantics are independent of it).
  */
+
+const supabaseMock = vi.hoisted(() => ({
+  readSupabaseEnv: vi.fn(),
+  signUp: vi.fn(),
+  deleteUser: vi.fn(),
+  profileInsertSingle: vi.fn(),
+  profileDeleteEq: vi.fn(),
+}));
+
+vi.mock('@/lib/server/supabase', () => ({
+  readSupabaseEnv: supabaseMock.readSupabaseEnv,
+  createAuthClient: () => ({ auth: { signUp: supabaseMock.signUp } }),
+  createAdminClient: () => ({
+    auth: { admin: { deleteUser: supabaseMock.deleteUser } },
+    from: () => ({
+      insert: () => ({ select: () => ({ single: supabaseMock.profileInsertSingle }) }),
+      delete: () => ({ eq: supabaseMock.profileDeleteEq }),
+    }),
+  }),
+}));
 
 const uctModule = vi.hoisted(() => ({ realUctSerial: undefined as (() => string) | undefined }));
 vi.mock('@/lib/covnant/uct', async (importOriginal) => {
@@ -30,6 +52,31 @@ const mockUctSerial = vi.mocked(uctSerial);
 
 const EMAIL = 'creator@example.com';
 const REGISTRY_ASSET_ID = 'b2c3d4e5-0000-4000-8000-000000000002';
+const AUTH_USER = { id: 'auth_user_1', email: EMAIL, email_confirmed_at: null };
+const SUPABASE_ENV = {
+  url: 'https://test-project.supabase.co',
+  anonKey: 'test-anon-key',
+  serviceRoleKey: 'test-service-role-key',
+};
+
+/** A valid full creator payload — every test overrides the one bad field. */
+function fullPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    stage_name: 'Nova Reign',
+    legal_name: 'Jordan A. Reyes',
+    email: EMAIL,
+    phone: '+15125550123',
+    core_industry: 'Music — Recording',
+    title: 'Recording Artist',
+    password: 'correct-horse-battery',
+    udr_terms_accepted: true,
+    ...overrides,
+  };
+}
+
+function profileRow(): Record<string, unknown> {
+  return { id: AUTH_USER.id, email: EMAIL, stage_name: 'Nova Reign' };
+}
 
 function signupHolderEntry(): Record<string, unknown> {
   return {
@@ -51,7 +98,8 @@ interface QueryCall {
  * route.test.ts, plus the mint's serial-uniqueness probe evaluated against
  * the LIVE registry (a serial taken by any holder collides) and the
  * atomic find-or-create semantics the advisory lock + UNIQUE(cbt_code)
- * give the real table (a concurrent creator sees the committed row).
+ * give the real table (a concurrent creator sees the committed row). The
+ * top-level query surface models the ordering peek (read-only).
  */
 function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } } = {}) {
   let registry = options.registry
@@ -104,7 +152,14 @@ function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } 
   });
   const tx = { query: txQuery };
   const db = {
-    query: vi.fn(),
+    query: vi.fn(async (sql: string) => {
+      if (sql.includes('cbt_code = $1') && !sql.includes('FOR UPDATE')) {
+        return registry
+          ? { rows: [{ id: registry.id, rights_holders: registry.rights_holders }] }
+          : { rows: [] };
+      }
+      return { rows: [] };
+    }),
     transaction: vi.fn(
       async <T>(work: (tx: { query: typeof txQuery }) => Promise<T>): Promise<T> => work(tx),
     ),
@@ -121,6 +176,12 @@ function signupRequest(body: unknown): Request {
 }
 
 beforeEach(() => {
+  supabaseMock.readSupabaseEnv.mockReturnValue(SUPABASE_ENV);
+  supabaseMock.signUp.mockResolvedValue({ data: { user: AUTH_USER, session: null }, error: null });
+  supabaseMock.profileInsertSingle.mockResolvedValue({ data: profileRow(), error: null });
+  supabaseMock.deleteUser.mockResolvedValue({ error: null });
+  supabaseMock.profileDeleteEq.mockResolvedValue({ error: null });
+  resetRateLimits();
   // Default: real crypto-random serials. Individual tests force draws with
   // mockImplementationOnce queues on top of this.
   mockUctSerial.mockReset();
@@ -133,6 +194,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  resetRateLimits();
 });
 
 interface SignupResponse {
@@ -153,7 +215,7 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
   it('returns 201 { created: true, uct, uctCreatedAt, jurisdiction, engine } with PENDING while Increase is unconfigured', async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    const res = await POST(signupRequest({ email: EMAIL, engine: 'music_recording' }));
+    const res = await POST(signupRequest(fullPayload({ engine: 'music_recording' })));
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
     expect(body).toMatchObject({
@@ -182,7 +244,7 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest({ email: EMAIL, engine: 'publishing', jurisdiction: 'gb' }),
+      signupRequest(fullPayload({ engine: 'publishing', jurisdiction: 'gb' })),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
@@ -193,10 +255,10 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
     expect(entry.engine).toBe('publishing');
   });
 
-  it('keeps the shipped { email }-only shape working with NO fabricated engine', async () => {
+  it('mints with NO fabricated engine when the payload omits engine', async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    const res = await POST(signupRequest({ email: EMAIL }));
+    const res = await POST(signupRequest(fullPayload()));
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
     expect(body.created).toBe(true);
@@ -208,16 +270,16 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
   });
 });
 
-describe('S2 — idempotent repeat is status-only (enumeration protection)', () => {
+describe('S2 — non-creating response is status-only (enumeration protection)', () => {
   it('returns 200 alreadyRegistered with NO uct key of any shape', async () => {
     const registry = { id: REGISTRY_ASSET_ID, rights_holders: [signupHolderEntry()] };
     const { db, getRegistry } = fakeDb({ registry });
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest({ email: `  ${EMAIL.toUpperCase()}  `, engine: 'music_recording' }),
+      signupRequest(fullPayload({ email: `  ${EMAIL.toUpperCase()}  `, engine: 'music_recording' })),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as SignupResponse;
+    const body = (await res.json()) as SignupResponse & Record<string, unknown>;
     expect(body).toMatchObject({
       ok: true,
       created: false,
@@ -225,11 +287,11 @@ describe('S2 — idempotent repeat is status-only (enumeration protection)', () 
       status: 'PENDING',
     });
     // Key ABSENCE, asserted — not by convention. uctCreatedAt would leak just
-    // the same; neither key may appear on the repeat path.
-    expect('uct' in body).toBe(false);
-    expect('uctCreatedAt' in body).toBe(false);
-    expect('jurisdiction' in body).toBe(false);
-    expect('engine' in body).toBe(false);
+    // the same; neither key may appear on the repeat path. Neither may
+    // credential material (session/user/profile) or the union extras.
+    for (const key of ['uct', 'uctCreatedAt', 'jurisdiction', 'engine', 'session', 'user', 'profile']) {
+      expect(key in body).toBe(false);
+    }
     expect(JSON.stringify(body)).not.toContain('"uct"');
     // The pre-UCT holder is untouched — no re-mint, no backfill.
     expect(getRegistry()?.rights_holders).toHaveLength(1);
@@ -239,18 +301,14 @@ describe('S2 — idempotent repeat is status-only (enumeration protection)', () 
 
 describe('S3 — invalid engine/jurisdiction are sanitized 400s with no state change', () => {
   it.each([
-    ['an unknown engine', { email: EMAIL, engine: 'film_licensing' }, 'film_licensing'],
-    ['a non-string engine', { email: EMAIL, engine: 42 }, '42'],
-    [
-      'a 3-char jurisdiction',
-      { email: EMAIL, engine: 'music_recording', jurisdiction: 'USA' },
-      'USA',
-    ],
-    ['a 1-char jurisdiction', { email: EMAIL, jurisdiction: 'U' }, 'U'],
-  ])('rejects %s without echoing the input', async (_label, requestBody, forbidden) => {
+    ['an unknown engine', { engine: 'film_licensing' }, 'film_licensing'],
+    ['a non-string engine', { engine: 42 }, '42'],
+    ['a 3-char jurisdiction', { engine: 'music_recording', jurisdiction: 'USA' }, 'USA'],
+    ['a 1-char jurisdiction', { jurisdiction: 'U' }, 'U'],
+  ])('rejects %s without echoing the input', async (_label, overrides, forbidden) => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    const res = await POST(signupRequest(requestBody));
+    const res = await POST(signupRequest(fullPayload(overrides)));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
@@ -263,7 +321,7 @@ describe('S3 — invalid engine/jurisdiction are sanitized 400s with no state ch
     const { db } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest({ email: EMAIL, engine: 'music_recording', jurisdiction: 'de' }),
+      signupRequest(fullPayload({ engine: 'music_recording', jurisdiction: 'de' })),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
@@ -283,8 +341,8 @@ describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
       .mockImplementationOnce(() => 'AAAAAAAA')
       .mockImplementationOnce(() => 'BBBBBBBB');
 
-    const first = await POST(signupRequest({ email: 'a@example.com', engine: 'music_recording' }));
-    const second = await POST(signupRequest({ email: 'b@example.com', engine: 'music_recording' }));
+    const first = await POST(signupRequest(fullPayload({ email: 'a@example.com', engine: 'music_recording' })));
+    const second = await POST(signupRequest(fullPayload({ email: 'b@example.com', engine: 'music_recording' })));
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     const firstBody = (await first.json()) as SignupResponse;
@@ -304,8 +362,8 @@ describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
     mockUctSerial.mockImplementationOnce(() => '11111111').mockImplementationOnce(() => '22222222');
 
     const [first, second] = await Promise.all([
-      POST(signupRequest({ email: 'a@example.com', engine: 'music_recording' })),
-      POST(signupRequest({ email: 'b@example.com', engine: 'music_recording' })),
+      POST(signupRequest(fullPayload({ email: 'a@example.com', engine: 'music_recording' }))),
+      POST(signupRequest(fullPayload({ email: 'b@example.com', engine: 'music_recording' }))),
     ]);
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
@@ -321,7 +379,7 @@ describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
 });
 
 describe('fail-closed mint', () => {
-  it('returns 503 UCT_MINT_FAILED and registers nothing when uniqueness is not achieved in bounds', async () => {
+  it('returns 503 UCT_MINT_FAILED, compensates the auth signup, and registers nothing when uniqueness is not achieved in bounds', async () => {
     const colliding = buildUct('US', uctIssuanceYear(), 'AAAAAAAA');
     const registry = {
       id: REGISTRY_ASSET_ID,
@@ -339,14 +397,17 @@ describe('fail-closed mint', () => {
     mockGetDb.mockReturnValue(db as never);
     mockUctSerial.mockImplementation(() => 'AAAAAAAA'); // every draw collides
 
-    const res = await POST(signupRequest({ email: 'new@example.com', engine: 'music_recording' }));
+    const res = await POST(signupRequest(fullPayload({ email: 'new@example.com', engine: 'music_recording' })));
     expect(res.status).toBe(503);
     const body = (await res.json()) as SignupResponse;
     expect(body.ok).toBe(false);
     expect(body.reason).toBe('UCT_MINT_FAILED');
     expect(body.uct).toBeUndefined();
-    // Fail-closed: no holder registered, no partial state.
+    // Fail-closed: no holder registered, no partial state...
     expect(getRegistry()?.rights_holders).toHaveLength(1);
+    // ...and the auth signup that had already committed is compensated away.
+    expect(supabaseMock.deleteUser).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.profileDeleteEq).toHaveBeenCalled();
     // Exactly the bounded number of uniqueness attempts ran.
     const mintProbes = txQueries.filter((q) => q.sql.includes('rh @>'));
     expect(mintProbes).toHaveLength(3);
@@ -357,7 +418,7 @@ describe('schema hygiene for the UCT path', () => {
   it('issues no money-movement queries when minting', async () => {
     const { db, txQueries } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    await POST(signupRequest({ email: EMAIL, engine: 'music_recording' }));
+    await POST(signupRequest(fullPayload({ engine: 'music_recording' })));
     const allSql = txQueries.map((q) => q.sql).join('\n');
     expect(allSql).not.toContain('universal_royalty_ledger');
     expect(allSql).not.toContain('disbursements');
