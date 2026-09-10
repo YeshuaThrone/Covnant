@@ -70,11 +70,13 @@ export function formatCents(cents: number): string {
   const whole = Math.trunc(magnitude / 100);
   const frac = String(magnitude % 100).padStart(2, '0');
   const wholeGrouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${negative ? '−' : ''}${wholeGrouped}.${frac}`;
+  return `${negative ? '−' : ''}$${wholeGrouped}.${frac}`;
 }
 
-/** The signed variant — money moving OUT of the holder's vault. */
+/** The signed variant — money moving OUT of the holder's vault. Zero
+ *  carries no sign: +$0.00 and −$0.00 are both noise. */
 export function formatCentsSigned(cents: number): string {
+  if (cents === 0) return formatCents(0);
   const formatted = formatCents(Math.abs(cents));
   return cents < 0 ? `−${formatted}` : `+${formatted}`;
 }

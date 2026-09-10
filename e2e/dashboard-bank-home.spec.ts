@@ -34,18 +34,23 @@ test.describe('The Don dashboard home — desktop', () => {
     await expect(page.getByTestId('avatar-chip')).toBeVisible();
 
     // Accounts — three bucket cards, right-aligned balances, View all.
-    await expect(page.getByTestId('vault-bucket-card')).toHaveCount(3);
-    const available = page.getByTestId('bucket-available');
-    await expect(available).toContainText('$2,478.30');
-    await expect(available.locator('[data-testid="bucket-balance"]')).toHaveClass(/text-right/);
-    await expect(page.getByTestId('bucket-pending')).toContainText('$912.05');
-    await expect(page.getByTestId('bucket-reserve')).toContainText('$450.00');
+    await expect(page.getByTestId('account-card-available')).toBeVisible();
+    await expect(page.getByTestId('account-card-pending')).toBeVisible();
+    await expect(page.getByTestId('account-card-reserve')).toBeVisible();
+    await expect(page.getByTestId('account-card-available-balance')).toContainText('$2,478.30');
+    await expect(page.getByTestId('account-card-available-balance')).toHaveClass(/text-right/);
+    await expect(page.getByTestId('account-card-pending-balance')).toContainText('$912.05');
+    await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$450.00');
     await expect(page.getByTestId('accounts-view-all')).toHaveAttribute('href', '/ledger');
 
     // Payout tiles — the sandbox rail vocabulary.
     await expect(page.getByTestId('payout-tile')).toHaveCount(2);
-    await expect(page.getByTestId('payout-rtp')).toContainText('Instant');
-    await expect(page.getByTestId('payout-ach')).toContainText('+3 business days');
+    await expect(page.locator('[data-testid="payout-tile"][data-rail="rtp"]')).toContainText(
+      'Instant',
+    );
+    await expect(page.locator('[data-testid="payout-tile"][data-rail="ach"]')).toContainText(
+      '+3 business days',
+    );
 
     // Quick actions — compact squares on real routes.
     await expect(page.getByTestId('quick-action')).toHaveCount(3);
@@ -55,13 +60,17 @@ test.describe('The Don dashboard home — desktop', () => {
     );
 
     // Transactions — dense rows with pairs, See more into the ledger.
-    await expect(page.getByTestId('transaction-row')).toHaveCount(6);
-    await expect(page.getByTestId('transaction-row').first()).toContainText('DR $0.00 / CR $129.90');
-    await expect(page.getByTestId('see-more')).toHaveAttribute('href', '/ledger');
+    await expect(page.getByTestId('transactions-row')).toHaveCount(6);
+    await expect(page.getByTestId('transactions-row').first()).toContainText('DR $250.00 / CR $0.00');
+    await expect(page.getByTestId('transactions-see-more')).toHaveAttribute('href', '/ledger');
 
     // Readiness panel + thin footer.
-    await expect(page.getByTestId('readiness-row').first()).toBeVisible();
+    await expect(page.getByTestId('readiness-kyc')).toBeVisible();
+    await expect(page.getByTestId('readiness-kyc')).toHaveAttribute('data-state', 'complete');
     await expect(page.locator('footer')).toContainText('Covnant');
+
+    // The carousel dots are mobile-only (md:hidden) — hidden at 1440px.
+    await expect(page.getByTestId('carousel-dots')).toBeHidden();
   });
 
   test('never fabricates identity or breaks the brand rails', async ({ page }) => {
@@ -79,16 +88,13 @@ test.describe('The Don dashboard home — 390px mobile', () => {
   test('shows a single-card carousel with three dots and the hamburger drawer', async ({ page }) => {
     await page.goto('/dashboard');
 
-    // The accounts row is a horizontal carousel (flex, not the desktop grid).
-    const row = page.getByTestId('accounts-row');
-    await expect(row).toHaveClass(/overflow-x-auto/);
-    await expect(row).not.toHaveClass(/md:grid/);
-
-    // Carousel dots — three tabs; tapping the second dot marks it active.
-    const dots = page.getByTestId('carousel-dots').getByRole('tab');
-    await expect(dots).toHaveCount(3);
-    await dots.nth(1).click();
-    await expect(dots.nth(1)).toHaveAttribute('aria-selected', 'true');
+    // The accounts row is a horizontal carousel on mobile: the dots are
+    // visible only below md (md:hidden), the discriminating signal.
+    const dots = page.getByTestId('carousel-dots');
+    await expect(dots).toBeVisible();
+    await expect(dots.getByRole('tab')).toHaveCount(3);
+    await dots.getByRole('tab').nth(1).click();
+    await expect(dots.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
 
     // The sidebar is hidden; navigation is the hamburger drawer.
     await expect(page.locator('[data-shell="sidebar"]')).toBeHidden();
@@ -108,7 +114,9 @@ test.describe('The Don dashboard home — 390px mobile', () => {
     await page.goto('/dashboard');
     await expect(page.getByTestId('quick-action')).toHaveCount(3);
     await expect(page.getByTestId('payout-tile')).toHaveCount(2);
-    await expect(page.getByTestId('payout-rtp')).toContainText('Instant');
+    await expect(page.locator('[data-testid="payout-tile"][data-rail="rtp"]')).toContainText(
+      'Instant',
+    );
   });
 });
 

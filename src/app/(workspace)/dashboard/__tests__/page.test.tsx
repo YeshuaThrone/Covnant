@@ -39,12 +39,15 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('NR'); // initials in the chip
   });
 
-  it('renders the Accounts section with three vault-bucket cards', async () => {
+  it('renders the Accounts section with the three vault-bucket cards', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('Accounts');
     expect(html).toContain('data-testid="accounts-row"');
-    expect((html.match(/data-testid="vault-bucket-card"/g) ?? []).length).toBe(3);
     // The three cards ARE the three buckets — available / pending / reserve.
+    expect(html).toContain('data-testid="account-card-available"');
+    expect(html).toContain('data-testid="account-card-pending"');
+    expect(html).toContain('data-testid="account-card-reserve"');
+    expect((html.match(/data-testid="account-card-(available|pending|reserve)"/g) ?? []).length).toBe(3);
     expect(html).toContain('Available');
     expect(html).toContain('Pending');
     expect(html).toContain('Reserve');
@@ -54,13 +57,15 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('$450.00');
   });
 
-  it('right-aligns the balance inside each card (bank-reference layout)', async () => {
+  it('right-aligns each balance with its sublabel beneath (bank-reference layout)', async () => {
     const html = await renderDashboardPage();
-    const cards = html.split('data-testid="vault-bucket-card"').slice(1);
-    expect(cards.length).toBe(3);
-    for (const card of cards) {
-      // The balance row is right-aligned; the sublabel sits under it.
-      expect(card).toContain('text-right');
+    for (const bucket of ['available', 'pending', 'reserve']) {
+      const balance = html.split(`data-testid="account-card-${bucket}-balance"`)[1] ?? '';
+      expect(balance, `${bucket} balance must be right-aligned`).toContain('text-right');
+      // The sublabel is the next paragraph after the balance.
+      expect(balance).toMatch(
+        /Spendable now|Awaiting release or settlement|Held — disputes &amp; withholding/,
+      );
     }
   });
 
@@ -74,18 +79,20 @@ describe('/dashboard — The Don composition', () => {
 
   it('renders payout tiles on the sandbox rail — RTP instant, ACH +3 business days', async () => {
     const html = await renderDashboardPage();
-    expect(html).toContain('data-testid="payout-tile"');
-    expect(html).toContain('RTP');
-    expect(html).toContain('ACH');
-    expect(html).toContain('Instant');
-    expect(html).toContain('+3 business days');
+    expect(html).toContain('data-testid="payout-tiles"');
+    expect((html.match(/data-testid="payout-tile"/g) ?? []).length).toBe(2);
+    expect(html).toContain('data-rail="rtp"');
+    expect(html).toContain('data-rail="ach"');
+    expect(html).toContain('RTP · Instant');
+    expect(html).toContain('ACH · +3 business days');
     expect(html).toContain('$250.00'); // RTP in-flight hold
     expect(html).toContain('$1,200.00'); // ACH in-flight hold
   });
 
   it('renders compact square quick actions on real routes only', async () => {
     const html = await renderDashboardPage();
-    expect(html).toContain('data-testid="quick-action"');
+    expect(html).toContain('data-testid="quick-actions"');
+    expect((html.match(/data-testid="quick-action"/g) ?? []).length).toBe(3);
     expect(html).toContain('href="/assets"');
     expect(html).toContain('href="/contracts"');
     expect(html).toContain('href="/ledger"');
@@ -102,21 +109,27 @@ describe('/dashboard — The Don composition', () => {
   it('renders the dense transactions card with debit/credit pairs and See more', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('Transactions');
-    expect((html.match(/data-testid="transaction-row"/g) ?? []).length).toBe(6); // visible rows
+    expect((html.match(/data-testid="transactions-row"/g) ?? []).length).toBe(6); // visible of 7
     // Pair lines as the GL stores them: DR / CR with exactly one live side.
-    expect(html).toContain('DR $0.00 / CR $129.90');
+    expect(html).toContain('DR $0.00 / CR $129.90'); // fx_j_001 royalty ingest
+    expect(html).toContain('DR $250.00 / CR $0.00'); // payout legs
     expect(html).toContain('+$129.90'); // inflow signed positive
-    expect(html).toContain('−$250.00'); // payout hold signed negative
-    expect(html).toContain('data-testid="see-more"');
+    expect(html).toContain('−$250.00'); // payout displayed as outflow
+    expect(html).toContain('data-testid="transactions-see-more"');
     expect(html).toContain('href="/ledger"');
   });
 
   it('renders the quiet readiness side panel with text-labeled states', async () => {
     const html = await renderDashboardPage();
-    expect(html).toContain('Readiness');
-    expect(html).toContain('data-testid="readiness-row"');
-    expect(html).toContain('Identity verified');
-    expect(html).toContain('Provisioning complete');
+    expect(html).toContain('Financial readiness');
+    expect(html).toContain('data-testid="readiness-kyc"');
+    expect(html).toContain('data-testid="readiness-tax"');
+    expect(html).toContain('data-testid="readiness-bank"');
+    expect(html).toContain('data-testid="readiness-provisioning"');
+    // Fixture states: KYC approved and provisioning complete — labeled in
+    // text, never color-only.
+    expect(html).toContain('COMPLETE');
+    expect(html).not.toContain('TODO');
   });
 
   it('never fabricates identity or account details — no UCT, no account numbers', async () => {

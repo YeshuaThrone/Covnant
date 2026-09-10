@@ -206,6 +206,7 @@ export function QuickActions(): React.JSX.Element {
         <Link
           key={action.href}
           href={action.href}
+          data-testid="quick-action"
           title={action.hint}
           aria-label={`${action.label} — ${action.hint}`}
           className="group flex flex-col items-center gap-2 rounded-2xl border border-transparent px-2 py-4 transition-colors hover:border-slate-700/50 hover:bg-white/[0.02]"
