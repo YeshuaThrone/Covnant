@@ -214,33 +214,45 @@ export class InMemoryStore implements Store {
     return this.ledgerTransactions.find((tx) => tx.id === id);
   }
 
-  async updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): Promise<void> {
+  async updateLedgerSettlement(
+    id: string,
+    update: LedgerSettlementUpdate,
+  ): Promise<LedgerTransactionRecord | undefined> {
     const record = await this.getLedgerTransaction(id);
     if (record) {
       Object.assign(record, update);
     }
+    return record;
   }
 
   async getBaasTransfer(transferId: string): Promise<BaasTransferRecord | undefined> {
     return this.baasTransfers.get(transferId);
   }
 
-  async updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): Promise<void> {
+  async updateBaasTransferStatus(
+    transferId: string,
+    status: BaasTransferStatus,
+  ): Promise<BaasTransferRecord | undefined> {
     const transfer = this.baasTransfers.get(transferId);
     if (transfer) {
       transfer.status = status;
     }
+    return transfer;
   }
 
   async getPayoutHold(transferId: string): Promise<PayoutHoldRecord | undefined> {
     return this.payoutHolds.get(transferId);
   }
 
-  async updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): Promise<void> {
+  async updatePayoutHoldStatus(
+    transferId: string,
+    status: PayoutHoldStatus,
+  ): Promise<PayoutHoldRecord | undefined> {
     const hold = this.payoutHolds.get(transferId);
     if (hold) {
       hold.status = status;
     }
+    return hold;
   }
 
   async getPayoutReversalByTransfer(transferId: string): Promise<PayoutReversalRecord | undefined> {
@@ -253,17 +265,40 @@ export class InMemoryStore implements Store {
     return record;
   }
 
-  async getLastGlJournal(): Promise<GlJournalRecord | undefined> {
+  async getLatestGlJournal(): Promise<GlJournalRecord | undefined> {
     if (this.glJournals.length === 0) {
       return undefined;
     }
     return this.glJournals[this.glJournals.length - 1];
   }
 
-  async insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): Promise<GlJournalRecord> {
-    this.glJournals.push(journal);
-    this.glEntries.push(...entries);
-    return journal;
+  async insertGlJournal(
+    row: Omit<
+      GlJournalRecord,
+      "id" | "sequence" | "prev_hash" | "entry_hash" | "state"
+    > & {
+      sequence?: number;
+      prev_hash?: string;
+      entry_hash?: string;
+      state?: GlJournalRecord["state"];
+    },
+  ): Promise<GlJournalRecord> {
+    const record: GlJournalRecord = {
+      sequence: 0,
+      prev_hash: "",
+      entry_hash: "",
+      state: "posted",
+      ...row,
+      id: this.nextId("glj"),
+    };
+    this.glJournals.push(record);
+    return record;
+  }
+
+  async insertGlEntry(row: Omit<GlEntryRecord, "id">): Promise<GlEntryRecord> {
+    const record: GlEntryRecord = { ...row, id: this.nextId("gle") };
+    this.glEntries.push(record);
+    return record;
   }
 
   async getRecoupmentAdvance(creatorId: string): Promise<RecoupmentAdvanceRecord | undefined> {

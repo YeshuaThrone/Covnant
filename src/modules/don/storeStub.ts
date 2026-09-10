@@ -41,14 +41,12 @@ export type BaasTransferStatus = BaasTransferRecord["status"];
 export type PayoutHoldStatus = PayoutHoldRecord["status"];
 
 // The exact settlement-update shape every dropped call site passes to
-// store.updateLedgerSettlement.
-export type LedgerSettlementUpdate = {
-  status: LedgerStatus;
-  rail: SettlementRail | null;
-  baas_provider: BaasProvider | null;
-  baas_transfer_id: string | null;
-  settled_at: string | null;
-};
+// store.updateLedgerSettlement (canonical: Pick over the record's settlement
+// fields).
+export type LedgerSettlementUpdate = Pick<
+  LedgerTransactionRecord,
+  "status" | "rail" | "baas_provider" | "baas_transfer_id" | "settled_at"
+>;
 
 export type LedgerTransactionInsert = Omit<LedgerTransactionRecord, "id">;
 export type PayoutReversalInsert = Omit<PayoutReversalRecord, "id">;
@@ -69,21 +67,46 @@ export interface Store {
   // Ledger transactions
   insertLedgerTransaction(tx: LedgerTransactionInsert): Promise<LedgerTransactionRecord>;
   getLedgerTransaction(id: string): Promise<LedgerTransactionRecord | undefined>;
-  updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): Promise<void>;
+  // Canonical return shapes: mutations hand back the updated row (or undefined
+  // when the target does not exist) so callers can surface them if needed.
+  updateLedgerSettlement(
+    id: string,
+    update: LedgerSettlementUpdate,
+  ): Promise<LedgerTransactionRecord | undefined>;
 
   // BaaS transfers and payout holds
   getBaasTransfer(transferId: string): Promise<BaasTransferRecord | undefined>;
-  updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): Promise<void>;
+  updateBaasTransferStatus(
+    transferId: string,
+    status: BaasTransferStatus,
+  ): Promise<BaasTransferRecord | undefined>;
   getPayoutHold(transferId: string): Promise<PayoutHoldRecord | undefined>;
-  updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): Promise<void>;
+  updatePayoutHoldStatus(
+    transferId: string,
+    status: PayoutHoldStatus,
+  ): Promise<PayoutHoldRecord | undefined>;
 
   // Payout reversals
   getPayoutReversalByTransfer(transferId: string): Promise<PayoutReversalRecord | undefined>;
   insertPayoutReversal(reversal: PayoutReversalInsert): Promise<PayoutReversalRecord>;
 
-  // GL journals — append-only, hash-chained
-  getLastGlJournal(): Promise<GlJournalRecord | undefined>;
-  insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): Promise<GlJournalRecord>;
+  // GL journals — append-only, hash-chained. The engine (ledger/chain.ts +
+  // postJournal) supplies the chain state; omitted chain fields take the
+  // canonical defaults (sequence 0, prev/entry hash '', state 'posted') and
+  // the store allocates ids.
+  getLatestGlJournal(): Promise<GlJournalRecord | undefined>;
+  insertGlJournal(
+    row: Omit<
+      GlJournalRecord,
+      "id" | "sequence" | "prev_hash" | "entry_hash" | "state"
+    > & {
+      sequence?: number;
+      prev_hash?: string;
+      entry_hash?: string;
+      state?: GlJournalRecord["state"];
+    },
+  ): Promise<GlJournalRecord>;
+  insertGlEntry(row: Omit<GlEntryRecord, "id">): Promise<GlEntryRecord>;
 
   // Recoupment
   getRecoupmentAdvance(creatorId: string): Promise<RecoupmentAdvanceRecord | undefined>;

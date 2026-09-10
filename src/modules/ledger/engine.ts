@@ -9,12 +9,11 @@
 // The transcription's journal_id/ts/source/source_ref row shape predates the
 // merged GlJournalRecord, which the foundation pins to kind/ref_type/ref_id.
 
-import { randomUUID } from "node:crypto";
-import type { Store } from "@/modules/don/storeStub";
 import type {
   GlEntryRecord,
   GlJournalRecord,
 } from "@/modules/don/records";
+import type { Store } from "@/modules/don/storeStub";
 import { GL_GENESIS_HASH, type JournalKind } from "@/modules/don/constants";
 import { hashJournal } from "./chain";
 import { validateJournal, type GlLegInput } from "./journal";
@@ -45,7 +44,7 @@ export async function postJournal(
   }
 
   const created_at = now.toISOString();
-  const last = await store.getLastGlJournal();
+  const last = await store.getLatestGlJournal();
   const sequence = (last?.sequence ?? 0) + 1;
   const prev_hash = last?.entry_hash ?? GL_GENESIS_HASH;
   const entry_hash = hashJournal(
@@ -60,8 +59,8 @@ export async function postJournal(
     prev_hash,
   );
 
-  const journal: GlJournalRecord = {
-    id: `glj_${randomUUID()}`,
+  // The store allocates ids; the engine supplies the chain state.
+  const journal = await store.insertGlJournal({
     kind: input.kind,
     ref_type: input.ref_type,
     ref_id: input.ref_id,
@@ -70,15 +69,16 @@ export async function postJournal(
     prev_hash,
     entry_hash,
     state: "posted",
-  };
-  const entries: GlEntryRecord[] = input.legs.map((leg) => ({
-    id: `gle_${randomUUID()}`,
-    journal_id: journal.id,
-    account: leg.account,
-    debit_cents: leg.debit_cents,
-    credit_cents: leg.credit_cents,
-    created_at,
-  }));
+  });
+  for (const leg of input.legs) {
+    await store.insertGlEntry({
+      journal_id: journal.id,
+      account: leg.account,
+      debit_cents: leg.debit_cents,
+      credit_cents: leg.credit_cents,
+      created_at,
+    });
+  }
 
-  return { ok: true, journal: await store.insertGlJournal(journal, entries) };
+  return { ok: true, journal };
 }
