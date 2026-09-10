@@ -1318,7 +1318,7 @@ test('the Obsidian shell carries the full sidebar and every workspace route reso
   const sidebar = page.locator('aside[data-shell="sidebar"]');
   await expect(sidebar).toBeVisible();
   for (const label of [
-    'Dashboard',
+    'The Don',
     'Catalog',
     'Contracts',
     'Templates',

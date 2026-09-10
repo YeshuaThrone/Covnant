@@ -10,7 +10,7 @@ import { SidebarNav, type NavItem } from './SidebarNav';
  * replace the stubbed views in place — the nav is the stable surface.
  */
 export const WORKSPACE_NAV: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/dashboard', label: 'The Don' },
   { href: '/catalog', label: 'Catalog' },
   { href: '/contracts', label: 'Contracts' },
   { href: '/templates', label: 'Templates' },
