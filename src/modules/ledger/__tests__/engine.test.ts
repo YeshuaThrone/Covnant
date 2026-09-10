@@ -6,9 +6,9 @@ import { fboDebit, vaultCredit } from "../journal";
 import { postJournal } from "../engine";
 
 describe("postJournal", () => {
-  it("posts a balanced journal and returns it", () => {
+  it("posts a balanced journal and returns it", async () => {
     const store = new InMemoryStore();
-    const posted = postJournal(store, {
+    const posted = await postJournal(store, {
       kind: "royalty_ingest",
       ref_type: "split_run",
       ref_id: "sr_01",
@@ -21,9 +21,9 @@ describe("postJournal", () => {
     expect(store.glEntries.every((e) => e.journal_id === posted.journal.id)).toBe(true);
   });
 
-  it("refuses an unbalanced journal and persists nothing", () => {
+  it("refuses an unbalanced journal and persists nothing", async () => {
     const store = new InMemoryStore();
-    const posted = postJournal(store, {
+    const posted = await postJournal(store, {
       kind: "royalty_ingest",
       ref_type: "split_run",
       ref_id: "sr_01",
@@ -39,17 +39,17 @@ describe("postJournal", () => {
     expect(store.glEntries).toHaveLength(0);
   });
 
-  it("refuses a single-sided journal", () => {
+  it("refuses a single-sided journal", async () => {
     const store = new InMemoryStore();
-    expect(postJournal(store, {
+    expect((await postJournal(store, {
       kind: "royalty_ingest",
       ref_type: "split_run",
       ref_id: "sr_01",
       legs: [fboDebit(100)],
-    }).ok).toBe(false);
+    })).ok).toBe(false);
   });
 
-  it("every posted journal in a sequence is balanced", () => {
+  it("every posted journal in a sequence is balanced", async () => {
     const store = new InMemoryStore();
     const sequences = [
       [fboDebit(1000), vaultCredit("c1", "available", 400), vaultCredit("c1", "pending", 600)],
@@ -57,7 +57,7 @@ describe("postJournal", () => {
       [fboDebit(1), vaultCredit("c1", "reserve", 1)],
     ];
     for (const legs of sequences) {
-      const posted = postJournal(store, {
+      const posted = await postJournal(store, {
         kind: "royalty_ingest",
         ref_type: "split_run",
         ref_id: "sr_01",
@@ -77,15 +77,15 @@ describe("postJournal", () => {
     }
   });
 
-  it("chains entry_hash across a sequence: prev_hash inside the hashed payload", () => {
+  it("chains entry_hash across a sequence: prev_hash inside the hashed payload", async () => {
     const store = new InMemoryStore();
-    const first = postJournal(store, {
+    const first = await postJournal(store, {
       kind: "royalty_ingest",
       ref_type: "split_run",
       ref_id: "sr_01",
       legs: [fboDebit(100), vaultCredit("c1", "available", 100)],
     }, new Date("2026-09-10T00:00:00.000Z"));
-    const second = postJournal(store, {
+    const second = await postJournal(store, {
       kind: "royalty_ingest",
       ref_type: "split_run",
       ref_id: "sr_02",

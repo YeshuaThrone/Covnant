@@ -3,7 +3,9 @@
 // One balanced journal, hash-chained onto the last posted journal. Call shape
 // and result envelope follow the TS drops (`postJournal(store, {kind,
 // ref_type, ref_id, legs}, now)` → `{ok, journal}` / `{ok: false, code,
-// message}` — the Phase 3/4 engines branch on `posted.ok` synchronously).
+// message}` — the Phase 3/4 engines branch on `posted.ok` after awaiting).
+// Async adaptation only (Store PR contract): the store reads/writes are
+// awaited; validation and hash math are untouched.
 // The transcription's journal_id/ts/source/source_ref row shape predates the
 // merged GlJournalRecord, which the foundation pins to kind/ref_type/ref_id.
 
@@ -28,11 +30,11 @@ export type PostJournalResult =
   | { ok: true; journal: GlJournalRecord }
   | { ok: false; code: "unbalanced_journal"; message: string };
 
-export function postJournal(
+export async function postJournal(
   store: Store,
   input: PostJournalInput,
   now: Date = new Date(),
-): PostJournalResult {
+): Promise<PostJournalResult> {
   const checked = validateJournal(input.legs);
   if (!checked.ok) {
     return {
@@ -43,7 +45,7 @@ export function postJournal(
   }
 
   const created_at = now.toISOString();
-  const last = store.getLastGlJournal();
+  const last = await store.getLastGlJournal();
   const sequence = (last?.sequence ?? 0) + 1;
   const prev_hash = last?.entry_hash ?? GL_GENESIS_HASH;
   const entry_hash = hashJournal(
@@ -78,5 +80,5 @@ export function postJournal(
     created_at,
   }));
 
-  return { ok: true, journal: store.insertGlJournal(journal, entries) };
+  return { ok: true, journal: await store.insertGlJournal(journal, entries) };
 }

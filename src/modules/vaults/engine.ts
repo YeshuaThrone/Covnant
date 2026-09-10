@@ -8,6 +8,10 @@
  * "@/services/baas", which lands with the BaaS adapter PR — deferred to the
  * final wiring PR per the drop-resolution rule. Settlement and reversal (the
  * webhook-ingestor paths) are fully included.
+ *
+ * Async adaptation only (Store PR contract): every store call is awaited and
+ * store-calling functions return Promises. Arithmetic, control flow, and GL
+ * wiring are untouched.
  */
 
 import type { Store } from "@/modules/don/storeStub";
@@ -31,7 +35,7 @@ import {
   type VaultCreditTarget,
 } from "./balances";
 
-function persistVault(
+async function persistVault(
   store: Store,
   payeeId: string,
   payeeName: string,
@@ -41,8 +45,8 @@ function persistVault(
     reserve_balance: number;
   },
   now: Date,
-): SovereignVaultRecord {
-  return store.upsertVault({
+): Promise<SovereignVaultRecord> {
+  return await store.upsertVault({
     payee_id: payeeId,
     payee_name: payeeName,
     ...balances,
@@ -50,15 +54,15 @@ function persistVault(
   });
 }
 
-export function creditVault(
+export async function creditVault(
   store: Store,
   payeeId: string,
   payeeName: string,
   amountCents: number,
   target: VaultCreditTarget,
   now: Date = new Date(),
-): SovereignVaultRecord {
-  const current = store.getVault(payeeId);
+): Promise<SovereignVaultRecord> {
+  const current = await store.getVault(payeeId);
   const balances = creditBalances(
     current ?? emptyVaultBalances(),
     amountCents,
@@ -67,15 +71,16 @@ export function creditVault(
   return persistVault(store, payeeId, payeeName, balances, now);
 }
 
-export function releaseVaultPending(
+export async function releaseVaultPending(
   store: Store,
   payeeId: string,
   amountCents: number | undefined,
   now: Date = new Date(),
-):
+): Promise<
   | { ok: true; vault: SovereignVaultRecord; released_cents: number }
-  | { ok: false; status: number; code: string; message: string } {
-  const current = store.getVault(payeeId);
+  | { ok: false; status: number; code: string; message: string }
+> {
+  const current = await store.getVault(payeeId);
   if (current === undefined) {
     return {
       ok: false,
@@ -84,7 +89,7 @@ export function releaseVaultPending(
       message: "No sovereign vault exists for that payee.",
     };
   }
-  const inFlight = store.sumInFlightPayoutHolds(payeeId);
+  const inFlight = await store.sumInFlightPayoutHolds(payeeId);
   const releasable = current.pending_balance - inFlight;
   const requested = amountCents === undefined ? releasable : amountCents;
   if (requested > releasable) {
@@ -104,7 +109,7 @@ export function releaseVaultPending(
       message: "Pending balance is insufficient for that release.",
     };
   }
-  const vault = persistVault(
+  const vault = await persistVault(
     store,
     current.payee_id,
     current.payee_name,
@@ -112,7 +117,7 @@ export function releaseVaultPending(
     now,
   );
   if (released.released_cents > 0) {
-    postJournal(store, {
+    await postJournal(store, {
       kind: "pending_release",
       ref_type: "vault",
       ref_id: payeeId,
@@ -125,14 +130,15 @@ export function releaseVaultPending(
   return { ok: true, vault, released_cents: released.released_cents };
 }
 
-export function settleVaultPayout(
+export async function settleVaultPayout(
   store: Store,
   transferId: string,
   now: Date = new Date(),
-):
+): Promise<
   | { ok: true; vault: SovereignVaultRecord; transfer: BaasTransferRecord; idempotent: boolean }
-  | { ok: false; status: number; code: string; message: string } {
-  const transfer = store.getBaasTransfer(transferId);
+  | { ok: false; status: number; code: string; message: string }
+> {
+  const transfer = await store.getBaasTransfer(transferId);
   if (transfer === undefined) {
     return {
       ok: false,
@@ -141,8 +147,8 @@ export function settleVaultPayout(
       message: "No BaaS transfer matches that id.",
     };
   }
-  const hold = store.getPayoutHold(transferId);
-  const vault = store.getVault(transfer.payee_id);
+  const hold = await store.getPayoutHold(transferId);
+  const vault = await store.getVault(transfer.payee_id);
   if (vault === undefined) {
     return {
       ok: false,
@@ -152,11 +158,11 @@ export function settleVaultPayout(
     };
   }
   if (hold === undefined || hold.status === "settled") {
-    store.updateBaasTransferStatus(transferId, "settled");
+    await store.updateBaasTransferStatus(transferId, "settled");
     if (transfer.ledger_transaction_id) {
-      const ledger = store.getLedgerTransaction(transfer.ledger_transaction_id);
+      const ledger = await store.getLedgerTransaction(transfer.ledger_transaction_id);
       if (ledger) {
-        store.updateLedgerSettlement(ledger.id, {
+        await store.updateLedgerSettlement(ledger.id, {
           status: "settled",
           rail: ledger.rail ?? transfer.rail,
           baas_provider: ledger.baas_provider ?? transfer.provider,
@@ -165,7 +171,7 @@ export function settleVaultPayout(
         });
       }
     }
-    return { ok: true, vault, transfer: store.getBaasTransfer(transferId)!, idempotent: true };
+    return { ok: true, vault, transfer: (await store.getBaasTransfer(transferId))!, idempotent: true };
   }
   if (hold.status === "reversed") {
     return {
@@ -184,13 +190,13 @@ export function settleVaultPayout(
       message: "pending_balance cannot cover that settled payout.",
     };
   }
-  const updated = persistVault(store, vault.payee_id, vault.payee_name, cleared.balances, now);
-  store.updatePayoutHoldStatus(transferId, "settled");
-  store.updateBaasTransferStatus(transferId, "settled");
+  const updated = await persistVault(store, vault.payee_id, vault.payee_name, cleared.balances, now);
+  await store.updatePayoutHoldStatus(transferId, "settled");
+  await store.updateBaasTransferStatus(transferId, "settled");
   if (transfer.ledger_transaction_id) {
-    const ledger = store.getLedgerTransaction(transfer.ledger_transaction_id);
+    const ledger = await store.getLedgerTransaction(transfer.ledger_transaction_id);
     if (ledger) {
-      store.updateLedgerSettlement(ledger.id, {
+      await store.updateLedgerSettlement(ledger.id, {
         status: "settled",
         rail: ledger.rail ?? transfer.rail,
         baas_provider: ledger.baas_provider ?? transfer.provider,
@@ -199,7 +205,7 @@ export function settleVaultPayout(
       });
     }
   }
-  postJournal(store, {
+  await postJournal(store, {
     kind: "payout_settled",
     ref_type: "baas_transfer",
     ref_id: transferId,
@@ -211,17 +217,17 @@ export function settleVaultPayout(
   return {
     ok: true,
     vault: updated,
-    transfer: store.getBaasTransfer(transferId)!,
+    transfer: (await store.getBaasTransfer(transferId))!,
     idempotent: false,
   };
 }
 
-export function reverseVaultPayout(
+export async function reverseVaultPayout(
   store: Store,
   transferId: string,
   reason: "payout.returned" | "payout.failed",
   now: Date = new Date(),
-):
+): Promise<
   | {
       ok: true;
       vault: SovereignVaultRecord;
@@ -229,8 +235,9 @@ export function reverseVaultPayout(
       transfer: BaasTransferRecord;
       idempotent: boolean;
     }
-  | { ok: false; status: number; code: string; message: string } {
-  const transfer = store.getBaasTransfer(transferId);
+  | { ok: false; status: number; code: string; message: string }
+> {
+  const transfer = await store.getBaasTransfer(transferId);
   if (transfer === undefined) {
     return {
       ok: false,
@@ -239,8 +246,8 @@ export function reverseVaultPayout(
       message: "No BaaS transfer matches that id.",
     };
   }
-  const existing = store.getPayoutReversalByTransfer(transferId);
-  const vault = store.getVault(transfer.payee_id);
+  const existing = await store.getPayoutReversalByTransfer(transferId);
+  const vault = await store.getVault(transfer.payee_id);
   if (vault === undefined) {
     return {
       ok: false,
@@ -259,7 +266,7 @@ export function reverseVaultPayout(
     };
   }
 
-  const hold = store.getPayoutHold(transferId);
+  const hold = await store.getPayoutHold(transferId);
   const amount = hold?.amount_cents ?? transfer.amount_cents;
   let nextBalances: VaultBalances = {
     available_balance: vault.available_balance,
@@ -281,24 +288,24 @@ export function reverseVaultPayout(
     nextBalances = reversed.balances;
     legs.push(vaultDebit(vault.payee_id, "pending", amount));
     legs.push(vaultCredit(vault.payee_id, "available", amount));
-    store.updatePayoutHoldStatus(transferId, "reversed");
+    await store.updatePayoutHoldStatus(transferId, "reversed");
   } else {
     nextBalances = creditBalances(nextBalances, amount, "available");
     legs.push(fboDebit(amount));
     legs.push(vaultCredit(vault.payee_id, "available", amount));
     if (hold?.status === "settled") {
-      store.updatePayoutHoldStatus(transferId, "reversed");
+      await store.updatePayoutHoldStatus(transferId, "reversed");
     }
   }
 
-  const updated = persistVault(store, vault.payee_id, vault.payee_name, nextBalances, now);
+  const updated = await persistVault(store, vault.payee_id, vault.payee_name, nextBalances, now);
   const transferStatus = reason === "payout.returned" ? "returned" : "failed";
-  store.updateBaasTransferStatus(transferId, transferStatus);
+  await store.updateBaasTransferStatus(transferId, transferStatus);
 
   if (transfer.ledger_transaction_id) {
-    const original = store.getLedgerTransaction(transfer.ledger_transaction_id);
+    const original = await store.getLedgerTransaction(transfer.ledger_transaction_id);
     if (original) {
-      store.updateLedgerSettlement(original.id, {
+      await store.updateLedgerSettlement(original.id, {
         status: "failed",
         rail: original.rail ?? transfer.rail,
         baas_provider: original.baas_provider ?? transfer.provider,
@@ -308,7 +315,7 @@ export function reverseVaultPayout(
     }
   }
 
-  const reversalLedger = store.insertLedgerTransaction({
+  const reversalLedger = await store.insertLedgerTransaction({
     split_run_id: "",
     line_item_id: "",
     payee_id: vault.payee_id,
@@ -326,7 +333,7 @@ export function reverseVaultPayout(
     kind: "payout_failed_reversal",
   });
 
-  const posted = postJournal(store, {
+  const posted = await postJournal(store, {
     kind: "payout_failed_reversal",
     ref_type: "baas_transfer",
     ref_id: transferId,
@@ -341,7 +348,7 @@ export function reverseVaultPayout(
     };
   }
 
-  const reversal = store.insertPayoutReversal({
+  const reversal = await store.insertPayoutReversal({
     transfer_id: transferId,
     payee_id: vault.payee_id,
     amount_cents: amount,
@@ -355,7 +362,7 @@ export function reverseVaultPayout(
     ok: true,
     vault: updated,
     reversal,
-    transfer: store.getBaasTransfer(transferId)!,
+    transfer: (await store.getBaasTransfer(transferId))!,
     idempotent: false,
   };
 }

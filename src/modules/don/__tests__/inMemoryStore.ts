@@ -175,18 +175,18 @@ export class InMemoryStore implements Store {
     return advance;
   }
 
-  // ---- Store implementation ----
+  // ---- Store implementation (async per the Store PR contract) ----
 
-  getVault(payeeId: string): SovereignVaultRecord | undefined {
+  async getVault(payeeId: string): Promise<SovereignVaultRecord | undefined> {
     return this.vaults.get(payeeId);
   }
 
-  upsertVault(vault: SovereignVaultRecord): SovereignVaultRecord {
+  async upsertVault(vault: SovereignVaultRecord): Promise<SovereignVaultRecord> {
     this.vaults.set(vault.payee_id, vault);
     return vault;
   }
 
-  sumInFlightPayoutHolds(payeeId: string): number {
+  async sumInFlightPayoutHolds(payeeId: string): Promise<number> {
     let sum = 0;
     for (const hold of this.payoutHolds.values()) {
       if (hold.payee_id === payeeId && hold.status === "in_flight") {
@@ -196,86 +196,86 @@ export class InMemoryStore implements Store {
     return sum;
   }
 
-  getVaultDispute(payeeId: string): VaultDisputeRecord | undefined {
+  async getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined> {
     return this.vaultDisputes.get(payeeId);
   }
 
-  getCatalogDispute(workId: string): CatalogDisputeRecord | undefined {
+  async getCatalogDispute(workId: string): Promise<CatalogDisputeRecord | undefined> {
     return this.catalogDisputes.get(workId);
   }
 
-  insertLedgerTransaction(tx: LedgerTransactionInsert): LedgerTransactionRecord {
+  async insertLedgerTransaction(tx: LedgerTransactionInsert): Promise<LedgerTransactionRecord> {
     const record: LedgerTransactionRecord = { ...tx, id: this.nextId("ltx") };
     this.ledgerTransactions.push(record);
     return record;
   }
 
-  getLedgerTransaction(id: string): LedgerTransactionRecord | undefined {
+  async getLedgerTransaction(id: string): Promise<LedgerTransactionRecord | undefined> {
     return this.ledgerTransactions.find((tx) => tx.id === id);
   }
 
-  updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): void {
-    const record = this.getLedgerTransaction(id);
+  async updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): Promise<void> {
+    const record = await this.getLedgerTransaction(id);
     if (record) {
       Object.assign(record, update);
     }
   }
 
-  getBaasTransfer(transferId: string): BaasTransferRecord | undefined {
+  async getBaasTransfer(transferId: string): Promise<BaasTransferRecord | undefined> {
     return this.baasTransfers.get(transferId);
   }
 
-  updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): void {
+  async updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): Promise<void> {
     const transfer = this.baasTransfers.get(transferId);
     if (transfer) {
       transfer.status = status;
     }
   }
 
-  getPayoutHold(transferId: string): PayoutHoldRecord | undefined {
+  async getPayoutHold(transferId: string): Promise<PayoutHoldRecord | undefined> {
     return this.payoutHolds.get(transferId);
   }
 
-  updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): void {
+  async updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): Promise<void> {
     const hold = this.payoutHolds.get(transferId);
     if (hold) {
       hold.status = status;
     }
   }
 
-  getPayoutReversalByTransfer(transferId: string): PayoutReversalRecord | undefined {
+  async getPayoutReversalByTransfer(transferId: string): Promise<PayoutReversalRecord | undefined> {
     return this.payoutReversals.find((reversal) => reversal.transfer_id === transferId);
   }
 
-  insertPayoutReversal(reversal: PayoutReversalInsert): PayoutReversalRecord {
+  async insertPayoutReversal(reversal: PayoutReversalInsert): Promise<PayoutReversalRecord> {
     const record: PayoutReversalRecord = { ...reversal, id: this.nextId("rev") };
     this.payoutReversals.push(record);
     return record;
   }
 
-  getLastGlJournal(): GlJournalRecord | undefined {
+  async getLastGlJournal(): Promise<GlJournalRecord | undefined> {
     if (this.glJournals.length === 0) {
       return undefined;
     }
     return this.glJournals[this.glJournals.length - 1];
   }
 
-  insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): GlJournalRecord {
+  async insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): Promise<GlJournalRecord> {
     this.glJournals.push(journal);
     this.glEntries.push(...entries);
     return journal;
   }
 
-  getRecoupmentAdvance(creatorId: string): RecoupmentAdvanceRecord | undefined {
+  async getRecoupmentAdvance(creatorId: string): Promise<RecoupmentAdvanceRecord | undefined> {
     return this.recoupmentAdvances.get(creatorId);
   }
 
-  upsertRecoupmentAdvance(advance: RecoupmentAdvanceRecord): RecoupmentAdvanceRecord {
+  async upsertRecoupmentAdvance(advance: RecoupmentAdvanceRecord): Promise<RecoupmentAdvanceRecord> {
     this.recoupmentAdvances.set(advance.creator_id, advance);
     return advance;
   }
 
-  insertRecoupmentLedger(row: RecoupmentLedgerInsert): RecoupmentLedgerRecord {
+  async insertRecoupmentLedger(row: RecoupmentLedgerInsert): Promise<RecoupmentLedgerRecord> {
     const record: RecoupmentLedgerRecord = { ...row, id: this.nextId("rcl") };
     this.recoupmentLedger.push(record);
     return record;

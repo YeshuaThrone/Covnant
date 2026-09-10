@@ -4,7 +4,8 @@
 // to the store: recouped cents land in the platform vault's available balance
 // (locked invariant 5 — never a creator), the excess goes to the payee's
 // chosen bucket, and the per-split-run ledger row is written when a run id is
-// supplied.
+// supplied. Async adaptation only (Store PR contract): the store calls are
+// awaited; the sweep math is untouched.
 
 import type { Store } from "@/modules/don/storeStub";
 import {
@@ -74,16 +75,16 @@ export type RecoupmentSweepOutcome = {
   recoupment_target_cents: number;
 };
 
-export function applyRecoupmentSweep(
+export async function applyRecoupmentSweep(
   store: Store,
   payeeId: string,
   payeeName: string,
   incomingCents: number,
   now: Date = new Date(),
   options: RecoupmentSweepOptions = {},
-): RecoupmentSweepOutcome {
+): Promise<RecoupmentSweepOutcome> {
   const excessTarget = options.excess_target ?? "available";
-  const advance = store.getRecoupmentAdvance(payeeId);
+  const advance = await store.getRecoupmentAdvance(payeeId);
   if (!advance) {
     return {
       applied: false,
@@ -102,12 +103,12 @@ export function applyRecoupmentSweep(
     recoupment_bps: advance.recoupment_bps,
   });
   if (swept.recouped_cents > 0) {
-    store.upsertRecoupmentAdvance({
+    await store.upsertRecoupmentAdvance({
       ...advance,
       recoupment_current_cents: swept.recoupment_current_cents,
       updated_at: now.toISOString(),
     });
-    creditVault(
+    await creditVault(
       store,
       COMPANY_VARIANCE_PAYEE_ID,
       COMPANY_VARIANCE_PAYEE_NAME,
@@ -117,10 +118,10 @@ export function applyRecoupmentSweep(
     );
   }
   if (swept.excess_cents > 0) {
-    creditVault(store, payeeId, payeeName, swept.excess_cents, excessTarget, now);
+    await creditVault(store, payeeId, payeeName, swept.excess_cents, excessTarget, now);
   }
   if (options.split_run_id && incomingCents > 0) {
-    store.insertRecoupmentLedger({
+    await store.insertRecoupmentLedger({
       creator_id: payeeId,
       split_run_id: options.split_run_id,
       incoming_cents: incomingCents,

@@ -76,11 +76,11 @@ describe("sweepRecoupment", () => {
 });
 
 describe("applyRecoupmentSweep", () => {
-  it("routes recouped cents to the platform vault available — never a creator", () => {
+  it("routes recouped cents to the platform vault available — never a creator", async () => {
     const store = new InMemoryStore();
     store.seedVault("c1", 0, 0, 0);
     store.seedRecoupmentAdvance("c1", 100_000, 0);
-    const outcome = applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date(), {
+    const outcome = await applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date(), {
       split_run_id: "sr_01",
     });
     expect(outcome.applied).toBe(true);
@@ -89,11 +89,11 @@ describe("applyRecoupmentSweep", () => {
     expect(store.vaults.get("c1")?.available_balance).toBe(0);
   });
 
-  it("credits the excess to the creator after the advance completes", () => {
+  it("credits the excess to the creator after the advance completes", async () => {
     const store = new InMemoryStore();
     store.seedVault("c1", 0, 0, 0);
     store.seedRecoupmentAdvance("c1", 100_000, 97_000);
-    const outcome = applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date());
+    const outcome = await applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date());
     expect(outcome.completed).toBe(true);
     expect(outcome.recouped_cents).toBe(3_000);
     expect(outcome.excess_cents).toBe(7_000);
@@ -101,22 +101,22 @@ describe("applyRecoupmentSweep", () => {
     expect(store.vaults.get("c1")?.available_balance).toBe(7_000);
   });
 
-  it("credits excess to pending when the creator's excess target is pending", () => {
+  it("credits excess to pending when the creator's excess target is pending", async () => {
     const store = new InMemoryStore();
     store.seedVault("c1", 0, 0, 0);
     store.seedRecoupmentAdvance("c1", 100_000, 100_000);
-    applyRecoupmentSweep(store, "c1", "Creator One", 4_000, new Date(), {
+    await applyRecoupmentSweep(store, "c1", "Creator One", 4_000, new Date(), {
       excess_target: "pending",
     });
     expect(store.vaults.get(COMPANY_VARIANCE_PAYEE_ID)).toBeUndefined();
     expect(store.vaults.get("c1")?.pending_balance).toBe(4_000);
   });
 
-  it("writes the recoupment ledger row for a split run", () => {
+  it("writes the recoupment ledger row for a split run", async () => {
     const store = new InMemoryStore();
     store.seedVault("c1", 0, 0, 0);
     store.seedRecoupmentAdvance("c1", 100_000, 0);
-    applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date(), {
+    await applyRecoupmentSweep(store, "c1", "Creator One", 10_000, new Date(), {
       split_run_id: "sr_01",
     });
     expect(store.recoupmentLedger).toHaveLength(1);
@@ -129,10 +129,10 @@ describe("applyRecoupmentSweep", () => {
     });
   });
 
-  it("passes everything through when the creator has no recoupment advance", () => {
+  it("passes everything through when the creator has no recoupment advance", async () => {
     const store = new InMemoryStore();
     store.seedVault("c1", 0, 0, 0);
-    const outcome = applyRecoupmentSweep(store, "c1", "Creator One", 8_000, new Date());
+    const outcome = await applyRecoupmentSweep(store, "c1", "Creator One", 8_000, new Date());
     // No advance → nothing recouped and nothing written here: the caller's
     // normal split flow already credits that creator's share. Crediting the
     // excess again inside the sweep would double-pay.

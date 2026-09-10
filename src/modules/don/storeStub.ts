@@ -12,6 +12,11 @@
 // When the Store PR merges: repoint the engine imports at
 // "@/lib/server/store", delete this file, and re-align the in-memory test
 // store if any signature differs.
+//
+// ASYNC CONTRACT: the Store PR ruled that every Store method is
+// Promise-wrapped (Cursor's sync canonical cannot be implemented over the
+// async Supabase client). This stub mirrors that contract — same method
+// names and parameter shapes, Promise returns.
 
 import type {
   BaasProvider,
@@ -53,35 +58,35 @@ export type RecoupmentLedgerInsert = Omit<RecoupmentLedgerRecord, "id">;
 // sequence / prev_hash / entry_hash on the journal row).
 export interface Store {
   // Sovereign vaults
-  getVault(payeeId: string): SovereignVaultRecord | undefined;
-  upsertVault(vault: SovereignVaultRecord): SovereignVaultRecord;
-  sumInFlightPayoutHolds(payeeId: string): number;
+  getVault(payeeId: string): Promise<SovereignVaultRecord | undefined>;
+  upsertVault(vault: SovereignVaultRecord): Promise<SovereignVaultRecord>;
+  sumInFlightPayoutHolds(payeeId: string): Promise<number>;
 
   // Disputes — payee-level (vault) and work-level (catalog)
-  getVaultDispute(payeeId: string): VaultDisputeRecord | undefined;
-  getCatalogDispute(workId: string): CatalogDisputeRecord | undefined;
+  getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined>;
+  getCatalogDispute(workId: string): Promise<CatalogDisputeRecord | undefined>;
 
   // Ledger transactions
-  insertLedgerTransaction(tx: LedgerTransactionInsert): LedgerTransactionRecord;
-  getLedgerTransaction(id: string): LedgerTransactionRecord | undefined;
-  updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): void;
+  insertLedgerTransaction(tx: LedgerTransactionInsert): Promise<LedgerTransactionRecord>;
+  getLedgerTransaction(id: string): Promise<LedgerTransactionRecord | undefined>;
+  updateLedgerSettlement(id: string, update: LedgerSettlementUpdate): Promise<void>;
 
   // BaaS transfers and payout holds
-  getBaasTransfer(transferId: string): BaasTransferRecord | undefined;
-  updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): void;
-  getPayoutHold(transferId: string): PayoutHoldRecord | undefined;
-  updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): void;
+  getBaasTransfer(transferId: string): Promise<BaasTransferRecord | undefined>;
+  updateBaasTransferStatus(transferId: string, status: BaasTransferStatus): Promise<void>;
+  getPayoutHold(transferId: string): Promise<PayoutHoldRecord | undefined>;
+  updatePayoutHoldStatus(transferId: string, status: PayoutHoldStatus): Promise<void>;
 
   // Payout reversals
-  getPayoutReversalByTransfer(transferId: string): PayoutReversalRecord | undefined;
-  insertPayoutReversal(reversal: PayoutReversalInsert): PayoutReversalRecord;
+  getPayoutReversalByTransfer(transferId: string): Promise<PayoutReversalRecord | undefined>;
+  insertPayoutReversal(reversal: PayoutReversalInsert): Promise<PayoutReversalRecord>;
 
   // GL journals — append-only, hash-chained
-  getLastGlJournal(): GlJournalRecord | undefined;
-  insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): GlJournalRecord;
+  getLastGlJournal(): Promise<GlJournalRecord | undefined>;
+  insertGlJournal(journal: GlJournalRecord, entries: GlEntryRecord[]): Promise<GlJournalRecord>;
 
   // Recoupment
-  getRecoupmentAdvance(creatorId: string): RecoupmentAdvanceRecord | undefined;
-  upsertRecoupmentAdvance(advance: RecoupmentAdvanceRecord): RecoupmentAdvanceRecord;
-  insertRecoupmentLedger(row: RecoupmentLedgerInsert): RecoupmentLedgerRecord;
+  getRecoupmentAdvance(creatorId: string): Promise<RecoupmentAdvanceRecord | undefined>;
+  upsertRecoupmentAdvance(advance: RecoupmentAdvanceRecord): Promise<RecoupmentAdvanceRecord>;
+  insertRecoupmentLedger(row: RecoupmentLedgerInsert): Promise<RecoupmentLedgerRecord>;
 }

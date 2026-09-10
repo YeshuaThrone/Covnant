@@ -10,35 +10,35 @@ describe("isIncomingFrozen truth table", () => {
     { vaultLocked: true, catalogLocked: true, expected: true },
   ])(
     "vault dispute locked=$vaultLocked, catalog dispute locked=$catalogLocked → $expected",
-    ({ vaultLocked, catalogLocked, expected }) => {
+    async ({ vaultLocked, catalogLocked, expected }) => {
       const store = new InMemoryStore();
       store.seedVaultDispute("c1", vaultLocked ? 1 : 0);
       store.seedCatalogDispute("trk_01", catalogLocked ? 1 : 0);
-      expect(isIncomingFrozen(store, "c1", "trk_01")).toBe(expected);
+      expect(await isIncomingFrozen(store, "c1", "trk_01")).toBe(expected);
     },
   );
 
-  it("is frozen when either dispute row exists and is locked", () => {
+  it("is frozen when either dispute row exists and is locked", async () => {
     const store = new InMemoryStore();
     store.seedCatalogDispute("trk_01", 1);
-    expect(isIncomingFrozen(store, "nobody", "trk_01")).toBe(true);
+    expect(await isIncomingFrozen(store, "nobody", "trk_01")).toBe(true);
   });
 });
 
 describe("isPayoutFrozen truth table", () => {
-  it("is true only while the payee's own dispute lock is active", () => {
+  it("is true only while the payee's own dispute lock is active", async () => {
     const locked = new InMemoryStore();
     locked.seedVaultDispute("c1", 1);
-    expect(isPayoutFrozen(locked, "c1")).toBe(true);
+    expect(await isPayoutFrozen(locked, "c1")).toBe(true);
 
     const unlocked = new InMemoryStore();
     unlocked.seedVaultDispute("c1", 0);
-    expect(isPayoutFrozen(unlocked, "c1")).toBe(false);
+    expect(await isPayoutFrozen(unlocked, "c1")).toBe(false);
 
     // A catalog-level lock does not freeze payouts — payouts are payee-scoped.
     const catalogOnly = new InMemoryStore();
     catalogOnly.seedCatalogDispute("trk_01", 1);
-    expect(isPayoutFrozen(catalogOnly, "c1")).toBe(false);
+    expect(await isPayoutFrozen(catalogOnly, "c1")).toBe(false);
   });
 });
 
