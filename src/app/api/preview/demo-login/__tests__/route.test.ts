@@ -31,10 +31,6 @@ function demoClient(signIn: ReturnType<typeof vi.fn>) {
   return { auth: { signInWithPassword: signIn } };
 }
 
-function aRequest(): Request {
-  return new Request('http://localhost:3000/api/preview/demo-login');
-}
-
 afterEach(() => {
   delete process.env.VERCEL_ENV;
   vi.clearAllMocks();
@@ -45,7 +41,7 @@ describe('GET /api/preview/demo-login', () => {
     process.env.VERCEL_ENV = 'production';
     ssrMock.createServerSupabaseClient.mockResolvedValue(demoClient(vi.fn()));
 
-    const response = await GET(aRequest());
+    const response = await GET();
 
     expect(response.status).toBe(404);
     expect(ssrMock.createServerSupabaseClient).not.toHaveBeenCalled();
@@ -56,7 +52,7 @@ describe('GET /api/preview/demo-login', () => {
     delete process.env.VERCEL_ENV;
     ssrMock.createServerSupabaseClient.mockResolvedValue(demoClient(vi.fn()));
 
-    const response = await GET(aRequest());
+    const response = await GET();
 
     expect(response.status).toBe(404);
     expect(ssrMock.createServerSupabaseClient).not.toHaveBeenCalled();
@@ -67,14 +63,20 @@ describe('GET /api/preview/demo-login', () => {
     const signIn = vi.fn().mockResolvedValue({ error: null });
     ssrMock.createServerSupabaseClient.mockResolvedValue(demoClient(signIn));
 
-    const response = await GET(aRequest());
+    const response = await GET();
 
     expect(signIn).toHaveBeenCalledWith({
       email: PREVIEW_DEMO_CREATOR_EMAIL,
       password: PREVIEW_DEMO_CREATOR_PASSWORD,
     });
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('http://localhost:3000/dashboard');
+    // Relative Location (RFC 7231): resolved by the browser against the
+    // requesting origin. An absolute Location built from `request.url`
+    // leaks the deployment's internal origin (localhost behind the proxy)
+    // and strands external users on their own machine.
+    expect(response.headers.get('location')).toBe('/dashboard');
+    expect(response.headers.get('location')).not.toMatch(/^https?:\/\//i);
+    expect(response.headers.get('location')).not.toContain('localhost');
   });
 
   it('on sign-in failure redirects to /signin with the failed param — never to /dashboard', async () => {
@@ -82,23 +84,23 @@ describe('GET /api/preview/demo-login', () => {
     const signIn = vi.fn().mockResolvedValue({ error: { message: 'Invalid login credentials' } });
     ssrMock.createServerSupabaseClient.mockResolvedValue(demoClient(signIn));
 
-    const response = await GET(aRequest());
+    const response = await GET();
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:3000/signin?demo_login_failed=1'
-    );
+    expect(response.headers.get('location')).toBe('/signin?demo_login_failed=1');
+    expect(response.headers.get('location')).not.toMatch(/^https?:\/\//i);
+    expect(response.headers.get('location')).not.toContain('localhost');
   });
 
   it('with no configured Supabase client redirects to /signin with the failed param', async () => {
     process.env.VERCEL_ENV = 'preview';
     ssrMock.createServerSupabaseClient.mockResolvedValue(null);
 
-    const response = await GET(aRequest());
+    const response = await GET();
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:3000/signin?demo_login_failed=1'
-    );
+    expect(response.headers.get('location')).toBe('/signin?demo_login_failed=1');
+    expect(response.headers.get('location')).not.toMatch(/^https?:\/\//i);
+    expect(response.headers.get('location')).not.toContain('localhost');
   });
 });

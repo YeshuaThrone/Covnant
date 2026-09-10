@@ -29,17 +29,26 @@ import { createServerSupabaseClient } from '@/lib/server/supabaseSsr';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request): Promise<NextResponse> {
+/**
+ * Relative 307 — legal per RFC 7231 and resolved by the browser against the
+ * requesting origin. Building the Location from `request.url` instead leaks
+ * the deployment's internal origin (e.g. http://localhost:8123) to clients
+ * behind a proxy, which strands them on their own localhost.
+ */
+function redirectTo(path: string): NextResponse {
+  return new NextResponse(null, { status: 307, headers: { Location: path } });
+}
+
+export async function GET(): Promise<NextResponse> {
   if (!isPreviewDemoAccessEnabled()) {
     return NextResponse.json({ error: { code: 'not_found' } }, { status: 404 });
   }
 
-  const requestUrl = new URL(request.url);
   const supabase = await createServerSupabaseClient();
   if (!supabase) {
     // Supabase env not configured on this deployment — fail to the real
     // sign-in page rather than loop.
-    return NextResponse.redirect(new URL('/signin?demo_login_failed=1', requestUrl));
+    return redirectTo('/signin?demo_login_failed=1');
   }
 
   const { error } = await supabase.auth.signInWithPassword({
@@ -47,8 +56,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     password: PREVIEW_DEMO_CREATOR_PASSWORD,
   });
   if (error) {
-    return NextResponse.redirect(new URL('/signin?demo_login_failed=1', requestUrl));
+    return redirectTo('/signin?demo_login_failed=1');
   }
 
-  return NextResponse.redirect(new URL('/dashboard', requestUrl));
+  return redirectTo('/dashboard');
 }
