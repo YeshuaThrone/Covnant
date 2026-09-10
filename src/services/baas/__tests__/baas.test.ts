@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import {
   ColumnAdapter,
   UnitAdapter,
@@ -10,84 +11,51 @@ import {
   settleLedgerThroughBaas,
 } from "../index";
 import { estimatedAchSettlement, liveFailure } from "../sandboxRail";
-import type { BaasProvider, BaasTransferRecord } from "@/lib/don/types";
-
-// Structural in-memory Store covering exactly the methods the BaaS layer
-// calls. Swapped for the repo's real InMemoryStore once the Store PR lands.
-type TransferRecord = BaasTransferRecord;
-
-class InMemoryStoreMock {
-  transfers: TransferRecord[] = [];
-  ledger: Map<string, LedgerRow> = new Map();
-  settlements: {
-    id: string;
-    patch: SettlementPatch;
-  }[] = [];
-  private nextId = 1;
-
-  insertBaasTransfer(input: Omit<TransferRecord, "id">) {
-    const record: TransferRecord = { ...input, id: `baas_${this.nextId++}` };
-    this.transfers.push(record);
-    return record;
-  }
-
-  getLedgerTransaction(id: string): LedgerRow | undefined {
-    return this.ledger.get(id);
-  }
-
-  updateLedgerSettlement(id: string, patch: SettlementPatch): void {
-    this.settlements.push({ id, patch });
-  }
-}
-
-type LedgerRow = {
-  id: string;
-  payee_id: string;
-  payee_name: string;
-  amount_cents: number;
-  currency: string;
-  status: string;
-};
-
-type SettlementPatch = {
-  status: string;
-  rail: "ach" | "rtp";
-  baas_provider: BaasProvider;
-  baas_transfer_id: string | null;
-  settled_at: string | null;
-};
 
 const NOW = new Date("2026-09-10T12:00:00.000Z");
 const NOW_PLUS_3_DAYS = "2026-09-13T12:00:00.000Z";
 
-let store: InMemoryStoreMock;
+let store: InMemoryStore;
 
-const pendingRow = (id: string): LedgerRow => ({
-  id,
-  payee_id: "creator_1",
-  payee_name: "Creator One",
-  amount_cents: 12_345,
-  currency: "usd",
-  status: "pending_settlement",
-});
+const seedPendingLedger = () =>
+  store.insertLedgerTransaction({
+    split_run_id: "run_1",
+    line_item_id: "li_1",
+    payee_id: "creator_1",
+    payee_name: "Creator One",
+    role: "other",
+    share_bps: 5000,
+    amount_cents: 12_345,
+    currency: "usd",
+    status: "pending_settlement",
+    rail: null,
+    baas_provider: null,
+    baas_transfer_id: null,
+    created_at: NOW.toISOString(),
+    settled_at: null,
+  });
 
-const sandboxInput = (rail: "ach" | "rtp") => ({
+const sandboxInput = (rail: "ach" | "rtp", ledgerId: string | null) => ({
   provider: "column" as const,
   rail,
   payee_id: "creator_1",
   payee_name: "Creator One",
   amount_cents: 12_345,
   currency: "usd",
-  ledger_transaction_id: "lt_1",
+  ledger_transaction_id: ledgerId,
 });
 
 describe("sandbox rail", () => {
   beforeEach(() => {
-    store = new InMemoryStoreMock();
+    store = new InMemoryStore();
   });
 
   it("settles RTP immediately with no ETA gap", async () => {
-    const result = await processSandboxRail(store, sandboxInput("rtp"), NOW);
+    const result = await processSandboxRail(
+      store,
+      sandboxInput("rtp", null),
+      NOW,
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.mode).toBe("sandbox");
@@ -96,17 +64,23 @@ describe("sandbox rail", () => {
     expect(result.transfer.provider).toBe("column");
     expect(result.transfer.estimated_settlement).toBe(result.transfer.created_at);
     expect(result.transfer.created_at).toBe(NOW.toISOString());
-    expect(result.transfer.ledger_transaction_id).toBe("lt_1");
-    expect(store.transfers).toHaveLength(1);
+    expect(result.transfer.ledger_transaction_id).toBeNull();
+    const persisted = await store.getBaasTransfer(result.transfer.id);
+    expect(persisted).toMatchObject({ status: "settled", rail: "rtp" });
   });
 
   it("records ACH as submitted with a +3-day settlement ETA", async () => {
-    const result = await processSandboxRail(store, sandboxInput("ach"), NOW);
+    const result = await processSandboxRail(
+      store,
+      sandboxInput("ach", null),
+      NOW,
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.transfer.status).toBe("submitted");
     expect(result.transfer.estimated_settlement).toBe(NOW_PLUS_3_DAYS);
     expect(result.transfer.created_at).toBe(NOW.toISOString());
+    expect((await store.listBaasTransfers()).length).toBe(1);
   });
 
   it("computes the ACH ETA in UTC across month boundaries", () => {
@@ -117,7 +91,7 @@ describe("sandbox rail", () => {
 
 describe("live mode fails closed", () => {
   beforeEach(() => {
-    store = new InMemoryStoreMock();
+    store = new InMemoryStore();
   });
 
   afterEach(() => {
@@ -163,18 +137,18 @@ describe("live mode fails closed", () => {
       payee_name: "Creator One",
       amount_cents: 12_345,
       currency: "usd",
-      ledger_transaction_id: "lt_1",
+      ledger_transaction_id: null,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.status).toBe(501);
-    expect(store.transfers).toHaveLength(0);
+    expect(await store.listBaasTransfers()).toHaveLength(0);
   });
 });
 
 describe("adapter dispatch", () => {
   beforeEach(() => {
-    store = new InMemoryStoreMock();
+    store = new InMemoryStore();
   });
 
   afterEach(() => {
@@ -213,10 +187,12 @@ describe("adapter dispatch", () => {
       payee_name: "Creator One",
       amount_cents: 12_345,
       currency: "usd",
-      ledger_transaction_id: "lt_1",
+      ledger_transaction_id: null,
     });
     expect(result.ok).toBe(true);
-    expect(store.transfers[0]?.provider).toBe("unit");
+    if (!result.ok) return;
+    const persisted = await store.getBaasTransfer(result.transfer.id);
+    expect(persisted?.provider).toBe("unit");
   });
 
   it("setBaasAdapter overrides and clears the module singleton", () => {
@@ -230,8 +206,7 @@ describe("adapter dispatch", () => {
 
 describe("settleLedgerThroughBaas", () => {
   beforeEach(() => {
-    store = new InMemoryStoreMock();
-    store.ledger.set("lt_1", pendingRow("lt_1"));
+    store = new InMemoryStore();
   });
 
   afterEach(() => {
@@ -239,47 +214,54 @@ describe("settleLedgerThroughBaas", () => {
   });
 
   it("transitions a pending transaction to settled on the RTP rail", async () => {
-    // Deterministic clock via the deps.processRail injection seam.
-    const adapter = new ColumnAdapter({
+    const row = await seedPendingLedger();
+    const adapter = new ColumnAdapter({ store, mode: "sandbox" });
+    const result = await settleLedgerThroughBaas(
       store,
-      mode: "sandbox",
-      processRail: (s, input) => processSandboxRail(s, input, NOW),
-    });
-    const result = await settleLedgerThroughBaas(store, adapter, "lt_1", "rtp");
+      adapter,
+      row.id,
+      "rtp",
+    );
     expect(result.ok).toBe(true);
-    expect(store.settlements).toEqual([
-      {
-        id: "lt_1",
-        patch: {
-          status: "settled",
-          rail: "rtp",
-          baas_provider: "column",
-          baas_transfer_id: "baas_1",
-          settled_at: NOW.toISOString(),
-        },
-      },
-    ]);
+    if (!result.ok) return;
+    const updated = await store.getLedgerTransaction(row.id);
+    expect(updated).toMatchObject({
+      status: "settled",
+      rail: "rtp",
+      baas_provider: "column",
+      baas_transfer_id: result.transfer.id,
+      settled_at: result.transfer.created_at,
+    });
+    expect(result.transfer.status).toBe("settled");
   });
 
   it("transitions a pending transaction to submitted on the ACH rail", async () => {
+    const row = await seedPendingLedger();
     const adapter = new ColumnAdapter({ store, mode: "sandbox" });
-    const result = await settleLedgerThroughBaas(store, adapter, "lt_1", "ach");
+    const result = await settleLedgerThroughBaas(
+      store,
+      adapter,
+      row.id,
+      "ach",
+    );
     expect(result.ok).toBe(true);
-    expect(store.settlements).toEqual([
-      {
-        id: "lt_1",
-        patch: {
-          status: "submitted",
-          rail: "ach",
-          baas_provider: "column",
-          baas_transfer_id: "baas_1",
-          settled_at: null,
-        },
-      },
-    ]);
+    if (!result.ok) return;
+    const updated = await store.getLedgerTransaction(row.id);
+    expect(updated).toMatchObject({
+      status: "submitted",
+      rail: "ach",
+      baas_provider: "column",
+      baas_transfer_id: result.transfer.id,
+      settled_at: null,
+    });
+    expect(result.transfer.status).toBe("submitted");
+    const created = new Date(result.transfer.created_at);
+    const eta = new Date(result.transfer.estimated_settlement ?? "");
+    expect(eta.getTime() - created.getTime()).toBe(3 * 24 * 60 * 60 * 1000);
   });
 
   it("marks the ledger failed when the adapter refuses", async () => {
+    const row = await seedPendingLedger();
     setBaasAdapter({
       provider: "unit",
       mode: "live",
@@ -301,42 +283,42 @@ describe("settleLedgerThroughBaas", () => {
     const result = await settleLedgerThroughBaas(
       store,
       getBaasAdapter(store),
-      "lt_1",
+      row.id,
       "ach",
     );
     expect(result.ok).toBe(false);
-    expect(store.settlements).toEqual([
-      {
-        id: "lt_1",
-        patch: {
-          status: "failed",
-          rail: "ach",
-          baas_provider: "unit",
-          baas_transfer_id: null,
-          settled_at: null,
-        },
-      },
-    ]);
+    const updated = await store.getLedgerTransaction(row.id);
+    expect(updated).toMatchObject({
+      status: "failed",
+      rail: "ach",
+      baas_provider: "unit",
+      baas_transfer_id: null,
+      settled_at: null,
+    });
   });
 
   it("returns ledger_not_found when no transaction matches", async () => {
     const adapter = new ColumnAdapter({ store, mode: "sandbox" });
-    const result = await settleLedgerThroughBaas(store, adapter, "lt_404", "rtp");
+    const result = await settleLedgerThroughBaas(
+      store,
+      adapter,
+      "no-such-ledger-id",
+      "rtp",
+    );
     expect(result).toMatchObject({
       ok: false,
       status: 404,
       code: "ledger_not_found",
     });
-    expect(store.settlements).toHaveLength(0);
+    expect(await store.listBaasTransfers()).toHaveLength(0);
   });
 
   it("routes RTP settlement through createRtpPayment and ACH through createAchTransfer", async () => {
+    const row = await seedPendingLedger();
     const adapter = new ColumnAdapter({ store, mode: "sandbox" });
-    await settleLedgerThroughBaas(store, adapter, "lt_1", "rtp");
-    const [rtpTransfer] = store.transfers;
-    expect(rtpTransfer?.rail).toBe("rtp");
-    await settleLedgerThroughBaas(store, adapter, "lt_1", "ach");
-    const [, achTransfer] = store.transfers;
-    expect(achTransfer?.rail).toBe("ach");
+    await settleLedgerThroughBaas(store, adapter, row.id, "rtp");
+    await settleLedgerThroughBaas(store, adapter, row.id, "ach");
+    const transfers = await store.listBaasTransfers();
+    expect(transfers.map((t) => t.rail)).toEqual(["rtp", "ach"]);
   });
 });
