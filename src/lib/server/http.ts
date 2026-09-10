@@ -15,9 +15,28 @@
  * Every error response is cache-control: no-store.
  */
 
+import { NextResponse } from 'next/server';
+
 export function jsonError(status: number, code: string, message: string): Response {
   return Response.json(
     { ok: false, error: message, reason: code },
     { status, headers: { 'cache-control': 'no-store' } },
   );
+}
+
+/**
+ * Don Engine wire envelope (Cursor drop): `{ error, code }`. The legacy
+ * jsonError envelope above stays byte-for-byte intact — admin login and
+ * signup tests assert its exact body — so the Don surface gets its own
+ * helper instead of a changed shared envelope. Don routes at intake import
+ * this in place of the drop's `jsonError`.
+ */
+export type DonApiErrorEnvelope = { error: string; code: string };
+
+export function donJsonError(
+  status: number,
+  code: string,
+  message: string,
+): NextResponse<DonApiErrorEnvelope> {
+  return NextResponse.json({ error: message, code }, { status });
 }
