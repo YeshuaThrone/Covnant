@@ -47,10 +47,17 @@ import { resolveCovnantMe } from '@/lib/server/covnantMe';
 
 export const dynamic = 'force-dynamic';
 
-/** The small-caps section label — the bank reference's "ACCOUNTS" row. */
+/**
+ * The small-caps section label — the bank reference's "ACCOUNTS" row.
+ * The `!` modifiers matter: globals.css carries an UNLAYERED
+ * `h1, h2 { font-family: var(--font-display); letter-spacing: -0.02em }`
+ * brand rule, and unlayered styles beat @layer utilities — without the
+ * flags the label silently renders in the display font with tight
+ * tracking instead of the tracked mono voice.
+ */
 function SectionLabel({ children }: { children: string }): React.JSX.Element {
   return (
-    <h2 className="font-mono text-[11px] uppercase tracking-[0.3em] text-slate-500">{children}</h2>
+    <h2 className="font-mono! text-[11px] uppercase tracking-[0.3em]! text-slate-500">{children}</h2>
   );
 }
 

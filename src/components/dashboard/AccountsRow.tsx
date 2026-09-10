@@ -71,8 +71,26 @@ export function VirtualAccountCard({ me }: { me: CovnantMeResponse }): React.JSX
 
 /** ── Card 2: Royalty Settlements — primary currency large, rest exact ── */
 
+/**
+ * The card's primary (large-type) currency: the largest net balance, with
+ * the route's row order as the deterministic tiebreak. The me-route's
+ * aggregation order is alphabetical (EUR before USD), which would render
+ * a minor currency as the hero figure — the bank grammar leads with the
+ * balance that matters most.
+ */
+function primaryLine(lines: ReadonlyArray<{ currency: string; netUnits: string }>): {
+  currency: string;
+  netUnits: string;
+} {
+  return [...lines].sort((a, b) => {
+    if (a.netUnits === b.netUnits) return 0;
+    return BigInt(a.netUnits) > BigInt(b.netUnits) ? -1 : 1;
+  })[0];
+}
+
 export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
   const lines = me.settlementsByCurrency;
+  const primary = lines.length > 0 ? primaryLine(lines) : null;
   return (
     <section
       data-testid="account-card-settlements"
@@ -81,7 +99,7 @@ export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.El
     >
       <h3 className="text-sm font-medium text-slate-400">Royalty Settlements</h3>
 
-      {lines.length === 0 ? (
+      {lines.length === 0 || primary === null ? (
         <p
           data-testid="settlements-empty"
           className="mt-6 text-right text-sm leading-relaxed text-slate-400 md:mt-8"
@@ -91,12 +109,12 @@ export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.El
       ) : (
         <>
           <p
-            data-testid={`settlements-net-${lines[0].currency}`}
+            data-testid={`settlements-net-${primary.currency}`}
             className="mt-6 text-right text-4xl font-semibold tracking-tight text-slate-100 md:mt-8 md:text-5xl"
           >
-            {formatUnitsMinor(lines[0].netUnits, lines[0].currency)}
+            {formatUnitsMinor(primary.netUnits, primary.currency)}
           </p>
-          <p className="mt-1 text-right text-xs text-slate-500">Balance · {lines[0].currency}</p>
+          <p className="mt-1 text-right text-xs text-slate-500">Balance · {primary.currency}</p>
 
           {/* Remaining currencies stay exact, in small print. */}
           {lines.length > 1 ? (
@@ -104,7 +122,9 @@ export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.El
               data-testid="settlements-lines"
               className="mt-4 space-y-1.5 border-t border-slate-700/50 pt-3"
             >
-              {lines.slice(1).map((line) => (
+              {lines
+                .filter((line) => line.currency !== primary.currency)
+                .map((line) => (
                 <div key={line.currency} className="flex items-baseline justify-between gap-4">
                   <dt className="font-mono text-[11px] uppercase tracking-[0.2em] text-slate-500">
                     {line.currency}

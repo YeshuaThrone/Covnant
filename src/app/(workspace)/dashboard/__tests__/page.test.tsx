@@ -157,6 +157,30 @@ describe('/dashboard — resolved aggregate (signed in)', () => {
     expect(html).not.toContain('data-testid="virtual-balance-pending"');
   });
 
+  it('renders the largest net balance as the primary large figure regardless of route order', async () => {
+    // The me-route aggregates per-currency alphabetically (EUR first); the
+    // card must lead with the balance that matters most, not route order.
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: true,
+      data: {
+        ...ME,
+        settlementsByCurrency: [
+          { currency: 'EUR', grossUnits: '50000000', netUnits: '35000000' },
+          { currency: 'USD', grossUnits: '140000000', netUnits: '140000000' },
+        ],
+      },
+    });
+
+    const html = await renderPage();
+
+    // USD is the largest net balance → the primary large-type figure.
+    const primary = html.match(/data-testid="settlements-net-USD"[^>]*class="([^"]*)"/)?.[1] ?? '';
+    expect(primary).toContain('text-4xl');
+    expect(primary).not.toContain('text-xs');
+    // EUR drops to the exact small-print lines.
+    expect(html).toContain('data-testid="settlements-gross-EUR"');
+  });
+
   it('never renders account or routing numbers anywhere', async () => {
     meMock.resolveCovnantMe.mockResolvedValue({ ok: true, data: ME });
 
