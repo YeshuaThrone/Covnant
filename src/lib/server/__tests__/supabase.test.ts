@@ -17,6 +17,8 @@ vi.mock('@supabase/supabase-js', () => ({
 const mockCreateClient = vi.mocked(createClient);
 
 const PUBLIC_ENV = {
+  // Bare-tsc gate: next/types/global augments NODE_ENV as required on ProcessEnv.
+  NODE_ENV: 'test' as const,
   NEXT_PUBLIC_SUPABASE_URL: 'https://proj.supabase.co',
   NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
   SUPABASE_SERVICE_ROLE_KEY: 'service-key',
@@ -45,9 +47,9 @@ describe('readSupabaseEnv', () => {
   });
 
   it.each([
-    ['the project URL', { NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key', SUPABASE_SERVICE_ROLE_KEY: 'service-key' }],
-    ['the anon key', { NEXT_PUBLIC_SUPABASE_URL: 'https://proj.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service-key' }],
-    ['the service role key', { NEXT_PUBLIC_SUPABASE_URL: 'https://proj.supabase.co', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key' }],
+    ['the project URL', { NODE_ENV: 'test' as const, NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key', SUPABASE_SERVICE_ROLE_KEY: 'service-key' }],
+    ['the anon key', { NODE_ENV: 'test' as const, NEXT_PUBLIC_SUPABASE_URL: 'https://proj.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service-key' }],
+    ['the service role key', { NODE_ENV: 'test' as const, NEXT_PUBLIC_SUPABASE_URL: 'https://proj.supabase.co', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key' }],
   ])('returns null when %s is missing', (_label, env) => {
     expect(readSupabaseEnv(env)).toBeNull();
   });

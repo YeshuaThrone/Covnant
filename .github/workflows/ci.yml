@@ -73,6 +73,12 @@ jobs:
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0003_creator_profiles.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0004_creator_compliance.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0005_admin_action_log.sql
+          # Don Engine persistence (spec art_zxsnGP3A): the canonical 27-table
+          # schema + the atomic record_checkout_purchase RPC. Applied twice —
+          # the second apply must be a clean no-op (ON_ERROR_STOP=1), proving
+          # the migration is idempotent.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -106,6 +112,37 @@ jobs:
           assert_col_shape creator_profiles tax_form_type "YES|'W9'::character varying"
           assert_col_shape creator_profiles tax_verified "YES|false"
           assert_col_shape creator_profiles bank_account_linked "YES|false"
+
+          # Don Engine tables (migration 0006): the canonical table inventory
+          # and the columns the Store contract reads and writes, checked
+          # against information_schema on the real scratch Postgres.
+          for table in shows live_pings artists checkout_sessions plaid_link_tokens \
+            kyc_verifications split_runs royalty_line_items ledger_transactions \
+            baas_transfers company_dust_ledger creator_tax_profiles creator_ytd_earnings \
+            tax_escrow_ledger sovereign_vaults plaid_processor_tokens recoupment_advances \
+            vault_disputes payout_holds baas_webhook_events payout_reversals gl_journals \
+            gl_entries recoupment_ledger catalog_disputes dsp_webhook_events split_reversals; do
+            table_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select count(*) from information_schema.tables where table_schema='public' and table_name='$table'")
+            [ "$table_exists" = "1" ] || { echo "MISSING TABLE $table"; exit 1; }
+          done
+          echo "OK: all 27 Don tables exist"
+          assert_cols gl_journals id kind ref_type ref_id created_at sequence prev_hash entry_hash state
+          assert_cols gl_entries id journal_id account debit_cents credit_cents created_at
+          assert_cols ledger_transactions id split_run_id line_item_id payee_id payee_name role share_bps amount_cents currency status rail baas_provider baas_transfer_id created_at settled_at kind
+          assert_cols baas_transfers id provider rail payee_id payee_name amount_cents currency status ledger_transaction_id created_at estimated_settlement
+          assert_cols payout_holds transfer_id payee_id amount_cents status created_at
+          assert_cols split_runs id source period currency gross_cents line_item_count variance_account_cents created_at status
+          assert_cols creator_tax_profiles creator_id tin_verified w9_on_file updated_at
+          assert_cols creator_ytd_earnings creator_id tax_year gross_cents withheld_cents updated_at
+          assert_cols sovereign_vaults payee_id payee_name available_balance pending_balance reserve_balance updated_at
+          assert_cols recoupment_advances creator_id creator_name recoupment_target_cents recoupment_current_cents recoupment_bps updated_at
+
+          # The atomic checkout RPC SupabaseStore.recordCheckoutPurchase calls.
+          rpc_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid where n.nspname = 'public' and p.proname = 'record_checkout_purchase'")
+          [ "$rpc_exists" = "1" ] || { echo "MISSING RPC record_checkout_purchase"; exit 1; }
+          echo "OK: record_checkout_purchase RPC exists"
 
   e2e:
     runs-on: ubuntu-latest
