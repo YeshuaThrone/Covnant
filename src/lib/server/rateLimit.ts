@@ -26,6 +26,15 @@ export const REGISTER_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000
 /** Admin console sign-in: 5 attempts per client address per minute (the shared secret's brute-force window). */
 export const ADMIN_LOGIN_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
 
+/**
+ * Don Engine API surface (split calculate, BaaS payout routes): 30 requests
+ * per client address per minute. Merged additively from the Cursor drop —
+ * the drop's RateLimitRule alias and DEFAULT_RULE fallback stay unported
+ * because its call sites always pass the rule explicitly, matching this
+ * module's required-config signature.
+ */
+export const DON_API_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
+
 export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 type Bucket = { count: number; windowStart: number };
