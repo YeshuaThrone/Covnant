@@ -22,9 +22,12 @@ import { PROVISIONING_LABELS } from '@/components/brand/provisioningLabels';
 import { formatUnitsMajor, formatUnitsMinor } from '@/lib/money/format';
 import type { CovnantMeResponse } from '@/lib/covnant/types';
 
-/** The calm card chassis — subtle glass, one hairline border. */
+/** The calm card chassis — REAL glass presence: the bank reference's cards
+ *  are the dominant visual field (high-contrast rounded rectangles), so the
+ *  Covnant card carries a visible two-stop glass fill, a true hairline, and
+ *  a soft elevation shadow. Quiet content on a card that actually reads. */
 const CARD_CLASS =
-  'flex min-w-[85%] snap-center flex-col rounded-2xl border border-slate-700/50 bg-white/[0.02] p-5 md:min-w-0 md:p-6';
+  'flex min-w-[85%] snap-center flex-col rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.07] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5 md:min-w-0 md:p-6';
 
 /** ── Card 1: Virtual Account — big escrow balance or honest status line ── */
 

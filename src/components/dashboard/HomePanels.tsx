@@ -41,7 +41,7 @@ export function TransactionsPanel({ me }: { me: CovnantMeResponse }): React.JSX.
   return (
     <section
       data-testid="transactions-panel"
-      className="rounded-2xl border border-slate-700/50 bg-white/[0.02] p-5 md:p-6"
+      className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5 md:p-6"
       aria-label="Recent royalty settlements"
     >
       {rows.length === 0 ? (
@@ -74,7 +74,7 @@ export function TransactionsPanel({ me }: { me: CovnantMeResponse }): React.JSX.
             <Link
               href="/ledger"
               data-testid="transactions-see-more"
-              className="mt-3 inline-block text-xs font-semibold text-gold-champagne hover:text-gold"
+              className="mt-4 inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5 text-[11px] font-semibold text-gold-champagne transition-colors hover:bg-gold/20"
             >
               See more
             </Link>
@@ -133,7 +133,7 @@ export function ReadinessChecklist({ me }: { me: CovnantMeResponse }): React.JSX
   return (
     <aside
       data-testid="readiness-checklist"
-      className="h-fit rounded-2xl border border-slate-700/50 bg-white/[0.02] p-5"
+      className="h-fit rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5"
       aria-label="Financial readiness"
     >
       <h3 className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">

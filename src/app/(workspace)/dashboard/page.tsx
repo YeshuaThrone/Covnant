@@ -33,6 +33,7 @@
  */
 
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 import {
   QuickActions,
@@ -44,6 +45,10 @@ import { CarouselDots } from '@/components/dashboard/CarouselDots';
 import { ReadinessChecklist, TransactionsPanel } from '@/components/dashboard/HomePanels';
 import { identityChipFromMe } from '@/lib/covnant/identityFromMe';
 import { resolveCovnantMe } from '@/lib/server/covnantMe';
+import {
+  isPreviewDemoAccessEnabled,
+  PREVIEW_DEMO_LOGIN_PATH,
+} from '@/lib/server/previewDemoAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -133,9 +138,28 @@ function NotSignedIn({ reason }: { reason: string }): React.JSX.Element {
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ demo_login_failed?: string }>;
+}) {
   const me = await resolveCovnantMe();
   if (!me.ok) {
+    // PREVIEW-ONLY direct access: an unauthenticated visit on a preview
+    // deployment routes through the demo-login door and comes back as the
+    // signed-in bank dashboard — zero steps (user directive: "NOT no sign
+    // in page a DASHBOARD"). Gated on the 401 family ONLY — a signed-in
+    // but unregistered/degraded state (404/502/503) keeps the honest
+    // reason surfaces, and the failed param breaks any possible loop.
+    // Production (VERCEL_ENV production/unset) never takes this branch.
+    const failed = (await searchParams)?.demo_login_failed;
+    if (
+      !failed &&
+      isPreviewDemoAccessEnabled() &&
+      (me.reason === 'no_session' || me.reason === 'session_invalid')
+    ) {
+      redirect(PREVIEW_DEMO_LOGIN_PATH);
+    }
     // 401/404 → the honest visitor state; read/config failures degrade with
     // the named reason (the code family is sanitized — no internals leak).
     return <NotSignedIn reason={me.reason} />;
@@ -149,9 +173,21 @@ export default async function DashboardPage() {
 
       <div className="gold-rule my-6 md:my-8" />
 
-      {/* Accounts — wide calm balance cards; one-card carousel on mobile. */}
+      {/* Accounts — wide calm balance cards; one-card carousel on mobile.
+          The header carries the reference's "View all" affordance; the wired
+          destination is the Ownership Ledger, the only full-financial-picture
+          surface (no invented routes). */}
       <section aria-label="Accounts">
-        <SectionLabel>Accounts</SectionLabel>
+        <div className="flex items-center justify-between gap-4">
+          <SectionLabel>Accounts</SectionLabel>
+          <Link
+            href="/ledger"
+            data-testid="accounts-view-all"
+            className="inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5 text-[11px] font-semibold text-gold-champagne transition-colors hover:bg-gold/20"
+          >
+            View all
+          </Link>
+        </div>
         <div
           id="accounts-row"
           data-testid="accounts-row"

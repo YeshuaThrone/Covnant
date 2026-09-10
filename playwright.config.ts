@@ -21,5 +21,10 @@ export default defineConfig({
     port: 3100,
     reuseExistingServer: true,
     timeout: 120_000,
+    // The main e2e server runs in EXPLICIT production mode: the preview
+    // demo-access door must be inert here. (The dashboard specs spawn
+    // their own isolated stub-backed servers; this server pins the
+    // production-style unauthenticated surfaces.)
+    env: { VERCEL_ENV: 'production' },
   },
 });

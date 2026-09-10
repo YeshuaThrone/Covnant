@@ -11,7 +11,7 @@
 import { PassThrough } from 'node:stream';
 
 import { renderToPipeableStream } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CovnantMeResponse } from '@/lib/covnant/types';
 import { buildUct } from '@/lib/covnant/uct';
@@ -25,24 +25,28 @@ vi.mock('@/lib/server/covnantMe', () => ({
 
 const { default: DashboardPage } = await import('@/app/(workspace)/dashboard/page');
 
-/** The async server component renders through the node pipeable stream. */
-async function renderPage(): Promise<string> {
+/** The async server component renders through the node pipeable stream.
+ *  An optional searchParams object mirrors the Next 15 page-prop shape. */
+async function renderPage(searchParams?: { demo_login_failed?: string }): Promise<string> {
   return new Promise((resolve, reject) => {
     let html = '';
-    const { pipe } = renderToPipeableStream(<DashboardPage />, {
-      onAllReady() {
-        const sink = new PassThrough();
-        sink.on('data', (chunk: Buffer) => {
-          html += chunk.toString();
-        });
-        sink.on('end', () => resolve(html));
-        sink.on('error', reject);
-        pipe(sink);
-      },
-      onError(error) {
-        reject(error);
-      },
-    });
+    const { pipe } = renderToPipeableStream(
+      <DashboardPage searchParams={searchParams ? Promise.resolve(searchParams) : undefined} />,
+      {
+        onAllReady() {
+          const sink = new PassThrough();
+          sink.on('data', (chunk: Buffer) => {
+            html += chunk.toString();
+          });
+          sink.on('end', () => resolve(html));
+          sink.on('error', reject);
+          pipe(sink);
+        },
+        onError(error) {
+          reject(error);
+        },
+      }
+    );
   });
 }
 
@@ -238,5 +242,92 @@ describe('/dashboard — honest failure states', () => {
     expect(html).toContain('escrow_read_failed');
     expect(html).toContain('data-testid="dashboard-state-reason"');
     expect(html).not.toContain('data-testid="accounts-row"');
+  });
+});
+
+describe('/dashboard — preview-only direct access (VERCEL_ENV gate)', () => {
+  afterEach(() => {
+    delete process.env.VERCEL_ENV;
+  });
+
+  it('in preview, an unauthenticated visit redirects through the demo-login door', async () => {
+    process.env.VERCEL_ENV = 'preview';
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: false,
+      status: 401,
+      reason: 'no_session',
+      message: 'No session — sign in to load the creator aggregate.',
+    });
+
+    // redirect() throws with the URL in the digest, not the message.
+    const error = (await renderPage().catch((e: unknown) => e)) as {
+      message?: string;
+      digest?: string;
+    };
+    expect(error.message).toBe('NEXT_REDIRECT');
+    expect(error.digest ?? '').toContain('/api/preview/demo-login');
+  });
+
+  it('in preview, a stale session (session_invalid) also routes through the door', async () => {
+    process.env.VERCEL_ENV = 'preview';
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: false,
+      status: 401,
+      reason: 'session_invalid',
+      message: 'The session is absent or invalid.',
+    });
+
+    const error = (await renderPage().catch((e: unknown) => e)) as {
+      message?: string;
+      digest?: string;
+    };
+    expect(error.message).toBe('NEXT_REDIRECT');
+    expect(error.digest ?? '').toContain('/api/preview/demo-login');
+  });
+
+  it('in preview, a signed-but-unregistered creator keeps the honest 404 state — no redirect loop', async () => {
+    process.env.VERCEL_ENV = 'preview';
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: false,
+      status: 404,
+      reason: 'holder_not_found',
+      message: 'No registered creator for this session.',
+    });
+
+    const html = await renderPage();
+
+    expect(html).toContain('Your creator home');
+    expect(html).toContain('holder_not_found');
+  });
+
+  it('in preview, the demo_login_failed param renders the visitor state — loop guard', async () => {
+    process.env.VERCEL_ENV = 'preview';
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: false,
+      status: 401,
+      reason: 'no_session',
+      message: 'No session — sign in to load the creator aggregate.',
+    });
+
+    const html = await renderPage({ demo_login_failed: '1' });
+
+    expect(html).toContain('Your creator home');
+    expect(html).toContain('no_session');
+  });
+
+  it('in production, an unauthenticated visit renders the real visitor state — no demo session', async () => {
+    process.env.VERCEL_ENV = 'production';
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: false,
+      status: 401,
+      reason: 'no_session',
+      message: 'No session — sign in to load the creator aggregate.',
+    });
+
+    const html = await renderPage();
+
+    expect(html).toContain('Your creator home');
+    expect(html).toContain('data-testid="dashboard-signin-cta"');
+    expect(html).not.toContain('api/preview/demo-login');
   });
 });
