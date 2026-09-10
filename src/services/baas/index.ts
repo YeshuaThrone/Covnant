@@ -47,7 +47,7 @@ export async function settleLedgerThroughBaas(
   ledgerId: string,
   rail: SettlementRail,
 ): Promise<BaasTransferResult> {
-  const row = store.getLedgerTransaction(ledgerId);
+  const row = await store.getLedgerTransaction(ledgerId);
   if (row === undefined) {
     return {
       ok: false,
@@ -68,7 +68,7 @@ export async function settleLedgerThroughBaas(
       ? await adapter.createRtpPayment(request)
       : await adapter.createAchTransfer(request);
   if (!result.ok) {
-    store.updateLedgerSettlement(row.id, {
+    await store.updateLedgerSettlement(row.id, {
       status: "failed",
       rail,
       baas_provider: adapter.provider,
@@ -78,7 +78,7 @@ export async function settleLedgerThroughBaas(
     return result;
   }
   const settled = result.transfer.status === "settled";
-  store.updateLedgerSettlement(row.id, {
+  await store.updateLedgerSettlement(row.id, {
     status: settled ? "settled" : "submitted",
     rail,
     baas_provider: adapter.provider,

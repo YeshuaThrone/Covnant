@@ -41,7 +41,7 @@ export type SandboxRailProcessor = (
   store: Store,
   input: AchTransferRequest & { provider: BaasProvider; rail: SettlementRail },
   now?: Date,
-) => BaasTransferSuccess;
+) => Promise<BaasTransferSuccess>;
 
 export type AdapterDeps = {
   store: Store;

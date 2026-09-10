@@ -44,14 +44,14 @@ export function liveFailure(provider: BaasProvider): {
   };
 }
 
-export const processSandboxRail: SandboxRailProcessor = (
+export const processSandboxRail: SandboxRailProcessor = async (
   store: Store,
   input: AchTransferRequest & { provider: BaasProvider; rail: SettlementRail },
   now: Date = new Date(),
-): BaasTransferSuccess => {
+): Promise<BaasTransferSuccess> => {
   const createdAt = now.toISOString();
   const instant = input.rail === "rtp";
-  const transfer = store.insertBaasTransfer({
+  const transfer = await store.insertBaasTransfer({
     provider: input.provider,
     rail: input.rail,
     payee_id: input.payee_id,

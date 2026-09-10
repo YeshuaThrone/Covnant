@@ -86,8 +86,8 @@ describe("sandbox rail", () => {
     store = new InMemoryStoreMock();
   });
 
-  it("settles RTP immediately with no ETA gap", () => {
-    const result = processSandboxRail(store, sandboxInput("rtp"), NOW);
+  it("settles RTP immediately with no ETA gap", async () => {
+    const result = await processSandboxRail(store, sandboxInput("rtp"), NOW);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.mode).toBe("sandbox");
@@ -100,8 +100,8 @@ describe("sandbox rail", () => {
     expect(store.transfers).toHaveLength(1);
   });
 
-  it("records ACH as submitted with a +3-day settlement ETA", () => {
-    const result = processSandboxRail(store, sandboxInput("ach"), NOW);
+  it("records ACH as submitted with a +3-day settlement ETA", async () => {
+    const result = await processSandboxRail(store, sandboxInput("ach"), NOW);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.transfer.status).toBe("submitted");
