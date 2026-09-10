@@ -319,6 +319,8 @@ describe("settleLedgerThroughBaas", () => {
     await settleLedgerThroughBaas(store, adapter, row.id, "rtp");
     await settleLedgerThroughBaas(store, adapter, row.id, "ach");
     const transfers = await store.listBaasTransfers();
-    expect(transfers.map((t) => t.rail)).toEqual(["rtp", "ach"]);
+    // listBaasTransfers sorts created_at DESC (production SupabaseStore
+    // semantics) — assert the rail set, not list order.
+    expect(transfers.map((t) => t.rail).sort()).toEqual(["ach", "rtp"]);
   });
 });
