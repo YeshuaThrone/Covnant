@@ -9,7 +9,7 @@
 // Async adaptation only (Store PR contract): the store reads are awaited;
 // predicates and math are untouched.
 
-import type { Store } from "@/modules/don/storeStub";
+import type { Store } from "@/lib/server/store";
 
 // A locked payee (vault dispute) or locked work (catalog dispute) freezes
 // incoming credits — routed to reserve upstream.

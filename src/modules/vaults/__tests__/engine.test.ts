@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryStore } from "@/modules/don/__tests__/inMemoryStore";
+import { InMemoryStore } from "@/lib/server/inMemoryStore";
+import {
+  seedBaasTransfer,
+  seedLedgerTransaction,
+  seedPayoutHold,
+  seedVault,
+} from "@/modules/don/__tests__/fixtures";
 import { creditVault, releaseVaultPending, reverseVaultPayout, settleVaultPayout } from "../engine";
 import { holdPayout } from "../balances";
 
@@ -18,7 +24,7 @@ describe("creditVault", () => {
 
   it("credits pending and reserve targets onto an existing vault", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 100, 0, 0);
+    await seedVault(store, "c1", 100, 0, 0);
     await creditVault(store, "c1", "Creator One", 200, "pending", NOW);
     const vault = await creditVault(store, "c1", "Creator One", 300, "reserve", NOW);
     expect(vault).toMatchObject({
@@ -32,7 +38,7 @@ describe("creditVault", () => {
 describe("releaseVaultPending", () => {
   it("moves pending to available and reports what released", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 100, 700, 0);
+    await seedVault(store, "c1", 100, 700, 0);
     const result = await releaseVaultPending(store, "c1", 400, NOW);
     if (!result.ok) throw new Error("expected release to succeed");
     expect(result.released_cents).toBe(400);
@@ -41,7 +47,7 @@ describe("releaseVaultPending", () => {
 
   it("releases all releasable pending when amount is undefined", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 700, 0);
+    await seedVault(store, "c1", 0, 700, 0);
     const result = await releaseVaultPending(store, "c1", undefined, NOW);
     if (!result.ok) throw new Error("expected release to succeed");
     expect(result.released_cents).toBe(700);
@@ -51,9 +57,9 @@ describe("releaseVaultPending", () => {
 
   it("excludes in-flight payout holds from the releasable pending", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 1000, 0);
+    await seedVault(store, "c1", 0, 1000, 0);
     // 700 is locked in an in-flight payout hold — only 300 may release.
-    store.seedPayoutHold("tx_1", "c1", 700, "in_flight");
+    await seedPayoutHold(store, "tx_1", "c1", 700, "in_flight");
     const result = await releaseVaultPending(store, "c1", undefined, NOW);
     if (!result.ok) throw new Error("expected release to succeed");
     expect(result.released_cents).toBe(300);
@@ -61,8 +67,8 @@ describe("releaseVaultPending", () => {
 
   it("refuses to release more than releasable pending", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 1000, 0);
-    store.seedPayoutHold("tx_1", "c1", 700, "in_flight");
+    await seedVault(store, "c1", 0, 1000, 0);
+    await seedPayoutHold(store, "tx_1", "c1", 700, "in_flight");
     const result = await releaseVaultPending(store, "c1", 400, NOW);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -83,16 +89,18 @@ describe("releaseVaultPending", () => {
 });
 
 describe("settleVaultPayout", () => {
-  function seeded(): { store: InMemoryStore; transferId: string } {
+  // The canonical store allocates BaaS transfer ids, so the hold and the
+  // settle call adopt the record's id.
+  async function seeded(): Promise<{ store: InMemoryStore; transferId: string }> {
     const store = new InMemoryStore();
-    store.seedVault("c1", 300, 700, 0);
-    store.seedBaasTransfer("tx_1", "c1", { amount_cents: 700 });
-    store.seedPayoutHold("tx_1", "c1", 700, "in_flight");
-    return { store, transferId: "tx_1" };
+    await seedVault(store, "c1", 300, 700, 0);
+    const transfer = await seedBaasTransfer(store, "c1", { amount_cents: 700 });
+    await seedPayoutHold(store, transfer.id, "c1", 700, "in_flight");
+    return { store, transferId: transfer.id };
   }
 
   it("clears the in-flight hold from pending on settlement", async () => {
-    const { store, transferId } = seeded();
+    const { store, transferId } = await seeded();
     const result = await settleVaultPayout(store, transferId, NOW);
     if (!result.ok) throw new Error("expected settlement to succeed");
     expect(result.idempotent).toBe(false);
@@ -102,16 +110,16 @@ describe("settleVaultPayout", () => {
   });
 
   it("re-settlement is idempotent", async () => {
-    const { store, transferId } = seeded();
+    const { store, transferId } = await seeded();
     await settleVaultPayout(store, transferId, NOW);
     const again = await settleVaultPayout(store, transferId, NOW);
     if (!again.ok) throw new Error("expected re-settlement to succeed");
     expect(again.idempotent).toBe(true);
-    expect(again.vault.pending_balance).toBe(0);
+    expect(again.vault).toMatchObject({ available_balance: 300, pending_balance: 0 });
   });
 
   it("returns 409 when the payout was already reversed", async () => {
-    const { store, transferId } = seeded();
+    const { store, transferId } = await seeded();
     await store.updatePayoutHoldStatus(transferId, "reversed");
     const result = await settleVaultPayout(store, transferId, NOW);
     expect(result.ok).toBe(false);
@@ -129,65 +137,75 @@ describe("settleVaultPayout", () => {
   });
 
   it("marks a linked ledger transaction settled", async () => {
-    const { store, transferId } = seeded();
-    const ledger = store.seedLedgerTransaction({ payee_id: "c1" });
-    store.seedBaasTransfer(transferId, "c1", { ledger_transaction_id: ledger.id });
-    await settleVaultPayout(store, transferId, NOW);
+    const store = new InMemoryStore();
+    await seedVault(store, "c1", 300, 700, 0);
+    const ledger = await seedLedgerTransaction(store, { payee_id: "c1" });
+    const transfer = await seedBaasTransfer(store, "c1", {
+      amount_cents: 700,
+      ledger_transaction_id: ledger.id,
+    });
+    await seedPayoutHold(store, transfer.id, "c1", 700, "in_flight");
+    await settleVaultPayout(store, transfer.id, NOW);
     expect((await store.getLedgerTransaction(ledger.id))?.status).toBe("settled");
-    expect((await store.getLedgerTransaction(ledger.id))?.baas_transfer_id).toBe(transferId);
+    expect((await store.getLedgerTransaction(ledger.id))?.baas_transfer_id).toBe(transfer.id);
   });
 });
 
 describe("reverseVaultPayout", () => {
   it("in-flight hold: pending returns to available and the hold reverses", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 300, 700, 0);
-    store.seedBaasTransfer("tx_1", "c1", { amount_cents: 700 });
-    store.seedPayoutHold("tx_1", "c1", 700, "in_flight");
+    await seedVault(store, "c1", 300, 700, 0);
+    const transfer = await seedBaasTransfer(store, "c1", { amount_cents: 700 });
+    await seedPayoutHold(store, transfer.id, "c1", 700, "in_flight");
 
-    const result = await reverseVaultPayout(store, "tx_1", "payout.failed", NOW);
+    const result = await reverseVaultPayout(store, transfer.id, "payout.failed", NOW);
     if (!result.ok) throw new Error("expected reversal to succeed");
     expect(result.idempotent).toBe(false);
     expect(result.vault).toMatchObject({ available_balance: 1000, pending_balance: 0 });
-    expect((await store.getPayoutHold("tx_1"))?.status).toBe("reversed");
-    expect((await store.getBaasTransfer("tx_1"))?.status).toBe("failed");
+    expect((await store.getPayoutHold(transfer.id))?.status).toBe("reversed");
+    expect((await store.getBaasTransfer(transfer.id))?.status).toBe("failed");
     expect(result.reversal.amount_cents).toBe(700);
   });
 
   it("settled payout: money returns to available from the FBO side", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 0, 0);
-    store.seedBaasTransfer("tx_1", "c1", { amount_cents: 250 });
-    store.seedPayoutHold("tx_1", "c1", 250, "settled");
+    await seedVault(store, "c1", 0, 0, 0);
+    const transfer = await seedBaasTransfer(store, "c1", { amount_cents: 250 });
+    await seedPayoutHold(store, transfer.id, "c1", 250, "settled");
 
-    const result = await reverseVaultPayout(store, "tx_1", "payout.returned", NOW);
+    const result = await reverseVaultPayout(store, transfer.id, "payout.returned", NOW);
     if (!result.ok) throw new Error("expected reversal to succeed");
     expect(result.vault.available_balance).toBe(250);
-    expect((await store.getBaasTransfer("tx_1"))?.status).toBe("returned");
+    expect((await store.getBaasTransfer(transfer.id))?.status).toBe("returned");
   });
 
   it("reversal is idempotent", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 100, 0);
-    store.seedBaasTransfer("tx_1", "c1");
-    store.seedPayoutHold("tx_1", "c1", 100, "in_flight");
-    const first = await reverseVaultPayout(store, "tx_1", "payout.returned", NOW);
-    const second = await reverseVaultPayout(store, "tx_1", "payout.returned", NOW);
+    await seedVault(store, "c1", 0, 100, 0);
+    const transfer = await seedBaasTransfer(store, "c1");
+    await seedPayoutHold(store, transfer.id, "c1", 100, "in_flight");
+    const first = await reverseVaultPayout(store, transfer.id, "payout.returned", NOW);
+    const second = await reverseVaultPayout(store, transfer.id, "payout.returned", NOW);
     if (!first.ok || !second.ok) throw new Error("expected both reversals to succeed");
     expect(second.idempotent).toBe(true);
     expect(second.reversal.id).toBe(first.reversal.id);
-    expect(store.payoutReversals).toHaveLength(1);
+    // Idempotency is observable without store internals: the second call must
+    // not double-restore balances.
+    expect(second.vault).toMatchObject({ available_balance: 100, pending_balance: 0 });
+    expect(await store.getPayoutReversalByTransfer(transfer.id)).toMatchObject({
+      id: first.reversal.id,
+    });
   });
 
   it("refuses to reverse an in-flight hold when pending can no longer cover it", async () => {
     const store = new InMemoryStore();
-    store.seedVault("c1", 0, 100, 0);
-    store.seedBaasTransfer("tx_1", "c1", { amount_cents: 500 });
-    store.seedPayoutHold("tx_1", "c1", 500, "in_flight");
+    await seedVault(store, "c1", 0, 100, 0);
+    const transfer = await seedBaasTransfer(store, "c1", { amount_cents: 500 });
+    await seedPayoutHold(store, transfer.id, "c1", 500, "in_flight");
     // Pending drained behind the engine's back — the hold can no longer reverse.
     const vault = await store.getVault("c1");
     if (vault) vault.pending_balance = 0;
-    const result = await reverseVaultPayout(store, "tx_1", "payout.failed", NOW);
+    const result = await reverseVaultPayout(store, transfer.id, "payout.failed", NOW);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(422);
@@ -206,21 +224,21 @@ describe("reverseVaultPayout", () => {
 describe("hold → settle vs hold → reverse round trip", () => {
   it("settlement then reversal restores the original buckets via the FBO side", async () => {
     const store = new InMemoryStore();
-    const before = store.seedVault("c1", 500, 500, 0);
-    store.seedBaasTransfer("tx_1", "c1", { amount_cents: 500 });
+    const before = await seedVault(store, "c1", 500, 500, 0);
+    const transfer = await seedBaasTransfer(store, "c1", { amount_cents: 500 });
 
     // available → pending hold
     const held = holdPayout(before, 500);
     if (!held.ok) throw new Error("expected hold to succeed");
-    store.seedPayoutHold("tx_1", "c1", 500, "in_flight");
+    await seedPayoutHold(store, transfer.id, "c1", 500, "in_flight");
 
     // settlement clears pending
-    const settled = await settleVaultPayout(store, "tx_1", NOW);
+    const settled = await settleVaultPayout(store, transfer.id, NOW);
     if (!settled.ok) throw new Error("expected settlement to succeed");
     expect(settled.vault.pending_balance).toBe(0);
 
     // payout bounced later: settled-payout reversal re-credits available
-    const reversed = await reverseVaultPayout(store, "tx_1", "payout.returned", NOW);
+    const reversed = await reverseVaultPayout(store, transfer.id, "payout.returned", NOW);
     if (!reversed.ok) throw new Error("expected reversal to succeed");
     expect(reversed.vault.available_balance).toBe(1000);
     expect(reversed.vault.pending_balance).toBe(0);

@@ -13,7 +13,7 @@ import type {
   GlEntryRecord,
   GlJournalRecord,
 } from "@/modules/don/records";
-import type { Store } from "@/modules/don/storeStub";
+import type { Store } from "@/lib/server/store";
 import { GL_GENESIS_HASH, type JournalKind } from "@/modules/don/constants";
 import { hashJournal } from "./chain";
 import { validateJournal, type GlLegInput } from "./journal";

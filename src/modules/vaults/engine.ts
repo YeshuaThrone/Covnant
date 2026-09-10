@@ -14,7 +14,7 @@
  * wiring are untouched.
  */
 
-import type { Store } from "@/modules/don/storeStub";
+import type { Store } from "@/lib/server/store";
 import type { BaasTransferRecord } from "@/lib/don/types";
 import { postJournal } from "@/modules/ledger/engine";
 import {

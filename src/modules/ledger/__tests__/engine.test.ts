@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { GL_GENESIS_HASH } from "@/modules/don/constants";
-import { InMemoryStore } from "@/modules/don/__tests__/inMemoryStore";
+import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import { fboDebit, vaultCredit } from "../journal";
 import { postJournal } from "../engine";
 
@@ -16,9 +16,11 @@ describe("postJournal", () => {
     });
     if (!posted.ok) throw new Error("expected balanced journal to post");
     expect(posted.journal.state).toBe("posted");
-    expect(store.glJournals).toHaveLength(1);
-    expect(store.glEntries).toHaveLength(2);
-    expect(store.glEntries.every((e) => e.journal_id === posted.journal.id)).toBe(true);
+    const journals = await store.listGlJournals();
+    const entries = await store.listGlEntries();
+    expect(journals).toHaveLength(1);
+    expect(entries).toHaveLength(2);
+    expect(entries.every((e) => e.journal_id === posted.journal.id)).toBe(true);
   });
 
   it("refuses an unbalanced journal and persists nothing", async () => {
@@ -35,8 +37,8 @@ describe("postJournal", () => {
       expect(posted.message).toContain("2500");
       expect(posted.message).toContain("2400");
     }
-    expect(store.glJournals).toHaveLength(0);
-    expect(store.glEntries).toHaveLength(0);
+    expect(await store.listGlJournals()).toHaveLength(0);
+    expect(await store.listGlEntries()).toHaveLength(0);
   });
 
   it("refuses a single-sided journal", async () => {
@@ -66,7 +68,7 @@ describe("postJournal", () => {
       expect(posted.ok).toBe(true);
     }
     const sums = new Map<string, { debits: number; credits: number }>();
-    for (const entry of store.glEntries) {
+    for (const entry of await store.listGlEntries()) {
       const s = sums.get(entry.journal_id) ?? { debits: 0, credits: 0 };
       s.debits += entry.debit_cents;
       s.credits += entry.credit_cents;

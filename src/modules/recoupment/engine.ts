@@ -7,7 +7,7 @@
 // supplied. Async adaptation only (Store PR contract): the store calls are
 // awaited; the sweep math is untouched.
 
-import type { Store } from "@/modules/don/storeStub";
+import type { Store } from "@/lib/server/store";
 import {
   BPS_DENOMINATOR,
   COMPANY_VARIANCE_PAYEE_ID,
