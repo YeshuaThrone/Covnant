@@ -124,7 +124,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Build
+        # The e2e build bakes the PostgREST stub's FIXED URL into the client
+        # bundle (the browser client's Supabase URL is inlined at build
+        # time); e2e/dashboard-bank-home.spec.ts starts the stub on 4599.
         run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:4599
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: e2e-stub-anon-key
 
       - name: E2E suite
         run: npm run test:e2e

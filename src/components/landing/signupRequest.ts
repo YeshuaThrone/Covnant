@@ -83,6 +83,26 @@ export type SealRequestState =
   | { phase: 'rate_limited' }
   | { phase: 'failed'; message: string };
 
+/**
+ * The 201 session-capture point: a creating response may carry the Supabase
+ * Auth session (created 201 only — a 200 never discloses credential
+ * material). Extract the two tokens the browser client needs to adopt the
+ * session; null when absent or malformed (the fail-closed reading — the
+ * composition then renders the sessionless state and nothing is captured).
+ */
+export type SealSession = { accessToken: string; refreshToken: string };
+
+export function extractSignupSession(body: unknown): SealSession | null {
+  if (!isRecord(body)) return null;
+  const session = body.session;
+  if (!isRecord(session)) return null;
+  const accessToken = session.access_token;
+  const refreshToken = session.refresh_token;
+  if (typeof accessToken !== 'string' || accessToken === '') return null;
+  if (typeof refreshToken !== 'string' || refreshToken === '') return null;
+  return { accessToken, refreshToken };
+}
+
 /** The UCT_MINT_FAILED recovery line — nothing registered, clean retry. */
 export const UCT_MINT_FAILED_MESSAGE =
   'Nothing was registered — unseal and submit again';

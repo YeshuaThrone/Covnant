@@ -143,15 +143,25 @@ interface ServiceFakeOptions {
   assetsError?: { message: string } | null;
   ledgerRows?: unknown[];
   ledgerError?: { message: string } | null;
+  contractsCount?: number | null;
+  contractsError?: { message: string } | null;
 }
 
-/** A fake service-role client: cbt_assets + universal_royalty_ledger reads. */
+/** A fake service-role client: cbt_assets + universal_royalty_ledger reads,
+ * plus the bounded contracts count read (head:true + .in chain). */
 function serviceDb(options: ServiceFakeOptions = {}) {
   return {
     from: vi.fn((table: string) => {
       if (table === 'universal_royalty_ledger') {
         return {
           select: vi.fn(async () => ({ data: options.ledgerRows ?? [], error: options.ledgerError ?? null })),
+        };
+      }
+      if (table === 'contracts') {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ count: options.contractsCount ?? null, error: options.contractsError ?? null })),
+          })),
         };
       }
       return {
@@ -180,6 +190,32 @@ function expectNoAccountNumbers(bodyJson: unknown): void {
 /** A settlement (engine) disbursement entry — no type field, numeric grossShare. */
 function settlement(rightsHolderId: string, grossShare: number): Record<string, unknown> {
   return { rightsHolderId, grossShare };
+}
+
+/** A settlement entry with the engine-recorded net share — the display slice requires it. */
+function settlementWithNet(
+  rightsHolderId: string,
+  grossShare: number,
+  netShare: number,
+): Record<string, unknown> {
+  return { rightsHolderId, grossShare, netShare };
+}
+
+/** A display-complete ledger row — every column the recent strip renders. */
+function displayRow(
+  transactionId: string,
+  createdAt: string,
+  currency: string,
+  entries: Record<string, unknown>[],
+): Record<string, unknown> {
+  return {
+    transaction_id: transactionId,
+    cbt_code: 'CBT-MUS-2026-AAAA1111',
+    platform: 'Spotify',
+    currency,
+    created_at: createdAt,
+    disbursements: entries,
+  };
 }
 
 /** A payout (type-DISBURSEMENT) escrow debit entry. */
@@ -263,8 +299,14 @@ describe('GET /api/covnant/me', () => {
       expect(profileEntry?.columns).toContain('tax_verified');
       expect(profileEntry?.columns).toContain('bank_account_linked');
       expect(profileEntry?.eq).toEqual(['id', USER_ID]);
-      // The service-role reads hit exactly the two documented tables.
-      expect(db.from.mock.calls).toEqual([['cbt_assets'], ['universal_royalty_ledger']]);
+      // The service-role reads hit exactly the three documented tables:
+      // the registry, the (single) ledger read serving BOTH the escrow
+      // math and the recent-settlements slice, and the contracts count.
+      expect(db.from.mock.calls).toEqual([
+        ['cbt_assets'],
+        ['universal_royalty_ledger'],
+        ['contracts'],
+      ]);
     });
 
     it('reports PROVISIONED with no reason key when the holder stores a virtual account', async () => {
@@ -497,6 +539,118 @@ describe('GET /api/covnant/me', () => {
       const body = await getJson(res);
       expect(body).toMatchObject({ ok: false, reason: 'registry_read_failed' });
       expect(JSON.stringify(body)).not.toContain(SESSION_UCT);
+    });
+  });
+
+  describe('the bounded recent-royalty slice (READ-ONLY display fields)', () => {
+    async function resolvedBody(ledgerRows: unknown[], options: ServiceFakeOptions = {}) {
+      ssrMock.createServerSupabaseClient.mockResolvedValue(
+        ssrClient({ user: { id: USER_ID, email: EMAIL }, profile: profileRow() }),
+      );
+      serviceMock.supabaseFromEnv.mockReturnValue(
+        serviceDb({ assetRows: registryAssetRows([holderEntry()]), ledgerRows, ...options }) as never,
+      );
+      const res = await GET();
+      expect(res.status).toBe(200);
+      return getJson(res);
+    }
+
+    it('serves the newest-first bounded slice with exact BigInt net strings, per currency', async () => {
+      const ledgerRows = [
+        displayRow('tx-old', '2026-01-01T00:00:00Z', 'USD', [settlementWithNet('rh_session', 1.0, 0.7)]),
+        displayRow('tx-new', '2026-06-01T00:00:00Z', 'USD', [settlementWithNet('rh_session', 2.0, 1.4)]),
+        displayRow('tx-eur', '2026-03-01T00:00:00Z', 'EUR', [settlementWithNet('rh_session', 0.5, 0.35)]),
+        // Another holder's row — never the session holder's data.
+        displayRow('tx-other', '2026-07-01T00:00:00Z', 'USD', [settlementWithNet('rh_other', 99, 99)]),
+        // A payout debit — a withdrawal, never a royalty row.
+        { transaction_id: 'tx-payout', cbt_code: 'C', platform: 'P', currency: 'USD', created_at: '2026-05-01T00:00:00Z', disbursements: [payout('rh_session', '25000000')] },
+      ];
+      const body = await resolvedBody(ledgerRows);
+
+      expect(body.recentSettlements).toEqual([
+        {
+          transactionId: 'tx-new',
+          cbtCode: 'CBT-MUS-2026-AAAA1111',
+          platform: 'Spotify',
+          currency: 'USD',
+          amountUnits: '140000000',
+          settledAt: '2026-06-01T00:00:00Z',
+        },
+        {
+          transactionId: 'tx-eur',
+          cbtCode: 'CBT-MUS-2026-AAAA1111',
+          platform: 'Spotify',
+          currency: 'EUR',
+          amountUnits: '35000000',
+          settledAt: '2026-03-01T00:00:00Z',
+        },
+        {
+          transactionId: 'tx-old',
+          cbtCode: 'CBT-MUS-2026-AAAA1111',
+          platform: 'Spotify',
+          currency: 'USD',
+          amountUnits: '70000000',
+          settledAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
+      // Per-currency totals — never rolled up across currencies, exact strings.
+      expect(body.settlementsByCurrency).toEqual([
+        { currency: 'EUR', grossUnits: '50000000', netUnits: '35000000' },
+        { currency: 'USD', grossUnits: '300000000', netUnits: '210000000' },
+      ]);
+      expectNoAccountNumbers(body);
+    });
+
+    it('bounds the slice at 10 rows, newest first', async () => {
+      const ledgerRows = Array.from({ length: 12 }, (_, index) =>
+        displayRow(`tx-${index}`, `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00Z`, 'USD', [
+          settlementWithNet('rh_session', 0.1, 0.07),
+        ]),
+      );
+      const body = await resolvedBody(ledgerRows);
+      const recent = body.recentSettlements as unknown[];
+      expect(recent).toHaveLength(10);
+      // Newest first: the slice keeps tx-11 … tx-2 and drops the two oldest.
+      expect((recent[0] as { transactionId: string }).transactionId).toBe('tx-11');
+      expect((recent[9] as { transactionId: string }).transactionId).toBe('tx-2');
+    });
+
+    it('skips corrupt display rows for display — never renders a gross-as-net lie', async () => {
+      const ledgerRows = [
+        displayRow('tx-ok', '2026-06-01T00:00:00Z', 'USD', [settlementWithNet('rh_session', 2.0, 1.4)]),
+        // A settlement entry without a recorded netShare — corrupt for display.
+        displayRow('tx-corrupt', '2026-07-01T00:00:00Z', 'USD', [settlement('rh_session', 5.0)]),
+        // Missing display columns entirely.
+        { transaction_id: 'tx-bare', disbursements: [settlementWithNet('rh_session', 1.0, 0.7)] },
+      ];
+      const body = await resolvedBody(ledgerRows);
+      expect(body.recentSettlements).toEqual([
+        expect.objectContaining({ transactionId: 'tx-ok' }),
+      ]);
+    });
+
+    it('surfaces registeredAssets and the contracts count, fail-closed on the contracts read', async () => {
+      const ok = await resolvedBody(
+        [],
+        { contractsCount: 3 },
+      );
+      expect(ok.registeredAssets).toBe(1); // the session holder on one registry asset
+      expect(ok.activeContracts).toBe(3);
+
+      ssrMock.createServerSupabaseClient.mockResolvedValue(
+        ssrClient({ user: { id: USER_ID, email: EMAIL }, profile: profileRow() }),
+      );
+      serviceMock.supabaseFromEnv.mockReturnValue(
+        serviceDb({
+          assetRows: registryAssetRows([holderEntry()]),
+          contractsError: { message: 'contracts unavailable' },
+        }) as never,
+      );
+      const res = await GET();
+      expect(res.status).toBe(502);
+      const body = await getJson(res);
+      expect(body).toMatchObject({ ok: false, reason: 'contracts_read_failed' });
+      expect(JSON.stringify(body)).not.toContain('contracts unavailable');
     });
   });
 });

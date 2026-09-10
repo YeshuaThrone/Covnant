@@ -1,14 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import {
   buildSignupPayload,
+  extractSignupSession,
   mapSignupResponse,
   networkFailureState,
   type ProvisioningStatus,
   type SealRequestState,
 } from '@/components/landing/signupRequest';
+import { adoptSignupSession } from '@/lib/auth/sessionCapture';
 
 /*
  * Entry composition — the six mirrored entry zones and the Universal
@@ -149,6 +152,14 @@ export function EntryZones() {
       const body: unknown = await response.json().catch(() => null);
       if (!sealedRef.current) return;
       setRequest(mapSignupResponse(response.status, body));
+      // The 201 session-capture point: when the creating response carries a
+      // Supabase session, adopt it in the browser so the creator reaches
+      // /dashboard signed in (the continue affordance renders in the
+      // created state). Captured only while the composition stays sealed.
+      if (sealedRef.current) {
+        const session = extractSignupSession(body);
+        if (session) void adoptSignupSession(session);
+      }
     } catch (error) {
       // Transport failure (offline, connection reset) — the composition is
       // still sealed; render the recovery line. Surfaced as state, never
@@ -437,6 +448,15 @@ export function EntryZones() {
           <p className={RESPONSE_LINE_CLASS}>{provisioningLine(request.provisioning)}</p>
           {!request.sessionless && (
             <p className={RESPONSE_LINE_CLASS}>Your account is live — you are signed in</p>
+          )}
+          {!request.sessionless && (
+            <Link
+              href="/dashboard"
+              data-testid="signup-continue"
+              className="mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne"
+            >
+              Continue to your world
+            </Link>
           )}
         </>
       )}

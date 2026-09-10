@@ -23,10 +23,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   CovenantTaxEngine,
-  type DisbursementDetail,
   type SelfServeRightsHolder,
   type TaxProfile,
 } from '@/engine/covenant-master-sdk';
+// The two ledger disbursement-entry shapes — one discrimination, shared with
+// the dashboard's display slice so the surfaces can never disagree.
+import {
+  isPayoutEntry,
+  isSettlementEntry,
+  type PayoutDisbursementEntry,
+} from '@/lib/ledger/disbursementEntries';
+import {
+  CREATOR_LEDGER_COLUMNS,
+  type CreatorLedgerDbRow,
+} from '@/lib/ledger/creatorSlice';
 import { FixedPointParseError, MICRO_SCALE, microFromNumber } from '@/lib/fixed-point';
 
 /** Thrown when the ledger read behind a balance computation fails. Fail closed: an escrow error must never surface as a zero (or stale) balance. */
@@ -37,18 +47,13 @@ export class EscrowLedgerReadError extends Error {
   }
 }
 
-/** A withdraw-route payout entry as persisted in ledger disbursements JSONB. Money fields are smallest-unit strings to avoid float loss. */
-export interface PayoutDisbursementEntry {
-  type: 'DISBURSEMENT';
-  rightsHolderId: string;
-  payoutAmount: string;
-  amountPaid: string;
-  taxWithheld: string;
-  plaidAuthorizationId?: string;
-  plaidTransferId?: string;
-  timestamp: number;
-  remainingNetBalance: string;
-}
+/**
+ * The two ledger disbursement-entry shapes and their guards now live in
+ * @/lib/ledger/disbursementEntries — one discrimination shared with the
+ * dashboard's display slice (re-exported below) so the surfaces can never
+ * disagree about what counts as a settlement.
+ */
+export { isPayoutEntry, isSettlementEntry, type PayoutDisbursementEntry };
 
 export interface EscrowBalance {
   /** Σ settlement grossShare for the holder across all ledger rows. */
@@ -92,25 +97,6 @@ export function withholdingUnitsOn(grossUnits: bigint, rate: number): bigint {
   const digits = dot === -1 ? rateString : rateString.slice(0, dot) + rateString.slice(dot + 1);
   const denominator = 10n ** BigInt(dot === -1 ? 0 : rateString.length - dot - 1);
   return (grossUnits * BigInt(digits)) / denominator;
-}
-
-function isPayoutEntry(entry: unknown): entry is PayoutDisbursementEntry {
-  return (
-    typeof entry === 'object' &&
-    entry !== null &&
-    'type' in entry &&
-    (entry as { type?: unknown }).type === 'DISBURSEMENT'
-  );
-}
-
-function isSettlementEntry(entry: unknown): entry is DisbursementDetail {
-  return (
-    typeof entry === 'object' &&
-    entry !== null &&
-    !('type' in entry) &&
-    'grossShare' in entry &&
-    typeof (entry as { grossShare?: unknown }).grossShare === 'number'
-  );
 }
 
 /** Gross earnings: Σ settlement grossShare for the holder across the given disbursements arrays. */
@@ -182,6 +168,24 @@ export async function fetchEscrowBalance(
       : [],
   );
   return escrowBalanceForHolder({ disbursementsByRow: rows, rightsHolderId, taxProfile });
+}
+
+/**
+ * The me route's ledger read — the SAME fail-closed posture as
+ * fetchEscrowBalance, selecting the display columns the creator slice needs
+ * in addition to disbursements (ONE table read serves both the balance math
+ * and the dashboard slice). Callers compute the escrow totals with the
+ * shared pure escrowBalanceForHolder over these rows, so the numbers stay
+ * identical to fetchEscrowBalance's by construction.
+ */
+export async function fetchCreatorLedgerRows(db: SupabaseClient): Promise<CreatorLedgerDbRow[]> {
+  const { data, error } = await db
+    .from('universal_royalty_ledger')
+    .select(CREATOR_LEDGER_COLUMNS);
+  if (error) {
+    throw new EscrowLedgerReadError(`Ledger read failed: ${error.message}`);
+  }
+  return (data ?? []) as CreatorLedgerDbRow[];
 }
 
 /**

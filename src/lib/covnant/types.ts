@@ -110,6 +110,29 @@ export type CovnantMeSettlements = {
   isTaxVerified: boolean;
 };
 
+/**
+ * One row of the me response's bounded recent-royalty slice — the
+ * display-only view of the holder's settled ledger rows (max 10, newest
+ * first). amountUnits is the holder's engine-recorded net share as a BigInt
+ * smallest-unit string (1e-8) — exact, per-currency, no float rollup.
+ * Display fields only: never account/routing numbers.
+ */
+export type CovnantMeRecentSettlement = {
+  transactionId: string;
+  cbtCode: string;
+  platform: string;
+  currency: string;
+  amountUnits: string;
+  settledAt: string;
+};
+
+/** Per-currency settled totals for the holder — exact BigInt unit strings (1e-8). */
+export type CovnantMeCurrencyTotals = {
+  currency: string;
+  grossUnits: string;
+  netUnits: string;
+};
+
 /** The GET /api/covnant/me 200 aggregate — composed from the verified session only. */
 export type CovnantMeResponse = {
   profile: CreatorProfile;
@@ -117,4 +140,12 @@ export type CovnantMeResponse = {
   role: string;
   provisioning: CovnantMeProvisioning;
   settlements: CovnantMeSettlements;
+  /** Creator-scoped count: cbt_assets rows whose rights_holders hold this holder. */
+  registeredAssets: number;
+  /** Contracts referencing the holder's assets' cbt_codes (any status). */
+  activeContracts: number;
+  /** Per-currency settled gross/net — the settlements card's exact lines. */
+  settlementsByCurrency: CovnantMeCurrencyTotals[];
+  /** The bounded recent-royalty strip (max 10, newest first) — READ-ONLY. */
+  recentSettlements: CovnantMeRecentSettlement[];
 };

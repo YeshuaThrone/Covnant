@@ -80,8 +80,9 @@ const INVENTORIED_FILES: Record<string, string> = {
   'app/api/payouts/withdraw/route.ts': 'SUPABASE_JS ×2 — Gen 9 stamped DISBURSEMENT insert (1 wired site)',
   'engine/covenant-master-sdk.ts': 'ENGINE ×1 — hash-locked internal ledger upsert',
   'lib/contracts/payouts.ts': 'DOC — display layer, type-only ledger reference',
-  'lib/escrow/balance.ts': 'READ — disbursements scan',
+  'lib/escrow/balance.ts': 'READ — disbursements scan + creator display-row scan (Gen 12)',
   'lib/ledger/cbt-settlement.ts': 'HELPER — stamp derivation docs (Gen 8/9)',
+  'lib/ledger/creatorSlice.ts': 'DOC — creator slice, type-only ledger reference (Gen 12, no DB access)',
   'lib/ledger/engine-stamp.ts': 'ENGINE — Gen 9 bounded metadata-only enrichment executor',
   'lib/ledger/store.ts': 'SUPABASE_JS ×2 — Gen 9 stamped rememberSettlement upsert (1 wired site)',
 };

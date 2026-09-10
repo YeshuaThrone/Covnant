@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildSignupPayload,
+  extractSignupSession,
   mapSignupResponse,
   networkFailureState,
   NETWORK_FAILED_MESSAGE,
@@ -155,5 +156,23 @@ describe('mapSignupResponse', () => {
 describe('networkFailureState', () => {
   it('renders the transport recovery line', () => {
     expect(networkFailureState()).toEqual({ phase: 'failed', message: NETWORK_FAILED_MESSAGE });
+  });
+});
+
+describe('extractSignupSession — the 201 session-capture point', () => {
+  it('extracts non-empty access and refresh tokens from a carrying body', () => {
+    expect(
+      extractSignupSession({ session: { access_token: 'at', refresh_token: 'rt' } }),
+    ).toEqual({ accessToken: 'at', refreshToken: 'rt' });
+  });
+
+  it('fails closed to null on absent, malformed, or empty token fields', () => {
+    expect(extractSignupSession(null)).toBeNull();
+    expect(extractSignupSession({})).toBeNull();
+    expect(extractSignupSession({ session: null })).toBeNull();
+    expect(extractSignupSession({ session: 'nope' })).toBeNull();
+    expect(extractSignupSession({ session: { refresh_token: 'rt' } })).toBeNull();
+    expect(extractSignupSession({ session: { access_token: '', refresh_token: 'rt' } })).toBeNull();
+    expect(extractSignupSession({ session: { access_token: 5, refresh_token: 'rt' } })).toBeNull();
   });
 });

@@ -12,32 +12,18 @@
  * anon-key identity, never the operator's.
  */
 
-import { createBrowserClient, createServerClient } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
-export type SupabasePublicEnv = {
-  url: string;
-  anonKey: string;
-};
+// The public-env read and the browser factory live in client-safe modules
+// (no next/headers in their graph) — re-exported here so every existing
+// import path keeps working.
+export { readSupabasePublicEnv } from '@/lib/auth/supabasePublicEnv';
+export { createBrowserSupabaseClient } from '@/lib/auth/browserClient';
+export type { SupabasePublicEnv } from '@/lib/auth/supabasePublicEnv';
 
-/**
- * Reads the Supabase URL + anon key under the documented names (the same
- * fallback pair readSupabaseEnv applies). Null when either is missing —
- * session consumers fail closed (401/503) and the middleware passes the
- * request through untouched; an unconfigured Supabase must never break the
- * site.
- */
-export function readSupabasePublicEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): SupabasePublicEnv | null {
-  const url = env.SUPABASE_URL ?? env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = env.SUPABASE_ANON_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    return null;
-  }
-  return { url, anonKey };
-}
+import { readSupabasePublicEnv } from '@/lib/auth/supabasePublicEnv';
 
 /**
  * True when the request carries any Supabase auth-token cookie. Storage keys
@@ -51,18 +37,6 @@ export async function hasSupabaseSessionCookies(): Promise<boolean> {
   return cookieStore
     .getAll()
     .some((cookie) => cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'));
-}
-
-/**
- * The browser session client — the client-side half of the standard
- * @supabase/ssr pair (createBrowserClient). Null when unconfigured.
- */
-export function createBrowserSupabaseClient(): SupabaseClient | null {
-  const env = readSupabasePublicEnv();
-  if (!env) {
-    return null;
-  }
-  return createBrowserClient(env.url, env.anonKey);
 }
 
 /**

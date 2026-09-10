@@ -8,24 +8,34 @@ import { expect, test } from '@playwright/test';
  * memory mode and Supabase mode.
  */
 
-test('dashboard renders metric cards and the three quick actions', async ({ page }) => {
+test('dashboard renders the bank-home surface: honest state, gold rules, quick actions when signed in', async ({ page }) => {
   await page.goto('/dashboard');
 
-  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+  // Data-state tolerant: the shared webServer has no Supabase credentials,
+  // so the resolver fails closed to the honest visitor state. Either way,
+  // the page is a real dashboard surface — never a bare heading with zeros.
+  const visitor = page.getByTestId('dashboard-signin-cta');
+  if ((await visitor.count()) > 0) {
+    // Visitor state — the honest sign-in path, no fabricated accounts
+    // and no fabricated quick actions.
+    await expect(visitor).toHaveAttribute('href', '/signin');
+    await expect(page.getByTestId('accounts-row')).toHaveCount(0);
+    await expect(page.getByLabel('Quick actions')).toHaveCount(0);
+  } else {
+    // Signed-in state — the greeting hero and accounts row.
+    await expect(page.getByTestId('greeting')).toBeVisible();
+    await expect(page.getByTestId('accounts-row')).toBeVisible();
 
-  // Metric cards — labels always render; values render in both data modes.
-  for (const label of ['Registered assets', 'Contracts', 'Settlements', 'Gross settled']) {
-    await expect(page.locator(`[data-metric="${label}"]`)).toBeVisible();
+    // Quick actions — directive: Register Asset, New Contract, Browse
+    // Templates — the wired destinations.
+    const actions = page.getByLabel('Quick actions').getByRole('link');
+    await expect(actions.filter({ hasText: 'Register Asset' })).toHaveAttribute('href', '/assets');
+    await expect(actions.filter({ hasText: 'New Contract' })).toHaveAttribute('href', '/contracts');
+    await expect(actions.filter({ hasText: 'Browse Templates' })).toHaveAttribute(
+      'href',
+      '/templates',
+    );
   }
-
-  // Quick actions — directive: Register Asset, New Contract, Browse Templates.
-  const actions = page.getByLabel('Quick actions').getByRole('link');
-  await expect(actions.filter({ hasText: 'Register Asset' })).toHaveAttribute('href', '/assets');
-  await expect(actions.filter({ hasText: 'New Contract' })).toHaveAttribute('href', '/contracts');
-  await expect(actions.filter({ hasText: 'Browse Templates' })).toHaveAttribute(
-    'href',
-    '/templates',
-  );
 });
 
 test('catalog shows registered assets with universal registry pills, or the empty state', async ({

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
-import { IdentityBadge } from '@/components/brand/IdentityBadge';
+import { IdentityBadge, type IdentityState } from '@/components/brand/IdentityBadge';
+import { MobileDrawer } from './MobileDrawer';
 import { SidebarNav, type NavItem } from './SidebarNav';
 
 /**
@@ -21,11 +22,22 @@ export const WORKSPACE_NAV: NavItem[] = [
 ];
 
 /**
- * Obsidian app shell — fixed sidebar on large screens with a scrollable
- * top-bar nav on small ones. Wraps every workspace route via the
- * (workspace) route group; the landing page stays chrome-free.
+ * Obsidian app shell — fixed sidebar on large screens, drawer navigation on
+ * small ones (bank reference: hamburger drawer). Wraps every workspace
+ * route via the (workspace) route group; the landing page stays chrome-free.
+ *
+ * `identity` is the LIVE session identity resolved by the (workspace)
+ * layout — the sidebar pill and the mobile drawer render it; when absent
+ * (layout could not resolve a session) both surfaces render the honest
+ * unregistered state. Navigation structure is unchanged by directive.
  */
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  identity = { kind: 'unregistered' },
+}: {
+  children: React.ReactNode;
+  identity?: IdentityState;
+}) {
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[264px_1fr]">
       <aside
@@ -44,10 +56,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         {/* Flex-spacer zone: the identity badge sits above the tagline, inside
             the bottom-pinned block so the justify-between column keeps its
-            two-child rhythm. Unregistered until an identity source exists. */}
+            two-child rhythm. Renders the live session identity when present. */}
         <div className="px-5 pb-6">
           <div className="hidden pb-4 lg:block">
-            <IdentityBadge state={{ kind: 'unregistered' }} />
+            <IdentityBadge state={identity} />
           </div>
           <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/30">
             Own Your Creation.
@@ -60,15 +72,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           data-shell="mobile-top"
           className="border-b border-gold/15 bg-obsidian-900 lg:hidden"
         >
-          <div className="flex items-center gap-3 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
             <Link href="/" aria-label="Covnant home" className="flex items-center gap-2">
               <CvRibbonMonogram size={28} />
               <span className="font-mono text-xs tracking-[0.3em] text-gold-champagne">
                 COVNANT
               </span>
             </Link>
+            <MobileDrawer items={WORKSPACE_NAV} identity={identity} />
           </div>
-          <SidebarNav items={WORKSPACE_NAV} variant="horizontal" />
         </header>
 
         <main className="flex-1">{children}</main>
