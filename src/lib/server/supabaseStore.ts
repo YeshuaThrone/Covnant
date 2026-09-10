@@ -122,14 +122,23 @@ export class SupabaseStore implements Store {
     return rows.map((row) => toRecord<T>(row));
   }
 
+  /** Insert/upsert read: throws when the DB returns no row. */
+  private async oneStrict<T>(result: DbResult, context: string): Promise<T> {
+    const row = await this.one<T>(result, context);
+    if (row === undefined) {
+      throw new Error(`${context}: expected exactly one row back, got none.`);
+    }
+    return row;
+  }
+
   // --- Legacy show / ping / artist surface ---
 
   async insertShow(show: ValidShowPayload): Promise<ShowRecord> {
     const row = { ...show, id: crypto.randomUUID() };
-    return this.one<ShowRecord>(
+    return this.oneStrict<ShowRecord>(
       this.client.from(TABLES.shows).insert(row).select().maybeSingle(),
       'insertShow',
-    ) as Promise<ShowRecord>;
+    );
   }
 
   async listShows(limit: number = DEFAULT_LIST_SHOWS_LIMIT): Promise<ShowRecord[]> {
@@ -156,22 +165,25 @@ export class SupabaseStore implements Store {
     showId: string,
     quantity: number,
   ): Promise<CheckoutPurchaseResult | null> {
-    return this.one<CheckoutPurchaseResult>(
+    const result = await this.one<CheckoutPurchaseResult>(
       this.client.rpc('record_checkout_purchase', {
         p_session_id: sessionId,
         p_show_id: showId,
         p_quantity: quantity,
       }),
       'recordCheckoutPurchase',
-    ) as Promise<CheckoutPurchaseResult | null>;
+    );
+    // The RPC yields JSON null when the show is missing, non-native, or the
+    // purchase is not recordable — null is part of the canonical contract.
+    return result ?? null;
   }
 
   async insertLivePing(ping: ValidLivePingPayload): Promise<LivePingRecord> {
     const row = { ...ping, id: crypto.randomUUID() };
-    return this.one<LivePingRecord>(
+    return this.oneStrict<LivePingRecord>(
       this.client.from(TABLES.livePings).insert(row).select().maybeSingle(),
       'insertLivePing',
-    ) as Promise<LivePingRecord>;
+    );
   }
 
   async listLivePings(limit: number = DEFAULT_LIST_SHOWS_LIMIT): Promise<LivePingRecord[]> {
@@ -199,10 +211,10 @@ export class SupabaseStore implements Store {
       key_hash: keyHash,
       key_prefix: keyPrefix,
     };
-    return this.one<ArtistRecord>(
+    return this.oneStrict<ArtistRecord>(
       this.client.from(TABLES.artists).insert(row).select().maybeSingle(),
       'insertArtist',
-    ) as Promise<ArtistRecord>;
+    );
   }
 
   async getArtist(id: string): Promise<ArtistRecord | undefined> {
@@ -229,10 +241,10 @@ export class SupabaseStore implements Store {
       id: crypto.randomUUID(),
       created_at: new Date().toISOString(),
     };
-    return this.one<PlaidLinkTokenRecord>(
+    return this.oneStrict<PlaidLinkTokenRecord>(
       this.client.from(TABLES.plaidLinkTokens).insert(row).select().maybeSingle(),
       'insertPlaidLinkToken',
-    ) as Promise<PlaidLinkTokenRecord>;
+    );
   }
 
   async getPlaidLinkTokenByLinkToken(
@@ -279,14 +291,14 @@ export class SupabaseStore implements Store {
   async insertKycVerification(
     row: Omit<KycVerificationRecord, 'id'>,
   ): Promise<KycVerificationRecord> {
-    return this.one<KycVerificationRecord>(
+    return this.oneStrict<KycVerificationRecord>(
       this.client
         .from(TABLES.kycVerifications)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertKycVerification',
-    ) as Promise<KycVerificationRecord>;
+    );
   }
 
   async listKycVerificationsByCreator(creatorId: string): Promise<KycVerificationRecord[]> {
@@ -304,14 +316,14 @@ export class SupabaseStore implements Store {
   async insertProcessorToken(
     row: Omit<PlaidProcessorTokenRecord, 'id'>,
   ): Promise<PlaidProcessorTokenRecord> {
-    return this.one<PlaidProcessorTokenRecord>(
+    return this.oneStrict<PlaidProcessorTokenRecord>(
       this.client
         .from(TABLES.processorTokens)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertProcessorToken',
-    ) as Promise<PlaidProcessorTokenRecord>;
+    );
   }
 
   async getProcessorToken(
@@ -334,14 +346,14 @@ export class SupabaseStore implements Store {
   async insertSplitRun(
     row: Omit<SplitRunRecord, 'id' | 'status'> & { status?: SplitRunRecord['status'] },
   ): Promise<SplitRunRecord> {
-    return this.one<SplitRunRecord>(
+    return this.oneStrict<SplitRunRecord>(
       this.client
         .from(TABLES.splitRuns)
         .insert({ ...row, status: row.status ?? 'posted', id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertSplitRun',
-    ) as Promise<SplitRunRecord>;
+    );
   }
 
   async getSplitRun(id: string): Promise<SplitRunRecord | undefined> {
@@ -369,14 +381,14 @@ export class SupabaseStore implements Store {
   async insertRoyaltyLineItem(
     row: Omit<RoyaltyLineItemRecord, 'id'>,
   ): Promise<RoyaltyLineItemRecord> {
-    return this.one<RoyaltyLineItemRecord>(
+    return this.oneStrict<RoyaltyLineItemRecord>(
       this.client
         .from(TABLES.royaltyLineItems)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertRoyaltyLineItem',
-    ) as Promise<RoyaltyLineItemRecord>;
+    );
   }
 
   // --- Ledger transactions ---
@@ -386,14 +398,14 @@ export class SupabaseStore implements Store {
       kind?: LedgerTransactionRecord['kind'];
     },
   ): Promise<LedgerTransactionRecord> {
-    return this.one<LedgerTransactionRecord>(
+    return this.oneStrict<LedgerTransactionRecord>(
       this.client
         .from(TABLES.ledgerTransactions)
         .insert({ ...row, kind: row.kind ?? 'royalty', id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertLedgerTransaction',
-    ) as Promise<LedgerTransactionRecord>;
+    );
   }
 
   async getLedgerTransaction(id: string): Promise<LedgerTransactionRecord | undefined> {
@@ -450,14 +462,14 @@ export class SupabaseStore implements Store {
   // --- BaaS transfers ---
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {
-    return this.one<BaasTransferRecord>(
+    return this.oneStrict<BaasTransferRecord>(
       this.client
         .from(TABLES.baasTransfers)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertBaasTransfer',
-    ) as Promise<BaasTransferRecord>;
+    );
   }
 
   async getBaasTransfer(id: string): Promise<BaasTransferRecord | undefined> {
@@ -497,14 +509,14 @@ export class SupabaseStore implements Store {
   // --- Company dust ---
 
   async insertCompanyDust(row: Omit<CompanyDustRecord, 'id'>): Promise<CompanyDustRecord> {
-    return this.one<CompanyDustRecord>(
+    return this.oneStrict<CompanyDustRecord>(
       this.client
         .from(TABLES.companyDust)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertCompanyDust',
-    ) as Promise<CompanyDustRecord>;
+    );
   }
 
   async listCompanyDustByRun(splitRunId: string): Promise<CompanyDustRecord[]> {
@@ -533,14 +545,14 @@ export class SupabaseStore implements Store {
   }
 
   async upsertCreatorTaxProfile(row: CreatorTaxProfile): Promise<CreatorTaxProfile> {
-    return this.one<CreatorTaxProfile>(
+    return this.oneStrict<CreatorTaxProfile>(
       this.client
         .from(TABLES.taxProfiles)
         .upsert(row, { onConflict: 'creator_id' })
         .select()
         .maybeSingle(),
       'upsertCreatorTaxProfile',
-    ) as Promise<CreatorTaxProfile>;
+    );
   }
 
   async getCreatorYtd(
@@ -559,25 +571,25 @@ export class SupabaseStore implements Store {
   }
 
   async upsertCreatorYtd(row: CreatorYtdEarnings): Promise<CreatorYtdEarnings> {
-    return this.one<CreatorYtdEarnings>(
+    return this.oneStrict<CreatorYtdEarnings>(
       this.client
         .from(TABLES.creatorYtd)
         .upsert(row, { onConflict: 'creator_id,tax_year' })
         .select()
         .maybeSingle(),
       'upsertCreatorYtd',
-    ) as Promise<CreatorYtdEarnings>;
+    );
   }
 
   async insertTaxEscrow(row: Omit<TaxEscrowRecord, 'id'>): Promise<TaxEscrowRecord> {
-    return this.one<TaxEscrowRecord>(
+    return this.oneStrict<TaxEscrowRecord>(
       this.client
         .from(TABLES.taxEscrow)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertTaxEscrow',
-    ) as Promise<TaxEscrowRecord>;
+    );
   }
 
   async listTaxEscrowByCreator(
@@ -613,14 +625,14 @@ export class SupabaseStore implements Store {
   }
 
   async upsertVault(row: SovereignVaultRecord): Promise<SovereignVaultRecord> {
-    return this.one<SovereignVaultRecord>(
+    return this.oneStrict<SovereignVaultRecord>(
       this.client
         .from(TABLES.vaults)
         .upsert(row, { onConflict: 'payee_id' })
         .select()
         .maybeSingle(),
       'upsertVault',
-    ) as Promise<SovereignVaultRecord>;
+    );
   }
 
   async getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined> {
@@ -635,14 +647,14 @@ export class SupabaseStore implements Store {
   }
 
   async upsertVaultDispute(row: VaultDisputeRecord): Promise<VaultDisputeRecord> {
-    return this.one<VaultDisputeRecord>(
+    return this.oneStrict<VaultDisputeRecord>(
       this.client
         .from(TABLES.vaultDisputes)
         .upsert(row, { onConflict: 'payee_id' })
         .select()
         .maybeSingle(),
       'upsertVaultDispute',
-    ) as Promise<VaultDisputeRecord>;
+    );
   }
 
   async getCatalogDispute(workId: string): Promise<CatalogDisputeRecord | undefined> {
@@ -657,14 +669,14 @@ export class SupabaseStore implements Store {
   }
 
   async upsertCatalogDispute(row: CatalogDisputeRecord): Promise<CatalogDisputeRecord> {
-    return this.one<CatalogDisputeRecord>(
+    return this.oneStrict<CatalogDisputeRecord>(
       this.client
         .from(TABLES.catalogDisputes)
         .upsert(row, { onConflict: 'work_id' })
         .select()
         .maybeSingle(),
       'upsertCatalogDispute',
-    ) as Promise<CatalogDisputeRecord>;
+    );
   }
 
   // --- Recoupment ---
@@ -683,14 +695,14 @@ export class SupabaseStore implements Store {
   }
 
   async upsertRecoupmentAdvance(row: RecoupmentAdvanceRecord): Promise<RecoupmentAdvanceRecord> {
-    return this.one<RecoupmentAdvanceRecord>(
+    return this.oneStrict<RecoupmentAdvanceRecord>(
       this.client
         .from(TABLES.recoupmentAdvances)
         .upsert(row, { onConflict: 'creator_id' })
         .select()
         .maybeSingle(),
       'upsertRecoupmentAdvance',
-    ) as Promise<RecoupmentAdvanceRecord>;
+    );
   }
 
   async listRecoupmentAdvances(): Promise<RecoupmentAdvanceRecord[]> {
@@ -706,14 +718,14 @@ export class SupabaseStore implements Store {
   async insertRecoupmentLedger(
     row: Omit<RecoupmentLedgerRecord, 'id'>,
   ): Promise<RecoupmentLedgerRecord> {
-    return this.one<RecoupmentLedgerRecord>(
+    return this.oneStrict<RecoupmentLedgerRecord>(
       this.client
         .from(TABLES.recoupmentLedger)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertRecoupmentLedger',
-    ) as Promise<RecoupmentLedgerRecord>;
+    );
   }
 
   async listRecoupmentLedgerByRun(splitRunId: string): Promise<RecoupmentLedgerRecord[]> {
@@ -742,10 +754,10 @@ export class SupabaseStore implements Store {
   }
 
   async insertPayoutHold(row: PayoutHoldRecord): Promise<PayoutHoldRecord> {
-    return this.one<PayoutHoldRecord>(
+    return this.oneStrict<PayoutHoldRecord>(
       this.client.from(TABLES.payoutHolds).insert(row).select().maybeSingle(),
       'insertPayoutHold',
-    ) as Promise<PayoutHoldRecord>;
+    );
   }
 
   async updatePayoutHoldStatus(
@@ -778,14 +790,14 @@ export class SupabaseStore implements Store {
   async insertPayoutReversal(
     row: Omit<PayoutReversalRecord, 'id'>,
   ): Promise<PayoutReversalRecord> {
-    return this.one<PayoutReversalRecord>(
+    return this.oneStrict<PayoutReversalRecord>(
       this.client
         .from(TABLES.payoutReversals)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertPayoutReversal',
-    ) as Promise<PayoutReversalRecord>;
+    );
   }
 
   async getPayoutReversalByTransfer(
@@ -819,14 +831,14 @@ export class SupabaseStore implements Store {
   async insertWebhookEvent(
     row: Omit<BaasWebhookEventRecord, 'id'>,
   ): Promise<BaasWebhookEventRecord> {
-    return this.one<BaasWebhookEventRecord>(
+    return this.oneStrict<BaasWebhookEventRecord>(
       this.client
         .from(TABLES.baasWebhookEvents)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertWebhookEvent',
-    ) as Promise<BaasWebhookEventRecord>;
+    );
   }
 
   async getDspWebhookEvent(eventId: string): Promise<DspWebhookEventRecord | undefined> {
@@ -843,14 +855,14 @@ export class SupabaseStore implements Store {
   async insertDspWebhookEvent(
     row: Omit<DspWebhookEventRecord, 'id'>,
   ): Promise<DspWebhookEventRecord> {
-    return this.one<DspWebhookEventRecord>(
+    return this.oneStrict<DspWebhookEventRecord>(
       this.client
         .from(TABLES.dspWebhookEvents)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertDspWebhookEvent',
-    ) as Promise<DspWebhookEventRecord>;
+    );
   }
 
   // --- GL ---
@@ -863,7 +875,7 @@ export class SupabaseStore implements Store {
       state?: GlJournalRecord['state'];
     },
   ): Promise<GlJournalRecord> {
-    return this.one<GlJournalRecord>(
+    return this.oneStrict<GlJournalRecord>(
       this.client
         .from(TABLES.glJournals)
         .insert({
@@ -877,18 +889,18 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'insertGlJournal',
-    ) as Promise<GlJournalRecord>;
+    );
   }
 
   async insertGlEntry(row: Omit<GlEntryRecord, 'id'>): Promise<GlEntryRecord> {
-    return this.one<GlEntryRecord>(
+    return this.oneStrict<GlEntryRecord>(
       this.client
         .from(TABLES.glEntries)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertGlEntry',
-    ) as Promise<GlEntryRecord>;
+    );
   }
 
   async listGlJournals(): Promise<GlJournalRecord[]> {
@@ -952,14 +964,14 @@ export class SupabaseStore implements Store {
   // --- Split-run reversals ---
 
   async insertSplitReversal(row: Omit<SplitReversalRecord, 'id'>): Promise<SplitReversalRecord> {
-    return this.one<SplitReversalRecord>(
+    return this.oneStrict<SplitReversalRecord>(
       this.client
         .from(TABLES.splitReversals)
         .insert({ ...row, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertSplitReversal',
-    ) as Promise<SplitReversalRecord>;
+    );
   }
 
   async getSplitReversalByRun(splitRunId: string): Promise<SplitReversalRecord | undefined> {

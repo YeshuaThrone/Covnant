@@ -60,7 +60,12 @@ import type {
   VaultDisputeRecord,
 } from '@/modules/don/records';
 
-/** Index-stable time sort: ties keep insertion order (DESC reverses it). */
+/**
+ * Index-stable time sort. Ties keep insertion order in the list's own
+ * direction — newest-first lists surface the latest insertion first,
+ * oldest-first lists the earliest — matching SupabaseStore's
+ * (created_at, insertion_order) ORDER BY pair.
+ */
 function sortByTime<T>(rows: T[], pick: (row: T) => string, direction: 'asc' | 'desc'): T[] {
   const signed = direction === 'asc' ? 1 : -1;
   return rows
@@ -68,7 +73,7 @@ function sortByTime<T>(rows: T[], pick: (row: T) => string, direction: 'asc' | '
     .sort((a, b) => {
       const ta = Date.parse(pick(a.row));
       const tb = Date.parse(pick(b.row));
-      return signed * (ta - tb) || a.index - b.index;
+      return signed * (ta - tb) || signed * (a.index - b.index);
     })
     .map((entry) => entry.row);
 }
@@ -558,10 +563,12 @@ export class InMemoryStore implements Store {
   async getPayoutReversalByTransfer(
     transferId: string,
   ): Promise<PayoutReversalRecord | undefined> {
-    for (const row of this.payoutReversals.values()) {
-      if (row.transfer_id === transferId) return row;
-    }
-    return undefined;
+    // Latest reversal for the transfer (SupabaseStore: created_at DESC LIMIT 1).
+    return sortByTime(
+      [...this.payoutReversals.values()].filter((row) => row.transfer_id === transferId),
+      (row) => row.created_at,
+      'desc',
+    )[0];
   }
 
   // --- Webhook event ledgers ---
@@ -573,11 +580,12 @@ export class InMemoryStore implements Store {
   async insertWebhookEvent(
     row: Omit<BaasWebhookEventRecord, 'id'>,
   ): Promise<BaasWebhookEventRecord> {
-    for (const existing of this.baasWebhookEvents.values()) {
-      if (existing.event_id === row.event_id) uniqueViolation('baas_webhook_events.event_id');
+    if (this.baasWebhookEvents.has(row.event_id)) {
+      uniqueViolation('baas_webhook_events.event_id');
     }
+    // Keyed by event_id — the dedupe/read key (getWebhookEvent).
     const record: BaasWebhookEventRecord = { ...row, id: randomUUID() };
-    this.baasWebhookEvents.set(record.id, record);
+    this.baasWebhookEvents.set(row.event_id, record);
     return record;
   }
 
@@ -588,11 +596,12 @@ export class InMemoryStore implements Store {
   async insertDspWebhookEvent(
     row: Omit<DspWebhookEventRecord, 'id'>,
   ): Promise<DspWebhookEventRecord> {
-    for (const existing of this.dspWebhookEvents.values()) {
-      if (existing.event_id === row.event_id) uniqueViolation('dsp_webhook_events.event_id');
+    if (this.dspWebhookEvents.has(row.event_id)) {
+      uniqueViolation('dsp_webhook_events.event_id');
     }
+    // Keyed by event_id — the dedupe/read key (getDspWebhookEvent).
     const record: DspWebhookEventRecord = { ...row, id: randomUUID() };
-    this.dspWebhookEvents.set(record.id, record);
+    this.dspWebhookEvents.set(row.event_id, record);
     return record;
   }
 

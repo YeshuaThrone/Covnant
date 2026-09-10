@@ -150,6 +150,9 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       '0003_creator_profiles.sql',
       '0004_creator_compliance.sql',
       '0005_admin_action_log.sql',
+      // Don Engine persistence (spec art_zxsnGP3A): creates the Don tables;
+      // still no DDL on universal_royalty_ledger — the referencing pin below holds.
+      '0006_don_engine.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

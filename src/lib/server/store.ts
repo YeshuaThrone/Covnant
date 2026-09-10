@@ -35,7 +35,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type {
-  BaasProvider,
   BaasTransferRecord,
   KycVerificationRecord,
   LedgerTransactionRecord,
@@ -47,6 +46,8 @@ import type {
   BaasWebhookEventRecord,
   CatalogDisputeRecord,
   CompanyDustRecord,
+  CreatorTaxProfile,
+  CreatorYtdEarnings,
   DspWebhookEventRecord,
   GlEntryRecord,
   GlJournalRecord,
