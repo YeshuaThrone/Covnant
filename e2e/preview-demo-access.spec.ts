@@ -156,7 +156,7 @@ test('zero-step: pasting /dashboard lands signed-in — mobile ~390px', async ({
   await context.close();
 });
 
-test('zero-step flow records as video: paste → dashboard, nothing else', async ({ browser }) => {
+test('zero-step flow records as video: paste → dashboard, nothing else', async ({ browser }, testInfo) => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     recordVideo: { dir: 'e2e-artifacts/preview-zero-step' },
@@ -168,8 +168,9 @@ test('zero-step flow records as video: paste → dashboard, nothing else', async
 
   const video = page.video();
   await context.close();
+  // Portable CI-safe artifact location (test-results/, gitignored).
   if (video) {
-    await video.saveAs('/home/user/work/evidence/preview-zero-step.webm');
+    await video.saveAs(testInfo.outputPath('preview-zero-step.webm'));
   }
 });
 
