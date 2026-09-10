@@ -10,7 +10,6 @@
 // merged GlJournalRecord, which the foundation pins to kind/ref_type/ref_id.
 
 import type {
-  GlEntryRecord,
   GlJournalRecord,
 } from "@/modules/don/records";
 import type { Store } from "@/lib/server/store";

@@ -15,7 +15,15 @@
  */
 
 import type { Store } from "@/lib/server/store";
-import type { BaasTransferRecord } from "@/lib/don/types";
+import type {
+  BaasTransferRecord,
+  LedgerTransactionRecord,
+  SettlementRail,
+} from "@/lib/don/types";
+import {
+  getBaasAdapter,
+  type BaasTransferResult,
+} from "@/services/baas";
 import { postJournal } from "@/modules/ledger/engine";
 import {
   fboCredit,
@@ -29,11 +37,13 @@ import {
   creditBalances,
   debitPending,
   emptyVaultBalances,
+  holdPayout,
   releasePending,
   reversePayoutHold,
   type VaultBalances,
   type VaultCreditTarget,
 } from "./balances";
+import { isPayoutFrozen } from "./dispute";
 
 async function persistVault(
   store: Store,
@@ -364,5 +374,149 @@ export async function reverseVaultPayout(
     reversal,
     transfer: (await store.getBaasTransfer(transferId))!,
     idempotent: false,
+  };
+}
+
+
+export type VaultPayoutInput = {
+  payee_id: string;
+  amount_cents: number;
+  rail: SettlementRail;
+};
+
+async function insertPayoutLedger(
+  store: Store,
+  input: {
+    payee_id: string;
+    payee_name: string;
+    amount_cents: number;
+    rail: SettlementRail;
+  },
+  now: Date,
+): Promise<LedgerTransactionRecord> {
+  return await store.insertLedgerTransaction({
+    split_run_id: "",
+    line_item_id: "",
+    payee_id: input.payee_id,
+    payee_name: input.payee_name,
+    role: "other",
+    share_bps: 0,
+    amount_cents: input.amount_cents,
+    currency: "USD",
+    status: "submitted",
+    rail: input.rail,
+    baas_provider: null,
+    baas_transfer_id: null,
+    created_at: now.toISOString(),
+    settled_at: null,
+    kind: "payout",
+  });
+}
+
+export async function payoutFromVault(
+  store: Store,
+  input: VaultPayoutInput,
+  now: Date = new Date(),
+): Promise<
+  | {
+      ok: true;
+      vault: SovereignVaultRecord;
+      transfer: Extract<BaasTransferResult, { ok: true }>["transfer"];
+    }
+  | { ok: false; status: number; code: string; message: string }
+> {
+  const current = await store.getVault(input.payee_id);
+  if (current === undefined) {
+    return {
+      ok: false,
+      status: 404,
+      code: "vault_not_found",
+      message: "No sovereign vault exists for that payee.",
+    };
+  }
+  if (await isPayoutFrozen(store, input.payee_id)) {
+    return {
+      ok: false,
+      status: 423,
+      code: "payout_frozen",
+      message: "Payouts are frozen while a split dispute lock is active.",
+    };
+  }
+  const held = holdPayout(current, input.amount_cents);
+  if (!held.ok) {
+    return {
+      ok: false,
+      status: 422,
+      code: held.code,
+      message: "available_balance is insufficient for that payout.",
+    };
+  }
+  await persistVault(store, current.payee_id, current.payee_name, held.balances, now);
+  const ledger = await insertPayoutLedger(
+    store,
+    {
+      payee_id: current.payee_id,
+      payee_name: current.payee_name,
+      amount_cents: input.amount_cents,
+      rail: input.rail,
+    },
+    now,
+  );
+  const adapter = getBaasAdapter(store);
+  const request = {
+    payee_id: current.payee_id,
+    payee_name: current.payee_name,
+    amount_cents: input.amount_cents,
+    currency: "USD",
+    ledger_transaction_id: ledger.id,
+  };
+  const result =
+    input.rail === "rtp"
+      ? await adapter.createRtpPayment(request)
+      : await adapter.createAchTransfer(request);
+  if (!result.ok) {
+    await persistVault(store, current.payee_id, current.payee_name, current, now);
+    await store.updateLedgerSettlement(ledger.id, {
+      status: "failed",
+      rail: input.rail,
+      baas_provider: adapter.provider,
+      baas_transfer_id: null,
+      settled_at: null,
+    });
+    return result;
+  }
+  await store.updateLedgerSettlement(ledger.id, {
+    status: "submitted",
+    rail: input.rail,
+    baas_provider: adapter.provider,
+    baas_transfer_id: result.transfer.id,
+    settled_at: null,
+  });
+  await store.insertPayoutHold({
+    transfer_id: result.transfer.id,
+    payee_id: current.payee_id,
+    amount_cents: input.amount_cents,
+    status: "in_flight",
+    created_at: now.toISOString(),
+  });
+  await postJournal(store, {
+    kind: "payout_hold",
+    ref_type: "baas_transfer",
+    ref_id: result.transfer.id,
+    legs: [
+      vaultDebit(current.payee_id, "available", input.amount_cents),
+      vaultCredit(current.payee_id, "pending", input.amount_cents),
+    ],
+  }, now);
+
+  return {
+    ok: true,
+    vault: {
+      payee_id: current.payee_id,
+      payee_name: current.payee_name,
+      ...held.balances,
+      updated_at: now.toISOString(),
+    },
+    transfer: result.transfer,
   };
 }
