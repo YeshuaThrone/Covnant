@@ -18,9 +18,10 @@ import { expect, test } from '@playwright/test';
  * shared by all tests.
  *
  * Covers the spec's verification table: the signed-in dashboard shows the
- * greeting/card/accounts/transactions (stubbed me-response), the visitor
- * sees the honest unregistered state, and the mobile viewport (~390px) is
- * a first-class single column with the accounts carousel and drawer nav.
+ * greeting + identity chip, accounts, and transactions (stubbed me-response),
+ * the visitor sees the honest unregistered state, and the mobile viewport
+ * (~390px) is a first-class single column with the accounts carousel and
+ * drawer nav.
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -107,30 +108,34 @@ async function signIn(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByTestId('greeting')).toBeVisible();
 }
 
-test('signed-in dashboard shows the greeting hero, identity card, accounts, and transactions', async ({
+test('signed-in dashboard shows the greeting row, identity chip, accounts, and transactions', async ({
   browser,
 }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   await signIn(page);
 
-  // Greeting hero — the creator's stage name, from the aggregate.
+  // Greeting row — the creator's stage name, from the aggregate.
   await expect(page.getByTestId('greeting')).toContainText('Nova Reed');
 
-  // The props-first CreatorIdCard — anchored state with the minted UCT.
-  const card = page.getByTestId('creator-id-card');
-  await expect(card).toBeVisible();
-  await expect(card).toContainText('UCT-US-2026-9F3A7C21-56');
-  await expect(card.locator('[data-provisioning]')).toHaveAttribute('data-provisioning', 'PENDING');
+  // The SMALL identity chip — initials avatar + compact UCT reference.
+  // The Creator ID card is out of the dashboard (user directive): it must
+  // not exist anywhere on the page.
+  const chip = page.getByTestId('identity-chip');
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText('UCT-US-2026-9F3A7C21-56');
+  await expect(page.getByTestId('creator-id-card')).toHaveCount(0);
 
-  // Accounts row — the three account cards with real figures. The virtual
-  // balance is the established escrow semantic: all-currency settlement
-  // gross (2.0 + 0.5) at the 30% unverified-withholding fallback
-  // (0.75), minus the prior payout (0.25) = 1.50 USD exactly.
+  // Accounts row — the three calm account cards. The stub's virtual
+  // account is PENDING: the card renders the honest status line, and NO
+  // balance is fabricated (money renders only when provisioned).
   await expect(page.getByTestId('accounts-row')).toBeVisible();
   await expect(page.getByTestId('account-card-virtual')).toBeVisible();
-  await expect(page.getByTestId('virtual-balance')).toHaveText(/1\.50 USD/);
-  await expect(page.getByTestId('settlements-gross-USD')).toHaveText(/2\.00000000 USD/);
+  await expect(page.getByTestId('virtual-balance-pending')).toBeVisible();
+  await expect(page.getByTestId('virtual-balance')).toHaveCount(0);
+  // Primary currency (USD) renders as the large net figure — exact
+  // minor-unit string from grossShare/netShare × 1e8 (1.4 USD).
+  await expect(page.getByTestId('settlements-net-USD')).toHaveText(/1\.40000000 USD/);
   await expect(page.getByTestId('account-card-workspace')).toBeVisible();
 
   // Quick actions — wired destinations only.

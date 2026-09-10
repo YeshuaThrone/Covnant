@@ -9,8 +9,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  creatorIdCardStateFromMe,
   identityBadgeStateFromMe,
+  identityChipFromMe,
+  initialsFromStageName,
 } from '@/lib/covnant/identityFromMe';
 import type { CovnantMeResponse } from '@/lib/covnant/types';
 import { buildUct } from '@/lib/covnant/uct';
@@ -66,24 +67,35 @@ describe('identityBadgeStateFromMe — the sidebar pill', () => {
   });
 });
 
-describe('creatorIdCardStateFromMe — the dashboard centerpiece', () => {
-  it('adds the stage name and role to the same verbatim identity facts', () => {
-    expect(creatorIdCardStateFromMe(ME)).toEqual({
-      kind: 'anchored',
-      stageName: 'Nova Reign',
+describe('identityChipFromMe — the greeting row chip', () => {
+  it('carries only the initials and the verbatim UCT reference', () => {
+    expect(identityChipFromMe(ME)).toEqual({
+      initials: 'NR',
       uct: UCT,
-      status: 'PENDING',
-      uctCreatedAt: '2026-09-09T00:00:00.000Z',
-      jurisdiction: 'US',
-      role: 'COMPOSER',
     });
   });
 
-  it('never carries financial fields onto the card state', () => {
-    const state = creatorIdCardStateFromMe(ME) as Record<string, unknown>;
-    expect('settlements' in state).toBe(false);
-    expect('recentSettlements' in state).toBe(false);
-    expect('accountNumber' in state).toBe(false);
-    expect('routingNumber' in state).toBe(false);
+  it('never carries financial fields onto the chip', () => {
+    const chip = identityChipFromMe(ME) as Record<string, unknown>;
+    expect('settlements' in chip).toBe(false);
+    expect('recentSettlements' in chip).toBe(false);
+    expect('accountNumber' in chip).toBe(false);
+    expect('routingNumber' in chip).toBe(false);
+  });
+});
+
+describe('initialsFromStageName — the chip avatar', () => {
+  it('takes the first letter of each of the first two words, uppercased', () => {
+    expect(initialsFromStageName('Nova Reign')).toBe('NR');
+    expect(initialsFromStageName('nova')).toBe('NO');
+  });
+
+  it('ignores punctuation and takes the first letters after it', () => {
+    expect(initialsFromStageName("D'Angelo")).toBe('DA');
+    expect(initialsFromStageName('A$AP')).toBe('AA');
+  });
+
+  it('degrades honestly on an empty name', () => {
+    expect(initialsFromStageName('')).toBe('');
   });
 });

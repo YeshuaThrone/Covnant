@@ -1,6 +1,6 @@
 /**
  * Provisioning status labels — the one text vocabulary for the Increase
- * provisioning chip across every surface (CreatorIdCard, dashboard account
+ * provisioning chip across every surface (dashboard account cards, sidebar
  * cards, readiness checklist). Status ONLY: these labels never render
  * account or routing numbers — the reason code is a provisioning fact, not
  * account credentials.

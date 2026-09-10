@@ -1,13 +1,15 @@
 /**
- * AccountsRow — the dashboard's accounts strip (bank reference: the balance
- * card row). Three glass cards, server-rendered from the verified session
- * aggregate; no client fetch, no interactivity beyond the wired quick
- * actions. On mobile the same DOM becomes a swipeable one-card carousel
- * (scroll-snap; dots from CarouselDots) — first-class, not a shrunken
- * desktop.
+ * AccountsRow — the dashboard's accounts strip (bank reference: the wide
+ * balance-card row). Calm cards, money first: a small title, the balance
+ * in large right-aligned type, a small sublabel beneath. One hairline
+ * border or subtle glass per card — no badge stacks, no legal copy, no
+ * dense tables. On mobile the same DOM becomes a swipeable one-card
+ * carousel (scroll-snap; dots from CarouselDots).
  *
  * Honesty rules carried here:
- *  - Provisioning is STATUS ONLY — a text-labeled chip; never numbers.
+ *  - Provisioning is STATUS ONLY — small quiet text; never numbers, never
+ *    a badge stack. When pending, the card shows the honest status line in
+ *    place of a balance.
  *  - Settlements stay per-currency with exact BigInt figures — no float
  *    rollup, no cross-currency sum.
  *  - The workspace card counts real registry artifacts only.
@@ -17,160 +19,205 @@
 import Link from 'next/link';
 
 import { PROVISIONING_LABELS } from '@/components/brand/provisioningLabels';
-import { formatUnitsMajor, formatUnitsMinor, formatUnitsSigned } from '@/lib/money/format';
+import { formatUnitsMajor, formatUnitsMinor } from '@/lib/money/format';
 import type { CovnantMeResponse } from '@/lib/covnant/types';
 
-/** The shared card chassis — glass, gold hairline, aligned to the brand system. */
+/** The calm card chassis — subtle glass, one hairline border. */
 const CARD_CLASS =
-  'glass-card flex min-w-[85%] snap-center flex-col p-5 md:min-w-0 md:p-6';
+  'flex min-w-[85%] snap-center flex-col rounded-2xl border border-slate-700/50 bg-white/[0.02] p-5 md:min-w-0 md:p-6';
 
-/** ── Card 1: Virtual Account — escrow balance + provisioning status ── */
+/** ── Card 1: Virtual Account — big escrow balance or honest status line ── */
 
 export function VirtualAccountCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
   const provisioned = me.provisioning.status === 'PROVISIONED';
   return (
     <section data-testid="account-card-virtual" className={CARD_CLASS} aria-label="Virtual account">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-300">Virtual account</h3>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium text-slate-400">Virtual Account</h3>
         <span
-          data-testid="virtual-provisioning-chip"
+          data-testid="virtual-status"
           data-provisioning={me.provisioning.status}
           className={
             provisioned
-              ? 'inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300'
-              : 'inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-gold-champagne'
+              ? 'font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300'
+              : 'font-mono text-[10px] uppercase tracking-[0.2em] text-gold-champagne'
           }
         >
-          <span
-            aria-hidden="true"
-            className={
-              provisioned ? 'h-1.5 w-1.5 rounded-full bg-emerald-400' : 'h-1.5 w-1.5 rounded-full bg-gold'
-            }
-          />
           {PROVISIONING_LABELS[me.provisioning.status].label}
         </span>
       </div>
 
-      <p className="mt-1 text-xs text-slate-500">Available escrow balance</p>
-      <p data-testid="virtual-balance" className="mt-2 text-3xl font-bold tracking-tight text-slate-100 md:text-4xl">
-        {formatUnitsMajor(me.settlements.availableEscrowBalance, 'USD')}
-      </p>
-
-      <dl className="mt-4 space-y-1 border-t border-gold/15 pt-3 text-xs">
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-slate-500">Gross settled</dt>
-          <dd data-testid="virtual-gross" className="font-mono text-slate-300">
-            {formatUnitsMajor(me.settlements.grossEarnings, 'USD')}
-          </dd>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-slate-500">Tax withheld</dt>
-          <dd data-testid="virtual-withheld" className="font-mono text-slate-300">
-            {formatUnitsSigned(me.settlements.taxWithheld, 'USD')}
-          </dd>
-        </div>
-      </dl>
-
-      {!provisioned ? (
-        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {PROVISIONING_LABELS.PENDING.note}
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-/** ── Card 2: Settlements — per-currency gross/net, exact figures ── */
-
-export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
-  const lines = me.settlementsByCurrency;
-  return (
-    <section data-testid="account-card-settlements" className={CARD_CLASS} aria-label="Settlements">
-      <h3 className="text-sm font-semibold text-slate-300">Settlements</h3>
-      <p className="mt-1 text-xs text-slate-500">Gross and net, by currency</p>
-
-      {lines.length === 0 ? (
-        <p data-testid="settlements-empty" className="mt-4 text-sm leading-relaxed text-slate-400">
-          No settlements on the ledger yet.
-        </p>
+      {provisioned ? (
+        <>
+          <p
+            data-testid="virtual-balance"
+            className="mt-6 text-right text-4xl font-semibold tracking-tight text-slate-100 md:mt-8 md:text-5xl"
+          >
+            {formatUnitsMajor(me.settlements.availableEscrowBalance, 'USD')}
+          </p>
+          <p className="mt-1 text-right text-xs text-slate-500">Available</p>
+        </>
       ) : (
-        <dl data-testid="settlements-lines" className="mt-4 space-y-3 border-t border-gold/15 pt-3">
-          {lines.map((line) => (
-            <div key={line.currency} className="flex items-baseline justify-between gap-4">
-              <dt className="font-mono text-xs uppercase tracking-[0.2em] text-gold-champagne">
-                {line.currency}
-              </dt>
-              <dd className="text-right">
-                <span data-testid={`settlements-gross-${line.currency}`} className="block font-mono text-sm text-slate-200">
-                  {formatUnitsMinor(line.grossUnits, line.currency)}
-                </span>
-                <span data-testid={`settlements-net-${line.currency}`} className="block font-mono text-xs text-slate-500">
-                  net {formatUnitsMinor(line.netUnits, line.currency)}
-                </span>
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <p
+          data-testid="virtual-balance-pending"
+          className="mt-6 text-right text-sm leading-relaxed text-slate-400 md:mt-8"
+        >
+          Provisioning in progress — your balance appears here once your account is ready.
+        </p>
       )}
     </section>
   );
 }
 
-/** ── Card 3: Rights workspace — real registry counts ── */
+/** ── Card 2: Royalty Settlements — primary currency large, rest exact ── */
 
-export function WorkspaceCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
+export function SettlementsCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
+  const lines = me.settlementsByCurrency;
   return (
-    <section data-testid="account-card-workspace" className={CARD_CLASS} aria-label="Rights workspace">
-      <h3 className="text-sm font-semibold text-slate-300">Rights workspace</h3>
-      <p className="mt-1 text-xs text-slate-500">Your registered catalog</p>
+    <section
+      data-testid="account-card-settlements"
+      className={CARD_CLASS}
+      aria-label="Royalty settlements"
+    >
+      <h3 className="text-sm font-medium text-slate-400">Royalty Settlements</h3>
 
-      <div className="mt-4 flex items-baseline gap-6 border-t border-gold/15 pt-3">
-        <div>
-          <p data-testid="workspace-assets" className="text-3xl font-bold tracking-tight text-slate-100">
-            {me.registeredAssets}
+      {lines.length === 0 ? (
+        <p
+          data-testid="settlements-empty"
+          className="mt-6 text-right text-sm leading-relaxed text-slate-400 md:mt-8"
+        >
+          No settlements on the ledger yet.
+        </p>
+      ) : (
+        <>
+          <p
+            data-testid={`settlements-net-${lines[0].currency}`}
+            className="mt-6 text-right text-4xl font-semibold tracking-tight text-slate-100 md:mt-8 md:text-5xl"
+          >
+            {formatUnitsMinor(lines[0].netUnits, lines[0].currency)}
           </p>
-          <p className="text-xs text-slate-500">Registered assets</p>
-        </div>
-        <div>
-          <p data-testid="workspace-contracts" className="text-3xl font-bold tracking-tight text-slate-100">
-            {me.activeContracts}
-          </p>
-          <p className="text-xs text-slate-500">Contracts</p>
-        </div>
-      </div>
+          <p className="mt-1 text-right text-xs text-slate-500">Balance · {lines[0].currency}</p>
 
-      <Link
-        href="/catalog"
-        className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-gold-champagne hover:text-gold"
-      >
-        Open your catalog
-        <span aria-hidden="true">→</span>
-      </Link>
+          {/* Remaining currencies stay exact, in small print. */}
+          {lines.length > 1 ? (
+            <dl
+              data-testid="settlements-lines"
+              className="mt-4 space-y-1.5 border-t border-slate-700/50 pt-3"
+            >
+              {lines.slice(1).map((line) => (
+                <div key={line.currency} className="flex items-baseline justify-between gap-4">
+                  <dt className="font-mono text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    {line.currency}
+                  </dt>
+                  <dd
+                    data-testid={`settlements-gross-${line.currency}`}
+                    className="font-mono text-xs text-slate-300"
+                  >
+                    {formatUnitsMinor(line.grossUnits, line.currency)} gross ·{' '}
+                    <span data-testid={`settlements-net-${line.currency}`}>
+                      {formatUnitsMinor(line.netUnits, line.currency)}
+                    </span>{' '}
+                    net
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
 
-/** ── Quick actions — wired creator destinations only ── */
+/** ── Card 3: Rights Workspace — real registry counts ── */
+
+export function WorkspaceCard({ me }: { me: CovnantMeResponse }): React.JSX.Element {
+  return (
+    <section data-testid="account-card-workspace" className={CARD_CLASS} aria-label="Rights workspace">
+      <h3 className="text-sm font-medium text-slate-400">Rights Workspace</h3>
+
+      <p
+        data-testid="workspace-assets"
+        className="mt-6 text-right text-4xl font-semibold tracking-tight text-slate-100 md:mt-8 md:text-5xl"
+      >
+        {me.registeredAssets}
+      </p>
+      <p className="mt-1 text-right text-xs text-slate-500">
+        Registered assets ·{' '}
+        <span data-testid="workspace-contracts" className="font-mono">
+          {me.activeContracts}
+        </span>{' '}
+        contracts
+      </p>
+    </section>
+  );
+}
+
+/** ── Quick actions — compact icon tiles, wired destinations only ── */
+
+/** A small stroke icon — the tiles stay calm; no filled art, no emoji. */
+function ActionIcon({ d }: { d: string }): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
 
 const QUICK_ACTIONS = [
-  { href: '/assets', label: 'Register Asset', hint: 'Add an asset to the registry' },
-  { href: '/contracts', label: 'New Contract', hint: 'Generate an agreement from the vault' },
-  { href: '/templates', label: 'Browse Templates', hint: 'The deterministic template library' },
+  {
+    href: '/assets',
+    label: 'Register Asset',
+    hint: 'Add an asset to the registry',
+    // Plus inside a rounded square.
+    icon: 'M12 9v6m-3-3h6M7 21h10a2 2 0 0 0 2-2V7l-4-4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z',
+  },
+  {
+    href: '/contracts',
+    label: 'New Contract',
+    hint: 'Generate an agreement from the vault',
+    // Document with lines.
+    icon: 'M14 3v4a1 1 0 0 0 1 1h4M9 13h6m-6 4h6M8 21h8a2 2 0 0 0 2-2V8l-5-5H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z',
+  },
+  {
+    href: '/templates',
+    label: 'Browse Templates',
+    hint: 'The deterministic template library',
+    // Layered grid.
+    icon: 'M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13ZM4 10h16M10 10v10',
+  },
 ] as const;
 
 export function QuickActions(): React.JSX.Element {
   return (
-    <nav data-testid="quick-actions" aria-label="Quick actions" className="grid grid-cols-3 gap-3 md:gap-4">
+    <nav
+      data-testid="quick-actions"
+      aria-label="Quick actions"
+      className="grid grid-cols-3 gap-3 md:gap-4"
+    >
       {QUICK_ACTIONS.map((action) => (
         <Link
           key={action.href}
           href={action.href}
-          className="glass-card group flex flex-col gap-1 p-4 transition-colors hover:border-gold/40"
+          title={action.hint}
+          aria-label={`${action.label} — ${action.hint}`}
+          className="group flex flex-col items-center gap-2 rounded-2xl border border-transparent px-2 py-4 transition-colors hover:border-slate-700/50 hover:bg-white/[0.02]"
         >
-          <span className="text-sm font-semibold text-slate-200 group-hover:text-gold-champagne">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700/50 bg-white/[0.02] text-gold-champagne transition-colors group-hover:border-gold/40 group-hover:text-gold">
+            <ActionIcon d={action.icon} />
+          </span>
+          <span className="text-center text-[11px] font-medium text-slate-400 group-hover:text-slate-200">
             {action.label}
           </span>
-          <span className="text-xs text-slate-500">{action.hint}</span>
         </Link>
       ))}
     </nav>

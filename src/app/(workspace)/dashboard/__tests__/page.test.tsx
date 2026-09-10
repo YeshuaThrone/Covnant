@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { CovnantMeResponse } from '@/lib/covnant/types';
 import { buildUct } from '@/lib/covnant/uct';
+import { formatUnitsMajor } from '@/lib/money/format';
 
 const meMock = vi.hoisted(() => ({ resolveCovnantMe: vi.fn() }));
 
@@ -93,28 +94,35 @@ const ME: CovnantMeResponse = {
 };
 
 describe('/dashboard — resolved aggregate (signed in)', () => {
-  it('renders the greeting hero, anchored card, and all five regions from the aggregate', async () => {
+  it('renders the greeting row, identity chip, and all five regions from the aggregate', async () => {
     meMock.resolveCovnantMe.mockResolvedValue({ ok: true, data: ME });
 
     const html = await renderPage();
 
-    // Greeting hero + props-first card.
+    // Greeting row: large greeting + the small identity chip. The Creator
+    // ID card is explicitly OUT of the dashboard (user directive) — the
+    // chip (initials + compact UCT) is the only identity on the page.
     expect(html).toContain('data-testid="greeting"');
     expect(html).toContain('Nova Reign');
-    expect(html).toContain('data-testid="creator-id-card"');
+    expect(html).toContain('data-testid="identity-chip"');
     expect(html).toContain(UCT);
-    expect(html).toContain('data-provisioning="PENDING"');
+    expect(html).not.toContain('creator-id-card');
 
-    // Accounts row: three cards with real figures.
+    // Accounts section: small-caps label, three calm cards. Provisioning
+    // is status-only quiet text — never a badge stack.
     expect(html).toContain('data-testid="accounts-row"');
-    expect(html).toContain('Virtual account');
+    expect(html).toContain('Virtual Account');
+    expect(html).toContain('data-testid="virtual-status"');
     expect(html).toContain('data-provisioning="PENDING"');
-    expect(html).toContain('1.75'); // gross 175000000 units → 1.75 USD
+    // Pending provisioning renders the honest status line, not a balance.
+    expect(html).toContain('data-testid="virtual-balance-pending"');
+    expect(html).not.toContain('data-testid="virtual-balance"');
+    expect(html).toContain('data-testid="account-card-settlements"');
+    expect(html).toContain('1.22500000'); // net 122500000 units — exact minor string
     expect(html).toContain('data-testid="workspace-assets"');
-    expect(html).toContain('Registered assets');
     expect(html).toContain('data-testid="workspace-contracts"');
 
-    // Quick actions — wired destinations only.
+    // Quick actions — compact icon tiles over wired destinations only.
     expect(html).toContain('href="/assets"');
     expect(html).toContain('href="/contracts"');
     expect(html).toContain('href="/templates"');
@@ -125,13 +133,28 @@ describe('/dashboard — resolved aggregate (signed in)', () => {
     expect(html).toContain('Spotify');
     expect(html).toContain('CBT-MUS-2026-AAAA1111');
     expect(html).toContain('1.40000000');
+    // One bounded slice: no truncation, so no "See more" affordance.
+    expect(html).not.toContain('data-testid="transactions-see-more"');
 
-    // Readiness checklist — text-labeled token states, fail-closed defaults.
+    // Readiness checklist — small, quiet, text-labeled token states.
     expect(html).toContain('data-testid="readiness-kyc"');
     expect(html).toContain('KYC status: PENDING_INITIALIZATION');
     expect(html).toContain('W9 — awaiting verification');
     expect(html).toContain('Link an account to receive payouts');
     expect(html).toContain('data-testid="readiness-provisioning"');
+  });
+
+  it('renders the large right-aligned balance once the virtual account is provisioned', async () => {
+    meMock.resolveCovnantMe.mockResolvedValue({
+      ok: true,
+      data: { ...ME, provisioning: { status: 'PROVISIONED', reason: null } },
+    });
+
+    const html = await renderPage();
+
+    expect(html).toContain('data-testid="virtual-balance"');
+    expect(html).toContain(formatUnitsMajor(ME.settlements.availableEscrowBalance, 'USD'));
+    expect(html).not.toContain('data-testid="virtual-balance-pending"');
   });
 
   it('never renders account or routing numbers anywhere', async () => {

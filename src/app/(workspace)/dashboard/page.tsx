@@ -1,23 +1,29 @@
 /**
  * /dashboard — the creator's money-first home (the bank-app layout, user
- * design directive 2026-09-09). One session-scoped aggregate
- * (resolveCovnantMe) feeds every region, so the dashboard can never disagree
- * with the API surface:
+ * design directive; rebuilt 2026-09-10 after the first preview was
+ * rejected for not reading like a bank). One session-scoped aggregate
+ * (resolveCovnantMe) feeds every region, so the dashboard can never
+ * disagree with the API surface:
  *
- *   greeting hero   "Hi, {stage_name}" + the props-first CreatorIdCard
- *   accounts row    Virtual Account (escrow + status chip) · Settlements
- *                   (per-currency exact) · Rights workspace (real counts)
- *   quick actions   wired destinations only — /assets, /contracts, /templates
- *   transactions    creator-scoped recent royalty rows, READ-ONLY, honest
- *                   empty state
- *   readiness       KYC / tax / bank-linked / provisioning, text-labeled
- *   mobile          single column: swipeable accounts carousel (one card +
- *                   dots) at ~390px — first-class, not a shrunken desktop
+ *   greeting row    large "Hi, {stage_name}" + a SMALL identity chip
+ *                   (initials avatar + compact UCT). Nothing else in the
+ *                   hero — the Creator ID card is explicitly out of scope
+ *                   here ("dont build no id", user directive 2026-09-10).
+ *   accounts        wide calm cards: title, LARGE right-aligned balance
+ *                   (or honest status line), small sublabel — no badge
+ *                   stacks, no legal copy. One-card carousel + dots on
+ *                   mobile.
+ *   quick actions   compact icon tiles — square icon, tiny label beneath.
+ *   transactions    dense read-only royalty list; "See more" to the full
+ *                   ledger when the bounded slice truncates.
+ *   readiness       one small quiet checklist panel (desktop right column,
+ *                   stacks beneath transactions on mobile).
  *
  * Brand system unchanged: obsidian/slate surfaces, champagne/deep-gold
- * accents, jade/emerald states, glass cards, gold rules, gradient
- * typography. No white banking chrome, no blue, and never account or
- * routing numbers — provisioning is status-only text.
+ * accents, jade/emerald states, glass, gold rules, gradient typography.
+ * Density, spacing, and hierarchy read like a bank app: money first, big
+ * balances, calm whitespace, minimal chrome. Never account or routing
+ * numbers — provisioning is status-only text.
  *
  * Honest failure states: a 401 (no/invalid session) or 404
  * holder_not_found renders the unregistered identity state with a sign-in
@@ -28,7 +34,6 @@
 
 import Link from 'next/link';
 
-import { CreatorIdCard, type CreatorIdCardState } from '@/components/brand/CreatorIdCard';
 import {
   QuickActions,
   SettlementsCard,
@@ -37,41 +42,63 @@ import {
 } from '@/components/dashboard/AccountsRow';
 import { CarouselDots } from '@/components/dashboard/CarouselDots';
 import { ReadinessChecklist, TransactionsPanel } from '@/components/dashboard/HomePanels';
-import { creatorIdCardStateFromMe } from '@/lib/covnant/identityFromMe';
+import { identityChipFromMe } from '@/lib/covnant/identityFromMe';
 import { resolveCovnantMe } from '@/lib/server/covnantMe';
 
 export const dynamic = 'force-dynamic';
 
-/** The hero greeting — the bank reference's "Good morning,…" moment. */
-function Greeting({ stageName }: { stageName: string }): React.JSX.Element {
+/** The small-caps section label — the bank reference's "ACCOUNTS" row. */
+function SectionLabel({ children }: { children: string }): React.JSX.Element {
   return (
-    <div className="order-2 flex flex-col justify-center md:order-1">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Workspace</p>
-      <h1 data-testid="greeting" className="mt-2 text-4xl font-bold tracking-tight text-slate-100 md:text-5xl">
+    <h2 className="font-mono text-[11px] uppercase tracking-[0.3em] text-slate-500">{children}</h2>
+  );
+}
+
+/**
+ * The greeting row — the ONLY identity on the page: large friendly
+ * greeting plus a small chip (initials avatar + compact UCT reference).
+ */
+function GreetingRow({
+  stageName,
+  chip,
+}: {
+  stageName: string;
+  chip: { initials: string; uct: string };
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <h1 data-testid="greeting" className="text-4xl font-bold tracking-tight text-slate-100 md:text-5xl">
         Hi,{' '}
         <span className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent">
           {stageName}
         </span>
       </h1>
-      <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-400">
-        Your money at a glance — settlements, escrow, and your rights workspace,
-        exactly as they stand on the ledger.
-      </p>
+      <div
+        data-testid="identity-chip"
+        className="flex shrink-0 items-center gap-2.5 rounded-full border border-slate-700/50 bg-white/[0.02] py-1.5 pl-1.5 pr-3.5"
+      >
+        <span
+          aria-hidden="true"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-deep/90 text-[11px] font-bold text-obsidian"
+        >
+          {chip.initials}
+        </span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-slate-500">
+          {chip.uct}
+        </span>
+      </div>
     </div>
   );
 }
 
-/** The degraded/visitor state — honest, no fabricated data. */
-function NotSignedIn({ cardState, reason }: { cardState: CreatorIdCardState; reason: string }): React.JSX.Element {
+/** The degraded/visitor state — honest, no fabricated data, no card. */
+function NotSignedIn({ reason }: { reason: string }): React.JSX.Element {
   return (
     <main className="mx-auto max-w-5xl px-4 py-12 md:px-6">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Workspace</p>
+      <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-gold">Workspace</p>
       <h1 className="mt-2 text-3xl font-semibold text-slate-100 md:text-4xl">Your creator home</h1>
       <div className="gold-rule my-8" />
-      <div className="max-w-md">
-        <CreatorIdCard state={cardState} />
-      </div>
-      <p className="mt-6 max-w-md text-sm leading-relaxed text-slate-400">
+      <p className="max-w-md text-sm leading-relaxed text-slate-400">
         Sign in to see your accounts, settlements, and readiness checklist.
       </p>
       <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -89,7 +116,10 @@ function NotSignedIn({ cardState, reason }: { cardState: CreatorIdCardState; rea
           Back to home
         </Link>
       </div>
-      <p data-testid="dashboard-state-reason" className="mt-8 font-mono text-[10px] uppercase tracking-[0.2em] text-slate-600">
+      <p
+        data-testid="dashboard-state-reason"
+        className="mt-8 font-mono text-[10px] uppercase tracking-[0.2em] text-slate-600"
+      >
         {reason}
       </p>
     </main>
@@ -101,31 +131,24 @@ export default async function DashboardPage() {
   if (!me.ok) {
     // 401/404 → the honest visitor state; read/config failures degrade with
     // the named reason (the code family is sanitized — no internals leak).
-    return <NotSignedIn cardState={{ kind: 'unregistered' }} reason={me.reason} />;
+    return <NotSignedIn reason={me.reason} />;
   }
 
-  const cardState = creatorIdCardStateFromMe(me.data);
+  const chip = identityChipFromMe(me.data);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6 md:py-10">
-      <section
-        aria-label="Greeting and identity"
-        className="flex flex-col gap-6 md:flex-row md:items-stretch md:gap-10"
-      >
-        <Greeting stageName={me.data.profile.stage_name} />
-        <div className="order-1 md:order-2 md:w-[400px] md:shrink-0">
-          <CreatorIdCard state={cardState} />
-        </div>
-      </section>
+      <GreetingRow stageName={me.data.profile.stage_name} chip={chip} />
 
-      <div className="gold-rule my-8" />
+      <div className="gold-rule my-6 md:my-8" />
 
-      {/* Accounts row — swipeable one-card carousel on mobile, 3-up on desktop. */}
+      {/* Accounts — wide calm balance cards; one-card carousel on mobile. */}
       <section aria-label="Accounts">
+        <SectionLabel>Accounts</SectionLabel>
         <div
           id="accounts-row"
           data-testid="accounts-row"
-          className="flex gap-4 overflow-x-auto pb-1 [scrollbar-width:none] snap-x snap-mandatory md:grid md:grid-cols-3 md:gap-6 md:overflow-visible"
+          className="mt-3 flex gap-4 overflow-x-auto pb-1 [scrollbar-width:none] snap-x snap-mandatory md:grid md:grid-cols-3 md:gap-6 md:overflow-visible"
         >
           <VirtualAccountCard me={me.data} />
           <SettlementsCard me={me.data} />
@@ -134,17 +157,20 @@ export default async function DashboardPage() {
         <CarouselDots containerId="accounts-row" count={3} />
       </section>
 
-      <section aria-label="Quick actions" className="mt-8">
-        <h2 className="font-mono text-xs uppercase tracking-[0.3em] text-slate-500">
-          Quick actions
-        </h2>
-        <div className="mt-3">
+      <section aria-label="Quick actions" className="mt-8 md:mt-10">
+        <SectionLabel>Quick actions</SectionLabel>
+        <div className="mt-2">
           <QuickActions />
         </div>
       </section>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
-        <TransactionsPanel me={me.data} />
+      <div className="mt-8 grid gap-6 md:mt-10 lg:grid-cols-[1fr_320px]">
+        <section aria-label="Transactions">
+          <SectionLabel>Transactions</SectionLabel>
+          <div className="mt-3">
+            <TransactionsPanel me={me.data} />
+          </div>
+        </section>
         <ReadinessChecklist me={me.data} />
       </div>
     </main>
