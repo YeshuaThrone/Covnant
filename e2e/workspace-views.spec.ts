@@ -8,24 +8,24 @@ import { expect, test } from '@playwright/test';
  * memory mode and Supabase mode.
  */
 
-test('dashboard renders metric cards and the three quick actions', async ({ page }) => {
+test('dashboard renders The Don home with the three vault cards and quick actions', async ({
+  page,
+}) => {
   await page.goto('/dashboard');
 
-  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+  // The Don home replaced the metric-card dashboard: the greeting + three
+  // vault-bucket cards are the new above-the-fold composition.
+  await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+  await expect(page.getByTestId('account-card-available')).toBeVisible();
+  await expect(page.getByTestId('account-card-pending')).toBeVisible();
+  await expect(page.getByTestId('account-card-reserve')).toBeVisible();
 
-  // Metric cards — labels always render; values render in both data modes.
-  for (const label of ['Registered assets', 'Contracts', 'Settlements', 'Gross settled']) {
-    await expect(page.locator(`[data-metric="${label}"]`)).toBeVisible();
-  }
-
-  // Quick actions — directive: Register Asset, New Contract, Browse Templates.
-  const actions = page.getByLabel('Quick actions').getByRole('link');
+  // Quick actions — compact squares on real routes (View Ledger replaced
+  // Browse Templates to stay on the ownership-ledger spine).
+  const actions = page.getByTestId('quick-actions').getByRole('link');
   await expect(actions.filter({ hasText: 'Register Asset' })).toHaveAttribute('href', '/assets');
   await expect(actions.filter({ hasText: 'New Contract' })).toHaveAttribute('href', '/contracts');
-  await expect(actions.filter({ hasText: 'Browse Templates' })).toHaveAttribute(
-    'href',
-    '/templates',
-  );
+  await expect(actions.filter({ hasText: 'View Ledger' })).toHaveAttribute('href', '/ledger');
 });
 
 test('catalog shows registered assets with universal registry pills, or the empty state', async ({
