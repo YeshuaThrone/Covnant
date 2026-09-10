@@ -24,9 +24,10 @@ test.describe('The Don dashboard home — desktop', () => {
     // Browser title — the rebrand reaches the tab.
     await expect(page).toHaveTitle('The Don — Covnant');
 
-    // Sidebar shell: THE DON brand chip + the user chip from the provider.
+    // Sidebar shell: the COVNANT brand chip (brand slot) + the user chip
+    // from the provider; the page header below carries The Don wordmark.
     await expect(page.getByTestId('shell-user-chip')).toContainText('Nova Reign');
-    await expect(page.locator('[data-shell="sidebar"]')).toContainText('THE DON');
+    await expect(page.locator('[data-shell="sidebar"]')).toContainText('COVNANT');
 
     // Page header wordmark + greeting + avatar chip.
     await expect(page.getByTestId('don-wordmark')).toContainText('THE DON');

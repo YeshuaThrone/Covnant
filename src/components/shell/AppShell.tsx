@@ -38,8 +38,10 @@ export type ShellUser = {
  * small ones (bank reference: hamburger drawer). Wraps every workspace
  * route via the (workspace) route group; the landing page stays chrome-free.
  *
- * Brand: the sidebar chip and drawer header carry THE DON wordmark — the
- * gold CV mark and every brand token are unchanged. No blue anywhere.
+ * Brand: the sidebar and mobile-top chips carry the COVNANT brand — the
+ * page-title slot (the dashboard wordmark, the drawer header, the browser
+ * title) carries The Don. The gold CV mark and every brand token are
+ * unchanged. No blue anywhere.
  */
 export function AppShell({
   children,
@@ -55,10 +57,10 @@ export function AppShell({
         className="sticky top-0 hidden h-screen flex-col justify-between border-r border-gold/15 bg-obsidian-900 lg:flex"
       >
         <div>
-          <Link href="/" className="flex items-center gap-3 px-5 py-5" aria-label="The Don home">
+          <Link href="/" className="flex items-center gap-3 px-5 py-5" aria-label="Covnant home">
             <CvRibbonMonogram size={36} />
             <span className="font-mono text-sm tracking-[0.3em] text-gold-champagne">
-              THE DON
+              COVNANT
             </span>
           </Link>
           <div className="gold-rule mx-5 mb-4 opacity-60" />
@@ -88,10 +90,10 @@ export function AppShell({
           className="border-b border-gold/15 bg-obsidian-900 lg:hidden"
         >
           <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <Link href="/" aria-label="The Don home" className="flex items-center gap-2">
+            <Link href="/" aria-label="Covnant home" className="flex items-center gap-2">
               <CvRibbonMonogram size={28} />
               <span className="font-mono text-xs tracking-[0.3em] text-gold-champagne">
-                THE DON
+                COVNANT
               </span>
             </Link>
             <MobileDrawer items={WORKSPACE_NAV} user={user} />

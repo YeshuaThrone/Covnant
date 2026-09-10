@@ -12,10 +12,11 @@ test('the shell sidebar carries the fixture holder user chip on desktop', async 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/dashboard');
 
-  // The sidebar is the desktop identity surface: THE DON brand + the chip.
+  // The sidebar is the desktop identity surface: the COVNANT brand chip + the
+  // chip (brand slot = Covnant; the page-title slot carries The Don).
   const sidebar = page.locator('aside[data-shell="sidebar"]');
   await expect(sidebar).toBeVisible();
-  await expect(sidebar).toContainText('THE DON');
+  await expect(sidebar).toContainText('COVNANT');
   const chip = page.getByTestId('shell-user-chip');
   await expect(chip).toBeVisible();
   await expect(chip).toContainText('Nova Reign');
