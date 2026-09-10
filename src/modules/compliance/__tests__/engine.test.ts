@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import { readCreatorCompliance, type ComplianceStore } from '../engine';
+import { describe, expect, it } from "vitest";
+import { readCreatorCompliance } from "../engine";
+import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import {
   CreatorTaxProfile,
   CreatorYtdEarnings,
   TaxEscrowRecord,
-} from '@/modules/don/records';
-import { FORM_1099_THRESHOLD_CENTS } from '@/modules/don/constants';
+} from "@/modules/don/records";
+import { FORM_1099_THRESHOLD_CENTS } from "@/modules/don/constants";
 
 /**
  * Don Engine compliance snapshot (Gen 14, part of spec criterion 3).
@@ -13,38 +14,40 @@ import { FORM_1099_THRESHOLD_CENTS } from '@/modules/don/constants';
  * readCreatorCompliance is Cursor's Phase 2 read path: TIN/W-9 flags come off
  * the stored tax profile (integer 0/1), YTD and escrow come off the store, and
  * requires_1099 flips at exactly 60,000 cents ($600). The withholding math
- * itself (floor(gross x 2400/10000)) arrives with the Phase 2 engine drop and
- * is tested there — this file locks the snapshot behavior against a store
- * mock per the function's signature.
+ * itself (floor(gross x 2400/10000)) is locked by the sibling withholding
+ * suite. Adapted mechanically for the real async Store (PR ruling): the tests
+ * seed the canonical InMemoryStore and await every read — assertions are
+ * byte-identical to the pre-wiring suite.
  */
 
 const TAX_YEAR = 2026;
 
 function taxProfile(overrides: Partial<CreatorTaxProfile> = {}): CreatorTaxProfile {
   return {
-    creator_id: 'creator_1',
+    creator_id: "creator_1",
     tin_verified: 1,
     w9_on_file: 1,
-    updated_at: '2026-09-10T00:00:00.000Z',
+    updated_at: "2026-09-10T00:00:00.000Z",
     ...overrides,
   };
 }
 
 function ytd(overrides: Partial<CreatorYtdEarnings> = {}): CreatorYtdEarnings {
   return {
-    creator_id: 'creator_1',
+    creator_id: "creator_1",
     tax_year: TAX_YEAR,
     gross_cents: 0,
     withheld_cents: 0,
-    updated_at: '2026-09-10T00:00:00.000Z',
+    updated_at: "2026-09-10T00:00:00.000Z",
     ...overrides,
   };
 }
 
-function escrowRow(overrides: Partial<TaxEscrowRecord> = {}): TaxEscrowRecord {
+function escrowInput(
+  overrides: Partial<Omit<TaxEscrowRecord, "id">> = {},
+): Omit<TaxEscrowRecord, "id"> {
   return {
-    id: 'escrow_1',
-    creator_id: 'creator_1',
+    creator_id: "creator_1",
     tax_year: TAX_YEAR,
     gross_cents: 10_000,
     withheld_cents: 2_400,
@@ -53,120 +56,132 @@ function escrowRow(overrides: Partial<TaxEscrowRecord> = {}): TaxEscrowRecord {
     w9_on_file: 0,
     requires_1099: 0,
     crossed_1099_threshold: 0,
-    created_at: '2026-09-10T00:00:00.000Z',
+    created_at: "2026-09-10T00:00:00.000Z",
     ...overrides,
   };
 }
 
-function mockStore(overrides: {
+// Async seed over the canonical InMemoryStore: a verified profile and zero YTD
+// by default; `null` seeds nothing (missing row).
+async function seededStore(overrides: {
   profile?: CreatorTaxProfile | null;
   ytd?: CreatorYtdEarnings | null;
-  escrow?: TaxEscrowRecord[];
-} = {}): ComplianceStore {
-  return {
-    getCreatorTaxProfile: vi.fn(() =>
-      overrides.profile === undefined ? taxProfile() : overrides.profile,
-    ),
-    getCreatorYtd: vi.fn(() =>
-      overrides.ytd === undefined ? ytd() : overrides.ytd,
-    ),
-    listTaxEscrowByCreator: vi.fn(() => overrides.escrow ?? []),
-  };
+  escrow?: Array<Omit<TaxEscrowRecord, "id">>;
+} = {}): Promise<InMemoryStore> {
+  const store = new InMemoryStore();
+  if (overrides.profile !== null) {
+    await store.upsertCreatorTaxProfile(overrides.profile ?? taxProfile());
+  }
+  if (overrides.ytd !== null) {
+    await store.upsertCreatorYtd(overrides.ytd ?? ytd());
+  }
+  for (const row of overrides.escrow ?? []) {
+    await store.insertTaxEscrow(row);
+  }
+  return store;
 }
 
-describe('readCreatorCompliance', () => {
-  it('reports verified TIN and W-9 as true', () => {
-    const store = mockStore({ profile: taxProfile({ tin_verified: 1, w9_on_file: 1 }) });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+describe("readCreatorCompliance", () => {
+  it("reports verified TIN and W-9 as true", async () => {
+    const store = await seededStore({
+      profile: taxProfile({ tin_verified: 1, w9_on_file: 1 }),
+    });
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.tin_verified).toBe(true);
     expect(snapshot.w9_on_file).toBe(true);
   });
 
-  it('reports unverified TIN and W-9 as false', () => {
-    const store = mockStore({ profile: taxProfile({ tin_verified: 0, w9_on_file: 0 }) });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+  it("reports unverified TIN and W-9 as false", async () => {
+    const store = await seededStore({
+      profile: taxProfile({ tin_verified: 0, w9_on_file: 0 }),
+    });
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.tin_verified).toBe(false);
     expect(snapshot.w9_on_file).toBe(false);
   });
 
-  it('treats a missing tax profile as fully unverified', () => {
-    const store = mockStore({ profile: null });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+  it("treats a missing tax profile as fully unverified", async () => {
+    const store = await seededStore({ profile: null });
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.tin_verified).toBe(false);
     expect(snapshot.w9_on_file).toBe(false);
   });
 
-  it('does not count a lone verified flag — both flags must be 1', () => {
-    const store = mockStore({
+  it("does not count a lone verified flag — both flags must be 1", async () => {
+    const store = await seededStore({
       profile: taxProfile({ tin_verified: 1, w9_on_file: 0 }),
     });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.tin_verified).toBe(true);
     expect(snapshot.w9_on_file).toBe(false);
   });
 
-  it('passes YTD gross and withheld cents through', () => {
-    const store = mockStore({
+  it("passes YTD gross and withheld cents through", async () => {
+    const store = await seededStore({
       ytd: ytd({ gross_cents: 123_456, withheld_cents: 29_629 }),
     });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.ytd_gross_cents).toBe(123_456);
     expect(snapshot.ytd_withheld_cents).toBe(29_629);
   });
 
-  it('reports zero YTD when no earnings row exists', () => {
-    const store = mockStore({ ytd: null });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+  it("reports zero YTD when no earnings row exists", async () => {
+    const store = await seededStore({ ytd: null });
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.ytd_gross_cents).toBe(0);
     expect(snapshot.ytd_withheld_cents).toBe(0);
     expect(snapshot.requires_1099).toBe(false);
   });
 
-  it('flips requires_1099 exactly at the $600 threshold (60,000 cents)', () => {
+  it("flips requires_1099 exactly at the $600 threshold (60,000 cents)", async () => {
     expect(FORM_1099_THRESHOLD_CENTS).toBe(60_000);
-    const below = readCreatorCompliance(
-      mockStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS - 1 }) }),
-      'creator_1',
+    const below = await readCreatorCompliance(
+      await seededStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS - 1 }) }),
+      "creator_1",
       TAX_YEAR,
     );
     expect(below.requires_1099).toBe(false);
 
-    const at = readCreatorCompliance(
-      mockStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS }) }),
-      'creator_1',
+    const at = await readCreatorCompliance(
+      await seededStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS }) }),
+      "creator_1",
       TAX_YEAR,
     );
     expect(at.requires_1099).toBe(true);
 
-    const above = readCreatorCompliance(
-      mockStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS + 1 }) }),
-      'creator_1',
+    const above = await readCreatorCompliance(
+      await seededStore({ ytd: ytd({ gross_cents: FORM_1099_THRESHOLD_CENTS + 1 }) }),
+      "creator_1",
       TAX_YEAR,
     );
     expect(above.requires_1099).toBe(true);
   });
 
-  it('returns the creator escrow history untouched', () => {
+  it("returns the creator escrow history untouched", async () => {
+    const store = new InMemoryStore();
     const rows = [
-      escrowRow(),
-      escrowRow({ id: 'escrow_2', gross_cents: 500, withheld_cents: 120, net_cents: 380 }),
+      await store.insertTaxEscrow(escrowInput()),
+      await store.insertTaxEscrow(
+        escrowInput({ gross_cents: 500, withheld_cents: 120, net_cents: 380 }),
+      ),
     ];
-    const store = mockStore({ escrow: rows });
-    const snapshot = readCreatorCompliance(store, 'creator_1', TAX_YEAR);
+    const snapshot = await readCreatorCompliance(store, "creator_1", TAX_YEAR);
     expect(snapshot.escrow).toEqual(rows);
   });
 
-  it('queries the store with the requested creator and tax year', () => {
-    const store = mockStore();
-    readCreatorCompliance(store, 'creator_9', 2025);
-    expect(store.getCreatorTaxProfile).toHaveBeenCalledWith('creator_9');
-    expect(store.getCreatorYtd).toHaveBeenCalledWith('creator_9', 2025);
-    expect(store.listTaxEscrowByCreator).toHaveBeenCalledWith('creator_9', 2025);
+  it("scopes the read to the requested creator and tax year", async () => {
+    const store = await seededStore();
+    await store.insertTaxEscrow(escrowInput({ creator_id: "creator_9", tax_year: 2025 }));
+    const snapshot = await readCreatorCompliance(store, "creator_9", 2025);
+    expect(snapshot.creator_id).toBe("creator_9");
+    expect(snapshot.tax_year).toBe(2025);
+    expect(snapshot.escrow).toHaveLength(1);
+    expect(snapshot.escrow[0]!.tax_year).toBe(2025);
   });
 
-  it('echoes the creator and tax year in the snapshot', () => {
-    const snapshot = readCreatorCompliance(mockStore(), 'creator_7', 2024);
-    expect(snapshot.creator_id).toBe('creator_7');
+  it("echoes the creator and tax year in the snapshot", async () => {
+    const snapshot = await readCreatorCompliance(await seededStore(), "creator_7", 2024);
+    expect(snapshot.creator_id).toBe("creator_7");
     expect(snapshot.tax_year).toBe(2024);
   });
 });

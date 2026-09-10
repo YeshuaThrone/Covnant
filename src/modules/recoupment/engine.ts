@@ -15,6 +15,8 @@ import {
 } from "@/modules/don/constants";
 import { creditVault } from "@/modules/vaults/engine";
 import type { VaultCreditTarget } from "@/modules/vaults/balances";
+import type { RecoupmentAdvanceRecord } from "@/modules/don/records";
+import type { RecoupmentPayload } from "@/lib/don/validation";
 
 export type RecoupmentSweepInput = {
   incoming_cents: number;
@@ -137,3 +139,33 @@ export async function applyRecoupmentSweep(
     recoupment_target_cents: advance.recoupment_target_cents,
   };
 }
+
+// Advance upsert (POST /api/v1/splits/recoupment) — authored gap-fill: the
+// re-drop's recoupment route calls upsertAdvance but no drop carries its body.
+// Creates or retargets the creator's advance, preserving recouped progress.
+export async function upsertAdvance(
+  store: Store,
+  input: RecoupmentPayload,
+  now: Date = new Date(),
+): Promise<RecoupmentAdvanceRecord> {
+  const existing = await store.getRecoupmentAdvance(input.creator_id);
+  return await store.upsertRecoupmentAdvance({
+    creator_id: input.creator_id,
+    creator_name: input.creator_name,
+    recoupment_target_cents: input.recoupment_target_cents,
+    recoupment_current_cents: existing?.recoupment_current_cents ?? 0,
+    recoupment_bps: input.recoupment_bps,
+    updated_at: now.toISOString(),
+  });
+}
+
+// Advance snapshot (GET /api/v1/splits/recoupment?creator_id=) — authored
+// gap-fill in the same Store-form style (null when no advance exists).
+export async function readAdvance(
+  store: Store,
+  creatorId: string,
+): Promise<RecoupmentAdvanceRecord | null> {
+  const advance = await store.getRecoupmentAdvance(creatorId);
+  return advance ?? null;
+}
+
