@@ -29,9 +29,17 @@ import { postJournal } from '@/modules/ledger/engine';
 import { fboDebit, vaultCredit } from '@/modules/ledger/journal';
 import type { SessionCreator } from '@/lib/server/sessionCreator';
 
-/** The env flag — explicit, off by default, documented in .env.example. */
+/**
+ * The env flag — explicit, off by default, documented in .env.example. On
+ * for DON_DEV_SEED=1 (local dev/e2e) and for Vercel preview deployments.
+ */
 export function isDevSeedMode(): boolean {
-  return process.env.DON_DEV_SEED === '1';
+  // The preview door: Vercel preview deployments must render the populated
+  // signed-in dashboard with zero user actions (standing directive), and the
+  // preview deployment has no Supabase credentials — the seeded in-memory
+  // persona is the only honest preview experience. VERCEL_ENV is
+  // 'production' on prod, so the gate there stays fail-closed.
+  return process.env.DON_DEV_SEED === '1' || process.env.VERCEL_ENV === 'preview';
 }
 
 /** The dev-seed persona — the dashboard's demo holder. */

@@ -11,6 +11,7 @@ import {
   DEV_SEED_CREATOR,
   isDevSeedMode,
 } from '@/lib/server/devSeed';
+import { loadSessionDashboard } from '@/lib/server/dashboardLive';
 import { getStore, setStore } from '@/lib/server/store';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
 
@@ -35,6 +36,54 @@ describe('isDevSeedMode — the explicit gate', () => {
       if (original === undefined) delete process.env.DON_DEV_SEED;
       else process.env.DON_DEV_SEED = original;
     }
+  });
+});
+
+describe('isDevSeedMode — the Vercel preview door', () => {
+  const originalDon = process.env.DON_DEV_SEED;
+  const originalVercel = process.env.VERCEL_ENV;
+
+  afterAll(() => {
+    if (originalDon === undefined) delete process.env.DON_DEV_SEED;
+    else process.env.DON_DEV_SEED = originalDon;
+    if (originalVercel === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalVercel;
+  });
+
+  it('opens on Vercel preview deployments without DON_DEV_SEED — the demo renders under preview env', async () => {
+    delete process.env.DON_DEV_SEED;
+    process.env.VERCEL_ENV = 'preview';
+    expect(isDevSeedMode()).toBe(true);
+
+    // The resolver serves the seeded registered persona — the populated
+    // dashboard renders immediately with zero user actions.
+    const resolution = await loadSessionDashboard();
+    expect(resolution.kind).toBe('registered');
+    if (resolution.kind === 'registered') {
+      expect(resolution.data.user.stage_name).toBe('Nova Reign');
+    }
+  });
+
+  it('stays closed in Vercel production — fail-closed resolution is untouched', async () => {
+    delete process.env.DON_DEV_SEED;
+    process.env.VERCEL_ENV = 'production';
+    expect(isDevSeedMode()).toBe(false);
+
+    // No session → the anonymous gate, exactly as production behaves.
+    const resolution = await loadSessionDashboard();
+    expect(resolution.kind === 'anonymous' || resolution.kind === 'unregistered').toBe(true);
+  });
+
+  it('stays closed when both variables are unset — no demo outside preview', () => {
+    delete process.env.DON_DEV_SEED;
+    delete process.env.VERCEL_ENV;
+    expect(isDevSeedMode()).toBe(false);
+  });
+
+  it('the explicit DON_DEV_SEED=1 switch still wins locally regardless of VERCEL_ENV', () => {
+    process.env.DON_DEV_SEED = '1';
+    process.env.VERCEL_ENV = 'production';
+    expect(isDevSeedMode()).toBe(true);
   });
 });
 
