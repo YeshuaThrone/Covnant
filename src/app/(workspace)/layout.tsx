@@ -8,16 +8,17 @@ import { liveDashboardDataProvider } from '@/lib/server/dashboardLive';
  *
  * The shell's user chip resolves from the SAME live dashboard provider the
  * dashboard home consumes (src/lib/server/dashboardLive.ts — the session-
- * bound identity swap that replaced the fixtures). Resolution never blocks
- * a page: anonymous, unregistered, and read-failure resolutions all render
- * the honest unregistered badge (no persona is fabricated), and the
+ * bound identity swap that replaced the fixtures). A sessionless visitor
+ * resolves the DEMO DOOR (the seeded persona, kind 'demo') and the chip
+ * renders the seeded identity; unregistered and read-failure resolutions
+ * render the honest unregistered badge (no persona is fabricated), and the
  * dashboard home's own body carries the detailed state panels.
  */
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   let user: ShellUser | undefined;
   try {
     const resolution = await liveDashboardDataProvider.getDashboardResolution();
-    if (resolution.kind === 'registered') {
+    if (resolution.kind === 'registered' || resolution.kind === 'demo') {
       user = resolution.data.user;
     }
   } catch (error) {

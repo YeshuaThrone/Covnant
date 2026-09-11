@@ -31,8 +31,12 @@ test.describe('The Don dashboard home — desktop', () => {
     await expect(page.getByTestId('shell-user-chip')).toContainText('Nova Reign');
     await expect(page.locator('[data-shell="sidebar"]')).toContainText('COVNANT');
 
-    // Page header wordmark + greeting + avatar chip.
+    // Page header wordmark + greeting + avatar chip. The seeded render IS
+    // the sessionless demo view — exactly ONE DEMO DATA badge, top of the
+    // main content, opposite the wordmark.
     await expect(page.getByTestId('don-wordmark')).toContainText('THE DON');
+    await expect(page.getByTestId('demo-data-badge')).toHaveCount(1);
+    await expect(page.getByTestId('demo-data-badge')).toBeVisible();
     await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
     await expect(page.getByTestId('avatar-chip')).toBeVisible();
 
@@ -84,6 +88,20 @@ test.describe('The Don dashboard home — desktop', () => {
     expect(body).not.toContain('accountNumber');
     expect(body).not.toContain('routingNumber');
   });
+
+  test('the demo door: the seeded dashboard lands sessionless — zero actions, no sign-in wall', async ({ page }) => {
+    await page.goto('/dashboard');
+
+    // The populated dashboard renders immediately — no NO SESSION wall, no
+    // sign-in redirect, and exactly ONE DEMO DATA disclosure so the seeded
+    // balances never present as a real holder's.
+    await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+    await expect(page.getByTestId('account-card-available')).toBeVisible();
+    await expect(page.getByTestId('demo-data-badge')).toHaveCount(1);
+    const body = await page.locator('body').innerText();
+    expect(body).not.toContain('NO SESSION');
+    expect(body).not.toContain('Your vault lives behind your sign-in');
+  });
 });
 
 test.describe('The Don dashboard home — 390px mobile', () => {
@@ -99,6 +117,9 @@ test.describe('The Don dashboard home — 390px mobile', () => {
     await expect(dots.getByRole('tab')).toHaveCount(3);
     await dots.getByRole('tab').nth(1).click();
     await expect(dots.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
+
+    // The demo disclosure rides at 390px too — opposite the wordmark.
+    await expect(page.getByTestId('demo-data-badge')).toBeVisible();
 
     // The sidebar is hidden; navigation is the hamburger drawer.
     await expect(page.locator('[data-shell="sidebar"]')).toBeHidden();

@@ -12,10 +12,17 @@
  * minted preview exercise the genuine live resolver, store reads, and
  * display model end to end. Nothing here is reachable without the flag.
  *
+ * The DEMO DOOR (dashboardLive.ts loadDashboardResolution) reuses the SAME
+ * seeded content for production's sessionless visitors — through
+ * getDemoDoorStore(), a dedicated instance that never touches the
+ * setStore() singleton, so a signed-in creator's getStore() keeps reading
+ * the real persistence seam.
+ *
  * The persona: Nova Reign (nova@example.com, rightsHolderId
  * rh_nova_reign_don) — the dashboard's demo holder since the fixtures era.
- * The seeded identity exists ONLY in this mode; production identity always
- * resolves from the real session (sessionCreator.ts).
+ * The seeded identity exists ONLY in this mode and in the demo door;
+ * production identity always resolves from the real session
+ * (sessionCreator.ts).
  */
 
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
@@ -72,22 +79,61 @@ const SEED_INSTANTS = {
 let devSeedStore: InMemoryStore | null = null;
 
 export async function bootDevSeedStore(): Promise<InMemoryStore> {
-  const store = new InMemoryStore();
+  const store = await createSeededStore();
+  // Publish ONLY after the seed completes: an eager publish would hand a
+  // concurrent first reader (page + layout render in parallel) an empty
+  // vault — the $0.00 boot race the e2e caught on this branch.
   setStore(store);
+  devSeedStore = store;
+  console.error('dev-seed: The Don dashboard store seeded (DON_DEV_SEED=1).');
+  return store;
+}
+
+/**
+ * One freshly seeded in-memory store — the REAL engine paths (postJournal
+ * for the GL chain, payoutFromVault for the holds). The shared half of both
+ * doors (the dev-seed boot and the demo door); a failed seed throws — never
+ * a half-seeded store.
+ */
+export async function createSeededStore(): Promise<InMemoryStore> {
+  const store = new InMemoryStore();
   try {
     await seedStore(store);
   } catch (error) {
     // A failed seed must never look like a working dashboard — fail loud.
-    devSeedStore = null;
     console.error('dev-seed: seeding failed:', error);
     throw error;
   }
-  // Publish ONLY after the seed completes: an eager publish would hand a
-  // concurrent first reader (page + layout render in parallel) an empty
-  // vault — the $0.00 boot race the e2e caught on this branch.
-  devSeedStore = store;
-  console.error('dev-seed: The Don dashboard store seeded (DON_DEV_SEED=1).');
   return store;
+}
+
+/**
+ * The DEMO DOOR's store — the production face of the seeded door. The same
+ * deterministic seed, booted into a DEDICATED instance that never touches
+ * the setStore() singleton: a sessionless visitor must be able to open the
+ * demo without swapping the persistence seam out from under real sessions —
+ * after this boots, a signed-in creator's getStore() still reads Supabase
+ * (or whatever was injected), never the demo data. The demo view is
+ * read-only, so one shared instance per process is safe and keeps the
+ * render deterministic.
+ */
+let demoDoorStore: InMemoryStore | null = null;
+let demoDoorBoot: Promise<InMemoryStore> | null = null;
+
+export function getDemoDoorStore(): Promise<InMemoryStore> {
+  if (demoDoorStore !== null) {
+    return Promise.resolve(demoDoorStore);
+  }
+  if (demoDoorBoot === null) {
+    demoDoorBoot = createSeededStore().then((store) => {
+      demoDoorStore = store;
+      return store;
+    }, (error) => {
+      demoDoorBoot = null; // a failed boot is forgotten — later reads retry
+      throw error;
+    });
+  }
+  return demoDoorBoot;
 }
 
 let devSeedBoot: Promise<InMemoryStore> | null = null;

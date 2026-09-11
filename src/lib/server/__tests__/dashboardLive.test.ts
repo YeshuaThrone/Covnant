@@ -5,15 +5,21 @@
  * payout joins with their rails, the zero state, and the readiness rows.
  */
 
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
-import { aggregateDashboardData, initialsFromName, RECENT_JOURNAL_LIMIT } from '@/lib/server/dashboardLive';
+import { aggregateDashboardData, initialsFromName, RECENT_JOURNAL_LIMIT, loadDashboardResolution } from '@/lib/server/dashboardLive';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
-import { setStore } from '@/lib/server/store';
+import { getStore, setStore } from '@/lib/server/store';
 import { creditVault, payoutFromVault, releaseVaultPending } from '@/modules/vaults/engine';
 import { postJournal } from '@/modules/ledger/engine';
 import { fboDebit, vaultCredit } from '@/modules/ledger/journal';
-import type { SessionCreator } from '@/lib/server/sessionCreator';
+import { resolveSessionCreator, type SessionCreator } from '@/lib/server/sessionCreator';
+
+// The session resolver — mocked per test so the door logic (not Supabase)
+// is what's under test. The real resolver has its own suite.
+vi.mock('@/lib/server/sessionCreator', () => ({
+  resolveSessionCreator: vi.fn(),
+}));
 
 const NOVA: SessionCreator = {
   payee_id: 'rh_nova_reign_don',
@@ -184,6 +190,107 @@ describe('aggregateDashboardData — the store-read half', () => {
       bank_account_linked: false,
       provisioning_status: 'PENDING',
     });
+  });
+});
+
+describe('the demo door — the page-facing resolution (loadDashboardResolution)', () => {
+  let store: InMemoryStore;
+  const mockResolve = vi.mocked(resolveSessionCreator);
+  const originalDon = process.env.DON_DEV_SEED;
+  const originalVercel = process.env.VERCEL_ENV;
+
+  beforeEach(() => {
+    // Production mode: neither door flag set — the demo door's anonymous
+    // branch is what fires (the dev-seed branch has its own suite).
+    delete process.env.DON_DEV_SEED;
+    delete process.env.VERCEL_ENV;
+    store = new InMemoryStore();
+    setStore(store);
+  });
+
+  afterEach(() => {
+    if (originalDon === undefined) delete process.env.DON_DEV_SEED;
+    else process.env.DON_DEV_SEED = originalDon;
+    if (originalVercel === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalVercel;
+  });
+
+  it('renders the seeded demo to a sessionless production visitor — zero actions, no wall', async () => {
+    mockResolve.mockResolvedValue({ kind: 'anonymous' });
+
+    const resolution = await loadDashboardResolution();
+
+    // The anonymous session resolution lands on the demo door: the seeded
+    // persona over the dedicated demo store — never the anonymous wall.
+    expect(resolution.kind).toBe('demo');
+    if (resolution.kind === 'demo') {
+      expect(resolution.data.user.stage_name).toBe('Nova Reign');
+      // The seeded buckets (available 80_000) — NOT the singleton's state.
+      expect(resolution.data.vault.payee_id).toBe('rh_nova_reign_don');
+      expect(resolution.data.vault.available_balance).toBe(80_000);
+    }
+  });
+
+  it('fail-closed invariant: no real user\u2019s data renders without a session', async () => {
+    // A REAL holder's data sits in the session-bound store (the singleton) —
+    // distinctive balance, real payee id.
+    await store.upsertVault({
+      payee_id: OTHER.payee_id,
+      payee_name: OTHER.stage_name,
+      available_balance: 777_777,
+      pending_balance: 0,
+      reserve_balance: 0,
+      updated_at: '2026-09-01T00:00:00.000Z',
+    });
+    mockResolve.mockResolvedValue({ kind: 'anonymous' });
+
+    const resolution = await loadDashboardResolution();
+
+    // The sessionless render is the DEMO — the seeded persona over the
+    // dedicated demo store. A sessionless request has no identity, so there
+    // is no real user whose data could leak: the door never reads the
+    // session-bound store for them.
+    expect(resolution.kind).toBe('demo');
+    if (resolution.kind === 'demo') {
+      expect(resolution.data.vault.payee_id).not.toBe(OTHER.payee_id);
+      expect(resolution.data.vault.available_balance).not.toBe(777_777);
+      expect(resolution.data.vault.available_balance).toBe(80_000); // the seed
+    }
+  });
+
+  it('a signed-in session keeps its session-bound data — the demo door never hijacks it', async () => {
+    await seedEngines(store, NOVA); // the real store holds Nova's engine data
+    mockResolve.mockResolvedValue({ kind: 'registered', creator: NOVA });
+
+    const resolution = await loadDashboardResolution();
+
+    expect(resolution.kind).toBe('registered');
+    if (resolution.kind === 'registered') {
+      // The session-bound aggregate (12_990 pending in, 10_000 released,
+      // 5_000 payout hold) — NOT the seeded demo's 80_000.
+      expect(resolution.data.vault.available_balance).toBe(5_000);
+      expect(resolution.data.user.stage_name).toBe('Nova Reign');
+    }
+  });
+
+  it('an unregistered session stays honest — no persona, no demo', async () => {
+    mockResolve.mockResolvedValue({ kind: 'unregistered', reason: 'profile_not_found' });
+
+    const resolution = await loadDashboardResolution();
+
+    expect(resolution).toEqual({ kind: 'unregistered', reason: 'profile_not_found' });
+  });
+
+  it('the demo store never swaps the persistence seam — concurrent renders reuse one instance', async () => {
+    mockResolve.mockResolvedValue({ kind: 'anonymous' });
+
+    const [first, second] = await Promise.all([loadDashboardResolution(), loadDashboardResolution()]);
+
+    expect(first.kind).toBe('demo');
+    expect(second.kind).toBe('demo');
+    // The singleton is EXACTLY the test's store — the demo door booted its
+    // own instance and left the seam untouched for real sessions.
+    expect(getStore()).toBe(store);
   });
 });
 

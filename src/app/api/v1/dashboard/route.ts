@@ -80,6 +80,12 @@ export async function GET(request: NextRequest): Promise<Response> {
   switch (resolution.kind) {
     case 'anonymous':
       return donJsonError(401, 'no_session', 'No session — sign in to load the dashboard.');
+    case 'demo':
+      // Unreachable through THIS door: loadSessionDashboard never resolves
+      // the demo kind — the demo door is the page-facing provider's
+      // sessionless fallback. The API stays session-bound: fail closed, not
+      // open (a demo aggregate is never served over the machine contract).
+      return donJsonError(401, 'no_session', 'No session — sign in to load the dashboard.');
     case 'unregistered':
       return donJsonError(404, resolution.reason, 'No dashboard exists for this session yet.');
     case 'registered':

@@ -79,13 +79,27 @@ export type DashboardData = {
 
 /**
  * What a session-bound dashboard resolution can honestly be. `registered`
- * carries the full aggregate; the other kinds name the signed-out /
- * unenrolled states so the page can render them without inventing data.
+ * carries the full aggregate for a REAL session; `demo` carries the SEEDED
+ * persona's aggregate for a SESSIONLESS visitor — the demo door, which by
+ * shape can never carry a real holder's data (no session, no identity);
+ * the other kinds name the signed-out / unenrolled states so the page can
+ * render them without inventing data.
  */
 export type DashboardResolution =
   | { kind: 'anonymous' }
   | { kind: 'unregistered'; reason: 'profile_not_found' | 'holder_not_found' }
-  | { kind: 'registered'; data: DashboardData };
+  | { kind: 'registered'; data: DashboardData }
+  | { kind: 'demo'; data: DashboardData };
+
+/**
+ * The PAGE-facing resolution — the anonymous wall is not a page state. The
+ * demo door answers every sessionless visitor (the standing directive: the
+ * site opens straight onto the populated seeded dashboard), so the page and
+ * the (workspace) layout never render an anonymous branch. The API door
+ * (GET /api/v1/dashboard) keeps the full union — its anonymous contract
+ * (401 no_session) is untouched by the demo door.
+ */
+export type DashboardViewResolution = Exclude<DashboardResolution, { kind: 'anonymous' }>;
 
 /**
  * The provider seam: the dashboard home consumes ONLY this interface. The
@@ -93,7 +107,7 @@ export type DashboardResolution =
  * and reads the Don store; tests inject resolutions.
  */
 export interface DashboardDataProvider {
-  getDashboardResolution(): Promise<DashboardResolution>;
+  getDashboardResolution(): Promise<DashboardViewResolution>;
 }
 
 // ── Display model (pure — unit-tested invariants) ───────────────────────────
