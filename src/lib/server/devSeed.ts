@@ -63,10 +63,9 @@ const SEED_INSTANTS = {
  */
 let devSeedStore: InMemoryStore | null = null;
 
-export async function bootDevSeedStore(): Promise<void> {
+export async function bootDevSeedStore(): Promise<InMemoryStore> {
   const store = new InMemoryStore();
   setStore(store);
-  devSeedStore = store;
   try {
     await seedStore(store);
   } catch (error) {
@@ -75,26 +74,35 @@ export async function bootDevSeedStore(): Promise<void> {
     console.error('dev-seed: seeding failed:', error);
     throw error;
   }
+  // Publish ONLY after the seed completes: an eager publish would hand a
+  // concurrent first reader (page + layout render in parallel) an empty
+  // vault — the $0.00 boot race the e2e caught on this branch.
+  devSeedStore = store;
   console.error('dev-seed: The Don dashboard store seeded (DON_DEV_SEED=1).');
+  return store;
 }
+
+let devSeedBoot: Promise<InMemoryStore> | null = null;
 
 /**
  * The dev-seed store for READ paths. Kept in THIS module rather than the
  * store.ts singleton because the instrumentation bundle and the SSR bundle
  * each compile their own copy of the store module — a store injected into
- * the singleton at boot never crosses that bundle boundary. This accessor
- * boots lazily per copy instead; the seed is deterministic, so multiple
- * booted copies agree on every displayed figure.
+ * the singleton at boot never crosses that bundle boundary. Concurrent
+ * first readers share ONE in-flight boot, and a failed boot is forgotten
+ * so later reads retry instead of caching the rejection.
  */
-export async function getSeededStore(): Promise<InMemoryStore> {
-  if (devSeedStore === null) {
-    await bootDevSeedStore();
+export function getSeededStore(): Promise<InMemoryStore> {
+  if (devSeedStore !== null) {
+    return Promise.resolve(devSeedStore);
   }
-  if (devSeedStore === null) {
-    // bootDevSeedStore() either leaves a seeded store or throws — unreachable.
-    throw new Error('dev-seed: store failed to boot');
+  if (devSeedBoot === null) {
+    devSeedBoot = bootDevSeedStore().then((store) => store, (error) => {
+      devSeedBoot = null;
+      throw error;
+    });
   }
-  return devSeedStore;
+  return devSeedBoot;
 }
 
 async function seedStore(store: InMemoryStore): Promise<void> {
