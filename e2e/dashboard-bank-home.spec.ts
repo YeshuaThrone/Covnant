@@ -24,7 +24,7 @@ test.describe('The Don dashboard home — desktop', () => {
     await page.goto('/dashboard');
 
     // Browser title — the rebrand reaches the tab.
-    await expect(page).toHaveTitle('The Don — Covnant');
+    await expect(page).toHaveTitle('Goldboard — Covnant');
 
     // Sidebar shell: the COVNANT brand chip (brand slot) + the user chip
     // from the provider; the page header below carries The Don wordmark.

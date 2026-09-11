@@ -29,10 +29,10 @@ async function renderDashboardPage(): Promise<string> {
 }
 
 describe('/dashboard — The Don composition', () => {
-  it('exports the browser title — The Don — Covnant', async () => {
+  it('exports the browser title — Goldboard — Covnant', async () => {
     const page = await import('../page');
     expect(page.metadata).toEqual({
-      title: 'The Don — Covnant',
+      title: 'Goldboard — Covnant',
       description: expect.stringContaining('The Don'),
     });
   });

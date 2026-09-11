@@ -46,7 +46,9 @@ import { liveDashboardDataProvider } from '@/lib/server/dashboardLive';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'The Don — Covnant',
+  // The browser tab reads Goldboard — the in-app product identity (The Don)
+  // stays for the surface itself; the tab is the only disclosure.
+  title: 'Goldboard — Covnant',
   description:
     'The Don — your money home: vault buckets, GL transactions, and payouts on the sandbox rail.',
 };
