@@ -6,13 +6,17 @@
  * tiles, dense transactions card with See more, quiet readiness panel,
  * thin footer (the shell's).
  *
- * Data comes ENTIRELY through the DashboardDataProvider seam
- * (src/lib/don/dashboardFixtures.ts) — fixtures today, the live Don
- * engine in the follow-up PR. The three account cards ARE the holder's
- * three vault buckets (SovereignVaultRecord, integer cents); the
- * transactions card IS the GL ledger (GlEntryRecord debit/credit legs);
- * the payout tiles carry the sandbox rail (RTP instant, ACH +3 business
- * days) over PayoutHoldRecord-shaped data.
+ * Data comes ENTIRELY through the DashboardDataProvider seam — now LIVE:
+ * src/lib/server/dashboardLive.ts resolves the session-bound identity
+ * (verified Supabase session → creator profile → signup registry) and reads
+ * the Don store; the display model lives in src/lib/don/dashboardData.ts.
+ * The three account cards ARE the holder's three vault buckets
+ * (SovereignVaultRecord, integer cents); the transactions card IS the GL
+ * ledger (GlEntryRecord debit/credit legs, each row carrying the journal's
+ * entry_hash short form for auditability); the payout tiles carry the
+ * sandbox rail (RTP instant, ACH +3 business days) over PayoutHoldRecord
+ * data. A session without a registered identity renders the honest access
+ * panel — never fabricated balances.
  *
  * Brand: THE DON wordmark on the page header and the browser title; the
  * Covnant brand tokens and the gold CV mark are unchanged — no blue.
@@ -34,9 +38,10 @@ import { CarouselDots } from '@/components/dashboard/CarouselDots';
 import { ReadinessChecklist, TransactionsPanel } from '@/components/dashboard/HomePanels';
 import {
   displayTransactions,
-  fixturesDashboardDataProvider,
   payoutTiles,
-} from '@/lib/don/dashboardFixtures';
+  type DashboardResolution,
+} from '@/lib/don/dashboardData';
+import { liveDashboardDataProvider } from '@/lib/server/dashboardLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,8 +96,80 @@ function GreetingRow({
   );
 }
 
+/**
+ * The honest access panel — what /dashboard renders when the session does
+ * not resolve to a registered creator. Three states, one panel: signed out
+ * (no session), unregistered (a session whose identity hasn't been enrolled
+ * in the signup registry yet), and error (a read failure — never rendered
+ * as "no data"). State displays only: there is no signup/sign-in PAGE in
+ * this app to link to, and inventing a route is dishonest — the same
+ * no-invented-routes rule the page header keeps. Never shows balances.
+ */
+function AccessPanel({
+  state,
+}: {
+  state: 'anonymous' | 'unregistered' | 'error';
+}): React.JSX.Element {
+  const copy = {
+    anonymous: {
+      eyebrow: 'NO SESSION',
+      title: 'Your vault lives behind your sign-in',
+      body: 'Sign in through the Covnant identity flow to load your sovereign vault, ledger, and payouts.',
+    },
+    unregistered: {
+      eyebrow: 'IDENTITY PENDING',
+      title: 'Finish setting up your Covnant identity',
+      body: 'This account is verified but not yet enrolled as a rights holder, so there is no vault to show yet.',
+    },
+    error: {
+      eyebrow: 'DASHBOARD UNAVAILABLE',
+      title: "We couldn't load your dashboard",
+      body: 'A server error interrupted the read. Nothing is shown rather than something wrong — please try again.',
+    },
+  }[state];
+  return (
+    <main
+      data-testid="access-panel"
+      data-access-state={state}
+      className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6 md:py-10"
+    >
+      <div className="flex items-center gap-2.5">
+        <CvRibbonMonogram size={22} />
+        <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">THE DON</span>
+      </div>
+      <section
+        aria-label="Dashboard access"
+        className="mt-10 rounded-2xl border border-gold/25 bg-obsidian-900/70 p-8"
+      >
+        <p className="font-mono! text-[11px] uppercase tracking-[0.3em]! text-slate-500">
+          {copy.eyebrow}
+        </p>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-100 md:text-4xl">
+          {copy.title}
+        </h1>
+        <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-400">{copy.body}</p>
+      </section>
+    </main>
+  );
+}
+
 export default async function DashboardPage(): Promise<React.JSX.Element> {
-  const data = await fixturesDashboardDataProvider.getDashboardData();
+  let resolution: DashboardResolution;
+  try {
+    resolution = await liveDashboardDataProvider.getDashboardResolution();
+  } catch (error) {
+    // Read failure — fail closed: the error state, never empty balances.
+    console.error('dashboard resolution failed:', error);
+    return <AccessPanel state="error" />;
+  }
+  if (resolution.kind === 'anonymous') {
+    return <AccessPanel state="anonymous" />;
+  }
+  if (resolution.kind === 'unregistered') {
+    return <AccessPanel state="unregistered" />;
+  }
+
+  const data = resolution.data;
   const transactions = displayTransactions(data.ledger, data.vault.payee_id);
   const payouts = payoutTiles(data.payouts);
 

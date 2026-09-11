@@ -15,7 +15,7 @@
 import Link from 'next/link';
 
 import { formatCents, formatCentsSigned } from '@/lib/money/format';
-import type { DashboardReadiness, DisplayTransaction } from '@/lib/don/dashboardFixtures';
+import type { DashboardReadiness, DisplayTransaction } from '@/lib/don/dashboardData';
 
 /** Deterministic date render — hydration-safe (UTC, fixed locale). */
 function settledOn(iso: string): string {
