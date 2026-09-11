@@ -11,7 +11,7 @@ import {
   DEV_SEED_CREATOR,
   isDevSeedMode,
 } from '@/lib/server/devSeed';
-import { loadSessionDashboard } from '@/lib/server/dashboardLive';
+import { loadDashboardResolution, loadSessionDashboard } from '@/lib/server/dashboardLive';
 import { getStore, setStore } from '@/lib/server/store';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
 
@@ -62,16 +62,34 @@ describe('isDevSeedMode — the Vercel preview door', () => {
     if (resolution.kind === 'registered') {
       expect(resolution.data.user.stage_name).toBe('Nova Reign');
     }
+
+    // The PAGE door renders the same seeded persona as the demo view —
+    // the seeded render IS the demo kind (exactly one badge rides on it).
+    const pageResolution = await loadDashboardResolution();
+    expect(pageResolution.kind).toBe('demo');
+    if (pageResolution.kind === 'demo') {
+      expect(pageResolution.data.user.stage_name).toBe('Nova Reign');
+    }
   });
 
-  it('stays closed in Vercel production — fail-closed resolution is untouched', async () => {
+  it('opens the page-facing demo door in Vercel production — sessionless visitors see the seeded demo', async () => {
     delete process.env.DON_DEV_SEED;
     process.env.VERCEL_ENV = 'production';
     expect(isDevSeedMode()).toBe(false);
 
-    // No session → the anonymous gate, exactly as production behaves.
-    const resolution = await loadSessionDashboard();
-    expect(resolution.kind === 'anonymous' || resolution.kind === 'unregistered').toBe(true);
+    // The API door stays fail-closed: no session → the anonymous gate,
+    // exactly as the machine contract has always behaved.
+    const apiResolution = await loadSessionDashboard();
+    expect(apiResolution.kind === 'anonymous' || apiResolution.kind === 'unregistered').toBe(true);
+
+    // The PAGE door is the demo door — VERCEL_ENV-agnostic: the sessionless
+    // visitor lands straight on the populated seeded dashboard.
+    const pageResolution = await loadDashboardResolution();
+    expect(pageResolution.kind).toBe('demo');
+    if (pageResolution.kind === 'demo') {
+      expect(pageResolution.data.user.stage_name).toBe('Nova Reign');
+      expect(pageResolution.data.vault.payee_id).toBe(DEV_SEED_CREATOR.payee_id);
+    }
   });
 
   it('stays closed when both variables are unset — no demo outside preview', () => {

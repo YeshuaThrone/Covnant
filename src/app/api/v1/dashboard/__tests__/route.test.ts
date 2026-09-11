@@ -62,6 +62,39 @@ describe('GET /api/v1/dashboard — failure-code mapping', () => {
     });
   });
 
+  it('maps demo → 401 no_session — the machine contract never serves the seeded demo', async () => {
+    // The demo door is the PAGE-facing provider's sessionless fallback; if a
+    // demo resolution ever reached this door anyway, it fails CLOSED — the
+    // API contract stays session-bound, never serving demo aggregates.
+    mockResolution({ kind: 'demo', data: {
+      user: { stage_name: 'Nova Reign', initials: 'NR' },
+      vault: {
+        payee_id: 'rh_nova_reign_don',
+        payee_name: 'Nova Reign',
+        available_balance: 80_000,
+        pending_balance: 247_485,
+        reserve_balance: 45_000,
+        updated_at: '2026-09-01T00:00:00.000Z',
+      },
+      ledger: [],
+      payouts: [],
+      readiness: {
+        kyc_status: 'APPROVED',
+        tin_verified: 1,
+        w9_on_file: 1,
+        bank_account_linked: true,
+        provisioning_status: 'PROVISIONED',
+      },
+    } });
+    const response = await GET(dashboardRequest());
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: 'No session — sign in to load the dashboard.',
+      code: 'no_session',
+    });
+  });
+
   it('maps unregistered profile_not_found → 404', async () => {
     mockResolution({ kind: 'unregistered', reason: 'profile_not_found' });
     const response = await GET(dashboardRequest());

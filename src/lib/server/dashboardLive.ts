@@ -9,9 +9,16 @@
  *   /dashboard (page)      ─┤        │
  *   (workspace) layout ────┘        ├─ DON_DEV_SEED=1 → the dev-seed persona
  *                                   │   over the seeded in-memory store
- *                                   └─ resolveSessionCreator() → the real
- *                                       session (JWT → profile → registry)
- *                                          → getStore() reads
+ *                                   ├─ resolveSessionCreator() → the real
+ *                                   │   session (JWT → profile → registry)
+ *                                   │      → getStore() reads
+ *                                   └─ the PAGE door only (page + layout,
+ *                                       loadDashboardResolution): a
+ *                                       SESSIONLESS resolution → the DEMO
+ *                                       DOOR — the same seeded persona over
+ *                                       a dedicated no-swap seeded store
+ *                                       (getDemoDoorStore), rendered with
+ *                                       its ONE DEMO DATA marker
  *
  * Everything the dashboard renders is read from the Don store for the
  * session's payee: the sovereign vault buckets, the holder-scoped GL
@@ -30,9 +37,15 @@ import {
   type DashboardLedgerEntry,
   type DashboardPayout,
   type DashboardResolution,
+  type DashboardViewResolution,
 } from '@/lib/don/dashboardData';
 import type { GlEntryRecord } from '@/modules/don/records';
-import { getSeededStore, isDevSeedMode, DEV_SEED_CREATOR } from '@/lib/server/devSeed';
+import {
+  DEV_SEED_CREATOR,
+  getDemoDoorStore,
+  getSeededStore,
+  isDevSeedMode,
+} from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
 import {
   resolveSessionCreator,
@@ -169,7 +182,54 @@ export async function loadSessionDashboard(): Promise<DashboardResolution> {
   };
 }
 
-/** The dashboard's provider — the live session-bound store (PR I's swap). */
+/**
+ * The seeded demo resolution — PR #54's seeded persona over a seeded store,
+ * resolved to the `demo` kind: the page renders its ONE DEMO DATA marker on
+ * it (and only on it), so no seeded balance can present as a real holder's.
+ */
+async function seededDemoResolution(store: Promise<Store>): Promise<DashboardViewResolution> {
+  return {
+    kind: 'demo',
+    data: await aggregateDashboardData(await store, DEV_SEED_CREATOR),
+  };
+}
+
+/**
+ * The PAGE-facing resolution — the door the /dashboard page and the
+ * (workspace) layout render through. The SAME seeded mechanism as the API
+ * door, with ONE difference: a sessionless visitor lands on the DEMO DOOR
+ * instead of the anonymous wall.
+ *
+ * The demo door is VERCEL_ENV-agnostic (the standing directive: the main
+ * site opens straight onto the populated dashboard — zero user actions, no
+ * /signin redirect, no NO SESSION wall). It is fail-closed BY SHAPE: this
+ * branch fires only when the session resolution came back `anonymous` —
+ * there is no session, so there is no real identity and no real user's data
+ * to leak; the rendered persona is the hardcoded seeded demo over a store
+ * that never replaces the persistence seam (getDemoDoorStore).
+ */
+export async function loadDashboardResolution(): Promise<DashboardViewResolution> {
+  // Dev-seed mode (DON_DEV_SEED=1 / preview): every render IS the seeded
+  // demo view — the shared booted store, marked demo.
+  if (isDevSeedMode()) {
+    return seededDemoResolution(getSeededStore());
+  }
+
+  const resolution = await resolveSessionCreator();
+  if (resolution.kind === 'anonymous') {
+    // THE DEMO DOOR — production's signed-out visitors included.
+    return seededDemoResolution(getDemoDoorStore());
+  }
+  if (resolution.kind !== 'registered') {
+    return resolution;
+  }
+  return {
+    kind: 'registered',
+    data: await aggregateDashboardData(getStore(), resolution.creator),
+  };
+}
+
+/** The dashboard's provider — the page-facing door (the demo door included). */
 export const liveDashboardDataProvider = {
-  getDashboardResolution: loadSessionDashboard,
+  getDashboardResolution: loadDashboardResolution,
 };

@@ -15,8 +15,14 @@
  * ledger (GlEntryRecord debit/credit legs, each row carrying the journal's
  * entry_hash short form for auditability); the payout tiles carry the
  * sandbox rail (RTP instant, ACH +3 business days) over PayoutHoldRecord
- * data. A session without a registered identity renders the honest access
- * panel — never fabricated balances.
+ * data.
+ *
+ * THE DEMO DOOR: a SESSIONLESS visitor (production included) lands straight
+ * on the populated seeded dashboard — zero user actions, no /signin
+ * redirect, no NO SESSION wall. The demo view carries ONE visible DEMO DATA
+ * marker (and only the demo view carries it), so no seeded balance can
+ * present as a real holder's. Real data is unreachable without a session —
+ * the demo branch fires only on an `anonymous` session resolution.
  *
  * Brand: THE DON wordmark on the page header and the browser title; the
  * Covnant brand tokens and the gold CV mark are unchanged — no blue.
@@ -39,7 +45,7 @@ import { ReadinessChecklist, TransactionsPanel } from '@/components/dashboard/Ho
 import {
   displayTransactions,
   payoutTiles,
-  type DashboardResolution,
+  type DashboardViewResolution,
 } from '@/lib/don/dashboardData';
 import { liveDashboardDataProvider } from '@/lib/server/dashboardLive';
 
@@ -99,25 +105,22 @@ function GreetingRow({
 }
 
 /**
- * The honest access panel — what /dashboard renders when the session does
- * not resolve to a registered creator. Three states, one panel: signed out
- * (no session), unregistered (a session whose identity hasn't been enrolled
- * in the signup registry yet), and error (a read failure — never rendered
- * as "no data"). State displays only: there is no signup/sign-in PAGE in
- * this app to link to, and inventing a route is dishonest — the same
- * no-invented-routes rule the page header keeps. Never shows balances.
+ * The honest access panel — what /dashboard renders when the dashboard
+ * cannot honestly render a holder's view. Two states, one panel:
+ * unregistered (a SESSION whose identity hasn't been enrolled in the signup
+ * registry yet) and error (a read failure — never rendered as "no data").
+ * The sessionless visitor never sees a wall here — the demo door answers
+ * first (loadDashboardResolution). State displays only: there is no
+ * signup/sign-in PAGE in this app to link to, and inventing a route is
+ * dishonest — the same no-invented-routes rule the page header keeps.
+ * Never shows balances.
  */
 function AccessPanel({
   state,
 }: {
-  state: 'anonymous' | 'unregistered' | 'error';
+  state: 'unregistered' | 'error';
 }): React.JSX.Element {
   const copy = {
-    anonymous: {
-      eyebrow: 'NO SESSION',
-      title: 'Your vault lives behind your sign-in',
-      body: 'Sign in through the Covnant identity flow to load your sovereign vault, ledger, and payouts.',
-    },
     unregistered: {
       eyebrow: 'IDENTITY PENDING',
       title: 'Finish setting up your Covnant identity',
@@ -155,8 +158,25 @@ function AccessPanel({
   );
 }
 
+/**
+ * The demo disclosure — the ONE marker the sessionless demo view carries
+ * (and the only fabrication flag on the page): the seeded balances below are
+ * demonstration data, never a real holder's. Stripe-test-mode placement —
+ * top of the main content, opposite the wordmark, visible at every width.
+ */
+function DemoDataBadge(): React.JSX.Element {
+  return (
+    <span
+      data-testid="demo-data-badge"
+      className="inline-flex shrink-0 items-center rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-300"
+    >
+      Demo data
+    </span>
+  );
+}
+
 export default async function DashboardPage(): Promise<React.JSX.Element> {
-  let resolution: DashboardResolution;
+  let resolution: DashboardViewResolution;
   try {
     resolution = await liveDashboardDataProvider.getDashboardResolution();
   } catch (error) {
@@ -164,25 +184,29 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
     console.error('dashboard resolution failed:', error);
     return <AccessPanel state="error" />;
   }
-  if (resolution.kind === 'anonymous') {
-    return <AccessPanel state="anonymous" />;
-  }
   if (resolution.kind === 'unregistered') {
     return <AccessPanel state="unregistered" />;
   }
 
+  // The registered session AND the demo door both render the populated
+  // dashboard; the demo view alone carries the DEMO DATA disclosure.
+  const isDemoView = resolution.kind === 'demo';
   const data = resolution.data;
   const transactions = displayTransactions(data.ledger, data.vault.payee_id);
   const payouts = payoutTiles(data.payouts);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6 md:py-10">
-      {/* Page header wordmark — THE DON, the reference's brand row. */}
-      <div data-testid="don-wordmark" className="flex items-center gap-2.5">
-        <CvRibbonMonogram size={22} />
-        <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">
-          THE DON
-        </span>
+      {/* Page header wordmark — THE DON, the reference's brand row; the demo
+          view's disclosure chip rides opposite it. */}
+      <div data-testid="don-wordmark" className="flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5">
+          <CvRibbonMonogram size={22} />
+          <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">
+            THE DON
+          </span>
+        </div>
+        {isDemoView ? <DemoDataBadge /> : null}
       </div>
 
       <div className="mt-6">

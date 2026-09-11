@@ -41,6 +41,10 @@ describe('/dashboard — The Don composition', () => {
     const html = await renderDashboardPage();
     expect(html).toContain('data-testid="don-wordmark"');
     expect(html).toContain('THE DON');
+    // The dev-seed render IS the sessionless demo view — exactly ONE DEMO
+    // DATA badge, opposite the wordmark, marks the seeded balances.
+    expect(html).toContain('data-testid="demo-data-badge"');
+    expect((html.match(/data-testid="demo-data-badge"/g) ?? []).length).toBe(1);
     expect(html).toContain('data-testid="greeting"');
     expect(html).toContain('Hi,');
     expect(html).toContain('Nova Reign'); // the dev-seed persona's stage name
@@ -147,6 +151,19 @@ describe('/dashboard — The Don composition', () => {
     expect(html).not.toContain('UCT-');
     expect(html).not.toContain('accountNumber');
     expect(html).not.toContain('routingNumber');
+  });
+
+  it('the demo door: the seeded dashboard renders sessionless — exactly one badge, no sign-in wall', async () => {
+    // renderToStaticMarkup runs with NO session (the page reads the live
+    // provider in dev-seed mode → the demo door): the populated dashboard
+    // renders immediately, and the DEMO DATA disclosure rides exactly once
+    // so no seeded balance presents as a real holder's.
+    const html = await renderDashboardPage();
+    expect(html).toContain('data-testid="greeting"'); // populated, not a wall
+    expect(html).toContain('data-testid="account-card-available"');
+    expect((html.match(/data-testid="demo-data-badge"/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('NO SESSION');
+    expect(html).not.toContain('Your vault lives behind your sign-in');
   });
 
   it('keeps the Covnant brand rails — no blue palette anywhere', async () => {
