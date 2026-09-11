@@ -1,18 +1,27 @@
 /**
  * /dashboard composition test — The Don home renders for real
- * (renderToStaticMarkup) against the fixtures provider, no mocks: the
- * page is a pure composition over DashboardDataProvider. Pins the
- * reference IA element-for-element — THE DON wordmark, greeting + avatar
- * chip, three vault-bucket cards with right-aligned balances, carousel
- * dots, View all → /ledger, payout rail tiles (RTP instant, ACH +3
- * business days), quick actions on real routes only, dense transaction
- * rows with debit/credit pairs + See more, the readiness panel — plus
- * the brand rails: browser title, no blue palette, no fabricated
- * identity (no UCT, no account numbers).
+ * (renderToStaticMarkup) against the LIVE resolver in dev-seed mode: the
+ * store boots through the real engines (DON_DEV_SEED=1, no mocks — the
+ * same path the e2e harness and preview use). Pins the reference IA
+ * element-for-element — THE DON wordmark, greeting + avatar chip, three
+ * vault-bucket cards with right-aligned balances, carousel dots, View all
+ * → /ledger, payout rail tiles (RTP instant, ACH +3 business days), quick
+ * actions on real routes only, dense transaction rows with debit/credit
+ * pairs + See more, the readiness panel — plus the brand rails: browser
+ * title, no blue palette, no fabricated identity (no UCT, no account
+ * numbers).
  */
 
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+import { bootDevSeedStore } from '@/lib/server/devSeed';
+
+beforeAll(async () => {
+  // The dev-seed boot — deterministic seeded data through the real engines.
+  process.env.DON_DEV_SEED = '1';
+  await bootDevSeedStore();
+});
 
 async function renderDashboardPage(): Promise<string> {
   const DashboardPage = (await import('../page')).default;
@@ -20,10 +29,10 @@ async function renderDashboardPage(): Promise<string> {
 }
 
 describe('/dashboard — The Don composition', () => {
-  it('exports the browser title — The Don — Covnant', async () => {
+  it('exports the browser title — Goldboard — Covnant', async () => {
     const page = await import('../page');
     expect(page.metadata).toEqual({
-      title: 'The Don — Covnant',
+      title: 'Goldboard — Covnant',
       description: expect.stringContaining('The Don'),
     });
   });
@@ -34,7 +43,7 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('THE DON');
     expect(html).toContain('data-testid="greeting"');
     expect(html).toContain('Hi,');
-    expect(html).toContain('Nova Reign'); // the fixture holder's stage name
+    expect(html).toContain('Nova Reign'); // the dev-seed persona's stage name
     expect(html).toContain('data-testid="avatar-chip"');
     expect(html).toContain('NR'); // initials in the chip
   });
@@ -51,9 +60,10 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('Available');
     expect(html).toContain('Pending');
     expect(html).toContain('Reserve');
-    // Fixture balances, exact from integer cents.
-    expect(html).toContain('$2,478.30');
-    expect(html).toContain('$912.05');
+    // Dev-seed balances, exact from integer cents (available 80_000,
+    // pending 247_485, reserve 45_000 — the seeded engine timeline).
+    expect(html).toContain('$800.00');
+    expect(html).toContain('$2,474.85');
     expect(html).toContain('$450.00');
   });
 
@@ -86,7 +96,7 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('RTP · Instant');
     expect(html).toContain('ACH · +3 business days');
     expect(html).toContain('$250.00'); // RTP in-flight hold
-    expect(html).toContain('$1,200.00'); // ACH in-flight hold
+    expect(html).toContain('$450.00'); // ACH in-flight hold
   });
 
   it('renders compact square quick actions on real routes only', async () => {
@@ -109,9 +119,9 @@ describe('/dashboard — The Don composition', () => {
   it('renders the dense transactions card with debit/credit pairs and See more', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('Transactions');
-    expect((html.match(/data-testid="transactions-row"/g) ?? []).length).toBe(6); // visible of 7
+    expect((html.match(/data-testid="transactions-row"/g) ?? []).length).toBe(6); // visible of 8
     // Pair lines as the GL stores them: DR / CR with exactly one live side.
-    expect(html).toContain('DR $0.00 / CR $129.90'); // fx_j_001 royalty ingest
+    expect(html).toContain('DR $0.00 / CR $129.90'); // the seeded Spotify royalty ingest
     expect(html).toContain('DR $250.00 / CR $0.00'); // payout legs
     expect(html).toContain('+$129.90'); // inflow signed positive
     expect(html).toContain('−$250.00'); // payout displayed as outflow

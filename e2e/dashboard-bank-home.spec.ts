@@ -1,8 +1,10 @@
 /**
  * The Don dashboard home — e2e (bank reference: BANKAPPDT&MOBILE,
- * element-for-element). The dashboard is fixture-backed, so no auth is
- * needed: these gates run against the production build's /dashboard
- * directly.
+ * element-for-element). The dashboard is LIVE-data backed: the production
+ * server boots with DON_DEV_SEED=1 (see playwright.config.ts), which
+ * seeds the in-memory store through the real engines and serves the
+ * seeded persona — so no auth is needed and these gates run against the
+ * production build's /dashboard directly.
  *
  * Covers: the desktop composition (wordmark, greeting + avatar chip,
  * three vault-bucket cards with right-aligned balances, payout rail
@@ -22,7 +24,7 @@ test.describe('The Don dashboard home — desktop', () => {
     await page.goto('/dashboard');
 
     // Browser title — the rebrand reaches the tab.
-    await expect(page).toHaveTitle('The Don — Covnant');
+    await expect(page).toHaveTitle('Goldboard — Covnant');
 
     // Sidebar shell: the COVNANT brand chip (brand slot) + the user chip
     // from the provider; the page header below carries The Don wordmark.
@@ -38,9 +40,9 @@ test.describe('The Don dashboard home — desktop', () => {
     await expect(page.getByTestId('account-card-available')).toBeVisible();
     await expect(page.getByTestId('account-card-pending')).toBeVisible();
     await expect(page.getByTestId('account-card-reserve')).toBeVisible();
-    await expect(page.getByTestId('account-card-available-balance')).toContainText('$2,478.30');
+    await expect(page.getByTestId('account-card-available-balance')).toContainText('$800.00');
     await expect(page.getByTestId('account-card-available-balance')).toHaveClass(/text-right/);
-    await expect(page.getByTestId('account-card-pending-balance')).toContainText('$912.05');
+    await expect(page.getByTestId('account-card-pending-balance')).toContainText('$2,474.85');
     await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$450.00');
     await expect(page.getByTestId('accounts-view-all')).toHaveAttribute('href', '/ledger');
 
@@ -60,9 +62,10 @@ test.describe('The Don dashboard home — desktop', () => {
       '/assets',
     );
 
-    // Transactions — dense rows with pairs, See more into the ledger.
+    // Transactions — dense rows with pairs, See more into the ledger. The
+    // newest seeded journal is the ACH payout hold (Aug 7).
     await expect(page.getByTestId('transactions-row')).toHaveCount(6);
-    await expect(page.getByTestId('transactions-row').first()).toContainText('DR $250.00 / CR $0.00');
+    await expect(page.getByTestId('transactions-row').first()).toContainText('DR $450.00 / CR $0.00');
     await expect(page.getByTestId('transactions-see-more')).toHaveAttribute('href', '/ledger');
 
     // Readiness panel + thin footer.
@@ -124,7 +127,7 @@ test.describe('The Don dashboard home — 390px mobile', () => {
 test.describe('the signup-success gateway', () => {
   test('the landing CTA lands on /dashboard and The Don renders', async ({ page }) => {
     // The PR #12 gateway override: signup success routes to /dashboard.
-    // The fixture-backed dashboard renders unconditionally, so the honest
+    // The dev-seed-backed dashboard renders unconditionally, so the honest
     // e2e for the override is: the landing's entry CTA leads here.
     await page.goto('/');
     await page.getByRole('link', { name: /enter your world/i }).click();

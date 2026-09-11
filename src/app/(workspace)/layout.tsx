@@ -1,21 +1,32 @@
-import { AppShell } from '@/components/shell/AppShell';
-import { fixturesDashboardDataProvider } from '@/lib/don/dashboardFixtures';
+import { AppShell, type ShellUser } from '@/components/shell/AppShell';
+import { liveDashboardDataProvider } from '@/lib/server/dashboardLive';
 
 /**
  * (workspace) route group — every authenticated-surface route renders
  * inside The Don app shell. The URL layout is unchanged; the group exists
  * purely to keep the landing page chrome-free.
  *
- * The shell's user chip resolves from the SAME dashboard data provider the
- * dashboard home consumes (fixtures today — the live swap changes the
- * provider in one place, and this layout follows). Resolution never blocks
- * a page: a provider without a persona renders the honest unregistered
- * badge, and nothing is fabricated.
+ * The shell's user chip resolves from the SAME live dashboard provider the
+ * dashboard home consumes (src/lib/server/dashboardLive.ts — the session-
+ * bound identity swap that replaced the fixtures). Resolution never blocks
+ * a page: anonymous, unregistered, and read-failure resolutions all render
+ * the honest unregistered badge (no persona is fabricated), and the
+ * dashboard home's own body carries the detailed state panels.
  */
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const data = await fixturesDashboardDataProvider.getDashboardData();
+  let user: ShellUser | undefined;
+  try {
+    const resolution = await liveDashboardDataProvider.getDashboardResolution();
+    if (resolution.kind === 'registered') {
+      user = resolution.data.user;
+    }
+  } catch (error) {
+    // Identity could not be verified (read failure) — the shell renders the
+    // honest unregistered badge; never a fabricated persona.
+    console.error('workspace identity resolution failed:', error);
+  }
   return (
-    <AppShell user={data.user}>
+    <AppShell user={user}>
       {children}
     </AppShell>
   );

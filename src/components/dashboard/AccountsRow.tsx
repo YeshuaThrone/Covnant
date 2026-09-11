@@ -22,7 +22,7 @@
 import Link from 'next/link';
 
 import { formatCents } from '@/lib/money/format';
-import type { PayoutTile } from '@/lib/don/dashboardFixtures';
+import type { PayoutTile } from '@/lib/don/dashboardData';
 import type { SovereignVaultRecord } from '@/modules/don/records';
 
 /** The calm card chassis — REAL glass presence: the bank reference's cards

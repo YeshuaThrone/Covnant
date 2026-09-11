@@ -21,5 +21,8 @@ export default defineConfig({
     port: 3100,
     reuseExistingServer: true,
     timeout: 120_000,
+    // The dashboard e2e runs against the deterministic dev-seed store —
+    // an explicit opt-in flag, never the default data path.
+    env: { ...process.env, DON_DEV_SEED: '1' },
   },
 });
