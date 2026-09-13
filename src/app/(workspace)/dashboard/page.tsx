@@ -140,7 +140,7 @@ function AccessPanel({
     >
       <div className="flex items-center gap-2.5">
         <CvRibbonMonogram size={22} />
-        <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">THE DON</span>
+        <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">GOLD BOARD</span>
       </div>
       <section
         aria-label="Dashboard access"
@@ -203,7 +203,7 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
         <div className="flex items-center gap-2.5">
           <CvRibbonMonogram size={22} />
           <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">
-            THE DON
+            GOLD BOARD
           </span>
         </div>
         {isDemoView ? <DemoDataBadge /> : null}
