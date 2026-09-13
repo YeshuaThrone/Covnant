@@ -40,7 +40,7 @@ describe('/dashboard — The Don composition', () => {
   it('renders the page-header THE DON wordmark and the greeting + avatar chip', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('data-testid="don-wordmark"');
-    expect(html).toContain('THE DON');
+    expect(html).toContain('GOLD BOARD');
     // The dev-seed render IS the sessionless demo view — exactly ONE DEMO
     // DATA badge, opposite the wordmark, marks the seeded balances.
     expect(html).toContain('data-testid="demo-data-badge"');

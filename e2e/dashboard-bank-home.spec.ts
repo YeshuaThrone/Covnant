@@ -34,7 +34,7 @@ test.describe('The Don dashboard home — desktop', () => {
     // Page header wordmark + greeting + avatar chip. The seeded render IS
     // the sessionless demo view — exactly ONE DEMO DATA badge, top of the
     // main content, opposite the wordmark.
-    await expect(page.getByTestId('don-wordmark')).toContainText('THE DON');
+    await expect(page.getByTestId('don-wordmark')).toContainText('GOLD BOARD');
     await expect(page.getByTestId('demo-data-badge')).toHaveCount(1);
     await expect(page.getByTestId('demo-data-badge')).toBeVisible();
     await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
@@ -126,7 +126,7 @@ test.describe('The Don dashboard home — 390px mobile', () => {
     await page.getByTestId('mobile-drawer-button').click();
     const drawer = page.getByTestId('mobile-drawer');
     await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText('THE DON');
+    await expect(drawer).toContainText('GOLD BOARD');
     await expect(drawer.getByRole('link', { name: 'Ownership Ledger' })).toBeVisible();
     await expect(drawer).toContainText('Nova Reign'); // the user chip rides along
 
@@ -154,6 +154,6 @@ test.describe('the signup-success gateway', () => {
     await page.getByRole('link', { name: /enter your world/i }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
-    await expect(page.getByTestId('don-wordmark')).toContainText('THE DON');
+    await expect(page.getByTestId('don-wordmark')).toContainText('GOLD BOARD');
   });
 });

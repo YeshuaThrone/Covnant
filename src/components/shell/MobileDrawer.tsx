@@ -69,10 +69,10 @@ export function MobileDrawer({
             className="absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r border-gold/15 bg-obsidian-900"
           >
             <div className="flex items-center justify-between px-5 py-4">
-              <Link href="/" onClick={close} aria-label="The Don home">
+              <Link href="/" onClick={close} aria-label="Gold Board home">
                 <span className="flex items-center gap-2">
                   <CvRibbonMonogram size={26} />
-                  <span className="font-mono text-xs tracking-[0.3em] text-gold-champagne">THE DON</span>
+                  <span className="font-mono text-xs tracking-[0.3em] text-gold-champagne">GOLD BOARD</span>
                 </span>
               </Link>
             </div>
