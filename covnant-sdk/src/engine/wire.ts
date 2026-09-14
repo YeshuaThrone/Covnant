@@ -272,7 +272,9 @@ export function holderSplitBps(sheet: readonly SheetUnitsSlice[]): number[] {
     .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
   for (const { index } of order) {
     if (residue <= 0) break;
-    bps[index] += 1;
+    const current = bps[index];
+    if (current === undefined) continue; // unreachable: index maps the same array
+    bps[index] = current + 1;
     residue -= 1;
   }
   return bps;
