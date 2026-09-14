@@ -30,6 +30,14 @@ export type StatementIngestStatus = 'parsed' | 'failed';
 /** Match-queue lifecycle: quarantined → matched | discarded. */
 export type MatchQueueStatus = 'open' | 'matched' | 'discarded';
 
+/**
+ * Where a quarantined event arrived from — the canonical royalty event's
+ * ingress vocabulary (covnant-sdk/src/contracts/royalty-event.ts), carried
+ * verbatim so queue provenance never folds a webhook or API-pull event
+ * into the statement-ingest vocabulary below.
+ */
+export type MatchQueueSource = 'webhook' | 'statement' | 'api_pull';
+
 /** MUL clearance lifecycle (append-only history in mul_clearance_transitions). */
 export type MulClearanceState = 'draft' | 'requested' | 'cleared' | 'disputed';
 
@@ -69,7 +77,8 @@ export interface MatchQueueRecord {
   status: MatchQueueStatus;
   reason: string;
   rights_pipeline: RightsPipeline;
-  source: StatementSource;
+  /** The event's ingress source, verbatim from the canonical event. */
+  source: MatchQueueSource;
   platform: string | null;
   territory: string | null;
   period: string | null;
