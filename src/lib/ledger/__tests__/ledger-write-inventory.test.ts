@@ -33,7 +33,13 @@ import { describe, it, expect } from 'vitest';
  *       stamped by the bounded post-upsert metadata-only enrichment in
  *       lib/ledger/engine-stamp.ts — Gen 9.
  *
- *   TOTAL: 13 ledger-write call expressions across 7 wired write paths.
+ *   Mechanism 4 · the SDK engine wire (covnant-sdk) ....... 2
+ *     - covnant-sdk/src/engine/wire.ts: exactly 2 raw-SQL INSERT
+ *       statements (1 wired site × metadata / 42703-fallback
+ *       variants) — Gen 16: the settlement credit is CBT-stamped
+ *       at INSERT and replay-guarded by the UNIQUE reference_id.
+ *
+ *   TOTAL: 15 ledger-write call expressions across 8 wired write paths.
  *
  * The file-set pin below is the silent-add guard: ANY new non-test src
  * file that mentions the table (even in a comment) breaks this test and
@@ -41,25 +47,31 @@ import { describe, it, expect } from 'vitest';
  */
 
 const SRC_ROOT = path.join(__dirname, '..', '..', '..');
+const SDK_SRC_ROOT = path.join(SRC_ROOT, '..', 'covnant-sdk', 'src');
 const MIGRATIONS_DIR = path.join(SRC_ROOT, '..', 'supabase', 'migrations');
 
-/** Every non-test src file that references the ledger table, relative to src/. */
+/**
+ * Every non-test source file that references the ledger table — keyed
+ * relative to src/ for the app tree and to the repo root (covnant-sdk/src
+ * prefix) for the SDK package, whose wire is a wired write path too.
+ */
 function ledgerReferencingFiles(): string[] {
   const hits: string[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      const full = path.join(dir, entry);
+  const walk = (root: string, base: string): void => {
+    for (const entry of readdirSync(root)) {
+      const full = path.join(root, entry);
       if (statSync(full).isDirectory()) {
         if (entry === '__tests__') continue; // tests may reference the table freely
-        walk(full);
+        walk(full, base);
       } else if (/\.(ts|tsx)$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
         if (readFileSync(full, 'utf8').includes('universal_royalty_ledger')) {
-          hits.push(path.relative(SRC_ROOT, full).split(path.sep).join('/'));
+          hits.push(path.relative(base, full).split(path.sep).join('/'));
         }
       }
     }
   };
-  walk(SRC_ROOT);
+  walk(SRC_ROOT, SRC_ROOT);
+  walk(SDK_SRC_ROOT, path.join(SRC_ROOT, '..'));
   return hits.sort();
 }
 
@@ -78,6 +90,8 @@ const INVENTORIED_FILES: Record<string, string> = {
   'app/api/health/db/route.ts': 'READ — count probe',
   'app/api/ledger/route.ts': 'READ — store-backed listing',
   'app/api/payouts/withdraw/route.ts': 'SUPABASE_JS ×2 — Gen 9 stamped DISBURSEMENT insert (1 wired site)',
+  'covnant-sdk/src/engine/wire.ts': 'SDK WIRE ×2 — Gen 16 stamped settlement credit (1 wired site)',
+  'covnant-sdk/src/recovery/recovery.ts': 'DOC — read-port docs mention the table; caller-supplied reader, zero writes (PR #64)',
   'engine/covenant-master-sdk.ts': 'ENGINE ×1 — hash-locked internal ledger upsert',
   'lib/contracts/payouts.ts': 'DOC — display layer, type-only ledger reference',
   'lib/escrow/balance.ts': 'READ — disbursements scan',
@@ -118,16 +132,30 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
     expect(read('lib/ledger/engine-stamp.ts')).toContain('universal_royalty_ledger');
   });
 
-  it('pins the full inventory at 13 ledger-write call expressions across 7 wired paths', () => {
+  it('pins mechanism 4 at exactly 2 raw-SQL INSERT statements (the SDK wire\'s settlement credit)', () => {
+    const wire = read('../covnant-sdk/src/engine/wire.ts');
+    // One wired site — stamped primary + 42703 no-metadata-column fallback,
+    // the increase webhook's exact discipline (Gen 8), one package over.
+    expect(countMatches(wire, /INSERT INTO universal_royalty_ledger/g)).toBe(2);
+    expect(countMatches(wire, /withCbtSettlementCode\(/g)).toBe(1);
+    expect(countMatches(wire, /isMissingMetadataColumnError\(/g)).toBeGreaterThanOrEqual(1);
+    // Replay idempotency: the credit keys off the canonical event id, and
+    // the UNIQUE-race guard returns the existing credit, never a second one.
+    expect(wire).toContain('sdk_settlement:');
+    expect(wire).toContain("'23505'");
+  });
+
+  it('pins the full inventory at 15 ledger-write call expressions across 8 wired paths', () => {
     const raw =
       countMatches(read('app/api/banking/route.ts'), /INSERT INTO universal_royalty_ledger/g) +
-      countMatches(read('app/api/covnant/webhooks/increase/route.ts'), /INSERT INTO universal_royalty_ledger/g);
+      countMatches(read('app/api/covnant/webhooks/increase/route.ts'), /INSERT INTO universal_royalty_ledger/g) +
+      countMatches(read('../covnant-sdk/src/engine/wire.ts'), /INSERT INTO universal_royalty_ledger/g);
     const supabaseJs =
       countMatches(read('app/api/payouts/withdraw/route.ts'), /from\('universal_royalty_ledger'\)\s*\.insert\(/g) +
       countMatches(read('lib/ledger/store.ts'), /from\('universal_royalty_ledger'\)\s*\.upsert\(/g);
     const engine =
       countMatches(read('engine/covenant-master-sdk.ts'), /\.upsert\(ledgerEntries/g);
-    expect(raw + supabaseJs + engine).toBe(13);
+    expect(raw + supabaseJs + engine).toBe(15);
   });
 
   it('inventories every file that references the table — a new write path cannot be added silently', () => {

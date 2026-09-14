@@ -143,7 +143,9 @@ function allocateByWeights(total: bigint, weights: bigint[]): bigint[] {
   let remaining = dust;
   for (const { index } of order) {
     if (remaining === 0n) break;
-    parts[index] += 1n;
+    const current = parts[index];
+    if (current === undefined) continue; // unreachable: index maps the same array
+    parts[index] = current + 1n;
     remaining -= 1n;
   }
   return parts;

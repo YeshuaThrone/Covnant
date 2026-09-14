@@ -4,7 +4,11 @@
   "compilerOptions": {
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@/engine/covenant-master-sdk": ["./types/vendored-engine.d.ts"],
+      "@/*": ["../src/*"]
+    }
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules"]
