@@ -1,0 +1,4 @@
+event_id,rights_pipeline,period,currency,gross_amount,territory,platform,isrc,iswc
+us-dsp-2024-000001,composition_mechanical,2024-03,USD,12.34,US,MyDSP,USDMG1800001,
+us-dsp-2024-000002,composition_performance,2024-03,USD,54.32,GB,MyDSP,USDMG1800009,
+us-dsp-2024-000003,composition_mechanical,2024-03,USD,0.07,US,MyDSP,USDMG1800002,T-034524680-1
