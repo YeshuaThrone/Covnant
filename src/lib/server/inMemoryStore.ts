@@ -59,6 +59,13 @@ import type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+import type {
+  MatchQueueRecord,
+  MatchQueueResolution,
+  MulClearanceRecord,
+  MulClearanceTransitionRecord,
+  StatementIngestRecord,
+} from '@/modules/sdk/records';
 
 /**
  * Index-stable time sort. Ties keep insertion order in the list's own
@@ -110,6 +117,10 @@ export class InMemoryStore implements Store {
   private catalogDisputes = new Map<string, CatalogDisputeRecord>();
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
+  private mulClearances = new Map<string, MulClearanceRecord>();
+  private clearanceTransitions: MulClearanceTransitionRecord[] = [];
+  private matchQueue: MatchQueueRecord[] = [];
+  private statementIngests = new Map<string, StatementIngestRecord>();
 
   // --- Legacy show / ping / artist surface ---
 
@@ -674,5 +685,88 @@ export class InMemoryStore implements Store {
 
   async getSplitReversalByRun(splitRunId: string): Promise<SplitReversalRecord | undefined> {
     return this.splitReversals.find((row) => row.split_run_id === splitRunId);
+  }
+
+  // --- SDK collection surfaces (migration 0007) ---
+
+  async upsertClearance(row: MulClearanceRecord): Promise<MulClearanceRecord> {
+    this.mulClearances.set(row.asset_cbt_code, row);
+    return row;
+  }
+
+  async getClearanceForAsset(assetCbtCode: string): Promise<MulClearanceRecord | undefined> {
+    return this.mulClearances.get(assetCbtCode);
+  }
+
+  async insertClearanceTransition(
+    row: Omit<MulClearanceTransitionRecord, 'id'>,
+  ): Promise<MulClearanceTransitionRecord> {
+    const record: MulClearanceTransitionRecord = { ...row, id: randomUUID() };
+    this.clearanceTransitions.push(record);
+    return record;
+  }
+
+  async listClearanceTransitions(
+    assetCbtCode: string,
+  ): Promise<MulClearanceTransitionRecord[]> {
+    return sortByTime(
+      this.clearanceTransitions.filter((row) => row.asset_cbt_code === assetCbtCode),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {
+    for (const existing of this.matchQueue) {
+      if (existing.event_id === row.event_id) {
+        uniqueViolation('match_queue.event_id');
+      }
+    }
+    const record: MatchQueueRecord = { ...row, id: randomUUID() };
+    this.matchQueue.push(record);
+    return record;
+  }
+
+  async getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined> {
+    return this.matchQueue.find((row) => row.id === id);
+  }
+
+  async listMatchQueueEntries(
+    status?: MatchQueueRecord['status'],
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<MatchQueueRecord[]> {
+    const rows =
+      status === undefined
+        ? [...this.matchQueue]
+        : this.matchQueue.filter((row) => row.status === status);
+    return sortByTime(rows, (row) => row.created_at, 'desc').slice(0, limit);
+  }
+
+  async resolveMatchQueueEntry(
+    id: string,
+    resolution: MatchQueueResolution,
+  ): Promise<MatchQueueRecord | undefined> {
+    const record = this.matchQueue.find((row) => row.id === id);
+    if (record === undefined) return undefined;
+    const resolved = {
+      ...record,
+      status: resolution.status,
+      matched_cbt_code: resolution.status === 'matched' ? resolution.cbtCode : null,
+      resolved_at: new Date().toISOString(),
+    } satisfies MatchQueueRecord;
+    this.matchQueue = this.matchQueue.map((row) => (row.id === id ? resolved : row));
+    return resolved;
+  }
+
+  async insertStatementIngest(
+    row: Omit<StatementIngestRecord, 'id'>,
+  ): Promise<StatementIngestRecord> {
+    const record: StatementIngestRecord = { ...row, id: randomUUID() };
+    this.statementIngests.set(record.id, record);
+    return record;
+  }
+
+  async getStatementIngest(id: string): Promise<StatementIngestRecord | undefined> {
+    return this.statementIngests.get(id);
   }
 }
