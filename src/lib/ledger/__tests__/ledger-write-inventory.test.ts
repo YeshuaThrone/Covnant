@@ -91,6 +91,7 @@ const INVENTORIED_FILES: Record<string, string> = {
   'app/api/ledger/route.ts': 'READ — store-backed listing',
   'app/api/payouts/withdraw/route.ts': 'SUPABASE_JS ×2 — Gen 9 stamped DISBURSEMENT insert (1 wired site)',
   'covnant-sdk/src/engine/wire.ts': 'SDK WIRE ×2 — Gen 16 stamped settlement credit (1 wired site)',
+  'covnant-sdk/src/recovery/recovery.ts': 'DOC — read-port docs mention the table; caller-supplied reader, zero writes (PR #64)',
   'engine/covenant-master-sdk.ts': 'ENGINE ×1 — hash-locked internal ledger upsert',
   'lib/contracts/payouts.ts': 'DOC — display layer, type-only ledger reference',
   'lib/escrow/balance.ts': 'READ — disbursements scan',
