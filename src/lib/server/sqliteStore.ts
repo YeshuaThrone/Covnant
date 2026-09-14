@@ -60,6 +60,13 @@ import type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+import type {
+  MatchQueueRecord,
+  MatchQueueResolution,
+  MulClearanceRecord,
+  MulClearanceTransitionRecord,
+  StatementIngestRecord,
+} from '@/modules/sdk/records';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shows (
@@ -345,6 +352,63 @@ CREATE TABLE IF NOT EXISTS split_reversals (
   id TEXT PRIMARY KEY,
   split_run_id TEXT NOT NULL UNIQUE,
   journal_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- --- SDK collection surfaces (migration 0007) ---
+
+CREATE TABLE IF NOT EXISTS mul_clearances (
+  asset_cbt_code TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'draft',
+  licensee TEXT,
+  territory TEXT,
+  term_start TEXT,
+  term_end TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mul_clearance_transitions (
+  id TEXT PRIMARY KEY,
+  asset_cbt_code TEXT NOT NULL,
+  from_state TEXT,
+  to_state TEXT NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS mul_clearance_transitions_asset_idx
+  ON mul_clearance_transitions (asset_cbt_code, created_at);
+
+CREATE TABLE IF NOT EXISTS match_queue (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'open',
+  reason TEXT NOT NULL,
+  rights_pipeline TEXT NOT NULL,
+  source TEXT NOT NULL,
+  platform TEXT,
+  territory TEXT,
+  period TEXT,
+  currency TEXT,
+  gross_micros TEXT,
+  identifiers_json TEXT,
+  raw_payload TEXT NOT NULL,
+  matched_cbt_code TEXT,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS match_queue_status_idx ON match_queue (status, created_at);
+
+CREATE TABLE IF NOT EXISTS statement_ingests (
+  id TEXT PRIMARY KEY,
+  format TEXT NOT NULL,
+  source TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  status TEXT NOT NULL,
+  event_count INTEGER,
+  error TEXT,
   created_at TEXT NOT NULL
 );
 `;
@@ -1324,6 +1388,160 @@ export class SqliteStore implements Store {
       this.db
         .prepare(`SELECT * FROM split_reversals WHERE split_run_id = ?`)
         .get(splitRunId) as SplitReversalRecord | undefined,
+    );
+  }
+
+  // --- SDK collection surfaces (migration 0007) ---
+
+  async upsertClearance(row: MulClearanceRecord): Promise<MulClearanceRecord> {
+    this.db
+      .prepare(
+        `INSERT INTO mul_clearances (
+           asset_cbt_code, state, licensee, territory, term_start, term_end, updated_at
+         ) VALUES (
+           @asset_cbt_code, @state, @licensee, @territory, @term_start, @term_end, @updated_at
+         )
+         ON CONFLICT(asset_cbt_code) DO UPDATE SET
+           state = excluded.state,
+           licensee = excluded.licensee,
+           territory = excluded.territory,
+           term_start = excluded.term_start,
+           term_end = excluded.term_end,
+           updated_at = excluded.updated_at`,
+      )
+      .run(row);
+    return Promise.resolve(row);
+  }
+
+  async getClearanceForAsset(assetCbtCode: string): Promise<MulClearanceRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM mul_clearances WHERE asset_cbt_code = ?`)
+        .get(assetCbtCode) as MulClearanceRecord | undefined,
+    );
+  }
+
+  async insertClearanceTransition(
+    row: Omit<MulClearanceTransitionRecord, 'id'>,
+  ): Promise<MulClearanceTransitionRecord> {
+    const record: MulClearanceTransitionRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO mul_clearance_transitions (
+           id, asset_cbt_code, from_state, to_state, note, created_at
+         ) VALUES (
+           @id, @asset_cbt_code, @from_state, @to_state, @note, @created_at
+         )`,
+      )
+      .run(record);
+    return Promise.resolve(record);
+  }
+
+  async listClearanceTransitions(
+    assetCbtCode: string,
+  ): Promise<MulClearanceTransitionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM mul_clearance_transitions
+           WHERE asset_cbt_code = ?
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(assetCbtCode) as MulClearanceTransitionRecord[],
+    );
+  }
+
+  async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {
+    const record: MatchQueueRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO match_queue (
+           id, event_id, status, reason, rights_pipeline, source, platform, territory,
+           period, currency, gross_micros, identifiers_json, raw_payload,
+           matched_cbt_code, resolved_at, created_at
+         ) VALUES (
+           @id, @event_id, @status, @reason, @rights_pipeline, @source, @platform, @territory,
+           @period, @currency, @gross_micros, @identifiers_json, @raw_payload,
+           @matched_cbt_code, @resolved_at, @created_at
+         )`,
+      )
+      .run(record);
+    return Promise.resolve(record);
+  }
+
+  async getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM match_queue WHERE id = ?`)
+        .get(id) as MatchQueueRecord | undefined,
+    );
+  }
+
+  async listMatchQueueEntries(
+    status?: MatchQueueRecord['status'],
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<MatchQueueRecord[]> {
+    return Promise.resolve(
+      (status === undefined
+        ? this.db
+            .prepare(
+              `SELECT * FROM match_queue
+               ORDER BY created_at DESC, rowid DESC
+               LIMIT ?`,
+            )
+            .all(limit)
+        : this.db
+            .prepare(
+              `SELECT * FROM match_queue
+               WHERE status = ?
+               ORDER BY created_at DESC, rowid DESC
+               LIMIT ?`,
+            )
+            .all(status, limit)) as MatchQueueRecord[],
+    );
+  }
+
+  async resolveMatchQueueEntry(
+    id: string,
+    resolution: MatchQueueResolution,
+  ): Promise<MatchQueueRecord | undefined> {
+    const resolvedAt = new Date().toISOString();
+    const patch =
+      resolution.status === 'matched'
+        ? { status: 'matched' as const, matched_cbt_code: resolution.cbtCode }
+        : { status: 'discarded' as const, matched_cbt_code: null };
+    const result = this.db
+      .prepare(
+        `UPDATE match_queue
+         SET status = @status, matched_cbt_code = @matched_cbt_code, resolved_at = @resolved_at
+         WHERE id = @id`,
+      )
+      .run({ ...patch, resolved_at: resolvedAt, id });
+    if (result.changes === 0) return undefined;
+    return this.getMatchQueueEntry(id);
+  }
+
+  async insertStatementIngest(
+    row: Omit<StatementIngestRecord, 'id'>,
+  ): Promise<StatementIngestRecord> {
+    const record: StatementIngestRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO statement_ingests (
+           id, format, source, file_name, content, status, event_count, error, created_at
+         ) VALUES (
+           @id, @format, @source, @file_name, @content, @status, @event_count, @error, @created_at
+         )`,
+      )
+      .run(record);
+    return Promise.resolve(record);
+  }
+
+  async getStatementIngest(id: string): Promise<StatementIngestRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM statement_ingests WHERE id = ?`)
+        .get(id) as StatementIngestRecord | undefined,
     );
   }
 }

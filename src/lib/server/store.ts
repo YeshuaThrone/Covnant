@@ -61,6 +61,13 @@ import type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+import type {
+  MatchQueueRecord,
+  MatchQueueResolution,
+  MulClearanceRecord,
+  MulClearanceTransitionRecord,
+  StatementIngestRecord,
+} from '@/modules/sdk/records';
 import {
   createAdminClient as createSupabaseAdminClient,
   readSupabaseEnv,
@@ -323,6 +330,38 @@ export interface Store {
   // --- Split-run reversals ---
   insertSplitReversal(row: Omit<SplitReversalRecord, 'id'>): Promise<SplitReversalRecord>;
   getSplitReversalByRun(splitRunId: string): Promise<SplitReversalRecord | undefined>;
+
+  // --- SDK collection surfaces (migration 0007, Generation 16) ---
+  // PR 3 owns ALL new-table Store methods: SDK PRs 4+ (clearance, matcher,
+  // parsers) consume this surface and never touch store files. Lists order
+  // by created_at with the store's insertion-order tie-break; unique
+  // violations throw (quarantine-once for match_queue.event_id).
+
+  /** Writes the CURRENT clearance state for one asset — one row per asset. */
+  upsertClearance(row: MulClearanceRecord): Promise<MulClearanceRecord>;
+  getClearanceForAsset(assetCbtCode: string): Promise<MulClearanceRecord | undefined>;
+  /** Appends one lifecycle transition; history is read oldest-first. */
+  insertClearanceTransition(
+    row: Omit<MulClearanceTransitionRecord, 'id'>,
+  ): Promise<MulClearanceTransitionRecord>;
+  listClearanceTransitions(assetCbtCode: string): Promise<MulClearanceTransitionRecord[]>;
+
+  /** Quarantines one event verbatim; rejects on a replayed event_id. */
+  insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord>;
+  getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined>;
+  /** Newest first; optional status filter; bounded by limit. */
+  listMatchQueueEntries(
+    status?: MatchQueueRecord['status'],
+    limit?: number,
+  ): Promise<MatchQueueRecord[]>;
+  /** matched stamps the CBT code; discarded closes without one. */
+  resolveMatchQueueEntry(
+    id: string,
+    resolution: MatchQueueResolution,
+  ): Promise<MatchQueueRecord | undefined>;
+
+  insertStatementIngest(row: Omit<StatementIngestRecord, 'id'>): Promise<StatementIngestRecord>;
+  getStatementIngest(id: string): Promise<StatementIngestRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
@@ -354,6 +393,17 @@ export type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+export type {
+  MatchQueueRecord,
+  MatchQueueResolution,
+  MulClearanceRecord,
+  MulClearanceState,
+  MulClearanceTransitionRecord,
+  StatementIngestRecord,
+  StatementFormat,
+  StatementIngestStatus,
+  StatementSource,
+} from '@/modules/sdk/records';
 
 // ---------------------------------------------------------------------------
 // Singleton — the spec's exact shape: getStore() boots the Supabase

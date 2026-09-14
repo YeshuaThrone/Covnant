@@ -56,6 +56,13 @@ import type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+import type {
+  MatchQueueRecord,
+  MatchQueueResolution,
+  MulClearanceRecord,
+  MulClearanceTransitionRecord,
+  StatementIngestRecord,
+} from '@/modules/sdk/records';
 
 /** Drops the store-internal ordering column; the DB row is otherwise the record. */
 function toRecord<T>(row: Record<string, unknown>): T {
@@ -92,6 +99,10 @@ const TABLES = {
   catalogDisputes: 'catalog_disputes',
   dspWebhookEvents: 'dsp_webhook_events',
   splitReversals: 'split_reversals',
+  mulClearances: 'mul_clearances',
+  mulClearanceTransitions: 'mul_clearance_transitions',
+  matchQueue: 'match_queue',
+  statementIngests: 'statement_ingests',
 } as const;
 
 type DbResult = PromiseLike<{
@@ -982,6 +993,139 @@ export class SupabaseStore implements Store {
         .eq('split_run_id', splitRunId)
         .maybeSingle(),
       'getSplitReversalByRun',
+    );
+  }
+
+  // --- SDK collection surfaces (migration 0007) ---
+
+  async upsertClearance(row: MulClearanceRecord): Promise<MulClearanceRecord> {
+    return this.oneStrict<MulClearanceRecord>(
+      this.client
+        .from(TABLES.mulClearances)
+        .upsert(row, { onConflict: 'asset_cbt_code' })
+        .select()
+        .maybeSingle(),
+      'upsertClearance',
+    );
+  }
+
+  async getClearanceForAsset(assetCbtCode: string): Promise<MulClearanceRecord | undefined> {
+    return this.one<MulClearanceRecord>(
+      this.client
+        .from(TABLES.mulClearances)
+        .select()
+        .eq('asset_cbt_code', assetCbtCode)
+        .maybeSingle(),
+      'getClearanceForAsset',
+    );
+  }
+
+  async insertClearanceTransition(
+    row: Omit<MulClearanceTransitionRecord, 'id'>,
+  ): Promise<MulClearanceTransitionRecord> {
+    return this.oneStrict<MulClearanceTransitionRecord>(
+      this.client
+        .from(TABLES.mulClearanceTransitions)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertClearanceTransition',
+    );
+  }
+
+  async listClearanceTransitions(
+    assetCbtCode: string,
+  ): Promise<MulClearanceTransitionRecord[]> {
+    return this.many<MulClearanceTransitionRecord>(
+      this.client
+        .from(TABLES.mulClearanceTransitions)
+        .select()
+        .eq('asset_cbt_code', assetCbtCode)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listClearanceTransitions',
+    );
+  }
+
+  async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {
+    return this.oneStrict<MatchQueueRecord>(
+      this.client
+        .from(TABLES.matchQueue)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMatchQueueEntry',
+    );
+  }
+
+  async getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined> {
+    return this.one<MatchQueueRecord>(
+      this.client.from(TABLES.matchQueue).select().eq('id', id).maybeSingle(),
+      'getMatchQueueEntry',
+    );
+  }
+
+  async listMatchQueueEntries(
+    status?: MatchQueueRecord['status'],
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<MatchQueueRecord[]> {
+    let query = this.client.from(TABLES.matchQueue).select();
+    if (status !== undefined) {
+      query = query.eq('status', status);
+    }
+    return this.many<MatchQueueRecord>(
+      query
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listMatchQueueEntries',
+    );
+  }
+
+  async resolveMatchQueueEntry(
+    id: string,
+    resolution: MatchQueueResolution,
+  ): Promise<MatchQueueRecord | undefined> {
+    const patch =
+      resolution.status === 'matched'
+        ? {
+            status: 'matched' as const,
+            matched_cbt_code: resolution.cbtCode,
+            resolved_at: new Date().toISOString(),
+          }
+        : {
+            status: 'discarded' as const,
+            matched_cbt_code: null,
+            resolved_at: new Date().toISOString(),
+          };
+    return this.one<MatchQueueRecord>(
+      this.client
+        .from(TABLES.matchQueue)
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'resolveMatchQueueEntry',
+    );
+  }
+
+  async insertStatementIngest(
+    row: Omit<StatementIngestRecord, 'id'>,
+  ): Promise<StatementIngestRecord> {
+    return this.oneStrict<StatementIngestRecord>(
+      this.client
+        .from(TABLES.statementIngests)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertStatementIngest',
+    );
+  }
+
+  async getStatementIngest(id: string): Promise<StatementIngestRecord | undefined> {
+    return this.one<StatementIngestRecord>(
+      this.client.from(TABLES.statementIngests).select().eq('id', id).maybeSingle(),
+      'getStatementIngest',
     );
   }
 }
