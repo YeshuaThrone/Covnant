@@ -12,75 +12,149 @@
  * The engine's minted codes remain the stored system of record and never
  * change format; this adapter only keys on them.
  *
+ * Identifier kinds come from the SDK contracts registry (PR 2,
+ * `covnant-sdk/src/contracts/identifiers.ts`) — the vault stores every
+ * ASSET-level registry kind except the NIL sentinel:
+ *   - creator-party kinds (ISNI / IPI / IPN) carry the registry's
+ *     `appliesTo: 'creator'` — they belong on creator_profiles, never on
+ *     the asset row this adapter writes;
+ *   - NIL is the registry's "no external identifier exists" sentinel.
+ *     Storing it would let exact matching assert a match from the ABSENCE
+ *     of an identifier — precisely the fuzzy logic the locked rule forbids.
+ *
+ * Canonicalization is the registry's, singular: attach and findByIdentifier
+ * both canonicalize through the same IdentifierSpec, so a value this
+ * surface attaches is exactly the value the matcher (and the Increase
+ * lineage lane) compares against — no second opinion anywhere. The
+ * registry's ISWC form is ISO 15707 (`T-<9 digits>-<check>`, dashed); the
+ * legacy vault pattern required ten work digits. That divergence is
+ * reconciled at the LOOKUP BOUNDARY, never by rewriting historical stored
+ * data: the lookup SQL normalizes the stored side (case, separators) so
+ * stored legacy variants stay matchable, while new attachments always
+ * store the registry's canonical form.
+ *
  * Ingestion is exact-match only, both directions:
- * - attachExternalIdentifier merges one external code (ISRC | ISWC | UPC)
- *   into the asset's `mapped_identifiers` JSONB — the same storage the
- *   Generation 7 lineage lane reads. Re-attaching an IDENTICAL pair is a
- *   no-op, never a duplicate; each kind holds exactly one value.
+ * - attachExternalIdentifier merges one external code into the asset's
+ *   `mapped_identifiers` JSONB — the same storage the Generation 7 lineage
+ *   lane reads. Re-attaching an IDENTICAL pair is a no-op, never a
+ *   duplicate; each kind holds exactly one value.
  * - findByIdentifier resolves an external code back to the asset with its
  *   stored CVT tag (and holder UCT where present). Unknown identifiers
- *   return not-found — NEVER auto-create, never fuzzy. The lookup applies
- *   the exact canonicalization the lineage lane uses, nothing looser.
+ *   return not-found — NEVER auto-create, never fuzzy.
  *
- * Adapter-level only: no HTTP endpoints here — a route can wrap this surface
- * later without rework. Read/write scope is one JSONB column on the asset
- * row; no table, route, or persisted-format changes.
+ * Wrapped by the admin surface: POST/GET /api/admin/vault/identifiers are
+ * this adapter's production callers. Read/write scope is one JSONB column
+ * on the asset row; no table or persisted-format changes.
  */
 
-import type { Db } from '@/lib/db';
-import { normalizeIsrc } from '@/lib/covnant/lineage';
+import type { IdentifierKind } from '../../../covnant-sdk/src/contracts/identifiers';
+import { IDENTIFIER_KINDS, IDENTIFIER_SPECS, canonicalizeIdentifier } from '../../../covnant-sdk/src/contracts/identifiers';
+import type { Db, DbClient } from '@/lib/db';
 
-/** The external-code kinds the vault ingests (Generation 8 kinds list). */
-export type VaultExternalIdentifierKind = 'ISRC' | 'ISWC' | 'UPC';
-
-export const VAULT_EXTERNAL_IDENTIFIER_KINDS: readonly VaultExternalIdentifierKind[] = [
+/**
+ * The asset-level registry kinds the vault ingests, in registry order.
+ * Explicit (not filtered at runtime) so the set is readable at a glance;
+ * `satisfies` pins every entry to the registry and the vault suite's
+ * drift-guard test pins the set to the registry's asset kinds minus NIL.
+ */
+export const VAULT_EXTERNAL_IDENTIFIER_KINDS = [
   'ISRC',
   'ISWC',
+  'ISAN',
+  'EIDR',
+  'DOI',
   'UPC',
-];
+  'EAN',
+  'ISMN',
+  'GRID',
+  'ISBN',
+  'ISSN',
+  'GTIN',
+  'MLC_WORK_ID',
+  'HFA_SONG_ID',
+  'TUNE_CODE',
+  'EPC_RFID',
+] as const satisfies readonly IdentifierKind[];
+
+export type VaultExternalIdentifierKind = (typeof VAULT_EXTERNAL_IDENTIFIER_KINDS)[number];
 
 export interface VaultIdentifierInput {
   kind: VaultExternalIdentifierKind;
   value: string;
 }
 
-/** Canonical UPC-A: exactly 12 digits. */
-const UPC_PATTERN = /^\d{12}$/;
-
-/** Canonical ISWC: T-<10 digits>-<1 check digit>, dashed and uppercase (the lineage lane's ISWC form). */
-const ISWC_PATTERN = /^T-\d{10}-\d$/;
-
-/** The lowercase mapped_identifiers JSONB key each kind is stored under. */
-const VAULT_IDENTIFIER_KEYS: Record<VaultExternalIdentifierKind, string> = {
-  ISRC: 'isrc',
-  ISWC: 'iswc',
-  UPC: 'upc',
-};
-
 /**
  * Canonicalizes an external identifier for storage and exact matching;
- * null when the value is not a valid code of the kind. ISRC reuses the
- * lineage module's canonical 12-char dashless normalization so the vault and
- * the lineage lane can never disagree about the same identifier. ISWC is
- * matched only in its canonical dashed uppercase form (same as lineage).
- * UPC is matched verbatim in its 12-digit UPC-A form.
+ * null when the value is not a valid code of the kind. Delegates to the
+ * registry's IdentifierSpec — the ONE canonicalizer every consumer shares,
+ * so the vault and the matcher can never disagree about the same
+ * identifier.
  */
 export function normalizeVaultIdentifier(
   kind: VaultExternalIdentifierKind,
   raw: string,
 ): string | null {
-  const value = raw.trim();
-  switch (kind) {
-    case 'ISRC':
-      return normalizeIsrc(value);
-    case 'ISWC': {
-      const upper = value.toUpperCase();
-      return ISWC_PATTERN.test(upper) ? upper : null;
-    }
-    case 'UPC':
-      return UPC_PATTERN.test(value) ? value : null;
-  }
+  return canonicalizeIdentifier(kind, raw);
 }
+
+/**
+ * The lowercase mapped_identifiers JSONB key each kind is stored under.
+ * Kinds the vendored engine models reuse the ENGINE's persisted field
+ * names — registration writes `eidrCanonical`/`isanHex`/`prs_tunecode`
+ * verbatim — so vault-attached and registration-written values for the
+ * same kind land under one key. Kinds the engine does not model use the
+ * lowercase kind. Compile-checked for completeness against the union.
+ */
+const VAULT_IDENTIFIER_KEYS: Record<VaultExternalIdentifierKind, string> = {
+  ISRC: 'isrc',
+  ISWC: 'iswc',
+  ISAN: 'isanHex',
+  EIDR: 'eidrCanonical',
+  DOI: 'doi',
+  UPC: 'upc',
+  EAN: 'ean',
+  ISMN: 'ismn',
+  GRID: 'grid',
+  ISBN: 'isbn',
+  ISSN: 'issn',
+  GTIN: 'gtin',
+  MLC_WORK_ID: 'mlc_work_id',
+  HFA_SONG_ID: 'hfa_song_id',
+  TUNE_CODE: 'prs_tunecode',
+  EPC_RFID: 'epc_rfid',
+};
+
+/**
+ * How the lookup boundary compares the stored JSONB value — the canonical
+ * forms' case/separator fold, applied to BOTH sides in SQL so stored
+ * legacy variants (registration wrote mapped_identifiers free-form) stay
+ * matchable without a data rewrite:
+ *   - dashless: uppercase, dashes stripped (the lineage lane's ISRC form;
+ *     ISWC joins it — see the header's ISWC divergence note)
+ *   - upper:    case-folded up, separators structural (EIDR dots/slashes,
+ *               ISMN/GRID/ISSN dashes survive)
+ *   - lower:    case-folded down (DOI and EPC URIs are lowercase-canonical)
+ */
+type LookupBoundaryFold = 'dashless' | 'upper' | 'lower';
+
+const LOOKUP_BOUNDARY_FOLD: Record<VaultExternalIdentifierKind, LookupBoundaryFold> = {
+  ISRC: 'dashless',
+  ISWC: 'dashless',
+  ISAN: 'upper',
+  EIDR: 'upper',
+  DOI: 'lower',
+  UPC: 'upper',
+  EAN: 'upper',
+  ISMN: 'upper',
+  GRID: 'upper',
+  ISBN: 'upper',
+  ISSN: 'upper',
+  GTIN: 'upper',
+  MLC_WORK_ID: 'upper',
+  HFA_SONG_ID: 'upper',
+  TUNE_CODE: 'upper',
+  EPC_RFID: 'lower',
+};
 
 export interface VaultAssetRecord {
   /** The vault's outward-facing handle — the stored cbt_assets.cvt_code. */
@@ -89,7 +163,7 @@ export interface VaultAssetRecord {
   cbtCode: string;
   title: string;
   medium: string;
-  /** The asset's external codes, keyed by lowercase kind. */
+  /** The asset's external codes, keyed by the persisted JSONB key. */
   externalIdentifiers: Record<string, string>;
   /** First UCT-carrying rights holder; null for holders registered before UCTs. */
   holderUct: string | null;
@@ -175,38 +249,54 @@ interface VaultMatchRow {
 }
 
 /**
- * The exact-match lookup per kind: the stored identifier is compared through
- * the SAME canonicalization the parser/attach path applies (ISRC uppercased
- * and dash-stripped, ISWC uppercased dashed, UPC verbatim digits), so the
- * comparison is exact identifier equality — never fuzzy, never a near-miss
- * shape scan.
+ * Folds one side of the lookup comparison — the canonical value's case/
+ * separator form for its kind, shared by the stored-side SQL expression
+ * below. Canonicalization itself already happened (the registry's); this
+ * is only the comparison fold.
  */
-const VAULT_LOOKUP_SQL: Record<VaultExternalIdentifierKind, string> = {
-  ISRC: `SELECT a.cvt_code, a.cbt_code, a.title, a.medium, a.mapped_identifiers,
+function lookupFold(kind: VaultExternalIdentifierKind, canonical: string): string {
+  switch (LOOKUP_BOUNDARY_FOLD[kind]) {
+    case 'dashless':
+      return canonical.replaceAll('-', '').toUpperCase();
+    case 'upper':
+      return canonical.toUpperCase();
+    case 'lower':
+      return canonical.toLowerCase();
+  }
+}
+
+/** The SQL expression that applies the same fold to the stored JSONB value. */
+function storedFoldSql(kind: VaultExternalIdentifierKind): string {
+  const stored = `a.mapped_identifiers->>'${VAULT_IDENTIFIER_KEYS[kind]}'`;
+  switch (LOOKUP_BOUNDARY_FOLD[kind]) {
+    case 'dashless':
+      return `UPPER(REPLACE(${stored}, '-', ''))`;
+    case 'upper':
+      return `UPPER(${stored})`;
+    case 'lower':
+      return `LOWER(${stored})`;
+  }
+}
+
+/**
+ * The exact-match lookup per kind: the stored identifier is compared
+ * through the SAME canonicalization the attach path applies (the
+ * registry's IdentifierSpec), folded identically on both sides at the
+ * lookup boundary — so the comparison is exact identifier equality that
+ * tolerates stored legacy separator/case variants without rewriting them.
+ * Never fuzzy, never a near-miss shape scan.
+ */
+const VAULT_LOOKUP_SQL = Object.fromEntries(
+  VAULT_EXTERNAL_IDENTIFIER_KINDS.map((kind) => {
+    const select = `SELECT a.cvt_code, a.cbt_code, a.title, a.medium, a.mapped_identifiers,
            (SELECT rh->>'uct'
               FROM jsonb_array_elements(a.rights_holders) AS rh
              WHERE COALESCE(rh->>'uct', '') <> ''
              LIMIT 1) AS uct
-      FROM cbt_assets a
-     WHERE UPPER(REPLACE(a.mapped_identifiers->>'isrc', '-', '')) = $1
-     LIMIT 1`,
-  ISWC: `SELECT a.cvt_code, a.cbt_code, a.title, a.medium, a.mapped_identifiers,
-           (SELECT rh->>'uct'
-              FROM jsonb_array_elements(a.rights_holders) AS rh
-             WHERE COALESCE(rh->>'uct', '') <> ''
-             LIMIT 1) AS uct
-      FROM cbt_assets a
-     WHERE UPPER(a.mapped_identifiers->>'iswc') = $1
-     LIMIT 1`,
-  UPC: `SELECT a.cvt_code, a.cbt_code, a.title, a.medium, a.mapped_identifiers,
-           (SELECT rh->>'uct'
-              FROM jsonb_array_elements(a.rights_holders) AS rh
-             WHERE COALESCE(rh->>'uct', '') <> ''
-             LIMIT 1) AS uct
-      FROM cbt_assets a
-     WHERE a.mapped_identifiers->>'upc' = $1
-     LIMIT 1`,
-};
+      FROM cbt_assets a`;
+    return [kind, `${select}\n     WHERE ${storedFoldSql(kind)} = $1\n     LIMIT 1`];
+  }),
+) as Record<VaultExternalIdentifierKind, string>;
 
 /**
  * Resolves an external identifier to its vault asset — exact match only,
@@ -215,7 +305,7 @@ const VAULT_LOOKUP_SQL: Record<VaultExternalIdentifierKind, string> = {
  * module contains no INSERT, and an unknown identifier simply finds nothing.
  */
 export async function findByIdentifier(
-  db: Db,
+  db: Db | DbClient,
   kind: VaultExternalIdentifierKind,
   value: string,
 ): Promise<VaultAssetRecord | null> {
@@ -223,7 +313,7 @@ export async function findByIdentifier(
   if (canonical === null) {
     return null; // An invalid value cannot match anything — not-found, not an error.
   }
-  const res = await db.query<VaultMatchRow>(VAULT_LOOKUP_SQL[kind], [canonical]);
+  const res = await db.query<VaultMatchRow>(VAULT_LOOKUP_SQL[kind], [lookupFold(kind, canonical)]);
   const row = res.rows[0];
   if (!row || !isNonEmpty(row.cvt_code) || !isNonEmpty(row.cbt_code)) {
     return null;
@@ -244,6 +334,19 @@ export async function findByIdentifier(
     externalIdentifiers: identifiers,
     holderUct: isNonEmpty(row.uct) ? row.uct : null,
   };
+}
+
+/** Registry drift guard: the vault kinds ARE the registry's asset kinds minus the NIL sentinel. */
+export function assertVaultKindsMatchRegistry(): void {
+  const expected = IDENTIFIER_KINDS.filter(
+    (kind) => IDENTIFIER_SPECS[kind].appliesTo === 'asset' && kind !== 'NIL',
+  );
+  const actual = VAULT_EXTERNAL_IDENTIFIER_KINDS.join(',');
+  if (actual !== expected.join(',')) {
+    throw new Error(
+      `Vault identifier kinds drifted from the registry: vault [${actual}] vs registry [${expected.join(',')}]`,
+    );
+  }
 }
 
 function isNonEmpty(value: unknown): value is string {
