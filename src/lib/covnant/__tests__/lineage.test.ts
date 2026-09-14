@@ -85,27 +85,50 @@ describe('parseExternalReferences — ISRC forms', () => {
 });
 
 describe('parseExternalReferences — ISWC', () => {
-  it('parses the canonical ISWC form (T-<10 digits>-<1 check digit>)', () => {
+  it('parses the canonical ISWC form (registry ISO 15707: T-<9 digits>-<1 check digit>)', () => {
     const refs = parseExternalReferences({
-      unstructured_remittance_information: 'Pub royalty T-0123456789-9 settlement',
+      unstructured_remittance_information: 'Pub royalty T-012345678-9 settlement',
     });
-    expect(refs).toContainEqual({ kind: 'ISWC', value: 'T-0123456789-9', raw: 'T-0123456789-9' });
+    expect(refs).toContainEqual({ kind: 'ISWC', value: 'T-012345678-9', raw: 'T-012345678-9' });
+  });
+
+  it('parses case-insensitive dashed variants to the same canonical value', () => {
+    const refs = parseExternalReferences({
+      unstructured_remittance_information: 'pub royalty t-012345678-9 settlement',
+    });
+    expect(refs).toEqual([{ kind: 'ISWC', value: 'T-012345678-9', raw: 't-012345678-9' }]);
+  });
+
+  it('dedupes case variants of the same ISWC to one reference (first raw wins)', () => {
+    const refs = parseExternalReferences({
+      unstructured_remittance_information: 'T-012345678-9 again t-012345678-9',
+    });
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({ kind: 'ISWC', value: 'T-012345678-9', raw: 'T-012345678-9' });
   });
 
   it('collects ISRC and ISWC together from one memo', () => {
     const refs = parseExternalReferences({
-      unstructured_remittance_information: 'ISRC:US-S1M-26-77777 T-0123456789-9',
+      unstructured_remittance_information: 'ISRC:US-S1M-26-77777 T-012345678-9',
     });
     expect(refs.map((r) => `${r.kind}:${r.value}`)).toEqual([
       'ISRC:USS1M2677777',
-      'ISWC:T-0123456789-9',
+      'ISWC:T-012345678-9',
     ]);
   });
 
-  it('rejects malformed ISWC look-alikes (9 or 11 middle digits)', () => {
+  it('rejects malformed ISWC look-alikes (8 or 11 middle digits)', () => {
     expect(
       parseExternalReferences({
-        unstructured_remittance_information: 'T-012345678-9 X T-01234567890-9',
+        unstructured_remittance_information: 'T-01234567-8 X T-01234567890-9',
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects the legacy ten-digit ISWC form — canonicalization is not repair', () => {
+    expect(
+      parseExternalReferences({
+        unstructured_remittance_information: 'Pub royalty T-0123456789-9 settlement',
       }),
     ).toEqual([]);
   });
