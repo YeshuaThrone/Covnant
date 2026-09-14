@@ -4,7 +4,11 @@ import path from 'path';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'covnant-sdk/**/*.test.ts',
+    ],
   },
   // The app targets the automatic JSX runtime (Next); component tests render
   // .tsx server components, so keep vitest's esbuild transform aligned
