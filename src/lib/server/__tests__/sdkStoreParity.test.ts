@@ -48,13 +48,25 @@ const UNIQUE_COLUMNS: Record<string, string[]> = {
   match_queue: ['event_id'],
 };
 
+/** Tables whose migration defines the insertion_order identity column. */
+const INSERTION_ORDER_TABLES = new Set([
+  'mul_clearance_transitions',
+  'match_queue',
+  'statement_ingests',
+]);
+
 class FakeTable {
   private rows: Row[] = [];
   private nextInsertionOrder = 1;
 
+  constructor(private readonly tableName: string) {}
+
   /** Assigns the identity column so the store's toRecord projection is real. */
   insert(row: Row): Row {
-    const stored = { ...row, insertion_order: this.nextInsertionOrder++ };
+    const stored =
+      INSERTION_ORDER_TABLES.has(this.tableName) ?
+        { ...row, insertion_order: this.nextInsertionOrder++ }
+      : { ...row };
     this.rows.push(stored);
     return stored;
   }
@@ -100,6 +112,7 @@ class FakeQueryBuilder {
   private filters: Array<[string, unknown]> = [];
   private orders: Array<[string, boolean]> = [];
   private limitCount: number | null = null;
+  private single = false;
   private operation:
     | { kind: 'insert'; row: Row }
     | { kind: 'upsert'; row: Row; conflictColumn: string }
@@ -145,8 +158,9 @@ class FakeQueryBuilder {
     return this;
   }
 
-  /** Single-row result mode — a no-op flag: one()/oneStrict() shape the row. */
+  /** Single-row result mode — resolved in execute(): row or data:null. */
   maybeSingle(): this {
+    this.single = true;
     return this;
   }
 
@@ -194,6 +208,11 @@ class FakeQueryBuilder {
     }
     const rows = this.sorted(this.table.select().filter((row) => this.matches(row)));
     const limited = this.limitCount === null ? rows : rows.slice(0, this.limitCount);
+    // Real client: .maybeSingle() resolves to the row itself, or data:null
+    // when nothing matched — never an array. one()/oneStrict() rely on it.
+    if (this.single) {
+      return { data: limited[0] ?? null, error: null };
+    }
     return { data: limited, error: null };
   }
 }
@@ -208,7 +227,7 @@ class FakeSupabaseClient {
   from(table: string): FakeQueryBuilder {
     let t = this.tables.get(table);
     if (t === undefined) {
-      t = new FakeTable();
+      t = new FakeTable(table);
       this.tables.set(table, t);
     }
     return new FakeQueryBuilder(t, table);
