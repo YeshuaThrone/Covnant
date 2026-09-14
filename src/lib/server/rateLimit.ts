@@ -35,6 +35,14 @@ export const ADMIN_LOGIN_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_
  */
 export const DON_API_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
 
+/**
+ * Admin API surface beyond sign-in (vault identifier attach/lookup): 30
+ * requests per client address per minute — the Don surface's window, keyed
+ * behind the admin gate so the limiter guards the data write, not the
+ * secret.
+ */
+export const ADMIN_API_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
+
 export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 type Bucket = { count: number; windowStart: number };
