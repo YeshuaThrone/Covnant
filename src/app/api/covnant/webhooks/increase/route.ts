@@ -120,6 +120,7 @@ import { getDb, type Db } from '@/lib/db';
 import {
   buildLineageMetadata,
   parseExternalReferences,
+  type ExternalReference,
   type ExternalReferenceKind,
 } from '@/lib/covnant/lineage';
 import { withCbtSettlementCode } from '@/lib/ledger/cbt-settlement';
@@ -380,11 +381,14 @@ interface LedgerInsert {
 
 /**
  * The exact-match lineage lookup per reference kind: the stored asset-level
- * external identifier is normalized with the SAME canonicalization the
- * parser applies (uppercase, dash-stripped), so the comparison is exact
- * identifier equality — never fuzzy. Resolves the matched asset's CBT code
- * plus its first UCT-carrying rights holder (holders registered before
- * UCTs carry none — the uct key is then omitted gracefully).
+ * external identifier is compared through the SAME lookup-boundary fold the
+ * inbound reference value receives (lineageLookupFold below — uppercase,
+ * dash-stripped), so the comparison is exact identifier equality — never
+ * fuzzy. This is vault.ts's two-sided fold posture: stored legacy
+ * case/separator variants stay matchable without rewriting historical
+ * data. Resolves the matched asset's CBT code plus its first UCT-carrying
+ * rights holder (holders registered before UCTs carry none — the uct key
+ * is then omitted gracefully).
  */
 const LINEAGE_LOOKUP_SQL: Record<ExternalReferenceKind, string> = {
   ISRC: `SELECT a.cbt_code,
@@ -404,6 +408,21 @@ const LINEAGE_LOOKUP_SQL: Record<ExternalReferenceKind, string> = {
      WHERE UPPER(REPLACE(a.mapped_identifiers->>'iswc', '-', '')) = $1
      LIMIT 1`,
 };
+
+/**
+ * The lookup-boundary comparison fold for one parsed reference value. The
+ * parser emits the registry's canonical forms (ISRC: 12-char dashless —
+ * the fold is an identity there; ISWC: the dashed ISO 15707 form
+ * `T-<9 digits>-<check>`), and the SQL above folds the STORED side with
+ * the same case/separator normalization (UPPER + dash-strip), so the
+ * inbound side folds identically here — vault.ts's lookup-fold pattern,
+ * mirrored. If the lineage lane ever grows a kind whose separators are
+ * structural (EIDR, ISSN…), this becomes a per-kind fold table like the
+ * vault's LOOKUP_BOUNDARY_FOLD; both current kinds fold dashless.
+ */
+function lineageLookupFold(reference: ExternalReference): string {
+  return reference.value.replaceAll('-', '').toUpperCase();
+}
 
 /**
  * The provenance payload written alongside every royalty movement (plain
@@ -575,7 +594,10 @@ async function buildLineageMetadataInTx(
   }
   let match: { assetCode: string; uct: string | null } | null = null;
   for (const reference of references) {
-    const res = await tx.query<LineageMatchRow>(LINEAGE_LOOKUP_SQL[reference.kind], [reference.value]);
+    const res = await tx.query<LineageMatchRow>(
+      LINEAGE_LOOKUP_SQL[reference.kind],
+      [lineageLookupFold(reference)],
+    );
     const row = res.rows[0];
     if (row && isNonEmptyString(row.cbt_code)) {
       match = { assetCode: row.cbt_code, uct: isNonEmptyString(row.uct) ? row.uct : null };

@@ -138,6 +138,11 @@ interface QueryCall {
   params: unknown[] | undefined;
 }
 
+/** The two-sided comparison fold: uppercase + dash-strip (the SQL's fold). */
+function lineageComparisonFold(value: string): string {
+  return value.replaceAll('-', '').toUpperCase();
+}
+
 interface LedgerRow {
   rights_holder_id: string;
   amount_cents: string;
@@ -149,7 +154,11 @@ interface LedgerRow {
  * Ledger-backed fake with lineage awareness — the PR #26 fake plus:
  *  - holder resolution via the payoutRouting path (matched FIRST: the
  *    lineage lookup's UCT subquery also contains jsonb_array_elements),
- *  - the exact-match lineage lookup keyed by the canonical value,
+ *  - the exact-match lineage lookup comparing the FOLD of each stored
+ *    variant against the FOLD of the bound parameter (the real SQL's
+ *    `UPPER(REPLACE(stored, '-', '')) = $1` — keys in lineageByValue are
+ *    RAW STORED forms: dashed, dashless, or lowercased legacy variants
+ *    all stay matchable, which is the point),
  *  - capture of the full metadata param (index 4, JSON) of each insert.
  */
 function lineageBackedDb(
@@ -168,7 +177,14 @@ function lineageBackedDb(
       return Promise.resolve({ rows: [{ rights_holder_id: HOLDER_ID }] });
     }
     if (sql.includes("mapped_identifiers->>'")) {
-      const match = options.lineageByValue?.[String(params?.[0])] ?? null;
+      // The comparison fold the real SQL applies to BOTH sides: uppercase
+      // + dash-strip. The route must bind a value that equals the fold of
+      // the stored variant — never the raw dashed form.
+      const bound = lineageComparisonFold(String(params?.[0] ?? ''));
+      const storedEntry = Object.entries(options.lineageByValue ?? {}).find(
+        ([stored]) => lineageComparisonFold(stored) === bound,
+      );
+      const match = storedEntry?.[1] ?? null;
       return Promise.resolve(
         match ? { rows: [{ cbt_code: match.cbt_code, uct: match.uct }] } : { rows: [] },
       );
@@ -257,15 +273,17 @@ describe('W1 — registered ISRC memo: credited once + exact lineage with assetC
     expect(Number.isNaN(Date.parse(String(lineage?.parsedAt)))).toBe(false);
   });
 
-  it('resolves via ISWC when the memo carries a work identifier', async () => {
-    const { db, insertedMetadata } = lineageBackedDb({
+  it('resolves ISWC lineage across mixed forms — lowercase dashed memo vs dashless stored variant', async () => {
+    const { db, insertedMetadata, txQueries } = lineageBackedDb({
       lineageByValue: {
-        'T-0123456789-9': { cbt_code: REGISTERED_ASSET_CODE, uct: REGISTERED_UCT },
+        // A historical stored variant: dashless, free-form written. Never
+        // rewritten — the lookup fold reconciles it.
+        T0123456789: { cbt_code: REGISTERED_ASSET_CODE, uct: REGISTERED_UCT },
       },
     });
     mockGetDb.mockReturnValue(db as never);
     stubTransferFetch(
-      wireTransferObject({ unstructured_remittance_information: 'Pub royalty T-0123456789-9' }),
+      wireTransferObject({ unstructured_remittance_information: 'Pub royalty t-012345678-9' }),
     );
     const res = await POST(
       signedRequest(eventEnvelope('inbound_wire_transfer.created', WIRE_TRANSFER_ID)),
@@ -276,8 +294,56 @@ describe('W1 — registered ISRC memo: credited once + exact lineage with assetC
       resolution: 'exact',
       assetCode: REGISTERED_ASSET_CODE,
       uct: REGISTERED_UCT,
-      references: [{ kind: 'ISWC', value: 'T-0123456789-9', raw: 'T-0123456789-9' }],
+      references: [{ kind: 'ISWC', value: 'T-012345678-9', raw: 't-012345678-9' }],
     });
+    // The regression pin: the bound comparison key is the FOLD of the
+    // canonical ISWC — the same fold the SQL applies to the stored side.
+    // The PR #60 defect bound the DASHED canonical value raw against a
+    // dash-stripped stored fold, which can never be equal.
+    const iswcLookup = txQueries.find((q) => q.sql.includes("mapped_identifiers->>'iswc'"));
+    expect(iswcLookup?.params?.[0]).toBe('T0123456789');
+  });
+
+  it('resolves ISWC lineage with the stored variant lowercase dashed and the memo canonical', async () => {
+    const { db, insertedMetadata } = lineageBackedDb({
+      lineageByValue: {
+        't-012345678-9': { cbt_code: REGISTERED_ASSET_CODE, uct: REGISTERED_UCT },
+      },
+    });
+    mockGetDb.mockReturnValue(db as never);
+    stubTransferFetch(
+      wireTransferObject({ unstructured_remittance_information: 'Pub royalty T-012345678-9' }),
+    );
+    const res = await POST(
+      signedRequest(eventEnvelope('inbound_wire_transfer.created', WIRE_TRANSFER_ID)),
+    );
+    expect(res.status).toBe(200);
+    const lineage = insertedMetadata[0]?.lineage as Record<string, unknown> | undefined;
+    expect(lineage).toMatchObject({
+      resolution: 'exact',
+      assetCode: REGISTERED_ASSET_CODE,
+      uct: REGISTERED_UCT,
+      references: [{ kind: 'ISWC', value: 'T-012345678-9', raw: 'T-012345678-9' }],
+    });
+  });
+
+  it('writes no lineage for the legacy ten-digit ISWC — rejected by the registry, never half-matched', async () => {
+    const { db, ledgerRows, insertedMetadata, txQueries } = lineageBackedDb({
+      lineageByValue: {
+        T0123456789: { cbt_code: REGISTERED_ASSET_CODE, uct: REGISTERED_UCT },
+      },
+    });
+    mockGetDb.mockReturnValue(db as never);
+    stubTransferFetch(
+      wireTransferObject({ unstructured_remittance_information: 'Pub royalty T-0123456789-9' }),
+    );
+    const res = await POST(
+      signedRequest(eventEnvelope('inbound_wire_transfer.created', WIRE_TRANSFER_ID)),
+    );
+    expect(res.status).toBe(200);
+    expect(ledgerRows).toHaveLength(1); // the credit stands
+    expect('lineage' in insertedMetadata[0]).toBe(false); // no parseable reference at all
+    expect(txQueries.some((q) => q.sql.includes("mapped_identifiers->>'iswc'"))).toBe(false);
   });
 });
 
@@ -424,7 +490,7 @@ describe('W6 — lineage merge preserves existing provenance keys', () => {
     mockGetDb.mockReturnValue(db as never);
     stubTransferFetch(
       wireTransferObject({
-        unstructured_remittance_information: 'DISTRO payout ISRC:US-S1M-26-77777 T-0123456789-9',
+        unstructured_remittance_information: 'DISTRO payout ISRC:US-S1M-26-77777 T-012345678-9',
       }),
     );
 
@@ -445,7 +511,7 @@ describe('W6 — lineage merge preserves existing provenance keys', () => {
       uetr: '9a21e10a-7600-4a24-8ff3-2cbc5943c27a',
       imad: '20220118MMQFMP0P000001',
       instructionIdentification: '202201180000001',
-      remittanceInformation: 'DISTRO payout ISRC:US-S1M-26-77777 T-0123456789-9',
+      remittanceInformation: 'DISTRO payout ISRC:US-S1M-26-77777 T-012345678-9',
       senderAccountNumber: '987654321',
       senderRoutingNumber: '101050001',
     });
@@ -457,7 +523,7 @@ describe('W6 — lineage merge preserves existing provenance keys', () => {
       uct: REGISTERED_UCT,
       references: [
         { kind: 'ISRC', value: REGISTERED_ISRC, raw: 'ISRC:US-S1M-26-77777' },
-        { kind: 'ISWC', value: 'T-0123456789-9', raw: 'T-0123456789-9' },
+        { kind: 'ISWC', value: 'T-012345678-9', raw: 'T-012345678-9' },
       ],
     });
   });

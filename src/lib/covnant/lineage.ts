@@ -14,12 +14,18 @@
  * Pure module: no DB, no IO. The route owns the lookup and the savepoint.
  */
 
+import { canonicalizeIdentifier } from '../../../covnant-sdk/src/contracts/identifiers';
+
 /** The reference kinds the parser recognizes (ISRC minimum per the spec). */
 export type ExternalReferenceKind = 'ISRC' | 'ISWC';
 
 export interface ExternalReference {
   kind: ExternalReferenceKind;
-  /** Canonical identifier value — the exact-match key (ISRC: 12-char dashless). */
+  /**
+   * Canonical identifier value — the exact-match key (ISRC: 12-char
+   * dashless; ISWC: the registry's dashed ISO 15707 form
+   * `T-<9 digits>-<check>`).
+   */
   value: string;
   /** The exact matched substring from the source text, prefix included. */
   raw: string;
@@ -41,10 +47,13 @@ export interface LedgerLineage {
 const ISRC_CANONICAL_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{2}\d{5}$/;
 
 /**
- * Canonical ISWC: T-<10 digits>-<1 check digit>. Matched only in its
- * canonical dashed form — ISWCs in free text are always dashed.
+ * ISWC candidates in memo text: the dashed `T-<work digits>-<check digit>`
+ * shape, scanned case-insensitively. The work-digit window is deliberately
+ * wider than one standard (8–12) so legacy-shaped tokens are CAPTURED and
+ * then decided by the registry's singular canonicalizer — never repaired
+ * to fit it.
  */
-const ISWC_PATTERN = /\b(T-\d{10}-\d)\b/g;
+const ISWC_CANDIDATE_PATTERN = /\b(T-\d{8,12}-\d)\b/gi;
 
 /**
  * ISRC shapes in memo text, tried in order so the raw capture includes the
@@ -93,10 +102,15 @@ function parseIsrcs(text: string, into: Map<string, ExternalReference>): void {
 
 /** Case-insensitive ISWC scan of one text — canonical values, first raw wins. */
 function parseIswcs(text: string, into: Map<string, ExternalReference>): void {
-  for (const match of text.matchAll(ISWC_PATTERN)) {
+  ISWC_CANDIDATE_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(ISWC_CANDIDATE_PATTERN)) {
     const raw = match[1];
-    const value = match[1].toUpperCase();
-    if (!into.has(value)) {
+    // The registry's singular ISWC canonicalizer decides: the dashed ISO
+    // 15707 form (T-<9 digits>-<check>, case-folded) or null — the legacy
+    // ten-work-digit vault shape is captured above and rejected here, the
+    // same not-found posture vault.ts's findByIdentifier takes.
+    const value = canonicalizeIdentifier('ISWC', match[1]);
+    if (value && !into.has(value)) {
       into.set(value, { kind: 'ISWC', value, raw });
     }
   }
