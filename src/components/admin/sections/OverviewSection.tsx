@@ -6,7 +6,7 @@
  */
 
 import { AuditRunner } from '@/components/vault/AuditRunner';
-import { allowlistsSummary } from '@/lib/admin/overview';
+import { allowlistsSummary } from '@/lib/admin/overviewShared';
 import { formatChangeValue } from '@/lib/admin/console';
 import type { AdminConsoleData, ContractRow } from '../types';
 import { SectionEyebrow } from '../shared';

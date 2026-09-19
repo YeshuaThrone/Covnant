@@ -78,6 +78,7 @@ describe('GET /api/v1/dashboard — failure-code mapping', () => {
       },
       ledger: [],
       payouts: [],
+      revenue_streams: [],
       readiness: {
         kyc_status: 'APPROVED',
         tin_verified: 1,

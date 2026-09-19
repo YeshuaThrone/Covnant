@@ -75,27 +75,32 @@ test('membership plans render as static marketing with no payment rails', async 
   await expect(page.locator('form')).toHaveCount(0);
 });
 
-test('settings persists workspace preferences locally and survives a reload', async ({
+test('settings renders real account facts with fiat-only currency and honest unavailable states', async ({
   page,
 }) => {
   await page.goto('/settings');
 
-  const currency = page.getByTestId('display-currency');
-  await expect(currency).toBeEnabled();
-  await currency.selectOption('EUR');
+  // Profile — real session/seeded facts, not browser-local preferences.
+  await expect(page.getByTestId('settings-profile')).toBeVisible();
+  await expect(page.getByTestId('settings-stage-name')).toContainText('Yeshua Throne');
+  await expect(page.getByTestId('settings-kyc')).toBeVisible();
+  await expect(page.getByTestId('settings-provisioning')).toBeVisible();
 
-  const codeDisplay = page.getByTestId('code-display');
-  await codeDisplay.selectOption('MASKED');
-  await expect(page.getByRole('status')).toContainText('Saved in this browser');
+  // Payout account — the real link state.
+  await expect(page.getByTestId('settings-bank-status')).toBeVisible();
 
-  const stored = await page.evaluate(() =>
-    window.localStorage.getItem('covnant.settings.v1'),
+  // Currency is fiat-only: USD, with no currency selector at all.
+  await expect(page.getByTestId('settings-currency-value')).toHaveText('USD');
+  await expect(page.getByTestId('settings-currency-note')).toContainText('fiat only');
+  await expect(page.getByTestId('display-currency')).toHaveCount(0);
+
+  // Notifications and security have no backing store — honest disclosures,
+  // no fake toggles or forms.
+  await expect(page.getByTestId('settings-notifications-note')).toContainText(
+    'not available yet',
   );
-  expect(stored).toBeTruthy();
-  expect(stored!).toContain('"displayCurrency":"EUR"');
-  expect(stored!).toContain('"codeDisplay":"MASKED"');
-
-  await page.reload();
-  await expect(page.getByTestId('display-currency')).toHaveValue('EUR');
-  await expect(page.getByTestId('code-display')).toHaveValue('MASKED');
+  await expect(page.getByTestId('settings-security-note')).toContainText(
+    'not available yet',
+  );
+  await expect(page.locator('form')).toHaveCount(0);
 });

@@ -39,6 +39,19 @@ import type { SyncLicensePurchaseRequest } from '../../../covnant-sdk/src/contra
  */
 export const SYNC_TIER_WEIGHTS = [5000n, 3500n, 1500n] as const;
 
+/**
+ * The locked Universal 50/35/15 structure, echoed in every sync-license
+ * 201 response. Lives beside SYNC_TIER_WEIGHTS (its single source) — route
+ * files may only export handlers and route config, so the constant cannot
+ * be exported from the register route itself.
+ */
+export const LOCKED_SYNC_SPLITS = {
+  tier1OwnershipBps: Number(SYNC_TIER_WEIGHTS[0] ?? 0n),
+  tier2CreativeBps: Number(SYNC_TIER_WEIGHTS[1] ?? 0n),
+  tier3ProductionBps: Number(SYNC_TIER_WEIGHTS[2] ?? 0n),
+} as const;
+
+
 /** The asset-sheet pool backing each tier, index-aligned with SYNC_TIER_WEIGHTS. */
 const TIER_POOLS = ['MASTER_RECORDING', 'WRITER_COMPOSITION', 'PUBLISHER_ADMIN'] as const;
 

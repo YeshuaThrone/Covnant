@@ -13,7 +13,6 @@
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
 import type { HolderYtd, LedgerRow, LedgerTotals } from '@/lib/ledger/store';
 import { holderStatsFrom, totalsFrom } from '@/lib/ledger/store';
-import type { AdminAllowlistRow } from './allowlists';
 import type { StoredContract } from '@/lib/contracts/store';
 
 export type ProvisioningStatus = 'PROVISIONED' | 'PENDING';
@@ -105,13 +104,7 @@ export function contractsSummary(contracts: StoredContract[]): ContractsSummary 
   return { total: contracts.length, byStatus };
 }
 
-export interface AllowlistsSummary {
-  total: number;
-  byStatus: { ACTIVE: number; REVOKED: number };
-}
+// Client-safe folds live in overviewShared — the server aggregation module
+// re-exports them so API routes and tests keep one canonical import path.
+export { allowlistsSummary, type AllowlistsSummary } from './overviewShared';
 
-export function allowlistsSummary(rows: AdminAllowlistRow[]): AllowlistsSummary {
-  const byStatus: AllowlistsSummary['byStatus'] = { ACTIVE: 0, REVOKED: 0 };
-  for (const row of rows) byStatus[row.status] += 1;
-  return { total: rows.length, byStatus };
-}

@@ -1314,19 +1314,16 @@ test('the Obsidian shell carries the full sidebar and every workspace route reso
 }) => {
   await page.goto('/dashboard');
 
-  // Fixed sidebar with the nine workspace destinations.
+  // Fixed sidebar with the five creator destinations (Creator UI Layout
+  // Contract — five-tab trim; Admin lives in the page-header pill, not nav).
   const sidebar = page.locator('aside[data-shell="sidebar"]');
   await expect(sidebar).toBeVisible();
   for (const label of [
     'Gold Board',
-    'Catalog',
-    'Contracts',
-    'Templates',
-    'Ownership Ledger',
-    'Vault',
-    'Pricing',
+    'Covnant ID',
+    'Virtual Card',
+    'Sync License',
     'Settings',
-    'Admin',
   ]) {
     await expect(sidebar.getByRole('link', { name: label })).toBeVisible();
   }
@@ -1334,14 +1331,10 @@ test('the Obsidian shell carries the full sidebar and every workspace route reso
   // Every nav destination resolves — real views or declared stubs.
   for (const route of [
     '/dashboard',
-    '/catalog',
-    '/contracts',
-    '/templates',
-    '/ledger',
-    '/vault',
-    '/pricing',
+    '/covnant-id',
+    '/virtual-card',
+    '/sync-license',
     '/settings',
-    '/admin',
   ]) {
     const res = await request.get(route);
     expect(res.status(), `route ${route}`).toBe(200);

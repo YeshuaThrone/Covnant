@@ -1,186 +1,171 @@
-'use client';
-
 /**
- * /settings — workspace preferences (directive §5).
+ * /settings — the fiat-only Settings rebuild (Creator UI Layout Contract
+ * G-directive).
  *
- * Client-side only: preferences live in this browser's localStorage
- * (key `covnant.settings.v1`) — no auth changes, no server writes, no API
- * calls. The surface restores after hydration to avoid a server/client
- * mismatch, and surfaces an honest error if storage is unavailable
- * (private mode, quota) instead of swallowing it.
+ * Renders only REAL account facts from the session resolution: the stage
+ * name, KYC status, provisioning status, and payout-account link state.
+ * Currency is fiat-only — the platform settles in USD, and no other
+ * currency (fiat or otherwise) is offered. Notifications and additional
+ * security controls have no backing store in this build, so they render
+ * honest "not available yet" disclosures instead of fake toggles — the
+ * honesty law: nothing is invented, nothing pretends to save.
  */
 
-import { useEffect, useState } from 'react';
-import { CURRENCY_DECIMALS } from '@/lib/ledger/currency-precision';
+import type { Metadata } from 'next';
 
-const STORAGE_KEY = 'covnant.settings.v1';
+import { HeaderActions } from '@/components/workspace/HeaderActions';
+import {
+  loadCreatorPageContext,
+  storeForContext,
+} from '@/lib/server/creatorPages';
 
-type CodeDisplay = 'FULL' | 'MASKED';
+export const dynamic = 'force-dynamic';
 
-interface WorkspacePreferences {
-  displayCurrency: string;
-  codeDisplay: CodeDisplay;
-}
-
-const DEFAULTS: WorkspacePreferences = {
-  displayCurrency: 'USD',
-  codeDisplay: 'FULL',
+export const metadata: Metadata = {
+  title: 'Settings — Covnant',
+  description:
+    'Your workspace settings — real account facts, fiat-only currency, and honest states for what is not available yet.',
 };
 
-const CURRENCIES = Object.keys(CURRENCY_DECIMALS).sort();
+function SectionCard({
+  testId,
+  title,
+  children,
+}: {
+  testId: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      data-testid={testId}
+      aria-label={title}
+      className="glass-card p-6"
+    >
+      <h2 className="font-display text-lg font-semibold text-slate-100">{title}</h2>
+      <div className="mt-4 divide-y divide-slate-700/40">{children}</div>
+    </section>
+  );
+}
 
-function loadPreferences(): WorkspacePreferences | { error: string } {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULTS;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return DEFAULTS;
-    const record = parsed as Record<string, unknown>;
-    return {
-      displayCurrency:
-        typeof record.displayCurrency === 'string' && CURRENCIES.includes(record.displayCurrency)
-          ? record.displayCurrency
-          : DEFAULTS.displayCurrency,
-      codeDisplay: record.codeDisplay === 'MASKED' ? 'MASKED' : 'FULL',
-    };
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Preferences could not be read.',
-    };
+function FactRow({ label, value, valueTestId }: {
+  label: string;
+  value: string;
+  valueTestId: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5">
+      <span className="text-sm text-slate-300">{label}</span>
+      <span
+        data-testid={valueTestId}
+        className="font-mono text-sm text-slate-100"
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+export default async function SettingsPage() {
+  const context = await loadCreatorPageContext();
+
+  if (context === null) {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-4 py-8 md:px-6 md:py-10">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold-champagne">Settings</p>
+        <h1 className="mt-2 text-3xl font-semibold text-slate-100 md:text-4xl">
+          Sign in to view your settings
+        </h1>
+        <p className="mt-3 text-sm text-slate-400">
+          Your workspace settings live behind your sign-in.
+        </p>
+      </main>
+    );
   }
-}
 
-function savePreferences(prefs: WorkspacePreferences): string | null {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
-    return null;
-  } catch (error) {
-    return error instanceof Error
-      ? error.message
-      : 'Preferences could not be saved in this browser.';
-  }
-}
-
-function maskCode(code: string): string {
-  if (code.length <= 8) return code;
-  return `${code.slice(0, 4)}····${code.slice(-4)}`;
-}
-
-export default function SettingsPage() {
-  const [hydrated, setHydrated] = useState(false);
-  const [prefs, setPrefs] = useState<WorkspacePreferences>(DEFAULTS);
-  const [storageError, setStorageError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    const result = loadPreferences();
-    if ('error' in result) {
-      setStorageError(result.error);
-    } else {
-      setPrefs(result);
-    }
-    setHydrated(true);
-  }, []);
-
-  const update = (next: WorkspacePreferences) => {
-    setPrefs(next);
-    const error = savePreferences(next);
-    setStorageError(error);
-    if (!error) setSavedAt(Date.now());
-  };
-
-  const sampleCode = 'CBT-TRK-4A3F2879BD05';
+  const { creator, demo } = context;
+  const store = await storeForContext(context);
+  const uct = await store.getCreatorUct(creator.payee_id);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Settings</p>
-      <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">Workspace Settings</h1>
-      <p className="mt-3 max-w-2xl text-sm text-white/60">
-        Display preferences for this browser. They are stored locally on your device —
-        no account is touched and nothing is written to the server.
-      </p>
-      <div className="gold-rule my-8" />
-
-      {storageError && (
-        <p
-          role="alert"
-          className="mb-6 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-300"
-        >
-          Preferences are unavailable in this session: {storageError}
-        </p>
-      )}
-
-      <div className="glass-card p-6">
-        <h2 className="text-lg font-semibold text-white">Display</h2>
-
-        <div className="mt-5 grid gap-5">
-          <label className="block">
-            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
-              Display currency
-            </span>
-            <select
-              value={prefs.displayCurrency}
-              onChange={(e) => update({ ...prefs, displayCurrency: e.target.value })}
-              disabled={!hydrated}
-              className="mt-2 block w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white focus:border-gold/60 focus:outline-none"
-              data-testid="display-currency"
-            >
-              {CURRENCIES.map((currency) => (
-                <option key={currency} value={currency}>
-                  {currency}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block text-xs text-white/40">
-              Used wherever a single display currency is offered; the ledger always reports
-              per settlement currency.
-            </span>
-          </label>
-
-          <label className="block">
-            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">
-              Code display format
-            </span>
-            <select
-              value={prefs.codeDisplay}
-              onChange={(e) =>
-                update({ ...prefs, codeDisplay: e.target.value as CodeDisplay })
-              }
-              disabled={!hydrated}
-              className="mt-2 block w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white focus:border-gold/60 focus:outline-none"
-              data-testid="code-display"
-            >
-              <option value="FULL">Full — CBT-TRK-4A3F2879BD05</option>
-              <option value="MASKED">Masked — CBT-····BD05</option>
-            </select>
-            <span className="mt-1 block text-xs text-white/40">
-              Sample: <code className="font-mono text-gold">{sampleCode}</code> →{' '}
-              <code className="font-mono text-gold-champagne">
-                {prefs.codeDisplay === 'MASKED' ? maskCode(sampleCode) : sampleCode}
-              </code>
-            </span>
-          </label>
-        </div>
-
-        <p className="mt-6 text-xs text-white/40" role="status" aria-live="polite">
-          {!hydrated
-            ? 'Restoring your preferences…'
-            : storageError
-              ? 'Changes are not being saved — see the error above.'
-              : savedAt
-                ? 'Saved in this browser just now.'
-                : 'Stored locally in this browser only.'}
-        </p>
+    <main className="mx-auto w-full max-w-3xl px-4 py-8 md:px-6 md:py-10">
+      <div
+        data-testid="settings-header"
+        className="flex items-center justify-between gap-2.5"
+      >
+        <span className="font-mono text-xs tracking-[0.35em] text-gold-champagne">
+          SETTINGS
+        </span>
+        <HeaderActions demo={demo} />
       </div>
 
-      <button
-        type="button"
-        onClick={() => update(DEFAULTS)}
-        disabled={!hydrated}
-        className="mt-6 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/60 transition hover:border-gold/50 hover:text-gold disabled:opacity-50"
+      <h1
+        data-testid="settings-title"
+        className="mt-6 text-4xl font-bold tracking-tight text-slate-100 md:text-5xl"
       >
-        Reset to defaults
-      </button>
+        <span className="bg-gradient-to-r from-gold-champagne via-emerald-200 to-gold bg-clip-text text-transparent">
+          Settings
+        </span>
+      </h1>
+      <p className="mt-2 max-w-2xl text-sm text-slate-400">
+        Your workspace account. Everything here reads your real account state —
+        nothing on this page is stored in your browser or invented.
+      </p>
+
+      <div className="gold-rule my-6 md:my-8" />
+
+      <div className="space-y-5">
+        <SectionCard testId="settings-profile" title="Profile">
+          <FactRow label="Creator" value={creator.stage_name} valueTestId="settings-stage-name" />
+          <FactRow label="Covnant ID" value={uct?.uctNumber ?? 'Not issued'} valueTestId="settings-uct" />
+          <FactRow label="Identity verification" value={creator.kyc_status} valueTestId="settings-kyc" />
+          <FactRow label="Provisioning" value={creator.provisioning_status} valueTestId="settings-provisioning" />
+        </SectionCard>
+
+        <SectionCard testId="settings-payouts" title="Payout account">
+          <FactRow
+            label="Payout account"
+            value={creator.bank_account_linked ? 'Linked' : 'Not linked'}
+            valueTestId="settings-bank-status"
+          />
+          <p className="py-2.5 text-xs leading-relaxed text-slate-500" data-testid="settings-payout-note">
+            {creator.bank_account_linked
+              ? 'Payouts settle from your sovereign vault to your linked payout account on the sandbox rail.'
+              : 'Link a payout account to receive vault payouts. Until one is linked, settled amounts remain in your vault.'}
+          </p>
+        </SectionCard>
+
+        <SectionCard testId="settings-currency" title="Currency">
+          <FactRow label="Settlement currency" value="USD" valueTestId="settings-currency-value" />
+          <p className="py-2.5 text-xs leading-relaxed text-slate-500" data-testid="settings-currency-note">
+            Covnant settles in USD — fiat only. Amounts across the workspace are
+            integer cents, rendered as dollars and cents. Additional currencies
+            are not supported yet.
+          </p>
+        </SectionCard>
+
+        <SectionCard testId="settings-notifications" title="Notifications">
+          <p className="py-2.5 text-xs leading-relaxed text-slate-500" data-testid="settings-notifications-note">
+            Notification preferences are not available yet. When they arrive,
+            they will be managed here — no placeholder switches in the meantime.
+          </p>
+        </SectionCard>
+
+        <SectionCard testId="settings-security" title="Security">
+          <p className="py-2.5 text-xs leading-relaxed text-slate-500" data-testid="settings-security-note">
+            Your workspace session is carried by your sign-in cookies. Additional
+            security controls (two-factor authentication, device management) are
+            not available yet and will appear here when they ship.
+          </p>
+        </SectionCard>
+      </div>
+
+      {demo && (
+        <p className="mt-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-xs leading-relaxed text-amber-200" data-testid="settings-demo-note">
+          This is the demo persona&apos;s settings — the seeded preview state. No
+          real holder&apos;s account is shown.
+        </p>
+      )}
     </main>
   );
 }

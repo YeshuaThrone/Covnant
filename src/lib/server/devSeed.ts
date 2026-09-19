@@ -36,7 +36,7 @@
  * loudly instead of rendering wrong numbers.
  */
 
-import { getSdk } from '@/lib/sdk';
+import { getSdk, indexAsset } from '@/lib/sdk';
 import { calculateUdrSplits } from '@/lib/server/udrSplits';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
 import { setStore } from '@/lib/server/store';
@@ -130,11 +130,14 @@ function expectedWithheld(allocation: bigint): bigint {
 }
 
 /**
- * Seed the two pre-cleared Sync Library demo works. The asset SHEETS are
+ * Seed the two pre-cleared Sync Library demo works plus one CBT asset that
+ * has not yet been submitted for sync licensing. The asset SHEETS are
  * registered through the engine's real mint path (`registerCBTAsset` — the
  * same server path the studio asset form uses, so titles hydrate through
- * getOrHydrateAsset); the catalog rows are then pre-cleared via the store
- * seam, representing the gated administrator's pre-clearance decision.
+ * getOrHydrateAsset); the two catalog rows are then pre-cleared via the
+ * store seam, representing the gated administrator's pre-clearance decision.
+ * "Crown Ledger" gets NO catalog row — the registration form's real target,
+ * so the pending pre-clearance state is reachable through the true path.
  */
 async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
   const sdk = getSdk();
@@ -144,7 +147,7 @@ async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
     role: 'COMPOSER' as const,
     splitPercentage: 50,
     taxProfile: {
-      taxFormType: 'W9' as const,
+      taxFormType: 'W9_US_PERSON' as const,
       taxIdentifierEncrypted: 'seed-creator-tin',
       usTaxResident: true,
       isBackupWithholdingRequired: false,
@@ -168,7 +171,7 @@ async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
     role: 'PUBLISHER' as const,
     splitPercentage: 50,
     taxProfile: {
-      taxFormType: 'W9' as const,
+      taxFormType: 'W9_US_PERSON' as const,
       taxIdentifierEncrypted: 'seed-label-ein',
       usTaxResident: true,
       isBackupWithholdingRequired: false,
@@ -190,11 +193,19 @@ async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
   for (const sheet of [
     { title: 'Midnight Clear', genre: 'Cinematic R&B', bpm: 92, fee: 495_000, identifiers: { isrc: 'US-CVN-26-00001' } },
     { title: 'Gold Hours', genre: 'Alt Soul', bpm: 78, fee: 320_000, identifiers: { isrc: 'US-CVN-26-00002' } },
+    // Registered in the CBT catalog only — NOT yet in the Sync Library.
+    { title: 'Crown Ledger', genre: 'Neo Soul', bpm: 84, fee: null, identifiers: { isrc: 'US-CVN-26-00003' } },
   ]) {
     const { cbtCode } = await sdk.registerCBTAsset(sheet.title, 'MUSIC_TRACK', sheet.identifiers, [
       creatorHolder,
       labelHolder,
     ]);
+    // The canonical registration flow populates the module-level shadow
+    // index (see src/lib/sdk.ts header) — listAssets() reads it on the
+    // demo door. Skipping this left the Sync Library enumerating nothing.
+    const asset = sdk.getInMemoryAsset(cbtCode);
+    if (asset) indexAsset(asset);
+    if (sheet.fee === null) continue;
     await store.upsertSyncCatalogItem({
       cbt_code: cbtCode,
       is_pre_cleared: true,
@@ -237,9 +248,9 @@ async function seedRoyaltyRun(
     new Date(run.at),
   );
   if (!result.ok) {
-    throw new Error(`dev seed royalty run ${run.source} ${run.period} failed: ${result.reason}`);
+    throw new Error(`dev seed royalty run ${run.source} ${run.period} failed: ${result.code} ${result.message}`);
   }
-  const expected = expectedWithheld(expectedAllocation(BigInt(run.gross)));
+  const expected = expectedWithheld(expectedAllocation(run.gross));
   const actual = BigInt(result.value.withholding[0]?.withheld_cents ?? 0);
   if (actual !== expected) {
     throw new Error(

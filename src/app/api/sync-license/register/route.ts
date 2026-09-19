@@ -22,14 +22,7 @@ import { resolveSessionCreator } from '@/lib/server/sessionCreator';
 import { getStore } from '@/lib/server/store';
 import { getSdk } from '@/lib/sdk';
 import { parseSyncRegistration } from '@/lib/sync/registration';
-import { SYNC_TIER_WEIGHTS } from '@/lib/server/syncLicenseSettlement';
-
-/** The locked Universal 50/35/15 structure, echoed in every 201 response. */
-export const LOCKED_SYNC_SPLITS = {
-  tier1OwnershipBps: Number(SYNC_TIER_WEIGHTS[0] ?? 0n),
-  tier2CreativeBps: Number(SYNC_TIER_WEIGHTS[1] ?? 0n),
-  tier3ProductionBps: Number(SYNC_TIER_WEIGHTS[2] ?? 0n),
-} as const;
+import { LOCKED_SYNC_SPLITS } from '@/lib/server/syncLicenseSettlement';
 
 /**
  * The asset-sheet reader over the SDK engine. getOrHydrateAsset throws a
