@@ -67,6 +67,8 @@ import type {
   MulClearanceRecord,
   MulClearanceTransitionRecord,
   StatementIngestRecord,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 import {
   createAdminClient as createSupabaseAdminClient,
@@ -142,6 +144,19 @@ export type CheckoutPurchaseResult =
   | { outcome: 'recorded'; remaining: number }
   | { outcome: 'already_recorded'; remaining: number }
   | { outcome: 'insufficient_capacity'; remaining: number };
+
+/**
+ * The creator's root UCT + stored ISNI — the kernel's getCreatorUct
+ * projection. creatorId is the Don store's payee key (the signup registry
+ * holder's rightsHolderId); uctNumber is that holder entry's root UCT tag;
+ * isni is creator_profiles.isni (0007), null when absent or malformed.
+ * The kernel reuses this identity verbatim — it never mints.
+ */
+export interface CreatorUctRecord {
+  creatorId: string;
+  uctNumber: string;
+  isni: string | null;
+}
 
 /**
  * The Don Engine persistence contract — Cursor's canonical 72-method
@@ -362,6 +377,41 @@ export interface Store {
 
   insertStatementIngest(row: Omit<StatementIngestRecord, 'id'>): Promise<StatementIngestRecord>;
   getStatementIngest(id: string): Promise<StatementIngestRecord | undefined>;
+
+  // --- Clearinghouse kernel + Sync Library seams (spec art_ZIdWlYUX,
+  //     SyncMarketplaceRegistry amendment, migration 0008) ---
+
+  /**
+   * The kernel's getCreatorUct identity read — READ-ONLY. The UCT is the
+   * signup-registry holder entry's root tag (minted at signup by the signup
+   * route's raw SQL); ISNI comes from creator_profiles (0007). Returns
+   * undefined when the creator has no root UCT — the kernel's typed
+   * identity error upstream, never a mint, never a silent new identity.
+   */
+  getCreatorUct(creatorId: string): Promise<CreatorUctRecord | undefined>;
+
+  /**
+   * Upserts the migration-0008 catalog columns for one asset. The asset
+   * itself must already exist (identity stays in cbt_assets) — a fresh
+   * Postgres insert of an unknown cbt_code fails on the parent columns.
+   */
+  upsertSyncCatalogItem(
+    row: Omit<SyncCatalogItemRecord, 'updated_at'> & { updated_at?: string },
+  ): Promise<SyncCatalogItemRecord>;
+  getSyncCatalogItem(cbtCode: string): Promise<SyncCatalogItemRecord | undefined>;
+  /** Stable catalog read: cbt_code ASC. */
+  listSyncCatalogItems(): Promise<SyncCatalogItemRecord[]>;
+
+  /**
+   * The licensing lane's write-back record. cbt_settlement_stamp is UNIQUE
+   * — the server-minted stamp is the replay key; a duplicate insert throws
+   * (23505 / UNIQUE) and the lane recovers by re-reading the existing row
+   * (the settlement wire's idempotency precedent).
+   */
+  insertSyncLicensePurchase(
+    row: Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>,
+  ): Promise<SyncLicensePurchaseRecord>;
+  getSyncLicensePurchaseByStamp(stamp: string): Promise<SyncLicensePurchaseRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
@@ -403,6 +453,8 @@ export type {
   StatementFormat,
   StatementIngestStatus,
   StatementSource,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 
 // ---------------------------------------------------------------------------

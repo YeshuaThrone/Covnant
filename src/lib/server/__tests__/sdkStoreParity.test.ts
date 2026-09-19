@@ -24,6 +24,8 @@ import type {
   MatchQueueRecord,
   MulClearanceRecord,
   StatementIngestRecord,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 
 // ---------------------------------------------------------------------------
@@ -43,9 +45,10 @@ const UNIQUE_VIOLATION: FakeDbError = {
   code: '23505',
 };
 
-/** The columns with a UNIQUE constraint, per migration 0007. */
+/** The columns with a UNIQUE constraint, per migrations 0007 + 0008. */
 const UNIQUE_COLUMNS: Record<string, string[]> = {
   match_queue: ['event_id'],
+  sync_license_purchases: ['cbt_settlement_stamp'],
 };
 
 /** Tables whose migration defines the insertion_order identity column. */
@@ -241,16 +244,65 @@ class FakeSupabaseClient {
 interface BackendSpec {
   name: string;
   make: () => Store;
+  /**
+   * Materializes the 0008 identity projection for the getCreatorUct parity
+   * read — the local seed seams (InMemory/SQLite) or the production signup
+   * registry rows (Supabase, through the fake client).
+   */
+  seedIdentity: (store: Store) => Promise<void>;
 }
 
+/** The Supabase backend's fake client, captured by make() for registry seeding. */
+let lastFakeClient: FakeSupabaseClient | undefined;
+
+const CREATOR_ID = 'creator_1';
+const IDENTITY_UCT = 'UCT-US-2026-9F3A7C21';
+const IDENTITY_ISNI = '0000-0002-1825-0097';
+
 const BACKENDS: BackendSpec[] = [
-  { name: 'InMemoryStore', make: () => new InMemoryStore() },
-  { name: 'SqliteStore', make: () => new SqliteStore(':memory:') },
+  {
+    name: 'InMemoryStore',
+    make: () => new InMemoryStore(),
+    seedIdentity: async (store) => {
+      await (store as InMemoryStore).upsertCreatorUct({
+        creatorId: CREATOR_ID,
+        uctNumber: IDENTITY_UCT,
+        isni: IDENTITY_ISNI,
+      });
+    },
+  },
+  {
+    name: 'SqliteStore',
+    make: () => new SqliteStore(':memory:'),
+    seedIdentity: async (store) => {
+      await (store as SqliteStore).upsertCreatorUct({
+        creatorId: CREATOR_ID,
+        uctNumber: IDENTITY_UCT,
+        isni: IDENTITY_ISNI,
+      });
+    },
+  },
   {
     // The fake implements the builder subset these tables use; the real
     // SupabaseClient surface is far larger than the store touches.
     name: 'SupabaseStore',
-    make: () => new SupabaseStore(new FakeSupabaseClient() as unknown as SupabaseClient),
+    make: () => {
+      const client = new FakeSupabaseClient();
+      lastFakeClient = client;
+      return new SupabaseStore(client as unknown as SupabaseClient);
+    },
+    seedIdentity: async () => {
+      const client = lastFakeClient;
+      if (client === undefined) throw new Error('fake client not initialized');
+      await client.from('cbt_assets').insert({
+        cbt_code: 'CBT-SIGNUP-REGISTRY',
+        rights_holders: [
+          { rightsHolderId: CREATOR_ID, email: 'Creator@Example.com', uct: IDENTITY_UCT },
+        ],
+      });
+      // creator_profiles.isni keyed by the NORMALIZED email.
+      await client.from('creator_profiles').insert({ email: 'creator@example.com', isni: IDENTITY_ISNI });
+    },
   },
 ];
 
@@ -300,9 +352,32 @@ const statementIngestInput = (
   ...overrides,
 });
 
+const syncCatalogInput = (overrides: Partial<SyncCatalogItemRecord> = {}): SyncCatalogItemRecord => ({
+  cbt_code: 'CBT-REC-0123456789AB',
+  is_pre_cleared: false,
+  sync_fee_cents: 25000,
+  genre: 'Ambient',
+  bpm: 92,
+  updated_at: '2026-09-01T00:00:00Z',
+  ...overrides,
+});
+
+const syncPurchaseInput = (
+  overrides: Partial<Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>> = {},
+): Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'> => ({
+  cvt_asset_tag: 'CBT-REC-0123456789AB',
+  buyer_uct: 'UCT-US-2026-DEADBEEF',
+  license_type: 'COMMERCIAL_SYNC',
+  fee_paid_cents: 999,
+  cbt_settlement_stamp: 'CBT-SETTLE-0123456789AB',
+  split_run_id: 'run_1',
+  metadata: { cbt: { settlementCode: 'CBT-SETTLE-0123456789AB', derivedFrom: 'reference_id' } },
+  ...overrides,
+});
+
 let store: Store;
 
-describe.each(BACKENDS)('SDK store parity — $name', ({ make }) => {
+describe.each(BACKENDS)('SDK store parity — $name', ({ make, seedIdentity }) => {
   beforeEach(() => {
     store = make();
   });
@@ -512,6 +587,77 @@ describe.each(BACKENDS)('SDK store parity — $name', ({ make }) => {
 
     it('returns undefined for an unknown id', async () => {
       expect(await store.getStatementIngest('missing')).toBeUndefined();
+    });
+  });
+
+  describe('creator UCT identity (0008)', () => {
+    it('returns undefined when the creator has no root UCT — never a mint', async () => {
+      await expect(store.getCreatorUct('creator_without_uct')).resolves.toBeUndefined();
+    });
+
+    it('resolves the identity projection (root UCT + ISNI) without minting', async () => {
+      await seedIdentity(store);
+      await expect(store.getCreatorUct(CREATOR_ID)).resolves.toEqual({
+        creatorId: CREATOR_ID,
+        uctNumber: IDENTITY_UCT,
+        isni: IDENTITY_ISNI,
+      });
+    });
+  });
+
+  describe('sync catalog (0008)', () => {
+    it('upserts, reads, and lists catalog items in stable cbt_code order', async () => {
+      await store.upsertSyncCatalogItem(syncCatalogInput({ cbt_code: 'CBT-REC-B' }));
+      await store.upsertSyncCatalogItem(syncCatalogInput({ cbt_code: 'CBT-REC-A' }));
+
+      expect(await store.getSyncCatalogItem('CBT-REC-B')).toEqual({
+        cbt_code: 'CBT-REC-B',
+        is_pre_cleared: false,
+        sync_fee_cents: 25000,
+        genre: 'Ambient',
+        bpm: 92,
+        updated_at: '2026-09-01T00:00:00Z',
+      });
+      await expect(store.getSyncCatalogItem('CBT-REC-ZZ')).resolves.toBeUndefined();
+
+      const list = await store.listSyncCatalogItems();
+      expect(list.map((item) => item.cbt_code)).toEqual(['CBT-REC-A', 'CBT-REC-B']);
+    });
+
+    it('re-upserting the same cbt_code updates the row in place', async () => {
+      await store.upsertSyncCatalogItem(syncCatalogInput());
+      await store.upsertSyncCatalogItem(
+        syncCatalogInput({ is_pre_cleared: true, sync_fee_cents: 30000, bpm: null }),
+      );
+
+      expect(await store.getSyncCatalogItem('CBT-REC-0123456789AB')).toMatchObject({
+        is_pre_cleared: true,
+        sync_fee_cents: 30000,
+        bpm: null,
+      });
+      expect((await store.listSyncCatalogItems()).length).toBe(1);
+    });
+  });
+
+  describe('sync license purchases (0008)', () => {
+    it('inserts and reads back the settlement write-back record by stamp', async () => {
+      const input = syncPurchaseInput();
+      const inserted = await store.insertSyncLicensePurchase(input);
+
+      expect(inserted.id).toEqual(expect.any(String));
+      expect(await store.getSyncLicensePurchaseByStamp(inserted.cbt_settlement_stamp)).toEqual(inserted);
+      expect(inserted.metadata).toEqual(input.metadata);
+    });
+
+    it('enforces the UNIQUE settlement stamp — the replay key', async () => {
+      await store.insertSyncLicensePurchase(syncPurchaseInput());
+      await expect(store.insertSyncLicensePurchase(syncPurchaseInput())).rejects.toThrow(
+        /23505|UNIQUE|unique/i,
+      );
+
+      // The lane's recovery path: the existing row is re-readable by stamp.
+      const existing = await store.getSyncLicensePurchaseByStamp('CBT-SETTLE-0123456789AB');
+      expect(existing?.split_run_id).toBe('run_1');
     });
   });
 });

@@ -11,6 +11,8 @@
  * money stays text micros — never floats (immutability rule).
  */
 
+import type { SyncLicenseType } from '../../../covnant-sdk/src/contracts/syncLibraryMarketplace';
+
 /** The four canonical rights pipelines (build spec art_MzwqTXym). */
 export type RightsPipeline =
   | 'composition_performance'
@@ -103,5 +105,47 @@ export interface StatementIngestRecord {
   status: StatementIngestStatus;
   event_count: number | null;
   error: string | null;
+  created_at: string;
+}
+
+// --- Sync Library catalog + purchases (migration 0008 — the
+//     SyncMarketplaceRegistry amendment, spec art_ZIdWlYUX) ---
+
+/**
+ * The migration-0008 catalog columns for one asset, keyed by its CBT code.
+ * NOT a new asset table — the asset's identity (title, medium, rights
+ * holders) stays in cbt_assets; these are the additive sync-library columns
+ * the amendment locks, projected per backend. `is_pre_cleared` is the
+ * pending pre-clearance state: registrations land false and only a gated
+ * administrator action flips them.
+ */
+export interface SyncCatalogItemRecord {
+  cbt_code: string;
+  is_pre_cleared: boolean;
+  sync_fee_cents: number;
+  genre: string;
+  bpm: number | null;
+  updated_at: string;
+}
+
+/**
+ * The licensing settlement lane's write-back record — one settled sync
+ * license purchase. `cbt_settlement_stamp` is the server-minted stamp
+ * (withCbtSettlementCode over the purchase reference); UNIQUE, and the
+ * replay key: duplicate purchases land on the idempotent existing row.
+ * `split_run_id` links the single calculateUdrSplits run that partitioned
+ * the fee 50/35/15 and credited the tier vaults. `metadata` carries the
+ * withCbtSettlementCode merge output — the cbt lineage tag, same provenance
+ * shape the settlement wire stamps onto ledger rows.
+ */
+export interface SyncLicensePurchaseRecord {
+  id: string;
+  cvt_asset_tag: string;
+  buyer_uct: string;
+  license_type: SyncLicenseType;
+  fee_paid_cents: number;
+  cbt_settlement_stamp: string;
+  split_run_id: string;
+  metadata: Record<string, unknown>;
   created_at: string;
 }

@@ -27,6 +27,7 @@ import {
   DEFAULT_LIST_SHOWS_LIMIT,
   type ArtistRecord,
   type CheckoutPurchaseResult,
+  type CreatorUctRecord,
   type LivePingRecord,
   type ShowRecord,
   type Store,
@@ -66,6 +67,8 @@ import type {
   MulClearanceRecord,
   MulClearanceTransitionRecord,
   StatementIngestRecord,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 
 export const SCHEMA = `
@@ -409,6 +412,36 @@ CREATE TABLE IF NOT EXISTS statement_ingests (
   status TEXT NOT NULL,
   event_count INTEGER,
   error TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- --- Clearinghouse kernel + Sync Library seams (migration 0008 — the
+--     SyncMarketplaceRegistry amendment) ---
+
+CREATE TABLE IF NOT EXISTS creator_ucts (
+  creator_id TEXT PRIMARY KEY,
+  uct_number TEXT NOT NULL,
+  isni TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sync_catalog_items (
+  cbt_code TEXT PRIMARY KEY,
+  is_pre_cleared INTEGER NOT NULL DEFAULT 0,
+  sync_fee_cents INTEGER NOT NULL DEFAULT 0,
+  genre TEXT NOT NULL DEFAULT '',
+  bpm INTEGER,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_license_purchases (
+  id TEXT PRIMARY KEY,
+  cvt_asset_tag TEXT NOT NULL,
+  buyer_uct TEXT NOT NULL,
+  license_type TEXT NOT NULL,
+  fee_paid_cents INTEGER NOT NULL,
+  cbt_settlement_stamp TEXT NOT NULL UNIQUE,
+  split_run_id TEXT NOT NULL,
+  metadata TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL
 );
 `;
@@ -1543,6 +1576,155 @@ export class SqliteStore implements Store {
         .prepare(`SELECT * FROM statement_ingests WHERE id = ?`)
         .get(id) as StatementIngestRecord | undefined,
     );
+  }
+
+  // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
+
+  async getCreatorUct(creatorId: string): Promise<CreatorUctRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT creator_id, uct_number, isni FROM creator_ucts WHERE creator_id = ?`)
+      .get(creatorId) as { creator_id: string; uct_number: string; isni: string | null } | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      creatorId: row.creator_id,
+      uctNumber: row.uct_number,
+      isni: row.isni,
+    });
+  }
+
+  /**
+   * Local-dev/test seed for the identity projection — NOT on the Store
+   * interface (production reads the signup registry holder entries; see
+   * SupabaseStore.getCreatorUct).
+   */
+  async upsertCreatorUct(row: CreatorUctRecord): Promise<CreatorUctRecord> {
+    this.db
+      .prepare(
+        `INSERT INTO creator_ucts (creator_id, uct_number, isni) VALUES (@creatorId, @uctNumber, @isni)
+         ON CONFLICT(creator_id) DO UPDATE SET
+           uct_number = excluded.uct_number,
+           isni = excluded.isni`,
+      )
+      .run(row);
+    return Promise.resolve(row);
+  }
+
+  async upsertSyncCatalogItem(
+    row: Omit<SyncCatalogItemRecord, 'updated_at'> & { updated_at?: string },
+  ): Promise<SyncCatalogItemRecord> {
+    const record: SyncCatalogItemRecord = {
+      ...row,
+      updated_at: row.updated_at ?? new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sync_catalog_items (
+           cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at
+         ) VALUES (
+           @cbt_code, @is_pre_cleared, @sync_fee_cents, @genre, @bpm, @updated_at
+         )
+         ON CONFLICT(cbt_code) DO UPDATE SET
+           is_pre_cleared = excluded.is_pre_cleared,
+           sync_fee_cents = excluded.sync_fee_cents,
+           genre = excluded.genre,
+           bpm = excluded.bpm,
+           updated_at = excluded.updated_at`,
+      )
+      .run({
+        ...record,
+        is_pre_cleared: record.is_pre_cleared ? 1 : 0,
+      });
+    return Promise.resolve(record);
+  }
+
+  async getSyncCatalogItem(cbtCode: string): Promise<SyncCatalogItemRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at
+         FROM sync_catalog_items WHERE cbt_code = ?`,
+      )
+      .get(cbtCode) as
+      | {
+          cbt_code: string;
+          is_pre_cleared: number;
+          sync_fee_cents: number;
+          genre: string;
+          bpm: number | null;
+          updated_at: string;
+        }
+      | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve(this.syncCatalogRecordFromRow(row));
+  }
+
+  async listSyncCatalogItems(): Promise<SyncCatalogItemRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at
+         FROM sync_catalog_items ORDER BY cbt_code ASC`,
+      )
+      .all() as Array<{
+      cbt_code: string;
+      is_pre_cleared: number;
+      sync_fee_cents: number;
+      genre: string;
+      bpm: number | null;
+      updated_at: string;
+    }>;
+    return Promise.resolve(rows.map((row) => this.syncCatalogRecordFromRow(row)));
+  }
+
+  /** SQLite keeps the flag as INTEGER 0/1; the record is a boolean. */
+  private syncCatalogRecordFromRow(row: {
+    cbt_code: string;
+    is_pre_cleared: number;
+    sync_fee_cents: number;
+    genre: string;
+    bpm: number | null;
+    updated_at: string;
+  }): SyncCatalogItemRecord {
+    return { ...row, is_pre_cleared: row.is_pre_cleared === 1 };
+  }
+
+  async insertSyncLicensePurchase(
+    row: Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>,
+  ): Promise<SyncLicensePurchaseRecord> {
+    const record: SyncLicensePurchaseRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    // better-sqlite3 surfaces the UNIQUE violation as a thrown
+    // "UNIQUE constraint failed: …" error — the canonical failure mode the
+    // lane catches to recover the idempotent existing row. It propagates
+    // unmodified from here — never swallowed.
+    this.db
+      .prepare(
+        `INSERT INTO sync_license_purchases (
+           id, cvt_asset_tag, buyer_uct, license_type, fee_paid_cents,
+           cbt_settlement_stamp, split_run_id, metadata, created_at
+         ) VALUES (
+           @id, @cvt_asset_tag, @buyer_uct, @license_type, @fee_paid_cents,
+           @cbt_settlement_stamp, @split_run_id, @metadata, @created_at
+         )`,
+      )
+      .run({ ...record, metadata: JSON.stringify(record.metadata) });
+    return Promise.resolve(record);
+  }
+
+  async getSyncLicensePurchaseByStamp(
+    stamp: string,
+  ): Promise<SyncLicensePurchaseRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sync_license_purchases WHERE cbt_settlement_stamp = ?`)
+      .get(stamp) as
+      | (Omit<SyncLicensePurchaseRecord, 'metadata'> & { metadata: string })
+      | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      ...row,
+      metadata: JSON.parse(row.metadata) as Record<string, unknown>,
+    });
   }
 }
 

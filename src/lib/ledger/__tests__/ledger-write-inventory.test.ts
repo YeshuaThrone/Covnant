@@ -184,6 +184,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // SDK collection surfaces (spec art_MzwqTXym): SDK tables + creator
       // identifier columns; still no DDL on universal_royalty_ledger.
       '0007_sdk_collection.sql',
+      // Sync Library catalog + licensing settlement (spec art_ZIdWlYUX,
+      // SyncMarketplaceRegistry amendment): additive catalog columns on
+      // cbt_assets + sync_license_purchases; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0008_sync_library.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

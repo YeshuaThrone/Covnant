@@ -23,6 +23,7 @@ import {
   DEFAULT_LIST_SHOWS_LIMIT,
   type ArtistRecord,
   type CheckoutPurchaseResult,
+  type CreatorUctRecord,
   type LivePingRecord,
   type ShowRecord,
   type Store,
@@ -62,6 +63,8 @@ import type {
   MulClearanceRecord,
   MulClearanceTransitionRecord,
   StatementIngestRecord,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 
 /** Drops the store-internal ordering column; the DB row is otherwise the record. */
@@ -103,7 +106,27 @@ const TABLES = {
   mulClearanceTransitions: 'mul_clearance_transitions',
   matchQueue: 'match_queue',
   statementIngests: 'statement_ingests',
+  // Migration 0008 — the SyncMarketplaceRegistry amendment. The sync
+  // catalog columns live ON cbt_assets (no new catalog table); purchases
+  // get the lane's own write-back table.
+  assets: 'cbt_assets',
+  creatorProfiles: 'creator_profiles',
+  syncLicensePurchases: 'sync_license_purchases',
 } as const;
+
+/** The designated self-serve identity registry row (signup route header). */
+const SIGNUP_REGISTRY_CBT_CODE = 'CBT-SIGNUP-REGISTRY';
+
+/** The registry holder entry fields getCreatorUct reads (0008 identity projection). */
+interface RegistryHolderUctEntry {
+  rightsHolderId?: unknown;
+  email?: unknown;
+  uct?: unknown;
+}
+
+function isRegistryHolderUctEntry(value: unknown): value is RegistryHolderUctEntry {
+  return typeof value === 'object' && value !== null && 'rightsHolderId' in value;
+}
 
 type DbResult = PromiseLike<{
   data: unknown;
@@ -1126,6 +1149,128 @@ export class SupabaseStore implements Store {
     return this.one<StatementIngestRecord>(
       this.client.from(TABLES.statementIngests).select().eq('id', id).maybeSingle(),
       'getStatementIngest',
+    );
+  }
+
+  // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
+
+  async getCreatorUct(creatorId: string): Promise<CreatorUctRecord | undefined> {
+    // (a) The signup registry's holder entry for this rightsHolderId — the
+    // root UCT lives there, minted at signup. The registry JSONB has no
+    // authenticated-role grant, which is why the seam reads it through the
+    // service-role client this store holds.
+    const registry = await this.one<{ rights_holders: unknown }>(
+      this.client
+        .from(TABLES.assets)
+        .select('rights_holders')
+        .eq('cbt_code', SIGNUP_REGISTRY_CBT_CODE)
+        .maybeSingle(),
+      'getCreatorUct',
+    );
+    const holders = Array.isArray(registry?.rights_holders) ? registry.rights_holders : [];
+    const entries = holders
+      .map((holder) => (isRegistryHolderUctEntry(holder) ? holder : null))
+      .filter((holder): holder is Exclude<typeof holder, null> => holder !== null);
+    const entry = entries.find(
+      (holder) =>
+        holder.rightsHolderId === creatorId &&
+        typeof holder.uct === 'string' &&
+        holder.uct.trim() !== '',
+    );
+    if (entry === undefined) return undefined; // no root UCT — the typed identity error upstream
+
+    // (b) The creator_profiles ISNI (0007) — keyed by the holder's
+    // normalized email when present; a profile row is optional for the UCT.
+    let isni: string | null = null;
+    if (typeof entry.email === 'string' && entry.email.trim() !== '') {
+      const profile = await this.one<{ isni: string | null }>(
+        this.client
+          .from(TABLES.creatorProfiles)
+          .select('isni')
+          .eq('email', entry.email.trim().toLowerCase())
+          .maybeSingle(),
+        'getCreatorUct',
+      );
+      isni = profile?.isni ?? null;
+    }
+
+    return { creatorId, uctNumber: entry.uct as string, isni };
+  }
+
+  async upsertSyncCatalogItem(
+    row: Omit<SyncCatalogItemRecord, 'updated_at'> & { updated_at?: string },
+  ): Promise<SyncCatalogItemRecord> {
+    const record: SyncCatalogItemRecord = {
+      ...row,
+      updated_at: row.updated_at ?? new Date().toISOString(),
+    };
+    // The 0008 columns live ON cbt_assets — the upsert targets the parent
+    // asset row keyed by its UNIQUE cbt_code. An unknown asset's insert
+    // violates the parent's NOT NULL identity columns and fails closed.
+    return this.oneStrict<SyncCatalogItemRecord>(
+      this.client
+        .from(TABLES.assets)
+        .upsert(
+          {
+            cbt_code: record.cbt_code,
+            is_pre_cleared: record.is_pre_cleared,
+            sync_fee_cents: record.sync_fee_cents,
+            genre: record.genre,
+            bpm: record.bpm,
+            updated_at: record.updated_at,
+          },
+          { onConflict: 'cbt_code' },
+        )
+        .select('cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at')
+        .maybeSingle(),
+      'upsertSyncCatalogItem',
+    );
+  }
+
+  async getSyncCatalogItem(cbtCode: string): Promise<SyncCatalogItemRecord | undefined> {
+    return this.one<SyncCatalogItemRecord>(
+      this.client
+        .from(TABLES.assets)
+        .select('cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at')
+        .eq('cbt_code', cbtCode)
+        .maybeSingle(),
+      'getSyncCatalogItem',
+    );
+  }
+
+  async listSyncCatalogItems(): Promise<SyncCatalogItemRecord[]> {
+    return this.many<SyncCatalogItemRecord>(
+      this.client
+        .from(TABLES.assets)
+        .select('cbt_code, is_pre_cleared, sync_fee_cents, genre, bpm, updated_at')
+        .order('cbt_code', { ascending: true }),
+      'listSyncCatalogItems',
+    );
+  }
+
+  async insertSyncLicensePurchase(
+    row: Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>,
+  ): Promise<SyncLicensePurchaseRecord> {
+    return this.oneStrict<SyncLicensePurchaseRecord>(
+      this.client
+        .from(TABLES.syncLicensePurchases)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSyncLicensePurchase',
+    );
+  }
+
+  async getSyncLicensePurchaseByStamp(
+    stamp: string,
+  ): Promise<SyncLicensePurchaseRecord | undefined> {
+    return this.one<SyncLicensePurchaseRecord>(
+      this.client
+        .from(TABLES.syncLicensePurchases)
+        .select()
+        .eq('cbt_settlement_stamp', stamp)
+        .maybeSingle(),
+      'getSyncLicensePurchaseByStamp',
     );
   }
 }

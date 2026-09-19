@@ -26,6 +26,7 @@ import {
   DEFAULT_LIST_SHOWS_LIMIT,
   type ArtistRecord,
   type CheckoutPurchaseResult,
+  type CreatorUctRecord,
   type LivePingRecord,
   type ShowRecord,
   type Store,
@@ -65,6 +66,8 @@ import type {
   MulClearanceRecord,
   MulClearanceTransitionRecord,
   StatementIngestRecord,
+  SyncCatalogItemRecord,
+  SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 
 /**
@@ -121,6 +124,10 @@ export class InMemoryStore implements Store {
   private clearanceTransitions: MulClearanceTransitionRecord[] = [];
   private matchQueue: MatchQueueRecord[] = [];
   private statementIngests = new Map<string, StatementIngestRecord>();
+  // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
+  private creatorUcts = new Map<string, CreatorUctRecord>();
+  private syncCatalog = new Map<string, SyncCatalogItemRecord>();
+  private syncPurchases = new Map<string, SyncLicensePurchaseRecord>();
 
   // --- Legacy show / ping / artist surface ---
 
@@ -768,5 +775,61 @@ export class InMemoryStore implements Store {
 
   async getStatementIngest(id: string): Promise<StatementIngestRecord | undefined> {
     return this.statementIngests.get(id);
+  }
+
+  // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
+
+  async getCreatorUct(creatorId: string): Promise<CreatorUctRecord | undefined> {
+    return this.creatorUcts.get(creatorId);
+  }
+
+  /**
+   * Local-dev/test seed for the identity projection — NOT on the Store
+   * interface. Production identity comes from the signup registry holder
+   * entries (SupabaseStore reads them); the in-memory and SQLite backends
+   * materialize the same projection here.
+   */
+  async upsertCreatorUct(row: CreatorUctRecord): Promise<CreatorUctRecord> {
+    this.creatorUcts.set(row.creatorId, row);
+    return row;
+  }
+
+  async upsertSyncCatalogItem(
+    row: Omit<SyncCatalogItemRecord, 'updated_at'> & { updated_at?: string },
+  ): Promise<SyncCatalogItemRecord> {
+    const record: SyncCatalogItemRecord = {
+      ...row,
+      updated_at: row.updated_at ?? new Date().toISOString(),
+    };
+    this.syncCatalog.set(record.cbt_code, record);
+    return record;
+  }
+
+  async getSyncCatalogItem(cbtCode: string): Promise<SyncCatalogItemRecord | undefined> {
+    return this.syncCatalog.get(cbtCode);
+  }
+
+  async listSyncCatalogItems(): Promise<SyncCatalogItemRecord[]> {
+    return [...this.syncCatalog.values()].sort((a, b) =>
+      a.cbt_code < b.cbt_code ? -1 : a.cbt_code > b.cbt_code ? 1 : 0,
+    );
+  }
+
+  async insertSyncLicensePurchase(
+    row: Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>,
+  ): Promise<SyncLicensePurchaseRecord> {
+    const existing = this.syncPurchases.get(row.cbt_settlement_stamp);
+    if (existing !== undefined) uniqueViolation('sync_license_purchases.cbt_settlement_stamp');
+    const record: SyncLicensePurchaseRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.syncPurchases.set(record.cbt_settlement_stamp, record);
+    return record;
+  }
+
+  async getSyncLicensePurchaseByStamp(stamp: string): Promise<SyncLicensePurchaseRecord | undefined> {
+    return this.syncPurchases.get(stamp);
   }
 }
