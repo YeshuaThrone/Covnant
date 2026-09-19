@@ -8,18 +8,15 @@
  * The three cards ARE the holder's three vault buckets (SovereignVaultRecord
  * semantics — integer cents, never floats): available, pending, reserve.
  * Payout tiles reflect the sandbox rail (RTP instant, ACH +3 business days)
- * over PayoutHoldRecord-shaped fixtures. Quick actions are visual
- * affordances wired to REAL workspace destinations — no invented routes.
+ * over PayoutHoldRecord-shaped fixtures. (Quick actions were REMOVED by the
+ * Gold Board UI spec — the strip is read-only financial truth.)
  *
  * Honesty rules carried here:
  *  - Balances render from the vault record only — no fabricated zero-fill.
  *  - The account-number ban: nothing resembling an account or routing
  *    number is ever rendered.
- *  - Every quick action is a wired destination; payout tiles are state
- *    displays, not dead links.
+ *  - Payout tiles are state displays, not dead links.
  */
-
-import Link from 'next/link';
 
 import { formatCents } from '@/lib/money/format';
 import type { PayoutTile } from '@/lib/don/dashboardData';
@@ -149,76 +146,5 @@ export function PayoutRailTiles({ tiles }: { tiles: PayoutTile[] }): React.JSX.E
         </div>
       ))}
     </div>
-  );
-}
-
-/** ── Quick actions — compact icon tiles, wired destinations only ── */
-
-function ActionIcon({ d }: { d: string }): React.JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-5 w-5"
-    >
-      <path d={d} />
-    </svg>
-  );
-}
-
-const QUICK_ACTIONS = [
-  {
-    href: '/assets',
-    label: 'Register Asset',
-    hint: 'Add an asset to the registry',
-    // Plus inside a rounded square.
-    icon: 'M12 9v6m-3-3h6M7 21h10a2 2 0 0 0 2-2V7l-4-4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z',
-  },
-  {
-    href: '/contracts',
-    label: 'New Contract',
-    hint: 'Generate an agreement from the vault',
-    // Document with lines.
-    icon: 'M14 3v4a1 1 0 0 0 1 1h4M9 13h6m-6 4h6M8 21h8a2 2 0 0 0 2-2V8l-5-5H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z',
-  },
-  {
-    href: '/ledger',
-    label: 'View Ledger',
-    hint: 'The full royalty picture',
-    // Layered grid.
-    icon: 'M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13ZM4 10h16M10 10v10',
-  },
-] as const;
-
-export function QuickActions(): React.JSX.Element {
-  return (
-    <nav
-      data-testid="quick-actions"
-      aria-label="Quick actions"
-      className="grid grid-cols-3 gap-3 md:gap-4"
-    >
-      {QUICK_ACTIONS.map((action) => (
-        <Link
-          key={action.href}
-          href={action.href}
-          data-testid="quick-action"
-          title={action.hint}
-          aria-label={`${action.label} — ${action.hint}`}
-          className="group flex flex-col items-center gap-2 rounded-2xl border border-transparent px-2 py-4 transition-colors hover:border-slate-700/50 hover:bg-white/[0.02]"
-        >
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700/50 bg-white/[0.02] text-gold-champagne transition-colors group-hover:border-gold/40 group-hover:text-gold">
-            <ActionIcon d={action.icon} />
-          </span>
-          <span className="text-center text-[11px] font-medium text-slate-400 group-hover:text-slate-200">
-            {action.label}
-          </span>
-        </Link>
-      ))}
-    </nav>
   );
 }

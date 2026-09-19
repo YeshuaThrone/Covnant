@@ -224,10 +224,11 @@ describe('the demo door — the page-facing resolution (loadDashboardResolution)
     // persona over the dedicated demo store — never the anonymous wall.
     expect(resolution.kind).toBe('demo');
     if (resolution.kind === 'demo') {
-      expect(resolution.data.user.stage_name).toBe('Nova Reign');
-      // The seeded buckets (available 80_000) — NOT the singleton's state.
-      expect(resolution.data.vault.payee_id).toBe('rh_nova_reign_don');
-      expect(resolution.data.vault.available_balance).toBe(80_000);
+      expect(resolution.data.user.stage_name).toBe('Yeshua Throne');
+      // The seeded buckets (available 330_000_000) — NOT the singleton's
+      // state.
+      expect(resolution.data.vault.payee_id).toBe('rh_yeshua_throne_don');
+      expect(resolution.data.vault.available_balance).toBe(330_000_000);
     }
   });
 
@@ -254,7 +255,7 @@ describe('the demo door — the page-facing resolution (loadDashboardResolution)
     if (resolution.kind === 'demo') {
       expect(resolution.data.vault.payee_id).not.toBe(OTHER.payee_id);
       expect(resolution.data.vault.available_balance).not.toBe(777_777);
-      expect(resolution.data.vault.available_balance).toBe(80_000); // the seed
+      expect(resolution.data.vault.available_balance).toBe(330_000_000); // the seed
     }
   });
 
@@ -267,7 +268,7 @@ describe('the demo door — the page-facing resolution (loadDashboardResolution)
     expect(resolution.kind).toBe('registered');
     if (resolution.kind === 'registered') {
       // The session-bound aggregate (12_990 pending in, 10_000 released,
-      // 5_000 payout hold) — NOT the seeded demo's 80_000.
+      // 5_000 payout hold) — NOT the seeded demo's 330_000_000.
       expect(resolution.data.vault.available_balance).toBe(5_000);
       expect(resolution.data.user.stage_name).toBe('Nova Reign');
     }

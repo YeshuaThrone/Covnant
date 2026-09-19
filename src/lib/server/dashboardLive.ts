@@ -47,6 +47,8 @@ import {
   isDevSeedMode,
 } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
+import type { GoldBoardRevenueStream } from '../../../covnant-sdk/src/contracts/goldBoardUiSpec';
+import { REVENUE_STREAM_LIMIT } from '../../../covnant-sdk/src/contracts/goldBoardUiSpec';
 import {
   resolveSessionCreator,
   type SessionCreator,
@@ -134,6 +136,26 @@ export async function aggregateDashboardData(
     .sort((a, b) => newestFirst(a.hold, b.hold))
     .slice(0, PAYOUT_TILE_LIMIT);
 
+  // Revenue streams — the holder's royalty inflow grouped by source (the
+  // royalty journal's split run), aggregated from the holder-facing vault
+  // credit legs within the same bounded window. A journal whose split run
+  // no longer resolves contributes no row: store-read only, nothing invented.
+  const streamTotals = new Map<string, number>();
+  for (const { journal, entries } of ledger) {
+    if (journal.kind !== 'royalty_ingest') continue;
+    const run = await store.getSplitRun(journal.ref_id);
+    if (!run) continue;
+    const holderCredit = entries
+      .filter((entry) => entry.account.startsWith(vaultPrefix) && entry.credit_cents > 0)
+      .reduce((sum, entry) => sum + entry.credit_cents, 0);
+    if (holderCredit <= 0) continue;
+    streamTotals.set(run.source, (streamTotals.get(run.source) ?? 0) + holderCredit);
+  }
+  const revenue_streams: GoldBoardRevenueStream[] = [...streamTotals.entries()]
+    .map(([source, total_cents]) => ({ source, total_cents }))
+    .sort((a, b) => b.total_cents - a.total_cents)
+    .slice(0, REVENUE_STREAM_LIMIT);
+
   return {
     user: { stage_name: creator.stage_name, initials: initialsFromName(creator.stage_name) },
     vault:
@@ -147,6 +169,7 @@ export async function aggregateDashboardData(
       },
     ledger,
     payouts,
+    revenue_streams,
     readiness: {
       kyc_status: creator.kyc_status,
       tin_verified: taxProfile?.tin_verified ?? 0,

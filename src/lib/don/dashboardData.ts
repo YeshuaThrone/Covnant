@@ -37,6 +37,7 @@ import type {
   PayoutHoldRecord,
   SovereignVaultRecord,
 } from '@/modules/don/records';
+import type { GoldBoardRevenueStream } from '../../../covnant-sdk/src/contracts/goldBoardUiSpec';
 
 // ── Data contract ────────────────────────────────────────────────────────────
 
@@ -74,6 +75,8 @@ export type DashboardData = {
   vault: SovereignVaultRecord;
   ledger: DashboardLedgerEntry[];
   payouts: DashboardPayout[];
+  /** Revenue streams — holder royalty inflow grouped by source (store-read). */
+  revenue_streams: GoldBoardRevenueStream[];
   readiness: DashboardReadiness;
 };
 
@@ -172,12 +175,19 @@ export function displayTransaction(
   { journal, entries }: DashboardLedgerEntry,
 ): DisplayTransaction | null {
   const vaultPrefix = `vault:${payeeId}:`;
-  const facing = entries.find((entry) => {
+  const facingCandidates = entries.filter((entry) => {
     const isVault = entry.account.startsWith(vaultPrefix);
     return INFLOW_KINDS.has(journal.kind as JournalKind)
       ? isVault && entry.credit_cents > 0
       : isVault && entry.debit_cents > 0;
   });
+  // For inflows the row amount is the royalty credited to the holder's
+  // available/pending buckets — the reserve leg (withholding) is a sibling
+  // movement inside the same journal, not the settlement amount. Journals
+  // with only a reserve leg (or no facing leg) fall through unchanged.
+  const facing =
+    facingCandidates.find((entry) => !entry.account.startsWith(`${vaultPrefix}reserve`)) ??
+    facingCandidates[0];
   if (!facing) return null;
 
   const inflow = INFLOW_KINDS.has(journal.kind as JournalKind);

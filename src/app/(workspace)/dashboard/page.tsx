@@ -37,11 +37,14 @@ import Link from 'next/link';
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import {
   PayoutRailTiles,
-  QuickActions,
   VaultBucketCards,
 } from '@/components/dashboard/AccountsRow';
 import { CarouselDots } from '@/components/dashboard/CarouselDots';
-import { ReadinessChecklist, TransactionsPanel } from '@/components/dashboard/HomePanels';
+import {
+  ReadinessChecklist,
+  RevenueStreamsStrip,
+  TransactionsPanel,
+} from '@/components/dashboard/HomePanels';
 import {
   displayTransactions,
   payoutTiles,
@@ -96,9 +99,11 @@ function GreetingRow({
       <div
         data-testid="avatar-chip"
         aria-hidden="true"
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-gold/30 bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-deep/90 text-sm font-bold text-obsidian"
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-gold/30 bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-muted/90 text-sm font-bold text-obsidian"
       >
-        {initials}
+        <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-obsidian">
+          {initials}
+        </span>
       </div>
     </div>
   );
@@ -206,7 +211,18 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
             GOLD BOARD
           </span>
         </div>
-        {isDemoView ? <DemoDataBadge /> : null}
+        <div className="flex shrink-0 items-center gap-2.5">
+          {isDemoView ? <DemoDataBadge /> : null}
+          {/* The gated administrator console — the page-header pill (never
+              creator navigation); /admin itself stays fail-closed. */}
+          <Link
+            href="/admin"
+            data-testid="admin-console-link"
+            className="inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-champagne transition-colors hover:bg-gold/20"
+          >
+            Admin
+          </Link>
+        </div>
       </div>
 
       <div className="mt-6">
@@ -248,10 +264,12 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
         </div>
       </section>
 
-      <section aria-label="Quick actions" className="mt-8 md:mt-10">
-        <SectionLabel>Quick actions</SectionLabel>
-        <div className="mt-2">
-          <QuickActions />
+      {/* Revenue streams — the holder's royalty inflow by source, aggregated
+          from the holder-scoped GL (store-read only). */}
+      <section aria-label="Revenue streams" className="mt-8 md:mt-10">
+        <SectionLabel>Revenue streams</SectionLabel>
+        <div className="mt-3">
+          <RevenueStreamsStrip streams={data.revenue_streams} />
         </div>
       </section>
 

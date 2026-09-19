@@ -5,7 +5,7 @@
  *  - TransactionsPanel: the GL ledger, READ-ONLY and DENSE — each row is a
  *    posted journal's holder-facing leg (GlEntryRecord debit/credit pair),
  *    counterparty voice on the left, signed amount right-aligned. The
- *    bounded slice shows at most ten rows and offers the wired "See more"
+ *    bounded slice shows at most six rows and offers the wired "See more"
  *    path to the full ledger when it truncates.
  *  - ReadinessChecklist: the side panel's financial-readiness rows — KYC,
  *    tax form, bank account, provisioning — small, quiet, text-labeled
@@ -16,6 +16,7 @@ import Link from 'next/link';
 
 import { formatCents, formatCentsSigned } from '@/lib/money/format';
 import type { DashboardReadiness, DisplayTransaction } from '@/lib/don/dashboardData';
+import type { GoldBoardRevenueStream } from '../../../covnant-sdk/src/contracts/goldBoardUiSpec';
 
 /** Deterministic date render — hydration-safe (UTC, fixed locale). */
 function settledOn(iso: string): string {
@@ -87,6 +88,60 @@ export function TransactionsPanel({ rows }: { rows: DisplayTransaction[] }): Rea
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * RevenueStreamsStrip — the Gold Board's revenue streams (the bank
+ * reference's spending-activity strip, in the money voice): the holder's
+ * royalty inflow grouped by source, aggregated store-side from the
+ * royalty journals' vault credit legs. Store-read only — a stream that
+ * cannot be derived from the ledger does not render.
+ */
+export function RevenueStreamsStrip({
+  streams,
+}: {
+  streams: GoldBoardRevenueStream[];
+}): React.JSX.Element {
+  if (streams.length === 0) {
+    return (
+      <p
+        data-testid="revenue-streams-empty"
+        className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 text-sm leading-relaxed text-slate-400"
+      >
+        No revenue activity yet — streams appear with your first royalty postings.
+      </p>
+    );
+  }
+  const max = Math.max(...streams.map((stream) => stream.total_cents));
+  return (
+    <ul
+      data-testid="revenue-streams"
+      className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5 md:p-6"
+      aria-label="Revenue streams"
+    >
+      {streams.map((stream) => (
+        <li
+          key={stream.source}
+          data-testid="revenue-stream"
+          data-source={stream.source}
+          className="flex items-center justify-between gap-4 py-2"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-slate-200">{stream.source}</span>
+            <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-slate-700/50">
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-gold-champagne/80 to-gold/60"
+                style={{ width: `${Math.max(6, Math.round((stream.total_cents / max) * 100))}%` }}
+              />
+            </span>
+          </span>
+          <span className="shrink-0 font-mono text-sm text-slate-100">
+            {formatCents(stream.total_cents)}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -2,6 +2,18 @@
  * The dev-seed boot — the flag gate and the seeded content through the real
  * engines: deterministic balances, the hash-chained GL, in-flight payouts,
  * the tax profile, and the demo persona.
+ *
+ * THE FOUNDER'S INTEGRITY TEST (rendered here as store-level assertions):
+ * the portfolio amounts are CONSTRUCTED through the real settlement engine
+ * and read back from the store —
+ *   reserve   100,000,000,000 — Σ 24% backup withholding credited to the
+ *               creator's reserve bucket by calculateUdrSplits (no verified
+ *               TIN/W-9 → locked semantic #4; the YTD and tax-escrow rows
+ *               are the engine's own receipts).
+ *   pending      65,000,000 — the two in-flight payout holds (payouts move
+ *               available → pending; payout.settled clears pending).
+ *   available   330,000,000 — the released residual after four payout holds.
+ * No display string anywhere produces these numbers.
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -9,6 +21,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   bootDevSeedStore,
   DEV_SEED_CREATOR,
+  DEV_SEED_TARGETS,
+  DEV_SEED_UCT,
   isDevSeedMode,
 } from '@/lib/server/devSeed';
 import { loadDashboardResolution, loadSessionDashboard } from '@/lib/server/dashboardLive';
@@ -60,7 +74,7 @@ describe('isDevSeedMode — the Vercel preview door', () => {
     const resolution = await loadSessionDashboard();
     expect(resolution.kind).toBe('registered');
     if (resolution.kind === 'registered') {
-      expect(resolution.data.user.stage_name).toBe('Nova Reign');
+      expect(resolution.data.user.stage_name).toBe('Yeshua Throne');
     }
 
     // The PAGE door renders the same seeded persona as the demo view —
@@ -68,7 +82,7 @@ describe('isDevSeedMode — the Vercel preview door', () => {
     const pageResolution = await loadDashboardResolution();
     expect(pageResolution.kind).toBe('demo');
     if (pageResolution.kind === 'demo') {
-      expect(pageResolution.data.user.stage_name).toBe('Nova Reign');
+      expect(pageResolution.data.user.stage_name).toBe('Yeshua Throne');
     }
   });
 
@@ -87,7 +101,7 @@ describe('isDevSeedMode — the Vercel preview door', () => {
     const pageResolution = await loadDashboardResolution();
     expect(pageResolution.kind).toBe('demo');
     if (pageResolution.kind === 'demo') {
-      expect(pageResolution.data.user.stage_name).toBe('Nova Reign');
+      expect(pageResolution.data.user.stage_name).toBe('Yeshua Throne');
       expect(pageResolution.data.vault.payee_id).toBe(DEV_SEED_CREATOR.payee_id);
     }
   });
@@ -112,37 +126,65 @@ describe('bootDevSeedStore — the seeded content', () => {
     const store = getStore();
     expect(store).toBeInstanceOf(InMemoryStore);
 
-    // The vault buckets — the engine math (327_485 pending in, 150_000
-    // released, 70_000 paid out in flight, 45_000 reserve).
+    // THE PORTFOLIO — the founder's three targets, produced by the real
+    // settlement/payout engine paths and read back from the store:
+    //   available   330,000,000   pending   65,000,000   reserve 100,000,000,000
     const vault = await store.getVault(DEV_SEED_CREATOR.payee_id);
     expect(vault).toBeDefined();
-    expect(vault!.available_balance).toBe(80_000);
-    expect(vault!.pending_balance).toBe(247_485);
-    expect(vault!.reserve_balance).toBe(45_000);
+    expect(vault!.available_balance).toBe(DEV_SEED_TARGETS.available_cents);
+    expect(vault!.pending_balance).toBe(DEV_SEED_TARGETS.pending_cents);
+    expect(vault!.reserve_balance).toBe(DEV_SEED_TARGETS.reserve_cents);
 
-    // The GL: five royalty ingests + one release + two payout holds, all
-    // posted — the hash chain links every journal to its predecessor.
+    // The withholding receipts — the engine's own records of the reserve
+    // construction: YTD gross is Σ creator allocations (416,666,666,668) and
+    // YTD withheld is the reserve itself (100,000,000,000 at 24%).
+    const ytd = await store.getCreatorYtd(DEV_SEED_CREATOR.payee_id, 2026);
+    expect(ytd).toBeDefined();
+    expect(ytd!.gross_cents).toBe(416_666_666_668);
+    expect(ytd!.withheld_cents).toBe(DEV_SEED_TARGETS.reserve_cents);
+
+    // The tax-escrow rows — one per seeded settlement run, summing to the
+    // same reserve total (the per-run receipts behind the YTD rollup).
+    const escrows = await store.listTaxEscrowByCreator(DEV_SEED_CREATOR.payee_id, 2026);
+    expect(escrows).toHaveLength(5);
+    const escrowedTotal = escrows.reduce((sum, row) => sum + row.withheld_cents, 0);
+    expect(escrowedTotal).toBe(DEV_SEED_TARGETS.reserve_cents);
+
+    // The GL: five royalty ingests + one release + four payout holds +
+    // two payout settlements, all posted — the hash chain links every
+    // journal to its predecessor.
     const journals = await store.listGlJournals();
-    expect(journals).toHaveLength(8);
+    expect(journals).toHaveLength(12);
     const bySequence = [...journals].sort((a, b) => a.sequence - b.sequence);
     for (let i = 1; i < bySequence.length; i += 1) {
       expect(bySequence[i].prev_hash).toBe(bySequence[i - 1].entry_hash);
     }
     expect(bySequence.every((journal) => journal.state === 'posted')).toBe(true);
     expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(5);
+    expect(bySequence.filter((journal) => journal.kind === 'pending_release')).toHaveLength(1);
+    expect(bySequence.filter((journal) => journal.kind === 'payout_hold')).toHaveLength(4);
+    expect(bySequence.filter((journal) => journal.kind === 'payout_settled')).toHaveLength(2);
 
-    // The payout holds — two in-flight transfers on the sandbox rails.
+    // The payout holds — two historical (settled) and two in-flight on the
+    // sandbox rails; the in-flight pair IS the pending bucket.
     const transfers = (await store.listBaasTransfers()).filter(
       (transfer) => transfer.payee_id === DEV_SEED_CREATOR.payee_id,
     );
-    expect(transfers).toHaveLength(2);
+    expect(transfers).toHaveLength(4);
     const holds = await Promise.all(transfers.map((transfer) => store.getPayoutHold(transfer.id)));
-    expect(holds.every((hold) => hold?.status === 'in_flight')).toBe(true);
+    expect(holds.filter((hold) => hold?.status === 'in_flight')).toHaveLength(2);
+    expect(holds.filter((hold) => hold?.status === 'settled')).toHaveLength(2);
 
-    // The tax profile — the readiness rows read complete for the persona.
+    // The tax profile — UNVERIFIED on purpose: it is what drives the 24%
+    // backup withholding that builds the $1,000,000,000 reserve (locked
+    // semantic #4). The readiness panel honestly shows the TODO.
     const profile = await store.getCreatorTaxProfile(DEV_SEED_CREATOR.payee_id);
-    expect(profile?.tin_verified).toBe(1);
-    expect(profile?.w9_on_file).toBe(1);
+    expect(profile?.tin_verified).toBe(0);
+    expect(profile?.w9_on_file).toBe(0);
+
+    // The persona's identity tag — the seeded UCT the identity surfaces read.
+    const uct = await store.getCreatorUct(DEV_SEED_CREATOR.payee_id);
+    expect(uct?.uctNumber).toBe(DEV_SEED_UCT);
   });
 
   it('seeds structurally deterministic — same ledger shape and balances per boot', async () => {
@@ -164,6 +206,6 @@ describe('bootDevSeedStore — the seeded content', () => {
     // the chain is valid within each boot (asserted above).
     expect(secondShape).toEqual(firstShape);
     const vault = await getStore().getVault(DEV_SEED_CREATOR.payee_id);
-    expect(vault!.available_balance).toBe(80_000);
+    expect(vault!.available_balance).toBe(DEV_SEED_TARGETS.available_cents);
   });
 });

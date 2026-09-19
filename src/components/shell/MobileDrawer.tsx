@@ -3,7 +3,7 @@
 /**
  * MobileDrawer — the mobile shell's navigation drawer (bank reference: the
  * hamburger drawer). Client component: it owns the open/close state. The
- * nine workspace destinations are unchanged — this re-skins HOW they are
+ * five workspace destinations are unchanged — this re-skins HOW they are
  * reached on small screens (drawer instead of the horizontal scroll bar),
  * not WHERE they go. The user chip renders from props inside the drawer,
  * exactly as the desktop sidebar does; absent a user, the honest
@@ -93,7 +93,7 @@ export function MobileDrawer({
                 <span data-testid="drawer-user-chip" className="flex items-center gap-2.5">
                   <span
                     aria-hidden="true"
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-deep/90 text-[10px] font-bold text-obsidian"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-muted/90 text-[10px] font-bold text-obsidian"
                   >
                     {user.initials}
                   </span>

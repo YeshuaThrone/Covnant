@@ -41,17 +41,17 @@ describe('GET /api/v1/dashboard — dev-seed integration', () => {
 
     // The greeting voice — the dev-seed persona.
     const user = body.user as { stage_name: string; initials: string };
-    expect(user.stage_name).toBe('Nova Reign');
-    expect(user.initials).toBe('NR');
+    expect(user.stage_name).toBe('Yeshua Throne');
+    expect(user.initials).toBe('YT');
 
-    // The three vault buckets — the engine math: 327_485 pending in, 150_000
-    // released to available, 70_000 drained into in-flight payouts, 45_000
-    // reserve.
+    // The three vault buckets — the engine math: 416,666,666,668 creator
+    // allocations in, 100,000,000,000 withheld to reserve (24%, no verified
+    // TIN), 316,666,666,668 released, two payouts settled, two in flight.
     const vault = body.vault as Record<string, number | string>;
-    expect(vault.payee_id).toBe('rh_nova_reign_don');
-    expect(vault.available_balance).toBe(80_000);
-    expect(vault.pending_balance).toBe(247_485);
-    expect(vault.reserve_balance).toBe(45_000);
+    expect(vault.payee_id).toBe('rh_yeshua_throne_don');
+    expect(vault.available_balance).toBe(330_000_000);
+    expect(vault.pending_balance).toBe(65_000_000);
+    expect(vault.reserve_balance).toBe(100_000_000_000);
   });
 
   it('returns holder-scoped journals with balanced legs and the hash chain intact', async () => {
@@ -74,7 +74,7 @@ describe('GET /api/v1/dashboard — dev-seed integration', () => {
     for (const { journal, entries } of body.ledger) {
       // Every journal belongs to this holder — a leg on the holder's vault
       // account (holder-scoping is the resolver's contract).
-      expect(entries.some((entry) => entry.account.includes('rh_nova_reign_don'))).toBe(true);
+      expect(entries.some((entry) => entry.account.includes('rh_yeshua_throne_don'))).toBe(true);
       // GL integrity: debits equal credits on every returned journal.
       const debits = entries.reduce((sum, entry) => sum + entry.debit_cents, 0);
       const credits = entries.reduce((sum, entry) => sum + entry.credit_cents, 0);
@@ -114,13 +114,16 @@ describe('GET /api/v1/dashboard — dev-seed integration', () => {
       }>;
     };
 
-    expect(body.payouts).toHaveLength(2);
-    const byRail = new Map(body.payouts.map((payout) => [payout.rail, payout]));
-    expect(byRail.get('rtp')?.hold.amount_cents).toBe(25_000);
-    expect(byRail.get('ach')?.hold.amount_cents).toBe(45_000);
+    expect(body.payouts).toHaveLength(4);
+    // The two settled historical holds clear pending; the in-flight pair —
+    // one per rail — IS the pending bucket.
+    const inFlight = body.payouts.filter((payout) => payout.hold.status === 'in_flight');
+    expect(inFlight).toHaveLength(2);
+    const byRail = new Map(inFlight.map((payout) => [payout.rail, payout]));
+    expect(byRail.get('rtp')?.hold.amount_cents).toBe(25_000_000);
+    expect(byRail.get('ach')?.hold.amount_cents).toBe(40_000_000);
     for (const payout of body.payouts) {
-      expect(payout.hold.status).toBe('in_flight');
-      expect(payout.hold.payee_id).toBe('rh_nova_reign_don');
+      expect(payout.hold.payee_id).toBe('rh_yeshua_throne_don');
       // The sandbox rail stamps the adapter's provider field; sandbox is the MODE.
       expect(payout.provider).toBe('column');
     }
@@ -140,8 +143,8 @@ describe('GET /api/v1/dashboard — dev-seed integration', () => {
 
     expect(body.readiness).toEqual({
       kyc_status: 'APPROVED',
-      tin_verified: 1,
-      w9_on_file: 1,
+      tin_verified: 0,
+      w9_on_file: 0,
       bank_account_linked: true,
       provisioning_status: 'PROVISIONED',
     });

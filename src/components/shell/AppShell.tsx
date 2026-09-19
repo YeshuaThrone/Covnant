@@ -5,20 +5,19 @@ import { MobileDrawer } from './MobileDrawer';
 import { SidebarNav, type NavItem } from './SidebarNav';
 
 /**
- * The nine destinations of the Obsidian workspace shell. Vault routes to
- * the contract vault; Admin is the existing operations console. Later PRs
- * replace the stubbed views in place — the nav is the stable surface.
+ * The FIVE creator destinations of the Obsidian workspace shell (the
+ * layout contract's five-tab trim): Gold Board (the money home, first),
+ * Covnant ID, Virtual Card, Sync License, Settings. Admin stays OUT of the
+ * creator navigation — the gated console is reachable through the shared
+ * page-header ADMIN pill (the dashboard header slot), and /admin itself
+ * remains URL-reachable and fail-closed.
  */
 export const WORKSPACE_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Gold Board' },
-  { href: '/catalog', label: 'Catalog' },
-  { href: '/contracts', label: 'Contracts' },
-  { href: '/templates', label: 'Templates' },
-  { href: '/ledger', label: 'Ownership Ledger' },
-  { href: '/vault', label: 'Vault' },
-  { href: '/pricing', label: 'Pricing' },
+  { href: '/covnant-id', label: 'Covnant ID' },
+  { href: '/virtual-card', label: 'Virtual Card' },
+  { href: '/sync-license', label: 'Sync License' },
   { href: '/settings', label: 'Settings' },
-  { href: '/admin', label: 'Admin' },
 ];
 
 /**
@@ -122,7 +121,7 @@ function ShellUserChip({ user }: { user: ShellUser }): React.JSX.Element {
       <span className="flex min-w-0 items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-deep/90 text-[10px] font-bold text-obsidian"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gold-champagne/90 via-gold/70 to-gold-muted/90 text-[10px] font-bold text-obsidian"
         >
           {user.initials}
         </span>

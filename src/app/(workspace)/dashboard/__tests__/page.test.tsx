@@ -2,14 +2,16 @@
  * /dashboard composition test — The Don home renders for real
  * (renderToStaticMarkup) against the LIVE resolver in dev-seed mode: the
  * store boots through the real engines (DON_DEV_SEED=1, no mocks — the
- * same path the e2e harness and preview use). Pins the reference IA
- * element-for-element — THE DON wordmark, greeting + avatar chip, three
- * vault-bucket cards with right-aligned balances, carousel dots, View all
- * → /ledger, payout rail tiles (RTP instant, ACH +3 business days), quick
- * actions on real routes only, dense transaction rows with debit/credit
- * pairs + See more, the readiness panel — plus the brand rails: browser
- * title, no blue palette, no fabricated identity (no UCT, no account
- * numbers).
+ * same path the e2e harness and preview use). Pins the Gold Board UI spec
+ * (goldBoardUiSpec) element-for-element — THE DON wordmark, greeting +
+ * avatar chip, three vault-bucket cards with right-aligned balances, the
+ * REVENUE STREAMS strip (store-read, per goldBoardUiSpec — Quick Actions
+ * are REMOVED), the ADMIN console pill in the page-header slot, carousel
+ * dots, View all → /ledger, payout rail tiles (RTP instant, ACH +3
+ * business days), dense transaction rows with debit/credit pairs + See
+ * more, the readiness panel — plus the brand rails: browser title, no
+ * blue palette, no fabricated identity (no UCT rendered, no account
+ * numbers), and the seeded persona is Yeshua Throne.
  */
 
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -37,7 +39,7 @@ describe('/dashboard — The Don composition', () => {
     });
   });
 
-  it('renders the page-header THE DON wordmark and the greeting + avatar chip', async () => {
+  it('renders the page-header THE DON wordmark, the greeting + avatar chip, and the ADMIN pill', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('data-testid="don-wordmark"');
     expect(html).toContain('GOLD BOARD');
@@ -45,11 +47,16 @@ describe('/dashboard — The Don composition', () => {
     // DATA badge, opposite the wordmark, marks the seeded balances.
     expect(html).toContain('data-testid="demo-data-badge"');
     expect((html.match(/data-testid="demo-data-badge"/g) ?? []).length).toBe(1);
+    // The gated administrator console rides the page-header slot (the
+    // five-tab creator nav carries no Admin entry).
+    expect(html).toContain('data-testid="admin-console-link"');
+    expect(html).toContain('href="/admin"');
     expect(html).toContain('data-testid="greeting"');
     expect(html).toContain('Hi,');
-    expect(html).toContain('Nova Reign'); // the dev-seed persona's stage name
+    expect(html).toContain('Yeshua Throne'); // the seeded persona's name
+    expect(html).not.toContain('Nova Reign');
     expect(html).toContain('data-testid="avatar-chip"');
-    expect(html).toContain('NR'); // initials in the chip
+    expect(html).toContain('YT'); // initials in the chip
   });
 
   it('renders the Accounts section with the three vault-bucket cards', async () => {
@@ -64,11 +71,31 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('Available');
     expect(html).toContain('Pending');
     expect(html).toContain('Reserve');
-    // Dev-seed balances, exact from integer cents (available 80_000,
-    // pending 247_485, reserve 45_000 — the seeded engine timeline).
-    expect(html).toContain('$800.00');
-    expect(html).toContain('$2,474.85');
-    expect(html).toContain('$450.00');
+    // The founder's seeded portfolio, EXACT from integer cents through the
+    // real engine paths — never display strings: available 330_000_000
+    // (net royalty proceeds minus settled and in-flight payouts), pending
+    // 65_000_000 (two in-flight payout holds: 25M + 40M), reserve
+    // 100_000_000_000 (24% backup withholding credited to the creator's
+    // reserve bucket across five seeded UDR settlements).
+    expect(html).toContain('$3,300,000.00');
+    expect(html).toContain('$650,000.00');
+    expect(html).toContain('$1,000,000,000.00');
+  });
+
+  it('renders the revenue streams strip and NO quick actions (goldBoardUiSpec)', async () => {
+    const html = await renderDashboardPage();
+    expect(html).toContain('Revenue streams');
+    expect(html).toContain('data-testid="revenue-streams"');
+    // Store-read per-source royalty inflow — Spotify (two settlements),
+    // Amazon Music, YouTube Music, Bandcamp (one each).
+    expect((html.match(/data-testid="revenue-stream"/g) ?? []).length).toBe(4);
+    expect(html).toContain('Spotify');
+    expect(html).toContain('Amazon Music');
+    expect(html).toContain('YouTube Music');
+    expect(html).toContain('Bandcamp');
+    // Quick actions are REMOVED — the strip is read-only financial truth.
+    expect(html).not.toContain('data-testid="quick-actions"');
+    expect(html).not.toContain('Quick actions');
   });
 
   it('right-aligns each balance with its sublabel beneath (bank-reference layout)', async () => {
@@ -94,41 +121,30 @@ describe('/dashboard — The Don composition', () => {
   it('renders payout tiles on the sandbox rail — RTP instant, ACH +3 business days', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('data-testid="payout-tiles"');
-    expect((html.match(/data-testid="payout-tile"/g) ?? []).length).toBe(2);
+    // Four seeded transfers: two settled (the historical withdrawals) and
+    // two in-flight holds (the $650,000.00 pending movement).
+    expect((html.match(/data-testid="payout-tile"/g) ?? []).length).toBe(4);
     expect(html).toContain('data-rail="rtp"');
     expect(html).toContain('data-rail="ach"');
     expect(html).toContain('RTP · Instant');
     expect(html).toContain('ACH · +3 business days');
-    expect(html).toContain('$250.00'); // RTP in-flight hold
-    expect(html).toContain('$450.00'); // ACH in-flight hold
-  });
-
-  it('renders compact square quick actions on real routes only', async () => {
-    const html = await renderDashboardPage();
-    expect(html).toContain('data-testid="quick-actions"');
-    expect((html.match(/data-testid="quick-action"/g) ?? []).length).toBe(3);
-    expect(html).toContain('href="/assets"');
-    expect(html).toContain('href="/contracts"');
-    expect(html).toContain('href="/ledger"');
-    // No invented routes — every action href stays inside the workspace nav.
-    const hrefs = [...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]);
-    for (const href of hrefs) {
-      expect(
-        ['/dashboard', '/ledger', '/assets', '/contracts'].some((allowed) => href.startsWith(allowed)),
-        `invented route in a quick action: ${href}`,
-      ).toBe(true);
-    }
+    expect(html).toContain('$250,000.00'); // RTP in-flight hold
+    expect(html).toContain('$400,000.00'); // ACH in-flight hold
   });
 
   it('renders the dense transactions card with debit/credit pairs and See more', async () => {
     const html = await renderDashboardPage();
     expect(html).toContain('Transactions');
-    expect((html.match(/data-testid="transactions-row"/g) ?? []).length).toBe(6); // visible of 8
+    expect((html.match(/data-testid="transactions-row"/g) ?? []).length).toBe(6); // visible of 12
     // Pair lines as the GL stores them: DR / CR with exactly one live side.
-    expect(html).toContain('DR $0.00 / CR $129.90'); // the seeded Spotify royalty ingest
-    expect(html).toContain('DR $250.00 / CR $0.00'); // payout legs
-    expect(html).toContain('+$129.90'); // inflow signed positive
-    expect(html).toContain('−$250.00'); // payout displayed as outflow
+    // The seeded window is payout-heavy (newest first): the two in-flight
+    // holds, the two historical settlement journals, and their original
+    // hold journals — each shows the holder-facing leg only.
+    expect(html).toContain('DR $400,000.00 / CR $0.00');
+    expect(html).toContain('DR $250,000.00 / CR $0.00');
+    expect(html).toContain('DR $1,162,716,666.68 / CR $0.00');
+    expect(html).toContain('DR $2,000,000,000.00 / CR $0.00');
+    expect(html).toContain('−$250,000.00'); // payout displayed as outflow
     expect(html).toContain('data-testid="transactions-see-more"');
     expect(html).toContain('href="/ledger"');
   });
@@ -140,10 +156,12 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('data-testid="readiness-tax"');
     expect(html).toContain('data-testid="readiness-bank"');
     expect(html).toContain('data-testid="readiness-provisioning"');
-    // Fixture states: KYC approved and provisioning complete — labeled in
-    // text, never color-only.
+    // Seeded states, labeled in text, never color-only: KYC, bank, and
+    // provisioning are COMPLETE; the tax row is honestly incomplete
+    // (zero/zero TIN and W-9) and renders its TODO state.
     expect(html).toContain('COMPLETE');
-    expect(html).not.toContain('TODO');
+    expect(html).toContain('data-testid="readiness-tax" data-state="incomplete"');
+    expect(html).toContain('TODO');
   });
 
   it('never fabricates identity or account details — no UCT, no account numbers', async () => {
