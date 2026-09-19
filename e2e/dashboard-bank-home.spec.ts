@@ -28,7 +28,7 @@ test.describe('The Don dashboard home — desktop', () => {
 
     // Sidebar shell: the COVNANT brand chip (brand slot) + the user chip
     // from the provider; the page header below carries The Don wordmark.
-    await expect(page.getByTestId('shell-user-chip')).toContainText('Nova Reign');
+    await expect(page.getByTestId('shell-user-chip')).toContainText('Yeshua Throne');
     await expect(page.locator('[data-shell="sidebar"]')).toContainText('COVNANT');
 
     // Page header wordmark + greeting + avatar chip. The seeded render IS
@@ -37,39 +37,39 @@ test.describe('The Don dashboard home — desktop', () => {
     await expect(page.getByTestId('don-wordmark')).toContainText('GOLD BOARD');
     await expect(page.getByTestId('demo-data-badge')).toHaveCount(1);
     await expect(page.getByTestId('demo-data-badge')).toBeVisible();
-    await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+    await expect(page.getByTestId('greeting')).toContainText('Hi, Yeshua Throne');
     await expect(page.getByTestId('avatar-chip')).toBeVisible();
 
     // Accounts — three bucket cards, right-aligned balances, View all.
     await expect(page.getByTestId('account-card-available')).toBeVisible();
     await expect(page.getByTestId('account-card-pending')).toBeVisible();
     await expect(page.getByTestId('account-card-reserve')).toBeVisible();
-    await expect(page.getByTestId('account-card-available-balance')).toContainText('$800.00');
+    await expect(page.getByTestId('account-card-available-balance')).toContainText('$3,300,000.00');
     await expect(page.getByTestId('account-card-available-balance')).toHaveClass(/text-right/);
-    await expect(page.getByTestId('account-card-pending-balance')).toContainText('$2,474.85');
-    await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$450.00');
+    await expect(page.getByTestId('account-card-pending-balance')).toContainText('$650,000.00');
+    await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$1,000,000,000.00');
     await expect(page.getByTestId('accounts-view-all')).toHaveAttribute('href', '/ledger');
 
-    // Payout tiles — the sandbox rail vocabulary.
-    await expect(page.getByTestId('payout-tile')).toHaveCount(2);
-    await expect(page.locator('[data-testid="payout-tile"][data-rail="rtp"]')).toContainText(
+    // Payout tiles — the sandbox rail vocabulary, in-flight + settled pairs.
+    await expect(page.getByTestId('payout-tile')).toHaveCount(4);
+    await expect(page.locator('[data-testid="payout-tile"][data-rail="rtp"]').first()).toContainText(
       'Instant',
     );
-    await expect(page.locator('[data-testid="payout-tile"][data-rail="ach"]')).toContainText(
+    await expect(page.locator('[data-testid="payout-tile"][data-rail="ach"]').first()).toContainText(
       '+3 business days',
     );
 
-    // Quick actions — compact squares on real routes.
-    await expect(page.getByTestId('quick-action')).toHaveCount(3);
-    await expect(page.locator('a[data-testid="quick-action"]').first()).toHaveAttribute(
-      'href',
-      '/assets',
-    );
+    // D1: Quick Actions are REMOVED from the Gold Board — the strip carries
+    // the revenue-streams section instead.
+    await expect(page.getByTestId('quick-action')).toHaveCount(0);
+    await expect(page.getByTestId('revenue-streams')).toBeVisible();
+    await expect(page.getByTestId('revenue-stream')).toHaveCount(4);
 
     // Transactions — dense rows with pairs, See more into the ledger. The
-    // newest seeded journal is the ACH payout hold (Aug 7).
+    // newest seeded journal entries are the Sep 10 payout holds (the pending
+    // balance is seeded through real payout records, not display strings).
     await expect(page.getByTestId('transactions-row')).toHaveCount(6);
-    await expect(page.getByTestId('transactions-row').first()).toContainText('DR $450.00 / CR $0.00');
+    await expect(page.getByTestId('transactions-row').first()).toContainText('DR $400,000.00 / CR $0.00');
     await expect(page.getByTestId('transactions-see-more')).toHaveAttribute('href', '/ledger');
 
     // Readiness panel + thin footer.
@@ -95,7 +95,7 @@ test.describe('The Don dashboard home — desktop', () => {
     // The populated dashboard renders immediately — no NO SESSION wall, no
     // sign-in redirect, and exactly ONE DEMO DATA disclosure so the seeded
     // balances never present as a real holder's.
-    await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+    await expect(page.getByTestId('greeting')).toContainText('Hi, Yeshua Throne');
     await expect(page.getByTestId('account-card-available')).toBeVisible();
     await expect(page.getByTestId('demo-data-badge')).toHaveCount(1);
     const body = await page.locator('body').innerText();
@@ -127,21 +127,23 @@ test.describe('The Don dashboard home — 390px mobile', () => {
     const drawer = page.getByTestId('mobile-drawer');
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText('GOLD BOARD');
-    await expect(drawer.getByRole('link', { name: 'Ownership Ledger' })).toBeVisible();
-    await expect(drawer).toContainText('Nova Reign'); // the user chip rides along
+    await expect(drawer.getByRole('link', { name: 'Covnant ID' })).toBeVisible();
+    await expect(drawer).toContainText('Yeshua Throne'); // the user chip rides along
 
     // Escape closes the drawer.
     await page.keyboard.press('Escape');
     await expect(drawer).toBeHidden();
   });
 
-  test('keeps quick actions and payout tiles in a compact grid', async ({ page }) => {
+  test('keeps payout tiles in a compact grid — quick actions are gone (D1)', async ({
+    page,
+  }) => {
     await page.goto('/dashboard');
-    await expect(page.getByTestId('quick-action')).toHaveCount(3);
-    await expect(page.getByTestId('payout-tile')).toHaveCount(2);
-    await expect(page.locator('[data-testid="payout-tile"][data-rail="rtp"]')).toContainText(
-      'Instant',
-    );
+    await expect(page.getByTestId('quick-action')).toHaveCount(0);
+    await expect(page.getByTestId('payout-tile')).toHaveCount(4);
+    await expect(
+      page.locator('[data-testid="payout-tile"][data-rail="rtp"]').first(),
+    ).toContainText('Instant');
   });
 });
 
@@ -153,7 +155,7 @@ test.describe('the signup-success gateway', () => {
     await page.goto('/');
     await page.getByRole('link', { name: /enter your world/i }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+    await expect(page.getByTestId('greeting')).toContainText('Hi, Yeshua Throne');
     await expect(page.getByTestId('don-wordmark')).toContainText('GOLD BOARD');
   });
 });

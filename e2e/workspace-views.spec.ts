@@ -8,24 +8,23 @@ import { expect, test } from '@playwright/test';
  * memory mode and Supabase mode.
  */
 
-test('dashboard renders The Don home with the three vault cards and quick actions', async ({
+test('dashboard renders The Don home: three vault cards, revenue streams, no quick actions', async ({
   page,
 }) => {
   await page.goto('/dashboard');
 
   // The Don home replaced the metric-card dashboard: the greeting + three
   // vault-bucket cards are the new above-the-fold composition.
-  await expect(page.getByTestId('greeting')).toContainText('Hi, Nova Reign');
+  await expect(page.getByTestId('greeting')).toContainText('Hi, Yeshua Throne');
   await expect(page.getByTestId('account-card-available')).toBeVisible();
   await expect(page.getByTestId('account-card-pending')).toBeVisible();
   await expect(page.getByTestId('account-card-reserve')).toBeVisible();
 
-  // Quick actions — compact squares on real routes (View Ledger replaced
-  // Browse Templates to stay on the ownership-ledger spine).
-  const actions = page.getByTestId('quick-actions').getByRole('link');
-  await expect(actions.filter({ hasText: 'Register Asset' })).toHaveAttribute('href', '/assets');
-  await expect(actions.filter({ hasText: 'New Contract' })).toHaveAttribute('href', '/contracts');
-  await expect(actions.filter({ hasText: 'View Ledger' })).toHaveAttribute('href', '/ledger');
+  // D1 removed Quick Actions from the Gold Board: the strip carries the
+  // revenue-streams section instead.
+  await expect(page.getByTestId('quick-action')).toHaveCount(0);
+  await expect(page.getByTestId('revenue-streams')).toBeVisible();
+  await expect(page.getByTestId('revenue-stream')).toHaveCount(4);
 });
 
 test('catalog shows registered assets with universal registry pills, or the empty state', async ({

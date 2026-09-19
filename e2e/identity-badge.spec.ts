@@ -19,8 +19,8 @@ test('the shell sidebar carries the fixture holder user chip on desktop', async 
   await expect(sidebar).toContainText('COVNANT');
   const chip = page.getByTestId('shell-user-chip');
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText('Nova Reign');
-  await expect(chip).toContainText('NR');
+  await expect(chip).toContainText('Yeshua Throne');
+  await expect(chip).toContainText('YT');
 
   // No fabricated identity anywhere: no UCT, no unregistered placeholder.
   await expect(page.locator('[data-identity="unregistered"]')).toHaveCount(0);
@@ -48,5 +48,5 @@ test('the sidebar identity slot is hidden below lg — the drawer carries the ch
   const drawer = page.getByTestId('mobile-drawer');
   await expect(drawer).toBeVisible();
   await expect(drawer.getByTestId('drawer-user-chip')).toBeVisible();
-  await expect(drawer.getByTestId('drawer-user-chip')).toContainText('Nova Reign');
+  await expect(drawer.getByTestId('drawer-user-chip')).toContainText('Yeshua Throne');
 });
