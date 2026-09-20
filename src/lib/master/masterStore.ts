@@ -391,7 +391,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     890,
   ),
   factoryTemplate(
-    'TPL-FLM-001',
+    'TPL-FLM-007',
     'Theatrical Distribution & Box Office Settlement',
     'FILM_TV',
     'Theatrical',
@@ -706,10 +706,11 @@ export function masterTemplatesForCategory(
  * that template id. Thin where the real ledger is thin — never padded with
  * demo counts.
  */
-export function applyRealExecutionCounts(
-  records: readonly ContractTemplateRecord[],
+/** Derive real-mode execution counts from the live contract store. */
+function withRealExecutionCounts<T extends { readonly templateId: string; readonly timesExecuted: number }>(
+  records: readonly T[],
   contracts: ReadonlyArray<{ templateId: string }>,
-): ContractTemplateRecord[] {
+): T[] {
   const executions = new Map<string, number>();
   for (const contract of contracts) {
     executions.set(contract.templateId, (executions.get(contract.templateId) ?? 0) + 1);
@@ -718,6 +719,13 @@ export function applyRealExecutionCounts(
     ...record,
     timesExecuted: executions.get(record.templateId) ?? 0,
   }));
+}
+
+export function applyRealExecutionCounts(
+  records: readonly ContractTemplateRecord[],
+  contracts: ReadonlyArray<{ templateId: string }>,
+): ContractTemplateRecord[] {
+  return withRealExecutionCounts(records, contracts);
 }
 
 /**
@@ -734,4 +742,527 @@ export async function resolveMasterTemplates(): Promise<{
   }
   const contracts = await listContracts();
   return { demo: false, records: applyRealExecutionCounts(MASTER_TEMPLATE_LIBRARY, contracts) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The Sovereign Clearing Framework — the ATOMIC REGISTRY (founder canon,
+// CovnantAtomicDataSDK drop, 2026-09-20). The factory's granular ledger: 26
+// ATOMIC SECTORS, every one carrying at least one clearing record — the seven
+// founder-verbatim seeds EXACTLY as dropped, the remaining sectors written in
+// the founder's voice (engineered escrow locks, settlement gates, micro
+// routing, asset isolation). Zero Ampersands: the atomic registry's names and
+// clauses read 'and', never '&'.
+//
+// Honesty law, unchanged: every record lives HERE in the master store —
+// components never inline atomic literals. The sector→master-vertical mapping
+// keeps the frozen six-tab filter authoritative: each vertical tab renders the
+// atomic records of the sectors that map to it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The founder's 26 atomic sectors (CovnantAtomicDataSDK canon) — exact. */
+export type AtomicSector =
+  | 'MUSIC'
+  | 'GAMING'
+  | 'INTERACTIVE'
+  | 'PODCASTING'
+  | 'STREAMING'
+  | 'SOCIAL_MEDIA'
+  | 'PUBLISHING'
+  | 'MOVIES'
+  | 'FILM'
+  | 'TV'
+  | 'VIDEO'
+  | 'SPORTS'
+  | 'MOTORSPORT'
+  | 'ARENA'
+  | 'ATHLETICS'
+  | 'FASHION'
+  | 'MODELING'
+  | 'CAD'
+  | 'VISUAL_ARTS'
+  | 'DESIGN'
+  | 'BOOKS'
+  | 'LITERATURE'
+  | 'DIGITAL_ASSETS'
+  | 'SOFTWARE'
+  | 'VTUBING'
+  | 'VIRTUAL_AVATARS';
+
+/** Canon display order of the 26 sectors — the registry manifest order. */
+export const ATOMIC_SECTOR_ORDER: readonly AtomicSector[] = Object.freeze([
+  'MUSIC',
+  'GAMING',
+  'INTERACTIVE',
+  'PODCASTING',
+  'STREAMING',
+  'SOCIAL_MEDIA',
+  'PUBLISHING',
+  'MOVIES',
+  'FILM',
+  'TV',
+  'VIDEO',
+  'SPORTS',
+  'MOTORSPORT',
+  'ARENA',
+  'ATHLETICS',
+  'FASHION',
+  'MODELING',
+  'CAD',
+  'VISUAL_ARTS',
+  'DESIGN',
+  'BOOKS',
+  'LITERATURE',
+  'DIGITAL_ASSETS',
+  'SOFTWARE',
+  'VTUBING',
+  'VIRTUAL_AVATARS',
+] as const);
+
+/**
+ * One atomic clearing record of the Sovereign Clearing Framework (founder
+ * canon): the granular sector record with its entityType, its telemetry
+ * metric, and the same compiler-locked 50/35/15 structure as the factory.
+ */
+export interface AtomicContractRecord {
+  readonly templateId: string;
+  readonly templateName: string;
+  readonly atomicSector: AtomicSector;
+  /** The industry entity of record, e.g. 'Film Studio'. */
+  readonly entityType: string;
+  /** The telemetry stream the clearing settles on, e.g. 'Box Office Gross Receipts and ISAN Telemetry'. */
+  readonly telemetryMetric: string;
+  readonly splitStructure: TemplateSplitStructure;
+  readonly keyClauses: readonly string[];
+  readonly executionStatus: TemplateExecutionStatus;
+  readonly timesExecuted: number;
+}
+
+/** Atomic sector → master vertical — the frozen six-tab filter mapping. */
+export const ATOMIC_SECTOR_TO_VERTICAL: Record<AtomicSector, GlobalEntertainmentCategory> = {
+  MUSIC: 'AUDIO_AND_RECORDED_SOUND',
+  PODCASTING: 'AUDIO_AND_RECORDED_SOUND',
+  MOVIES: 'FILM_AND_TELEVISION',
+  FILM: 'FILM_AND_TELEVISION',
+  TV: 'FILM_AND_TELEVISION',
+  VIDEO: 'FILM_AND_TELEVISION',
+  STREAMING: 'FILM_AND_TELEVISION',
+  PUBLISHING: 'PUBLISHING_AND_LITERARY',
+  BOOKS: 'PUBLISHING_AND_LITERARY',
+  LITERATURE: 'PUBLISHING_AND_LITERARY',
+  SPORTS: 'LIVE_PERFORMANCE_AND_COMEDY',
+  MOTORSPORT: 'LIVE_PERFORMANCE_AND_COMEDY',
+  ARENA: 'LIVE_PERFORMANCE_AND_COMEDY',
+  ATHLETICS: 'LIVE_PERFORMANCE_AND_COMEDY',
+  GAMING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  INTERACTIVE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  SOFTWARE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  DIGITAL_ASSETS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  CAD: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  SOCIAL_MEDIA: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  VTUBING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  VIRTUAL_AVATARS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  FASHION: 'COMMERCIAL_AND_BRAND_LICENSING',
+  MODELING: 'COMMERCIAL_AND_BRAND_LICENSING',
+  VISUAL_ARTS: 'COMMERCIAL_AND_BRAND_LICENSING',
+  DESIGN: 'COMMERCIAL_AND_BRAND_LICENSING',
+};
+
+/** Atomic record constructor — fills the canon split structure. */
+function atomicTemplate(
+  templateId: string,
+  templateName: string,
+  atomicSector: AtomicSector,
+  entityType: string,
+  telemetryMetric: string,
+  keyClauses: readonly string[],
+  executionStatus: TemplateExecutionStatus,
+  timesExecuted: number,
+): AtomicContractRecord {
+  return {
+    templateId,
+    templateName,
+    atomicSector,
+    entityType,
+    telemetryMetric,
+    splitStructure: CANON_SPLIT,
+    keyClauses,
+    executionStatus,
+    timesExecuted,
+  };
+}
+
+/**
+ * The atomic registry — 26 sector records. The seven founder-verbatim seeds
+ * lead EXACTLY as dropped (ids, names, sectors, entity types, telemetry
+ * metrics, clauses, counts); the remaining sectors complete the founder's
+ * standing directive that no sector form is left out.
+ */
+export const ATOMIC_TEMPLATE_REGISTRY: readonly AtomicContractRecord[] = Object.freeze([
+  // ── FILM_AND_TELEVISION ─────────────────────────────────────────────────
+  atomicTemplate(
+    'TPL-MOV-001',
+    'Movie Studio Catalog Distribution Clearing',
+    'MOVIES',
+    'Movie Studio',
+    'Catalog License Fees and Library Circulation Counts',
+    ['Catalog Distribution Escrow', 'Library Yield Settlement Gate', 'Catalog Reversion Lock'],
+    'LEGAL_VAULT_LOCKED',
+    560,
+  ),
+  atomicTemplate(
+    'TPL-FLM-001',
+    'Feature Film Theatrical Distribution Master Agreement',
+    'FILM',
+    'Film Studio',
+    'Box Office Gross Receipts and ISAN Telemetry',
+    ['Box Office Gross Escrow Lock', 'Territorial Window Distribution Gate', 'ISAN Asset Tracking'],
+    'PRODUCTION_READY',
+    890,
+  ),
+  atomicTemplate(
+    'TPL-TV-001',
+    'Linear Television Broadcast Syndication Contract',
+    'TV',
+    'Broadcaster',
+    'Nielsen Ratings and Linear Commercial Flight Minutes',
+    ['Ad Insertion Micro Routing', 'Syndication Reversion Lock', 'Territory Airtime Escrow'],
+    'PRODUCTION_READY',
+    620,
+  ),
+  atomicTemplate(
+    'TPL-VID-001',
+    'Video Content Platform Distribution Clearing',
+    'VIDEO',
+    'Video Platform',
+    'View Duration Minutes and Creator Fund Distributions',
+    ['View Yield Escrow Lock', 'Distribution Settlement Gate', 'Creator Payout Micro Routing'],
+    'PRODUCTION_READY',
+    830,
+  ),
+  atomicTemplate(
+    'TPL-STR-001',
+    'Platform Subscription Content Yield Clearing',
+    'STREAMING',
+    'Streaming Platform',
+    'Subscriber Watch Hours and Retention Telemetry',
+    ['Subscription Pool Escrow Lock', 'Watch Hour Yield Gate', 'Catalog Reversion Settlement'],
+    'PRODUCTION_READY',
+    1040,
+  ),
+  // ── AUDIO_AND_RECORDED_SOUND ────────────────────────────────────────────
+  atomicTemplate(
+    'TPL-MUS-001',
+    'Master Recording Rights and Royalty Clearing',
+    'MUSIC',
+    'Record Label',
+    'Stream Counts and ISRC Royalty Receipts',
+    ['Master Rights Escrow Lock', 'Per Stream Royalty Settlement Gate', 'ISRC Telemetry Routing'],
+    'PRODUCTION_READY',
+    1320,
+  ),
+  atomicTemplate(
+    'TPL-PDC-001',
+    'Podcast Network Advertising Yield Clearing',
+    'PODCASTING',
+    'Podcast Network',
+    'Episode Downloads and Ad Insert Impressions',
+    ['Ad Yield Escrow Lock', 'Download Settlement Gate', 'Network Feed Isolation Shield'],
+    'PRODUCTION_READY',
+    690,
+  ),
+  // ── PUBLISHING_AND_LITERARY ─────────────────────────────────────────────
+  atomicTemplate(
+    'TPL-PUB-001',
+    'Publisher Catalog Rights Clearing',
+    'PUBLISHING',
+    'Publisher Catalog',
+    'Rights Licensing Fees and Catalog Circulation',
+    ['Catalog Rights Escrow Lock', 'Licensing Settlement Gate', 'Subsidiary Rights Isolation Shield'],
+    'PRODUCTION_READY',
+    590,
+  ),
+  atomicTemplate(
+    'TPL-BOK-001',
+    'Book Publishing and Advance Clearing',
+    'BOOKS',
+    'Trade Publisher',
+    'Copy Sales and Advance Earnout Receipts',
+    ['Advance Recoupment Escrow', 'Copy Sale Royalty Gate', 'Rights Reversion Lock'],
+    'PRODUCTION_READY',
+    610,
+  ),
+  atomicTemplate(
+    'TPL-LTR-001',
+    'Literary Work Serial Rights Clearing',
+    'LITERATURE',
+    'Serial Publication',
+    'Serial Installment Reads and Syndication Placements',
+    ['Serial Rights Escrow Lock', 'Installment Payout Gate', 'Syndication Reversion Settlement'],
+    'PRODUCTION_READY',
+    430,
+  ),
+  // ── LIVE_PERFORMANCE_AND_COMEDY ─────────────────────────────────────────
+  atomicTemplate(
+    'TPL-SPT-001',
+    'League Broadcast Rights Clearing',
+    'SPORTS',
+    'League Office',
+    'Broadcast Viewership and Gate Receipt Telemetry',
+    ['Broadcast Rights Escrow Lock', 'League Revenue Settlement Gate', 'Franchise Split Routing'],
+    'PRODUCTION_READY',
+    880,
+  ),
+  atomicTemplate(
+    'TPL-MTR-001',
+    'Motorsport Circuit Trackage Media Rights Agreement',
+    'MOTORSPORT',
+    'Motorsport Circuit',
+    'Telemetry Track Telematics and Pit Revenue',
+    ['Lap Time Broadcast Micro Payouts', 'Circuit Pit Lane Asset Lock', 'Telemetry Escrow Gate'],
+    'PRODUCTION_READY',
+    210,
+  ),
+  atomicTemplate(
+    'TPL-ARN-001',
+    'Arena Venue Facility Access and Gate Yield Clearing',
+    'ARENA',
+    'Arena Operator',
+    'Turnstile Gate Foot Traffic and Venue Concessions',
+    ['Sub Second Turnstile Settlement', 'Facility Fee Floor Gate', 'In Venue Commercial Clearing'],
+    'PRODUCTION_READY',
+    430,
+  ),
+  atomicTemplate(
+    'TPL-ATH-001',
+    'Athlete Endorsement and NIL Clearing',
+    'ATHLETICS',
+    'NIL Athlete',
+    'Endorsement Impressions and Confirmed Appearance Bookings',
+    ['Endorsement Escrow Lock', 'Appearance Settlement Gate', 'NIL Rights Isolation Shield'],
+    'PRODUCTION_READY',
+    760,
+  ),
+  // ── INTERACTIVE_AND_DIGITAL_MEDIA ───────────────────────────────────────
+  atomicTemplate(
+    'TPL-GAM-001',
+    'Game Studio Distribution and Microtransaction Clearing',
+    'GAMING',
+    'Game Studio',
+    'Player Session Hours and In-Game Purchase Volume',
+    ['Microtransaction Settlement Escrow', 'Studio Distribution Yield Gate', 'Save Asset Isolation Lock'],
+    'PRODUCTION_READY',
+    1180,
+  ),
+  atomicTemplate(
+    'TPL-IXP-001',
+    'Interactive Experience License Clearing',
+    'INTERACTIVE',
+    'Experience Producer',
+    'Session Participation and Interactive Event Placements',
+    ['Experience License Escrow', 'Session Yield Settlement Gate', 'Interactive Asset Isolation Lock'],
+    'PRODUCTION_READY',
+    470,
+  ),
+  atomicTemplate(
+    'TPL-SFT-001',
+    'Software License and Seat Yield Clearing',
+    'SOFTWARE',
+    'Software Vendor',
+    'Active Seat Counts and License Key Activations',
+    ['Seat Yield Escrow Lock', 'License Activation Settlement Gate', 'Source Code Isolation Shield'],
+    'PRODUCTION_READY',
+    720,
+  ),
+  atomicTemplate(
+    'TPL-DGA-001',
+    'Digital Asset Vault Custody Clearing',
+    'DIGITAL_ASSETS',
+    'Asset Custodian',
+    'Vault Access Events and Asset Transfer Volume',
+    ['Custody Vault Escrow Lock', 'Transfer Settlement Gate', 'Zero Knowledge Custody Shield'],
+    'LEGAL_VAULT_LOCKED',
+    380,
+  ),
+  atomicTemplate(
+    'TPL-CAD-001',
+    '3D CAD Mesh Spatial Asset Licensing Agreement',
+    'CAD',
+    'CAD Asset Store',
+    'Direct Polygon Mesh Downloads and API Invocations',
+    ['Spatial Polygon Licensing Lock', 'Automated Render Engine Yield', 'Zero Knowledge Asset Protection'],
+    'PRODUCTION_READY',
+    1150,
+  ),
+  atomicTemplate(
+    'TPL-SOC-001',
+    'Creator Channel Monetization Clearing',
+    'SOCIAL_MEDIA',
+    'Channel Creator',
+    'Impression Counts and Creator Fund Distributions',
+    ['Impression Micro Payout Routing', 'Brand Deal Escrow Gate', 'Channel Asset Isolation Lock'],
+    'PRODUCTION_READY',
+    960,
+  ),
+  atomicTemplate(
+    'TPL-VTB-001',
+    'Virtual Avatar Rigging and Model Ownership Contract',
+    'VTUBING',
+    'Virtual Avatar Creator',
+    'Stream Frame Render Hours and Direct Fan Micro Tipping',
+    ['Live Stream Micro Tipping Telemetry', 'Rigging Model IP Isolation', 'Syndicated Avatar Split'],
+    'PRODUCTION_READY',
+    980,
+  ),
+  atomicTemplate(
+    'TPL-VAV-001',
+    'Avatar Licensing and Appearance Clearing',
+    'VIRTUAL_AVATARS',
+    'Avatar Owner',
+    'Avatar Appearance Sessions and Licensing Placements',
+    ['Appearance Fee Escrow Lock', 'Licensing Yield Settlement Gate', 'Avatar Identity Isolation Shield'],
+    'PRODUCTION_READY',
+    340,
+  ),
+  // ── COMMERCIAL_AND_BRAND_LICENSING ──────────────────────────────────────
+  atomicTemplate(
+    'TPL-FSH-001',
+    'Physical Garment High Volume Production Contract',
+    'FASHION',
+    'Fashion House',
+    'Cut and Sew Unit Yield and Wholesale Inventory',
+    ['Continuous Floor Manufacturing Escrow', 'Unit Run Payout Gate', 'DTC Order Settlement'],
+    'PRODUCTION_READY',
+    540,
+  ),
+  atomicTemplate(
+    'TPL-MDL-001',
+    'Runway and Campaign Booking Clearing',
+    'MODELING',
+    'Modeling Agency',
+    'Runway Show Counts and Campaign Booking Yield',
+    ['Booking Fee Escrow Lock', 'Campaign Settlement Gate', 'Image Rights Isolation Lock'],
+    'PRODUCTION_READY',
+    640,
+  ),
+  atomicTemplate(
+    'TPL-VIS-001',
+    'Fine Art Exhibition and Print Yield Clearing',
+    'VISUAL_ARTS',
+    'Visual Artist',
+    'Exhibition Attendance and Print Edition Sales',
+    ['Exhibition Proceeds Escrow', 'Edition Print Yield Gate', 'Provenance Ledger Lock'],
+    'PRODUCTION_READY',
+    520,
+  ),
+  atomicTemplate(
+    'TPL-DES-001',
+    'Design Portfolio Commercial License',
+    'DESIGN',
+    'Design Studio',
+    'Licensed Portfolio Views and Derivative Deployments',
+    ['License Term Escrow Lock', 'Derivative Use Settlement Gate', 'Portfolio Asset Isolation'],
+    'PRODUCTION_READY',
+    460,
+  ),
+]);
+
+/** The founder-verbatim atomic seeds — the registry is incomplete without all seven. */
+const ATOMIC_FOUNDER_SEED_IDS: readonly string[] = [
+  'TPL-MTR-001',
+  'TPL-ARN-001',
+  'TPL-FLM-001',
+  'TPL-TV-001',
+  'TPL-CAD-001',
+  'TPL-FSH-001',
+  'TPL-VTB-001',
+];
+
+/**
+ * The atomic registry's integrity gate — runs once at module load and THROWS
+ * on any violation: a missing founder seed, a duplicate id, a collision with
+ * the factory library, an empty entityType/telemetryMetric, anything off the
+ * three-clause canon, an ampersand in a name or clause (Zero Ampersands), an
+ * atomic sector left without a record, or a master vertical whose tab would
+ * render no atomic records at all.
+ */
+function assertAtomicIntegrity(): void {
+  const factoryIds = new Set(MASTER_TEMPLATE_LIBRARY.map((record) => record.templateId));
+  const byId = new Set<string>();
+  const sectorsCovered = new Set<AtomicSector>();
+  for (const record of ATOMIC_TEMPLATE_REGISTRY) {
+    if (byId.has(record.templateId)) {
+      throw new Error(`masterStore: duplicate atomic template id ${record.templateId}`);
+    }
+    byId.add(record.templateId);
+    if (factoryIds.has(record.templateId)) {
+      throw new Error(`masterStore: atomic id ${record.templateId} collides with the factory library`);
+    }
+    if (record.entityType.trim() === '' || record.telemetryMetric.trim() === '') {
+      throw new Error(`masterStore: ${record.templateId} must carry an entityType and a telemetryMetric`);
+    }
+    if (record.keyClauses.length !== 3 || record.keyClauses.some((clause) => clause.trim() === '')) {
+      throw new Error(`masterStore: ${record.templateId} must carry exactly three non-empty key clauses`);
+    }
+    for (const text of [record.templateName, ...record.keyClauses]) {
+      if (text.includes('&')) {
+        throw new Error(
+          `masterStore: ${record.templateId} carries an ampersand — the atomic registry is zero-ampersand ('and', never '&')`,
+        );
+      }
+    }
+    sectorsCovered.add(record.atomicSector);
+  }
+  for (const seedId of ATOMIC_FOUNDER_SEED_IDS) {
+    if (!byId.has(seedId)) {
+      throw new Error(`masterStore: founder atomic seed ${seedId} is missing from the registry`);
+    }
+  }
+  for (const sector of ATOMIC_SECTOR_ORDER) {
+    if (!sectorsCovered.has(sector)) {
+      throw new Error(`masterStore: atomic sector ${sector} has no record — no sector form left out`);
+    }
+  }
+  for (const vertical of MASTER_CATEGORY_ORDER) {
+    const covered = ATOMIC_TEMPLATE_REGISTRY.some(
+      (record) => ATOMIC_SECTOR_TO_VERTICAL[record.atomicSector] === vertical,
+    );
+    if (!covered) {
+      throw new Error(`masterStore: master vertical ${vertical} renders no atomic records — no empty states`);
+    }
+  }
+}
+assertAtomicIntegrity();
+
+/** Filter the atomic registry to one master vertical; null = the whole registry. */
+export function atomicRecordsForCategory(
+  records: readonly AtomicContractRecord[],
+  category: GlobalEntertainmentCategory | null,
+): readonly AtomicContractRecord[] {
+  return category
+    ? records.filter((record) => ATOMIC_SECTOR_TO_VERTICAL[record.atomicSector] === category)
+    : [...records];
+}
+
+/** REAL mode for the atomic registry — counts derive from the live contract store. */
+export function applyAtomicRealExecutionCounts(
+  records: readonly AtomicContractRecord[],
+  contracts: ReadonlyArray<{ templateId: string }>,
+): AtomicContractRecord[] {
+  return withRealExecutionCounts(records, contracts);
+}
+
+/**
+ * The atomic registry for the current mode — the seeded registry in
+ * demo/preview (under the DEMO DATA disclosure), the same canon definitions
+ * with live-store execution counts otherwise.
+ */
+export async function resolveAtomicRegistry(): Promise<{
+  readonly demo: boolean;
+  readonly records: readonly AtomicContractRecord[];
+}> {
+  if (isDevSeedMode()) {
+    return { demo: true, records: ATOMIC_TEMPLATE_REGISTRY };
+  }
+  const contracts = await listContracts();
+  return { demo: false, records: applyAtomicRealExecutionCounts(ATOMIC_TEMPLATE_REGISTRY, contracts) };
 }

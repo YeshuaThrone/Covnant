@@ -14,6 +14,7 @@
 import type {
   ContractTemplateRecord,
   TemplateExecutionStatus,
+  AtomicContractRecord,
 } from '@/lib/master/masterStore';
 
 /** Execution status chip — the two canon states, distinct voices. */
@@ -111,6 +112,79 @@ export function FactoryTemplateGrid({
       {records.map((record) => (
         <li key={record.templateId}>
           <FactoryTemplateCard record={record} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Sector chip — the atomic record's granular sector of the 26-sector canon. */
+function AtomicSectorChip({ sector }: { sector: string }): React.JSX.Element {
+  return (
+    <span
+      data-testid="atomic-sector-chip"
+      className="inline-block rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] text-gold-champagne"
+    >
+      {sector.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+/** One atomic card — every canon field of the Sovereign Clearing Framework record. */
+export function AtomicTemplateCard({ record }: { record: AtomicContractRecord }): React.JSX.Element {
+  return (
+    <article
+      className="glass-card flex h-full flex-col p-5"
+      data-testid="atomic-template-card"
+      data-atomic-sector={record.atomicSector}
+      data-template-id={record.templateId}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">
+          {record.templateId}
+        </span>
+        <ExecutionStatusChip status={record.executionStatus} />
+      </div>
+      <h3 className="mt-2 font-medium text-white">{record.templateName}</h3>
+      <div className="mt-2">
+        <AtomicSectorChip sector={record.atomicSector} />
+      </div>
+      <p className="mt-2 text-sm text-white/50">
+        {record.entityType}
+        <br />
+        {record.telemetryMetric}
+      </p>
+      <div className="mt-3">
+        <FactorySplitPills splitStructure={record.splitStructure} />
+      </div>
+      <ul className="mt-3 flex-1 space-y-1" data-testid="atomic-key-clauses">
+        {record.keyClauses.map((clause) => (
+          <li key={clause} className="flex gap-2 text-xs text-white/60">
+            <span className="text-gold" aria-hidden>
+              ·
+            </span>
+            <span>{clause}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 font-mono text-xs text-white/40">
+        {record.keyClauses.length} key clauses · {executionsLabel(record.timesExecuted)} executions
+      </p>
+    </article>
+  );
+}
+
+/** The atomic grid — the registry rendered beneath its master vertical tab. */
+export function AtomicTemplateGrid({
+  records,
+}: {
+  records: readonly AtomicContractRecord[];
+}): React.JSX.Element {
+  return (
+    <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="atomic-template-grid">
+      {records.map((record) => (
+        <li key={record.templateId}>
+          <AtomicTemplateCard record={record} />
         </li>
       ))}
     </ul>

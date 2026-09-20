@@ -56,6 +56,25 @@ test('/templates hydrates the Sovereign Contract Factory across the six master v
 
   // The DEMO DATA disclosure stays on the factory.
   await expect(page.getByTestId('demo-data-badge')).toBeVisible();
+
+  // The Sovereign Clearing Framework atomic registry joins the page — 26
+  // sector records beneath the factory grids, every field from the store.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(26);
+  const flm = page.locator('[data-testid="atomic-template-card"][data-template-id="TPL-FLM-001"]');
+  await expect(flm).toContainText('Feature Film Theatrical Distribution Master Agreement');
+  await expect(flm).toContainText('Film Studio');
+  await expect(flm).toContainText('Box Office Gross Receipts and ISAN Telemetry');
+  await expect(flm).toContainText('Ownership reserve 50%');
+  await expect(flm).toContainText('Creative payout 35%');
+  await expect(flm).toContainText('Operations yield 15%');
+  await expect(flm).toContainText('Box Office Gross Escrow Lock');
+  await expect(flm).toContainText('890 executions');
+  await expect(flm.locator('[data-testid="atomic-sector-chip"]')).toHaveText('FILM');
+  await expect(flm.locator('[data-testid="factory-execution-status"]')).toHaveText('PRODUCTION READY');
+  // The generated theatrical record survives the collision — renumbered to
+  // TPL-FLM-007 for the founder's verbatim seed, otherwise intact.
+  const flm7 = page.locator('[data-testid="factory-template-card"][data-template-id="TPL-FLM-007"]');
+  await expect(flm7).toContainText('Theatrical Distribution & Box Office Settlement');
 });
 
 test('/templates vertical tabs swap the factory library per master vertical', async ({ page }) => {
@@ -66,6 +85,13 @@ test('/templates vertical tabs swap the factory library per master vertical', as
   await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toBeVisible();
   await expect(page.getByText('Master Recording & Streaming Royalty Agreement')).toHaveCount(0);
 
+  // The atomic registry swaps with the tab — this vertical clears the eight
+  // interactive/digital sectors, founder seeds included.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(8);
+  await expect(page.getByText('3D CAD Mesh Spatial Asset Licensing Agreement')).toBeVisible();
+  await expect(page.getByText('Virtual Avatar Rigging and Model Ownership Contract')).toBeVisible();
+  await expect(page.getByTestId('atomic-template-card').filter({ hasText: 'MOTORSPORT' })).toHaveCount(0);
+
   // Clicking another tab swaps every card for that vertical's library.
   await page.locator('a[href="/templates?category=LIVE_PERFORMANCE_AND_COMEDY"]').click();
   await page.waitForURL(/category=LIVE_PERFORMANCE_AND_COMEDY/);
@@ -74,10 +100,17 @@ test('/templates vertical tabs swap the factory library per master vertical', as
   await expect(page.getByText('Live Stand-Up & Concert Touring Ticket Escrow')).toBeVisible();
   await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toHaveCount(0);
 
+  // The atomic swap follows: four live-economy sectors, founder seeds first.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(4);
+  await expect(page.getByText('Motorsport Circuit Trackage Media Rights Agreement')).toBeVisible();
+  await expect(page.getByText('Arena Venue Facility Access and Gate Yield Clearing')).toBeVisible();
+  await expect(page.getByText('3D CAD Mesh Spatial Asset Licensing Agreement')).toHaveCount(0);
+
   // All verticals restores the completed library.
   await page.getByRole('tab', { name: 'All verticals' }).click();
   await page.waitForURL(/\/templates$/);
   await expect(page.getByTestId('factory-template-card')).toHaveCount(31);
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(26);
 });
 
 test('template navigation generates an auto-filled agreement from the asset of record', async ({

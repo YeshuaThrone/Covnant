@@ -2,6 +2,8 @@ import Link from 'next/link';
 import {
   masterTemplatesForCategory,
   resolveMasterTemplates,
+  atomicRecordsForCategory,
+  resolveAtomicRegistry,
 } from '@/lib/master/masterStore';
 import {
   MASTER_CATEGORY_ORDER,
@@ -11,9 +13,13 @@ import {
 } from '@/lib/master/taxonomy';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
 import { MasterCategoryTabs } from '@/components/master/MasterData';
-import { FactoryTemplateGrid } from '@/components/master/MasterTemplates';
+import { FactoryTemplateGrid, AtomicTemplateGrid } from '@/components/master/MasterTemplates';
 
 export const dynamic = 'force-dynamic';
+
+/** One line of registry context, shared by every vertical's atomic block. */
+const ATOMIC_REGISTRY_BLURB =
+  'The Sovereign Clearing Framework atomic registry — granular sector clearing records with their entity types, telemetry metrics, and the same 50/35/15 allocation structure.';
 
 /**
  * /templates — the COVNANT SOVEREIGN CONTRACT FACTORY (founder canon,
@@ -24,6 +30,12 @@ export const dynamic = 'force-dynamic';
  * store: jurisdiction, key clauses, the 50/35/15 allocation structure, and
  * the factory's execution history. Drafts and finalization live in the
  * Contract Vault.
+ *
+ * Beneath each vertical's factory grid, the SOVEREIGN CLEARING FRAMEWORK
+ * ATOMIC REGISTRY (founder canon, CovnantAtomicDataSDK) renders its atomic
+ * sector records — every card read from the master store's
+ * AtomicContractRecord: sector chip, entityType, telemetryMetric, the
+ * 50/35/15 structure, key clauses, execution status, and execution history.
  */
 export default async function TemplatesPage({
   searchParams,
@@ -33,10 +45,11 @@ export default async function TemplatesPage({
   const { category } = await searchParams;
   const active = masterCategoryFromParam(category);
 
-  // The master data seam — the seeded factory library in demo/preview (under
-  // the DEMO DATA badge), the canon library with live-store execution counts
-  // otherwise. Store-computed, always.
+  // The master data seam — the seeded factory library and atomic registry in
+  // demo/preview (under the DEMO DATA badge), the canon definitions with
+  // live-store execution counts otherwise. Store-computed, always.
   const { demo, records } = await resolveMasterTemplates();
+  const { records: atomicRecords } = await resolveAtomicRegistry();
   const verticals = active ? [active] : [...MASTER_CATEGORY_ORDER];
 
   return (
@@ -56,6 +69,11 @@ export default async function TemplatesPage({
           structure, and the factory&apos;s execution history. Click a vertical to swap
           the library below.
         </p>
+        <p className="mt-3 max-w-2xl text-white/60">
+          Beneath each vertical, the Sovereign Clearing Framework&apos;s atomic registry
+          clears {atomicRecords.length} sector records across all 26 atomic sectors —
+          entity types, telemetry metrics, and the same 50/35/15 structure.
+        </p>
       </header>
 
       <div className="mt-10">
@@ -65,6 +83,7 @@ export default async function TemplatesPage({
       <div className="mt-6 space-y-12">
         {verticals.map((vertical) => {
           const templates = masterTemplatesForCategory(records, vertical);
+          const atomic = atomicRecordsForCategory(atomicRecords, vertical);
           return (
             <section key={vertical} aria-label={MASTER_CATEGORY_LABELS[vertical]} data-testid="template-vertical-section">
               <div className="flex items-baseline justify-between gap-4">
@@ -77,6 +96,21 @@ export default async function TemplatesPage({
               <div className="gold-rule mt-4" />
 
               <FactoryTemplateGrid records={templates} />
+
+              <div className="mt-10" data-testid="atomic-registry-block">
+                <div className="flex items-baseline justify-between gap-4">
+                  <h3 className="font-mono text-xs uppercase tracking-[0.25em] text-gold">
+                    Sovereign Clearing Framework — Atomic Registry
+                  </h3>
+                  <span className="font-mono text-xs text-white/40">
+                    {atomic.length} atomic record{atomic.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-white/50">{ATOMIC_REGISTRY_BLURB}</p>
+                <div className="gold-rule mt-4" />
+
+                <AtomicTemplateGrid records={atomic} />
+              </div>
             </section>
           );
         })}
