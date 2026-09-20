@@ -119,6 +119,37 @@ function AssetPicker({ templateKey, templateName }: { templateKey: string; templ
   );
 }
 
+/**
+ * The vertical tabs — the lane's per-sector rendering surface (founder rule:
+ * EVERY vertical of entertainment). Server-rendered links over the demo
+ * asset registry; the active sector's pill renders gold. Switching a tab
+ * rehydrates the whole payload through the same seam — no client state.
+ */
+function VerticalTabs({ activeCbt, templateKey }: { activeCbt: string; templateKey: string }) {
+  const assets = listDemoLaneAssets();
+  return (
+    <nav aria-label="Entertainment verticals" className="flex flex-wrap items-center gap-2">
+      {assets.map((asset) => {
+        const active = asset.cbt === activeCbt;
+        return (
+          <Link
+            key={asset.cbt}
+            href={`/contracts/new?template=${encodeURIComponent(templateKey)}&cbt=${encodeURIComponent(asset.cbt)}`}
+            aria-current={active ? 'true' : undefined}
+            className={`rounded-full border px-3 py-1.5 font-mono text-[11px] tracking-wide transition ${
+              active
+                ? 'border-gold/50 bg-gold/10 text-gold'
+                : 'border-white/15 bg-white/5 text-white/60 hover:border-gold/30 hover:text-white'
+            }`}
+          >
+            {asset.title}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // THE RENDERER — one section per payload block.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -454,6 +485,7 @@ export default async function NewContractPage({
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 px-6 py-12">
       <NavRow />
+      <VerticalTabs activeCbt={lane.asset.cbt} templateKey={templateKey} />
       <div>
         <h1 className="mt-2 text-2xl font-semibold text-white">Execution lane</h1>
         <p className="mt-1 text-sm text-white/50">
