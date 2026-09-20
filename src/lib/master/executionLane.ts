@@ -127,6 +127,8 @@ export interface ReconciledPool {
   readonly pool: LanePoolName;
   readonly label: string;
   readonly weightBps: number;
+  /** Rounding dust this pool gave up (swept to the operations yield). */
+  readonly dustBps: number;
   /** Sum of party shares AFTER the dust sweep (operations may exceed its weight). */
   readonly totalBps: number;
   readonly parties: readonly ReconciledPoolParty[];
@@ -183,6 +185,7 @@ export function reconcileParticipantPools(roster: readonly LanePoolPartySeed[]):
     pool: entry.pool,
     label: LANE_POOL_LABELS[entry.pool],
     weightBps: entry.weight,
+    dustBps: entry.poolDustBps,
     totalBps: entry.parties.reduce((sum, party) => sum + party.poolShareBps, 0),
     parties: entry.parties,
   }));
