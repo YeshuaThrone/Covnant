@@ -16,7 +16,7 @@ import { expect, test } from '@playwright/test';
  * invented numbers.
  */
 
-test('/templates lists 20 templates across the six master vertical sections', async ({ page }) => {
+test('/templates hydrates the Sovereign Contract Factory across the six master verticals', async ({ page }) => {
   await page.goto('/templates');
 
   // All six master vertical sections render (founder taxonomy).
@@ -31,26 +31,61 @@ test('/templates lists 20 templates across the six master vertical sections', as
     await expect(page.getByRole('heading', { name: label })).toBeVisible();
   }
 
-  const cards = page.locator('a[href^="/contracts/new?template="]');
-  await expect(cards).toHaveCount(20);
+  // The completed 31-record factory library renders as data cards.
+  await expect(page.getByTestId('factory-template-card')).toHaveCount(31);
 
-  // One named agreement per category spot-check (scoped to card links —
-  // category blurbs can contain the same words).
-  for (const name of [
-    'Songwriter Split Sheet',
-    'Film/TV Score Composer Contract',
-    'Voiceover/MoCap Release',
-    'Podcast Co-Host & Guest Split',
-    'Fashion Design License Agreement',
-  ]) {
-    await expect(page.locator('a[href^="/contracts/new?template="]', { hasText: name })).toBeVisible();
+  // The founder-verbatim seeds render with their canon 50/35/15 structure.
+  for (const [templateId, name] of [
+    ['TPL-AUD-001', 'Master Recording & Streaming Royalty Agreement'],
+    ['TPL-FLM-004', 'Global SVOD & AVOD Distribution Option Contract'],
+    ['TPL-LIT-002', 'Audiobook & Digital E-Book Rights Acquisition'],
+    ['TPL-LVE-009', 'Live Stand-Up & Concert Touring Ticket Escrow'],
+  ] as const) {
+    const card = page.locator(`[data-testid="factory-template-card"][data-template-id="${templateId}"]`);
+    await expect(card).toContainText(name);
+    await expect(card).toContainText('Ownership reserve 50%');
+    await expect(card).toContainText('Creative payout 35%');
+    await expect(card).toContainText('Operations yield 15%');
   }
+
+  // Jurisdiction, engineered clauses, and execution history render on the card.
+  const aud = page.locator('[data-testid="factory-template-card"][data-template-id="TPL-AUD-001"]');
+  await expect(aud).toContainText('US-TX Sovereign Ledger Standard');
+  await expect(aud).toContainText('Sub-Second Micro-Royalty Routing');
+  await expect(aud).toContainText('1,420 executions');
+
+  // The DEMO DATA disclosure stays on the factory.
+  await expect(page.getByTestId('demo-data-badge')).toBeVisible();
 });
 
-test('/templates navigation generates an auto-filled agreement from the asset of record', async ({
+test('/templates vertical tabs swap the factory library per master vertical', async ({ page }) => {
+  // A vertical tab shows ONLY that vertical's fully populated library.
+  await page.goto('/templates?category=INTERACTIVE_AND_DIGITAL_MEDIA');
+  await expect(page.getByRole('heading', { name: 'Interactive & Digital Media' })).toBeVisible();
+  await expect(page.getByTestId('factory-template-card')).toHaveCount(4);
+  await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toBeVisible();
+  await expect(page.getByText('Master Recording & Streaming Royalty Agreement')).toHaveCount(0);
+
+  // Clicking another tab swaps every card for that vertical's library.
+  await page.locator('a[href="/templates?category=LIVE_PERFORMANCE_AND_COMEDY"]').click();
+  await page.waitForURL(/category=LIVE_PERFORMANCE_AND_COMEDY/);
+  await expect(page.getByRole('heading', { name: 'Live Performance & Comedy' })).toBeVisible();
+  await expect(page.getByTestId('factory-template-card')).toHaveCount(5);
+  await expect(page.getByText('Live Stand-Up & Concert Touring Ticket Escrow')).toBeVisible();
+  await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toHaveCount(0);
+
+  // All verticals restores the completed library.
+  await page.getByRole('tab', { name: 'All verticals' }).click();
+  await page.waitForURL(/\/templates$/);
+  await expect(page.getByTestId('factory-template-card')).toHaveCount(31);
+});
+
+test('template navigation generates an auto-filled agreement from the asset of record', async ({
   page,
 }) => {
-  await page.goto('/templates');
+  // The vault owns the generation flow — the factory cards link its data,
+  // the vault's catalog cards start the drafts.
+  await page.goto('/contracts');
 
   await page.getByText('Songwriter Split Sheet').first().click();
   await page.waitForURL(/template=MUSIC_SPLIT_SHEET/);
