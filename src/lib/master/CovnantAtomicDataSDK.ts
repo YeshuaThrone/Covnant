@@ -262,7 +262,9 @@ export const FACTORY_VERTICAL_GUARDS: readonly SectorGuardBinding[] = Object.fre
   {
     guardId: 'GUARD-FACTORY-PUBLISHING',
     sector: 'PUBLISHING',
-    prefixes: [...TEMPLATE_PREFIX.PUBLISHING_FACTORY],
+    // The factory PUBLISHING vertical's own ids (TPL-PUB- is the atomic
+    // PUBLISHING sector's prefix, guarded by GUARD-SECTOR-PUBLISHING).
+    prefixes: ['TPL-LIT-'],
     entityType: 'LITERARY_WORK',
   },
   { guardId: 'GUARD-FACTORY-LIVE_COMEDY', sector: 'LIVE_COMEDY', prefixes: ['TPL-LVE-'], entityType: 'STAGE_PERFORMANCE' },

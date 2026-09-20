@@ -1471,6 +1471,8 @@ export interface LaneAgreementSeed {
   readonly effectiveDate: string;
   readonly territory: string;
   readonly term: string;
+  /** The governing law of record — the platform's ledger standard. */
+  readonly governingLaw: string;
   /** Integer USD cents — the engine's money. */
   readonly feeCents: number;
 }
@@ -1503,6 +1505,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-09-01',
       territory: 'Worldwide',
       term: '12 months from the effective date',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 12_500_000,
     },
     poolRoster: [
@@ -1523,6 +1526,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-08-15',
       territory: 'United States and Canada',
       term: '18 months from the effective date',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 45_000_000,
     },
     poolRoster: [
@@ -1544,6 +1548,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-09-12',
       territory: 'United States',
       term: 'Single engagement — the event date of record',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 28_000_000,
     },
     poolRoster: [
@@ -1563,6 +1568,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-07-01',
       territory: 'Worldwide',
       term: 'Print run of record plus 24 months',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 8_500_000,
     },
     poolRoster: [
@@ -1582,6 +1588,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-09-05',
       territory: 'Worldwide',
       term: 'Live-ops season window',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 96_000_000,
     },
     poolRoster: [
@@ -1601,6 +1608,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
       effectiveDate: '2026-09-18',
       territory: 'United States',
       term: '90 days from the effective date',
+      governingLaw: 'US-TX Ledger Standard',
       feeCents: 15_000_000,
     },
     poolRoster: [
@@ -1685,7 +1693,12 @@ function assertLaneRegistriesIntegrity(): void {
     if (!Number.isInteger(asset.agreement.feeCents) || asset.agreement.feeCents <= 0) {
       throw new Error(`masterStore: asset ${asset.cbt} fee must be a positive integer cent count`);
     }
-    if (asset.agreement.effectiveDate.trim() === '' || asset.agreement.territory.trim() === '' || asset.agreement.term.trim() === '') {
+    if (
+      asset.agreement.effectiveDate.trim() === '' ||
+      asset.agreement.territory.trim() === '' ||
+      asset.agreement.term.trim() === '' ||
+      asset.agreement.governingLaw.trim() === ''
+    ) {
       throw new Error(`masterStore: asset ${asset.cbt} agreement fields must be populated (no placeholders)`);
     }
     if (asset.workIdentifiers.length === 0 || asset.workIdentifiers.some((id) => id.label.trim() === '' || id.value.trim() === '')) {
