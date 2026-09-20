@@ -114,6 +114,11 @@ export function verifyAdminSession(
   now: Date = new Date(),
 ): AdminGateVerdict {
   const password = readAdminPassword(env);
+  // J1 preview carve-out: the demo preview runs with DON_DEV_SEED=1 and no
+  // operator secret, so the console opens without a sign-in form. A real
+  // deployment (password configured) stays fail-closed — this branch can
+  // never fire there.
+  if (!password && env.DON_DEV_SEED === '1') return { ok: true };
   if (!password) return NOT_CONFIGURED;
   if (!token) return NOT_AUTHENTICATED;
 

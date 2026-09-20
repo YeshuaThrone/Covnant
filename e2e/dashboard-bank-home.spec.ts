@@ -70,7 +70,9 @@ test.describe('The Don dashboard home — desktop', () => {
     // balance is seeded through real payout records, not display strings).
     await expect(page.getByTestId('transactions-row')).toHaveCount(6);
     await expect(page.getByTestId('transactions-row').first()).toContainText('DR $400,000.00 / CR $0.00');
-    await expect(page.getByTestId('transactions-see-more')).toHaveAttribute('href', '/ledger');
+    // See more lands on the creator's full transaction history (distinct from
+    // the administrator /ledger surface).
+    await expect(page.getByTestId('transactions-see-more')).toHaveAttribute('href', '/transactions');
 
     // Readiness panel + thin footer.
     await expect(page.getByTestId('readiness-kyc')).toBeVisible();
