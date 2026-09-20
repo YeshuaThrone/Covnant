@@ -28,16 +28,25 @@ import {
 } from './taxonomy';
 import {
   ENTITY_TARGET_SPLIT,
+  FACTORY_VERTICAL_GUARDS,
+  LANE_POOL_BPS,
+  LANE_POOL_ORDER,
+  LANE_TOTAL_BPS,
   TEMPLATE_PREFIX,
+  ATOMIC_SECTOR_GUARDS,
   entityClassTag,
   isFilmEntity,
   isLiveEntity,
   isMusicEntity,
+  isPodcastEntity,
+  isPublishingEntity,
   isTvEntity,
   type AtomicEntityClassTag,
   type AtomicExecutionTelemetry,
+  type LanePoolName,
   type SovereignAtomicEntity,
 } from './CovnantAtomicDataSDK';
+import { buildUct, isValidUct } from '@/lib/covnant/uct';
 
 // The atomic sector vocabulary keeps its masterStore import surface (existing
 // importers unchanged) while the client-side Control Board reads the same
@@ -1326,13 +1335,9 @@ export function validateServedEntity(entity: SovereignAtomicEntity): boolean {
     case 'STAGE_PERFORMANCE':
       return isLiveEntity(entity) && splitHolds;
     case 'PODCAST_NETWORK':
-      return entity.templateId.startsWith(TEMPLATE_PREFIX.PODCAST) && splitHolds;
+      return isPodcastEntity(entity) && splitHolds;
     case 'LITERARY_WORK':
-      return (
-        [...TEMPLATE_PREFIX.PUBLISHING_FACTORY, ...TEMPLATE_PREFIX.PUBLISHING_SECTOR].some(
-          (prefix) => entity.templateId.startsWith(prefix),
-        ) && splitHolds
-      );
+      return isPublishingEntity(entity) && splitHolds;
   }
 }
 
@@ -1401,4 +1406,352 @@ export async function resolveAtomicRegistry(): Promise<{
   }
   const contracts = await listContracts();
   return { demo: false, records: applyAtomicRealExecutionCounts(ATOMIC_TEMPLATE_REGISTRY, contracts) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE UNIVERSAL EXECUTION LANE — demo registries (founder GO, 2026-09-20:
+// 'there is just way more then 6 verticals… for EVERY vertical of
+// entertainment'). The lane's ASSET-OF-RECORD and PARTY-IDENTITY data lives
+// here beside the two template registries — the honesty law: data lives in
+// the store, components never inline literals. The seed assets span
+// DIFFERENT sectors (music, film, live event, book, game, fashion) so the
+// lane's universality is provable, not asserted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The lane's UCT demo party identity — checksum-valid UCT plus identifiers. */
+export interface UctDemoIdentity {
+  readonly uctId: string;
+  readonly name: string;
+  /** Every identity carries an ISNI — the cross-industry party identifier. */
+  readonly isni: string;
+  /** Music-industry parties carry an IPI; null elsewhere (never a placeholder). */
+  readonly ipi: string | null;
+}
+
+/** Deterministic checksum-valid UCT for the demo identities (2026 issuance). */
+function demoUct(serial: string): string {
+  return buildUct('US', 2026, serial);
+}
+
+/**
+ * The UCT demo identities — the parties every lane payload auto-fills from.
+ * Identifiers are sector-appropriate: ISNI everywhere, IPI for the
+ * music-industry parties. No field is ever a 'To be completed' placeholder —
+ * the integrity gate below enforces it at module load.
+ */
+export const UCT_DEMO_IDENTITIES: Readonly<Record<string, UctDemoIdentity>> = Object.freeze({
+  'identity-founder': { uctId: demoUct('A51DF05B'), name: 'Yeshua Throne', isni: '0000-0001-2345-6789', ipi: 'IPI-00339217564' },
+  'identity-gold-hours': { uctId: demoUct('0B4C27D9'), name: 'Gold Hours Masters', isni: '0000-0002-9183-7465', ipi: 'IPI-00448263715' },
+  'identity-meridian': { uctId: demoUct('7E2F91AC'), name: 'Meridian Line Studios', isni: '0000-0003-8264-1597', ipi: null },
+  'identity-sovereign-stage': { uctId: demoUct('3C8A64E1'), name: 'Sovereign Stage Company', isni: '0000-0004-7159-2638', ipi: null },
+  'identity-vault-runners': { uctId: demoUct('D94E07B2'), name: 'Vault Runners Studio', isni: '0000-0005-6941-8372', ipi: null },
+  'identity-sovereign-fit': { uctId: demoUct('5A1F8C36'), name: 'Sovereign Fit Apparel', isni: '0000-0006-5382-9406', ipi: null },
+  'identity-gold-hours-publishing': { uctId: demoUct('E27B49A0'), name: 'Gold Hours Publishing', isni: '0000-0007-4829-6513', ipi: 'IPI-00557124839' },
+  'identity-operations': { uctId: demoUct('B60D2E94'), name: 'Covnant Clearing Operations', isni: '0000-0008-3716-5290', ipi: null },
+});
+
+/** One pool-roster row — a party's declared pool-internal integer units. */
+export interface LanePoolPartySeed {
+  readonly identityKey: string;
+  readonly pool: LanePoolName;
+  /** Pool-internal integer units; the reconciler converts to whole-10,000 BPS. */
+  readonly poolUnits: number;
+  /** The party's role OF RECORD on this asset, e.g. 'Owner'. */
+  readonly role: string;
+}
+
+/** One work-level identifier of the asset of record (ISRC, ISAN, ISBN, …). */
+export interface LaneAssetIdentifier {
+  readonly label: string;
+  readonly value: string;
+}
+
+/** The lane's agreement fields of record — stored, never invented per render. */
+export interface LaneAgreementSeed {
+  readonly effectiveDate: string;
+  readonly territory: string;
+  readonly term: string;
+  /** Integer USD cents — the engine's money. */
+  readonly feeCents: number;
+}
+
+/** One demo asset of record, keyed by its canonical CBT-<TYPE>-<12hex> code. */
+export interface MasterDemoAsset {
+  readonly cbt: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly sector: AtomicSector;
+  readonly workIdentifiers: readonly LaneAssetIdentifier[];
+  readonly agreement: LaneAgreementSeed;
+  readonly poolRoster: readonly LanePoolPartySeed[];
+}
+
+/**
+ * The demo asset registry — keyed by CBT, spanning DIFFERENT sectors so the
+ * lane's universality is provable. CBT-TRK-A51DF05B4279 is the founder's
+ * production reference asset ('E2E Pool Gate Song' Music Track). Every roster
+ * carries an OPERATIONS_YIELD party — the Don dust canon's sweep recipient.
+ */
+export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.freeze([
+  {
+    cbt: 'CBT-TRK-A51DF05B4279',
+    kind: 'Music Track',
+    title: 'E2E Pool Gate Song',
+    sector: 'MUSIC',
+    workIdentifiers: [{ label: 'ISRC', value: 'US-S1Z-26-42791' }],
+    agreement: {
+      effectiveDate: '2026-09-01',
+      territory: 'Worldwide',
+      term: '12 months from the effective date',
+      feeCents: 12_500_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-founder', pool: 'OWNERSHIP_RESERVE', poolUnits: 60, role: 'Owner' },
+      { identityKey: 'identity-gold-hours', pool: 'OWNERSHIP_RESERVE', poolUnits: 40, role: 'Co-Owner' },
+      { identityKey: 'identity-founder', pool: 'CREATIVE_PAYOUT', poolUnits: 55, role: 'Lead Writer and Producer' },
+      { identityKey: 'identity-gold-hours', pool: 'CREATIVE_PAYOUT', poolUnits: 45, role: 'Publisher Share' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 100, role: 'Operations Yield' },
+    ],
+  },
+  {
+    cbt: 'CBT-FLM-7C3A91D2E40B',
+    kind: 'Feature Film',
+    title: 'Meridian Line — Theatrical Master',
+    sector: 'FILM',
+    workIdentifiers: [{ label: 'ISAN', value: '0002-9D8C-7B6A-0001-P' }],
+    agreement: {
+      effectiveDate: '2026-08-15',
+      territory: 'United States and Canada',
+      term: '18 months from the effective date',
+      feeCents: 45_000_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-founder', pool: 'OWNERSHIP_RESERVE', poolUnits: 1, role: 'Owner' },
+      { identityKey: 'identity-meridian', pool: 'OWNERSHIP_RESERVE', poolUnits: 1, role: 'Studio Owner' },
+      { identityKey: 'identity-gold-hours', pool: 'OWNERSHIP_RESERVE', poolUnits: 1, role: 'Co-Owner' },
+      { identityKey: 'identity-meridian', pool: 'CREATIVE_PAYOUT', poolUnits: 60, role: 'Production Lead' },
+      { identityKey: 'identity-founder', pool: 'CREATIVE_PAYOUT', poolUnits: 40, role: 'Director Share' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 4, role: 'Operations Yield' },
+    ],
+  },
+  {
+    cbt: 'CBT-LVE-5D2E8A4B91C7',
+    kind: 'Live Event',
+    title: 'Gold Coast Arena Tour — Night One',
+    sector: 'ARENA',
+    workIdentifiers: [{ label: 'Box Office Ledger', value: 'CVN-LIVE-2026-003' }],
+    agreement: {
+      effectiveDate: '2026-09-12',
+      territory: 'United States',
+      term: 'Single engagement — the event date of record',
+      feeCents: 28_000_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-founder', pool: 'OWNERSHIP_RESERVE', poolUnits: 70, role: 'Headliner Owner' },
+      { identityKey: 'identity-sovereign-stage', pool: 'OWNERSHIP_RESERVE', poolUnits: 30, role: 'Venue Owner' },
+      { identityKey: 'identity-sovereign-stage', pool: 'CREATIVE_PAYOUT', poolUnits: 100, role: 'Production Lead' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 100, role: 'Operations Yield' },
+    ],
+  },
+  {
+    cbt: 'CBT-BOK-2E6B4F08A3D9',
+    kind: 'Print Book',
+    title: 'The Ownership Ledger — Hardcover Edition',
+    sector: 'BOOKS',
+    workIdentifiers: [{ label: 'ISBN', value: '978-1-95502-482-3' }],
+    agreement: {
+      effectiveDate: '2026-07-01',
+      territory: 'Worldwide',
+      term: 'Print run of record plus 24 months',
+      feeCents: 8_500_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-founder', pool: 'OWNERSHIP_RESERVE', poolUnits: 100, role: 'Author Owner' },
+      { identityKey: 'identity-founder', pool: 'CREATIVE_PAYOUT', poolUnits: 50, role: 'Author Royalty' },
+      { identityKey: 'identity-gold-hours-publishing', pool: 'CREATIVE_PAYOUT', poolUnits: 50, role: 'Publisher Royalty' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 100, role: 'Operations Yield' },
+    ],
+  },
+  {
+    cbt: 'CBT-GAM-8B4D0C6E2F1A',
+    kind: 'Game Asset Bundle',
+    title: 'Vault Runners — Season Pass Assets',
+    sector: 'GAMING',
+    workIdentifiers: [{ label: 'Storefront SKU', value: 'VR-SP-2026-04' }],
+    agreement: {
+      effectiveDate: '2026-09-05',
+      territory: 'Worldwide',
+      term: 'Live-ops season window',
+      feeCents: 96_000_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-vault-runners', pool: 'OWNERSHIP_RESERVE', poolUnits: 100, role: 'Studio Owner' },
+      { identityKey: 'identity-vault-runners', pool: 'CREATIVE_PAYOUT', poolUnits: 65, role: 'Studio Royalty' },
+      { identityKey: 'identity-founder', pool: 'CREATIVE_PAYOUT', poolUnits: 35, role: 'Design Royalty' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 100, role: 'Operations Yield' },
+    ],
+  },
+  {
+    cbt: 'CBT-FSH-3F7A1B9D5E2C',
+    kind: 'Garment Line',
+    title: 'Sovereign Fit — Capsule Drop 4',
+    sector: 'FASHION',
+    workIdentifiers: [{ label: 'Style Code', value: 'SF-CD4-2026' }],
+    agreement: {
+      effectiveDate: '2026-09-18',
+      territory: 'United States',
+      term: '90 days from the effective date',
+      feeCents: 15_000_000,
+    },
+    poolRoster: [
+      { identityKey: 'identity-sovereign-fit', pool: 'OWNERSHIP_RESERVE', poolUnits: 60, role: 'Brand Owner' },
+      { identityKey: 'identity-founder', pool: 'OWNERSHIP_RESERVE', poolUnits: 40, role: 'Co-Owner' },
+      { identityKey: 'identity-founder', pool: 'CREATIVE_PAYOUT', poolUnits: 45, role: 'Design Royalty' },
+      { identityKey: 'identity-sovereign-fit', pool: 'CREATIVE_PAYOUT', poolUnits: 55, role: 'Brand Royalty' },
+      { identityKey: 'identity-operations', pool: 'OPERATIONS_YIELD', poolUnits: 100, role: 'Operations Yield' },
+    ],
+  },
+]);
+
+/** Fail-closed lookup by CBT — undefined when the registry holds no record. */
+export function demoAssetForCbt(cbt: string): MasterDemoAsset | undefined {
+  return MASTER_DEMO_ASSET_REGISTRY.find((asset) => asset.cbt === cbt.toUpperCase());
+}
+
+/** Picker read — the registry's assets for the no-CBT asset chooser. */
+export function listDemoLaneAssets(): readonly Pick<MasterDemoAsset, 'cbt' | 'kind' | 'title' | 'sector'>[] {
+  return MASTER_DEMO_ASSET_REGISTRY.map(({ cbt, kind, title, sector }) => ({ cbt, kind, title, sector }));
+}
+
+/**
+ * The lane registries' integrity gate — runs once at module load and THROWS
+ * on any violation (the devSeed law: never a half-seeded store):
+ *   - the guard registry covers all 26 atomic sectors and all 6 factory
+ *     verticals exactly, with no duplicate guard ids;
+ *   - every asset's CBT matches the canonical shape and is unique;
+ *   - every asset's sector, agreement fields, and work identifiers are
+ *     populated (never a 'To be completed' placeholder);
+ *   - every roster carries all three canon pools with positive integer
+ *     units and at least one OPERATIONS_YIELD party (the dust recipient);
+ *   - every identity is checksum-valid (isValidUct) and fully populated.
+ */
+function assertLaneRegistriesIntegrity(): void {
+  const atomicGuardSectors = ATOMIC_SECTOR_GUARDS.map((binding) => binding.sector);
+  const atomicSectorSet = new Set(atomicGuardSectors);
+  if (atomicGuardSectors.length !== ATOMIC_SECTOR_ORDER.length || !ATOMIC_SECTOR_ORDER.every((sector) => atomicSectorSet.has(sector))) {
+    throw new Error('masterStore: the guard registry does not cover all 26 atomic sectors exactly once');
+  }
+  const guardIdSet = new Set([...ATOMIC_SECTOR_GUARDS, ...FACTORY_VERTICAL_GUARDS].map((binding) => binding.guardId));
+  if (guardIdSet.size !== ATOMIC_SECTOR_GUARDS.length + FACTORY_VERTICAL_GUARDS.length) {
+    throw new Error('masterStore: duplicate guard id in the guard registry');
+  }
+  const factoryVerticalSet = new Set(FACTORY_VERTICAL_GUARDS.map((binding) => binding.sector));
+  const factoryVerticalCount = Object.keys(TEMPLATE_VERTICAL_TO_MASTER).length;
+  if (factoryVerticalSet.size !== factoryVerticalCount) {
+    throw new Error('masterStore: the guard registry does not cover every factory vertical');
+  }
+  if (LANE_POOL_BPS.OWNERSHIP_RESERVE + LANE_POOL_BPS.CREATIVE_PAYOUT + LANE_POOL_BPS.OPERATIONS_YIELD !== LANE_TOTAL_BPS) {
+    throw new Error('masterStore: the lane pool canon must sum to exactly 10,000 BPS');
+  }
+
+  const identityKeys = new Set(Object.keys(UCT_DEMO_IDENTITIES));
+  for (const [key, identity] of Object.entries(UCT_DEMO_IDENTITIES)) {
+    if (!isValidUct(identity.uctId)) {
+      throw new Error(`masterStore: demo identity ${key} carries a checksum-invalid UCT`);
+    }
+    if (identity.name.trim() === '' || identity.isni.trim() === '') {
+      throw new Error(`masterStore: demo identity ${key} must carry a name and an ISNI (no placeholders)`);
+    }
+    if (identity.ipi !== null && identity.ipi.trim() === '') {
+      throw new Error(`masterStore: demo identity ${key} ipi must be a value or null — never an empty string`);
+    }
+  }
+
+  const seenCbt = new Set<string>();
+  for (const asset of MASTER_DEMO_ASSET_REGISTRY) {
+    if (!/^CBT-[A-Z]+-[0-9A-F]{12}$/.test(asset.cbt)) {
+      throw new Error(`masterStore: asset ${asset.cbt} does not match the canonical CBT-<TYPE>-<12hex> shape`);
+    }
+    if (seenCbt.has(asset.cbt)) {
+      throw new Error(`masterStore: duplicate asset CBT ${asset.cbt}`);
+    }
+    seenCbt.add(asset.cbt);
+    if (!(ATOMIC_SECTOR_ORDER as readonly string[]).includes(asset.sector)) {
+      throw new Error(`masterStore: asset ${asset.cbt} carries an unknown sector ${asset.sector}`);
+    }
+    if (asset.title.trim() === '' || asset.kind.trim() === '') {
+      throw new Error(`masterStore: asset ${asset.cbt} must carry a title and a kind`);
+    }
+    if (!Number.isInteger(asset.agreement.feeCents) || asset.agreement.feeCents <= 0) {
+      throw new Error(`masterStore: asset ${asset.cbt} fee must be a positive integer cent count`);
+    }
+    if (asset.agreement.effectiveDate.trim() === '' || asset.agreement.territory.trim() === '' || asset.agreement.term.trim() === '') {
+      throw new Error(`masterStore: asset ${asset.cbt} agreement fields must be populated (no placeholders)`);
+    }
+    if (asset.workIdentifiers.length === 0 || asset.workIdentifiers.some((id) => id.label.trim() === '' || id.value.trim() === '')) {
+      throw new Error(`masterStore: asset ${asset.cbt} work identifiers must be populated (no placeholders)`);
+    }
+    const rosterPools = new Set(asset.poolRoster.map((party) => party.pool));
+    for (const pool of LANE_POOL_ORDER) {
+      if (!rosterPools.has(pool)) {
+        throw new Error(`masterStore: asset ${asset.cbt} roster is missing the ${pool} pool`);
+      }
+    }
+    for (const party of asset.poolRoster) {
+      if (!identityKeys.has(party.identityKey)) {
+        throw new Error(`masterStore: asset ${asset.cbt} roster references unknown identity ${party.identityKey}`);
+      }
+      if (!Number.isInteger(party.poolUnits) || party.poolUnits <= 0) {
+        throw new Error(`masterStore: asset ${asset.cbt} roster units must be positive integers`);
+      }
+      if (party.role.trim() === '') {
+        throw new Error(`masterStore: asset ${asset.cbt} roster roles must be populated (no placeholders)`);
+      }
+    }
+    if (!asset.poolRoster.some((party) => party.pool === 'OPERATIONS_YIELD')) {
+      throw new Error(`masterStore: asset ${asset.cbt} roster carries no OPERATIONS_YIELD party (the dust recipient)`);
+    }
+  }
+}
+assertLaneRegistriesIntegrity();
+
+/** Input for landing an executed lane record in the master clearing ledger. */
+export interface ExecutionLandingInput {
+  readonly category: GlobalEntertainmentCategory;
+  readonly subcategory: string;
+  readonly assetTitle: string;
+  /** Stable rights-holder key — hashed through the sovereign path, never raw. */
+  readonly rightsHolderKey: string;
+  /** Integer USD cents — the executed agreement fee. */
+  readonly grossCents: number;
+  readonly stampedAt: string;
+}
+
+/**
+ * Land one executed lane record in the master clearing ledger through the
+ * store path — the drop-5 transaction pattern (execution telemetry wired to
+ * the template's registry record) extended to the lane: the record is
+ * settled through the SAME real allocation engine as every seeded row
+ * (settleSovereignRecord) and appended to the memoized store array the
+ * master surfaces read. A fresh execution lands as PENDING_CLEARANCE —
+ * honestly unverified until the clearinghouse marks it immutable.
+ */
+export function recordExecutionInMasterLedger(input: ExecutionLandingInput): SovereignLedgerRecord {
+  const ledger = seededMasterLedger();
+  const categorySequences = ledger
+    .filter((record) => record.category === input.category)
+    .map((record) => Number.parseInt(record.ledgerId.slice(-3), 10));
+  const sequence = (categorySequences.length > 0 ? Math.max(...categorySequences) : 0) + 1;
+  const record = settleSovereignRecord({
+    category: input.category,
+    subcategory: input.subcategory,
+    assetTitle: input.assetTitle,
+    rightsHolderKey: input.rightsHolderKey,
+    grossVolumeCents: input.grossCents,
+    clearinghouseStatus: 'PENDING_CLEARANCE',
+    settlementTimestamp: input.stampedAt,
+    sequence,
+  });
+  ledger.push(record);
+  return record;
 }

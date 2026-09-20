@@ -126,6 +126,7 @@ export type AtomicEntityClassTag =
   | 'LIVE'
   | 'PUBLISHING';
 
+
 /** The class tag of an entity — the pill-badge vocabulary, one per class. */
 export function entityClassTag(entity: SovereignAtomicEntity): AtomicEntityClassTag {
   switch (entity.entityType) {
@@ -176,3 +177,232 @@ export function isTvEntity(entity: SovereignAtomicEntity): entity is TelevisionE
 export function isLiveEntity(entity: SovereignAtomicEntity): entity is LivePerformanceEntity {
   return entity.entityType === 'STAGE_PERFORMANCE' && entity.templateId.startsWith(TEMPLATE_PREFIX.LIVE);
 }
+
+/** The entity class names — the guard registry's entityType binding keys. */
+export type AtomicEntityTypeName = SovereignAtomicEntity['entityType'];
+
+/**
+ * The two drop-series guards the founder's registry left unguarded, completed
+ * by the Universal Execution Lane expansion (2026-09-20): all six isolated
+ * classes now carry the fail-closed class+prefix pairing invariant. No new
+ * entity classes are invented — the class union is still EXACTLY the
+ * founder's six drops.
+ */
+export function isPodcastEntity(entity: SovereignAtomicEntity): entity is PodcastEntity {
+  return entity.entityType === 'PODCAST_NETWORK' && entity.templateId.startsWith(TEMPLATE_PREFIX.PODCAST);
+}
+
+export function isPublishingEntity(entity: SovereignAtomicEntity): entity is PublishingEntity {
+  return (
+    entity.entityType === 'LITERARY_WORK' &&
+    [...TEMPLATE_PREFIX.PUBLISHING_FACTORY, ...TEMPLATE_PREFIX.PUBLISHING_SECTOR].some(
+      (prefix) => entity.templateId.startsWith(prefix),
+    )
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE GUARD REGISTRY (Universal Execution Lane expansion, 2026-09-20): EVERY
+// atomic sector — all 26 — and every factory vertical gets a guard binding
+// entityType↔templateId. Sectors whose canon carries an SDK entity class bind
+// that class; sectors without one bind `null` — the guard then requires the
+// record to claim NO entity class (its telemetryMetric display is the canon,
+// never a force-fitted class; new classes come only from founder drops).
+//
+// This module stays PURE CANON: the registry's sector keys are string
+// literals here, and the master store's integrity gate asserts the registry
+// covers the taxonomy's 26 sectors and 6 factory verticals exactly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One guard binding — a sector's template-id prefix canon and entity class. */
+export interface SectorGuardBinding {
+  readonly guardId: string;
+  /** The AtomicSector name (asserted against the taxonomy by the master store). */
+  readonly sector: string;
+  /** Every template-id prefix the sector's records may carry. */
+  readonly prefixes: readonly string[];
+  /** The bound entity class; null when the sector is telemetryMetric-only. */
+  readonly entityType: AtomicEntityTypeName | null;
+}
+
+/** The 26 atomic-sector guard bindings — one per sector, no sector left out. */
+export const ATOMIC_SECTOR_GUARDS: readonly SectorGuardBinding[] = Object.freeze([
+  { guardId: 'GUARD-SECTOR-MUSIC', sector: 'MUSIC', prefixes: ['TPL-MUS-'], entityType: 'MASTER_RECORDING' },
+  { guardId: 'GUARD-SECTOR-GAMING', sector: 'GAMING', prefixes: ['TPL-GAM-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-INTERACTIVE', sector: 'INTERACTIVE', prefixes: ['TPL-IXP-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-PODCASTING', sector: 'PODCASTING', prefixes: ['TPL-PDC-'], entityType: 'PODCAST_NETWORK' },
+  { guardId: 'GUARD-SECTOR-STREAMING', sector: 'STREAMING', prefixes: ['TPL-STR-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-SOCIAL_MEDIA', sector: 'SOCIAL_MEDIA', prefixes: ['TPL-SOC-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-PUBLISHING', sector: 'PUBLISHING', prefixes: ['TPL-PUB-'], entityType: 'LITERARY_WORK' },
+  { guardId: 'GUARD-SECTOR-MOVIES', sector: 'MOVIES', prefixes: ['TPL-MOV-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-FILM', sector: 'FILM', prefixes: ['TPL-FLM-'], entityType: 'FEATURE_FILM' },
+  { guardId: 'GUARD-SECTOR-TV', sector: 'TV', prefixes: ['TPL-TV-'], entityType: 'LINEAR_TV' },
+  { guardId: 'GUARD-SECTOR-VIDEO', sector: 'VIDEO', prefixes: ['TPL-VID-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-SPORTS', sector: 'SPORTS', prefixes: ['TPL-SPT-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-MOTORSPORT', sector: 'MOTORSPORT', prefixes: ['TPL-MTR-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-ARENA', sector: 'ARENA', prefixes: ['TPL-ARN-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-ATHLETICS', sector: 'ATHLETICS', prefixes: ['TPL-ATH-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-FASHION', sector: 'FASHION', prefixes: ['TPL-FSH-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-MODELING', sector: 'MODELING', prefixes: ['TPL-MDL-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-CAD', sector: 'CAD', prefixes: ['TPL-CAD-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-VISUAL_ARTS', sector: 'VISUAL_ARTS', prefixes: ['TPL-VIS-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-DESIGN', sector: 'DESIGN', prefixes: ['TPL-DES-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-BOOKS', sector: 'BOOKS', prefixes: ['TPL-BOK-'], entityType: 'LITERARY_WORK' },
+  { guardId: 'GUARD-SECTOR-LITERATURE', sector: 'LITERATURE', prefixes: ['TPL-LTR-'], entityType: 'LITERARY_WORK' },
+  { guardId: 'GUARD-SECTOR-DIGITAL_ASSETS', sector: 'DIGITAL_ASSETS', prefixes: ['TPL-DGA-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-SOFTWARE', sector: 'SOFTWARE', prefixes: ['TPL-SFT-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-VTUBING', sector: 'VTUBING', prefixes: ['TPL-VTB-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-VIRTUAL_AVATARS', sector: 'VIRTUAL_AVATARS', prefixes: ['TPL-VAV-'], entityType: null },
+]);
+
+/** The 6 factory-vertical guard bindings — every factory template is covered. */
+export const FACTORY_VERTICAL_GUARDS: readonly SectorGuardBinding[] = Object.freeze([
+  { guardId: 'GUARD-FACTORY-AUDIO_SOUND', sector: 'AUDIO_SOUND', prefixes: ['TPL-AUD-'], entityType: null },
+  { guardId: 'GUARD-FACTORY-FILM_TV', sector: 'FILM_TV', prefixes: ['TPL-FLM-'], entityType: 'FEATURE_FILM' },
+  {
+    guardId: 'GUARD-FACTORY-PUBLISHING',
+    sector: 'PUBLISHING',
+    prefixes: [...TEMPLATE_PREFIX.PUBLISHING_FACTORY],
+    entityType: 'LITERARY_WORK',
+  },
+  { guardId: 'GUARD-FACTORY-LIVE_COMEDY', sector: 'LIVE_COMEDY', prefixes: ['TPL-LVE-'], entityType: 'STAGE_PERFORMANCE' },
+  { guardId: 'GUARD-FACTORY-INTERACTIVE', sector: 'INTERACTIVE', prefixes: ['TPL-INT-'], entityType: null },
+  { guardId: 'GUARD-FACTORY-BRAND_LICENSING', sector: 'BRAND_LICENSING', prefixes: ['TPL-BRD-'], entityType: null },
+]);
+
+/** One guard verdict — structured, so every verdict is VISIBLE in the payload. */
+export interface GuardVerdict {
+  readonly guardId: string;
+  /** ENTITY_BINDING: the class↔prefix pairing. CROSS_DOMAIN: the sector pair. */
+  readonly kind: 'ENTITY_BINDING' | 'CROSS_DOMAIN';
+  /** One sector for entity bindings, a `SOURCE → TARGET` pair for cross-domain. */
+  readonly sectorPair: string;
+  readonly allowed: boolean;
+  readonly reason: string;
+}
+
+/** The claim a record makes — its template id and (optionally) an entity class. */
+export interface GuardClaimInput {
+  readonly templateId: string;
+  readonly entityType: AtomicEntityTypeName | null;
+}
+
+/**
+ * Evaluate ONE binding: the template id must carry the binding's prefix canon
+ * AND the claimed entity class must be exactly the bound class (a null bound
+ * class demands a null claim — telemetryMetric-only sectors bind no entity).
+ * Fail-closed: any mismatch blocks, and a blocked verdict never serves an
+ * execution.
+ */
+export function evaluateGuardBinding(binding: SectorGuardBinding, claim: GuardClaimInput): GuardVerdict {
+  const prefixMatch = binding.prefixes.some((prefix) => claim.templateId.startsWith(prefix));
+  const entityMatch = claim.entityType === binding.entityType;
+  if (prefixMatch && entityMatch) {
+    return {
+      guardId: binding.guardId,
+      kind: 'ENTITY_BINDING',
+      sectorPair: binding.sector,
+      allowed: true,
+      reason:
+        binding.entityType === null
+          ? `${binding.sector} record carries the ${binding.prefixes.join('/')} prefix and claims no entity class (telemetryMetric canon)`
+          : `${binding.sector} record carries the ${binding.prefixes.join('/')} prefix and the bound ${binding.entityType} class`,
+    };
+  }
+  const reason = !prefixMatch
+    ? `Blocked: ${claim.templateId} carries none of the ${binding.sector} prefix canon (${binding.prefixes.join(', ')})`
+    : `Blocked: ${claim.templateId} claims ${claim.entityType ?? 'no entity class'} but the ${binding.sector} binding requires ${binding.entityType ?? 'no entity class'}`;
+  return { guardId: binding.guardId, kind: 'ENTITY_BINDING', sectorPair: binding.sector, allowed: false, reason };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CROSS-DOMAIN BINDING — fail closed. A binding inside ONE sector is always
+// allowed; a cross-sector pair is allowed ONLY through an entry in the
+// founder-owned allowlist below. The registry ships EMPTY: the default
+// posture is deny, and no pairing is granted by inference. The allowlist is
+// FOUNDER-OWNED — entries land only on the founder's explicit direction, in
+// the form { sourceSector, targetSector, note }.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One founder-owned allowlist entry — an allowed cross-sector pair. */
+export interface CrossDomainBindingPair {
+  readonly sourceSector: string;
+  readonly targetSector: string;
+  /** The founder's note for the grant — who asked for it and when. */
+  readonly note: string;
+}
+
+/** FOUNDER-OWNED — default empty: cross-sector bindings fail closed. */
+export const CROSS_DOMAIN_BINDING_ALLOWLIST: readonly CrossDomainBindingPair[] = Object.freeze([]);
+
+/**
+ * The pure allowlist evaluator (the registry version below just supplies the
+ * founder-owned list). A pair passes when the two sectors are the SAME, or
+ * when the allowlist carries the pair in either direction.
+ */
+export function evaluateCrossDomainBindingWithAllowlist(
+  allowlist: readonly CrossDomainBindingPair[],
+  sourceSector: string,
+  targetSector: string,
+): GuardVerdict {
+  const sectorPair = `${sourceSector} → ${targetSector}`;
+  if (sourceSector === targetSector) {
+    return {
+      guardId: 'GUARD-CROSS-DOMAIN',
+      kind: 'CROSS_DOMAIN',
+      sectorPair,
+      allowed: true,
+      reason: `Same-sector binding (${sourceSector}) — always allowed`,
+    };
+  }
+  const entry = allowlist.find(
+    (pair) =>
+      (pair.sourceSector === sourceSector && pair.targetSector === targetSector) ||
+      (pair.sourceSector === targetSector && pair.targetSector === sourceSector),
+  );
+  if (entry) {
+    return {
+      guardId: 'GUARD-CROSS-DOMAIN',
+      kind: 'CROSS_DOMAIN',
+      sectorPair,
+      allowed: true,
+      reason: `Founder-owned allowlist entry grants this pair: ${entry.note}`,
+    };
+  }
+  return {
+    guardId: 'GUARD-CROSS-DOMAIN',
+    kind: 'CROSS_DOMAIN',
+    sectorPair,
+    allowed: false,
+    reason: 'Fail closed: cross-sector bindings are allowed only through the founder-owned CROSS_DOMAIN_BINDING_ALLOWLIST (default empty)',
+  };
+}
+
+/** The registry path the lane and the execute route run. */
+export function evaluateCrossDomainBinding(sourceSector: string, targetSector: string): GuardVerdict {
+  return evaluateCrossDomainBindingWithAllowlist(CROSS_DOMAIN_BINDING_ALLOWLIST, sourceSector, targetSector);
+}
+
+/**
+ * The Universal Execution Lane's canon pool buckets — the 50/35/15 structure
+ * as integer BPS of the whole 10,000. The reconciler in executionLane.ts
+ * enforces these weights engine-side (integer math, dust to the operations
+ * yield per the Don dust canon); no payload can exist off this structure.
+ */
+export const LANE_POOL_ORDER = ['OWNERSHIP_RESERVE', 'CREATIVE_PAYOUT', 'OPERATIONS_YIELD'] as const;
+export type LanePoolName = (typeof LANE_POOL_ORDER)[number];
+
+export const LANE_POOL_BPS: Record<LanePoolName, number> = Object.freeze({
+  OWNERSHIP_RESERVE: 5_000,
+  CREATIVE_PAYOUT: 3_500,
+  OPERATIONS_YIELD: 1_500,
+});
+
+export const LANE_POOL_LABELS: Record<LanePoolName, string> = Object.freeze({
+  OWNERSHIP_RESERVE: 'Ownership Reserve',
+  CREATIVE_PAYOUT: 'Creative Payout',
+  OPERATIONS_YIELD: 'Operations Yield',
+});
+
+/** The 10,000-BPS denominator the lane reconciles every payload against. */
+export const LANE_TOTAL_BPS = LANE_POOL_ORDER.reduce((sum, pool) => sum + LANE_POOL_BPS[pool], 0);
