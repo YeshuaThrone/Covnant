@@ -8,6 +8,7 @@
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
+import type { ControlBoardState } from '@/lib/master/controlBoard';
 import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
 
 export type SectionData<T> =
@@ -44,15 +45,22 @@ export interface AdminConsoleData {
   creators: SectionData<AdminCreatorProfile[]>;
   allowlists: SectionData<AdminAllowlistRow[]>;
   master: SectionData<MasterLedgerSection>;
+  /**
+   * The Covnant Control Board's server-bound state — the same entity-bound
+   * board the /templates page SSRs, composed from the same master-store
+   * engine so the console section renders the identical library.
+   */
+  controlBoard: ControlBoardState;
 }
 
-/** The six console tabs, in operator order. */
+/** The seven console tabs, in operator order. */
 export const CONSOLE_TABS = [
   'Overview',
   'Creators',
   'UCT Registry',
   'Ledger',
   'Contracts',
+  'Control Board',
   'Allowlists',
 ] as const;
 

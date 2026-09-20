@@ -9,7 +9,8 @@
  *     can see. No hints about what lies behind.
  *   - 'console' — AdminConsole with server-side reads over the verified
  *     stores: registry (provisioning status ONLY), ledger, contracts,
- *     creator profiles, and platform allowlists. Supabase-backed stores
+ *     creator profiles, platform allowlists, the master ledger, and the
+ *     entity-bound Covnant Control Board library. Supabase-backed stores
  *     degrade to their honest unavailable state when the service-role
  *     client cannot be built.
  *
@@ -28,7 +29,22 @@ import type { AdminStoreResult } from '@/lib/admin/types';
 import { registrySummary, ledgerSummary } from '@/lib/admin/overview';
 import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { adminPageView } from '@/lib/admin/console';
-import { resolveMasterLedger } from '@/lib/master/masterStore';
+import {
+  atomicRecordsForCategory,
+  bindAtomicEntity,
+  bindFactoryEntity,
+  executionTelemetryFor,
+  masterTemplatesForCategory,
+  resolveAtomicRegistry,
+  resolveMasterLedger,
+  resolveMasterTemplates,
+} from '@/lib/master/masterStore';
+import { MASTER_CATEGORY_ORDER } from '@/lib/master/taxonomy';
+import type { ControlBoardState } from '@/lib/master/controlBoard';
+import type {
+  AtomicContractRecord,
+  ContractTemplateRecord,
+} from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { AdminGate } from '@/components/admin/AdminGate';
 import { AdminConsole } from '@/components/admin/AdminConsole';
@@ -67,6 +83,38 @@ function toSectionData<T>(result: AdminStoreResult<T> | null): SectionData<T> {
 }
 
 /**
+ * The Control Board's server seam — the same composition the /templates
+ * page and the per-sector entity doors run over the master store: every
+ * factory template and atomic record of the six verticals, entity-bound
+ * with its CovnantAtomicDataSDK telemetry and execution history before
+ * anything renders. No literals — the board is the store's library.
+ */
+function buildControlBoardState(
+  masterTemplates: { demo: boolean; records: readonly ContractTemplateRecord[] },
+  atomicRegistry: { records: readonly AtomicContractRecord[] },
+): ControlBoardState {
+  return {
+    demo: masterTemplates.demo,
+    active: null,
+    verticals: [...MASTER_CATEGORY_ORDER].map((vertical) => ({
+      vertical,
+      factoryTemplates: masterTemplatesForCategory(masterTemplates.records, vertical).map(
+        (record) => ({
+          record,
+          entity: bindFactoryEntity(record),
+          execution: executionTelemetryFor(record.templateId),
+        }),
+      ),
+      atomicRecords: atomicRecordsForCategory(atomicRegistry.records, vertical).map((record) => ({
+        record,
+        entity: bindAtomicEntity(record),
+        execution: executionTelemetryFor(record.templateId),
+      })),
+    })),
+  };
+}
+
+/**
  * listContracts throws on a store read failure (its documented contract) —
  * one failing store must never take the whole console down, so the read
  * is caught here and degraded to the section's honest unavailable state.
@@ -101,7 +149,7 @@ export default async function AdminPage() {
   }
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -117,6 +165,8 @@ export default async function AdminPage() {
         },
       }),
     ),
+    resolveMasterTemplates(),
+    resolveAtomicRegistry(),
   ]);
 
   const data: AdminConsoleData = {
@@ -126,6 +176,7 @@ export default async function AdminPage() {
     creators: toSectionData(creators),
     allowlists: toSectionData(allowlists),
     master,
+    controlBoard: buildControlBoardState(masterTemplates, atomicRegistry),
   };
 
   return <AdminConsole data={data} />;

@@ -84,7 +84,31 @@ function VerticalSection({ section }: { section: VerticalBoardData }) {
   );
 }
 
-export function TemplatesControlBoard({ initial }: { initial: ControlBoardState }) {
+/** The shared vertical-tab pill treatment — identical across both hosts. */
+function tabPillClasses(active: boolean): string {
+  return `rounded-full border px-4 py-1.5 text-sm transition ${
+    active
+      ? 'border-gold/60 bg-gold/10 text-gold'
+      : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
+  }`;
+}
+
+export function TemplatesControlBoard({
+  initial,
+  historyMode = 'url',
+}: {
+  initial: ControlBoardState;
+  /**
+   * Who owns the URL. 'url' (the default, the /templates page): the board
+   * deep-links through /templates?category=… history pushes and re-renders
+   * on back/forward. 'local': the board is a section inside a host console
+   * — the host owns navigation, so no history is touched, the vertical tabs
+   * are plain buttons, and All-verticals restores the server-rendered board
+   * the section mounted with.
+   */
+  historyMode?: 'url' | 'local';
+}): React.JSX.Element {
+  const ownsHistory = historyMode === 'url';
   const [view, setView] = useState<ControlBoardState>(initial);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<GlobalEntertainmentCategory | null>(null);
@@ -108,7 +132,9 @@ export function TemplatesControlBoard({ initial }: { initial: ControlBoardState 
           }),
         );
         const hydrated = mergeSectorResponses(vertical, responses);
-        window.history.pushState({}, '', `/templates?category=${vertical}`);
+        if (ownsHistory) {
+          window.history.pushState({}, '', `/templates?category=${vertical}`);
+        }
         setView({
           demo: responses[0]?.demo ?? false,
           active: vertical,
@@ -122,12 +148,13 @@ export function TemplatesControlBoard({ initial }: { initial: ControlBoardState 
         setSyncing(false);
       }
     },
-    [],
+    [ownsHistory],
   );
 
   // Back/forward: re-render the URL's server view. Client-pushed entries
   // cannot restore deeper history state honestly, so the server re-renders.
   useEffect(() => {
+    if (!ownsHistory) return;
     const onPopState = (): void => {
       if (categoryFromSearch(window.location.search) !== view.active) {
         window.location.reload();
@@ -135,46 +162,62 @@ export function TemplatesControlBoard({ initial }: { initial: ControlBoardState 
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [view.active]);
+  }, [view.active, ownsHistory]);
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Master categories">
-        <Link
-          href="/templates"
-          role="tab"
-          aria-selected={view.active === null}
-          className={`rounded-full border px-4 py-1.5 text-sm transition ${
-            view.active === null
-              ? 'border-gold/60 bg-gold/10 text-gold'
-              : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
-          }`}
-        >
-          All verticals
-        </Link>
-        {MASTER_CATEGORY_ORDER.map((category) => (
-          <Link
-            key={category}
-            href={`/templates?category=${category}`}
-            role="tab"
-            aria-selected={view.active === category}
-            data-testid="vertical-tab"
-            data-vertical={category}
-            onClick={(event) => {
-              if (view.active !== category) {
-                event.preventDefault();
-                void activate(category);
-              }
-            }}
-            className={`rounded-full border px-4 py-1.5 text-sm transition ${
-              view.active === category
-                ? 'border-gold/60 bg-gold/10 text-gold'
-                : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
-            }`}
-          >
-            {MASTER_CATEGORY_LABELS[category]}
+        {ownsHistory ? (
+          <Link href="/templates" role="tab" aria-selected={view.active === null} className={tabPillClasses(view.active === null)}>
+            All verticals
           </Link>
-        ))}
+        ) : (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view.active === null}
+            onClick={() => setView(initial)}
+            className={tabPillClasses(view.active === null)}
+          >
+            All verticals
+          </button>
+        )}
+        {MASTER_CATEGORY_ORDER.map((category) =>
+          ownsHistory ? (
+            <Link
+              key={category}
+              href={`/templates?category=${category}`}
+              role="tab"
+              aria-selected={view.active === category}
+              data-testid="vertical-tab"
+              data-vertical={category}
+              onClick={(event) => {
+                if (view.active !== category) {
+                  event.preventDefault();
+                  void activate(category);
+                }
+              }}
+              className={tabPillClasses(view.active === category)}
+            >
+              {MASTER_CATEGORY_LABELS[category]}
+            </Link>
+          ) : (
+            <button
+              key={category}
+              type="button"
+              role="tab"
+              aria-selected={view.active === category}
+              data-testid="vertical-tab"
+              data-vertical={category}
+              onClick={() => {
+                if (view.active !== category) void activate(category);
+              }}
+              className={tabPillClasses(view.active === category)}
+            >
+              {MASTER_CATEGORY_LABELS[category]}
+            </button>
+          ),
+        )}
       </div>
 
       {syncing ? (

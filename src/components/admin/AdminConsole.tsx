@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * AdminConsole — the gated operator console shell. Renders the six
+ * AdminConsole — the gated operator console shell. Renders the seven
  * sections as tabs (Overview, Creators, Registry, Ledger, Contracts,
- * Allowlists) in the established obsidian/deep-gold language.
+ * Control Board, Allowlists) in the established obsidian/deep-gold
+ * language.
  *
  * Mutation results are lifted here (updated creator profile / allowlist
  * row from the mutation response) so a section stays consistent when the
@@ -19,6 +20,7 @@ import { RegistrySection } from './sections/RegistrySection';
 import { LedgerSection } from './sections/LedgerSection';
 import { ContractsSection } from './sections/ContractsSection';
 import { AllowlistsSection } from './sections/AllowlistsSection';
+import { ControlBoardSection } from './sections/ControlBoardSection';
 
 export type AdminTab =
   | 'overview'
@@ -26,6 +28,7 @@ export type AdminTab =
   | 'registry'
   | 'ledger'
   | 'contracts'
+  | 'controlboard'
   | 'allowlists';
 
 const TABS: readonly { id: AdminTab; label: string }[] = [
@@ -34,6 +37,7 @@ const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'registry', label: 'UCT Registry' },
   { id: 'ledger', label: 'Ledger' },
   { id: 'contracts', label: 'Contracts' },
+  { id: 'controlboard', label: 'Control Board' },
   { id: 'allowlists', label: 'Allowlists' },
 ];
 
@@ -106,7 +110,8 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
             master={data.master.kind === 'ready' ? data.master.value : undefined}
           />
         )}
-        {tab === 'contracts' && <ContractsSection contracts={data.contracts} />}
+        {tab === 'contracts' && <ContractsSection contracts={data.contracts} master={data.master.kind === 'ready' ? data.master.value : undefined} />}
+        {tab === 'controlboard' && <ControlBoardSection board={data.controlBoard} />}
         {tab === 'allowlists' && (
           <AllowlistsSection
             allowlists={allowlists}

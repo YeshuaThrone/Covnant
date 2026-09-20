@@ -104,13 +104,42 @@ test('an anonymous visitor gets the gate — wrong password states it plainly, n
   await expect(page.locator('[data-admin="console"]')).toHaveCount(0);
 });
 
-test('a credentialed operator gets the console with all six sections', async ({ page }) => {
+test('a credentialed operator gets the console with all seven sections', async ({ page }) => {
   await signIn(page, ADMIN_E2E_PASSWORD);
 
-  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Allowlists']) {
+  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Control Board', 'Allowlists']) {
     await page.getByRole('button', { name: section, exact: true }).click();
     await expect(page.locator(`[aria-label="${section}"]`)).toBeVisible();
   }
+});
+
+test('the Control Board tab renders the master board; Contracts stays intact', async ({ page }) => {
+  await signIn(page, ADMIN_E2E_PASSWORD);
+
+  // Control Board: the reused /templates board inside the console — vertical
+  // tabs, isolated entity pills, the 50/35/15 badges, all store-backed.
+  await page.getByRole('button', { name: 'Control Board', exact: true }).click();
+  await expect(page.locator('[aria-label="Control Board"]')).toBeVisible();
+  await expect(page.locator('[data-testid="vertical-tab"]')).toHaveCount(6);
+  await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
+  await expect(page.getByText('US-S1Z-26-00001')).toBeVisible();
+  await expect(page.getByText('Ownership reserve 50%').first()).toBeVisible();
+  await expect(page.getByText('Demo data').first()).toBeVisible();
+
+  // A vertical swap hydrates through the per-sector entity doors — the same
+  // engine as /templates — and the console owns the URL (no history drift).
+  await page.getByTestId('vertical-tab').filter({ hasText: 'Audio & Recorded Sound' }).click();
+  await expect(page.locator('[data-testid="template-vertical-section"]').first()).toBeVisible();
+  await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
+  await expect(page).toHaveURL(/\/admin$/);
+
+  // Contracts: still intact — the enriched /contracts master hydration above
+  // the vault index.
+  await page.getByRole('button', { name: 'Contracts', exact: true }).click();
+  await expect(page.locator('[aria-label="Contracts"]')).toBeVisible();
+  await expect(page.locator('[data-testid="master-stat-cards"]')).toBeVisible();
+  await expect(page.locator('[data-testid="sovereign-ledger-table"]')).toBeVisible();
+  await expect(page.getByText('Contract vault records')).toBeVisible();
 });
 
 test('a compliance edit POSTs and the action log shows the change; the allowlist flip likewise', async ({

@@ -58,6 +58,7 @@ vi.mock('@/lib/admin/allowlists', () => ({
 }));
 
 import { mintAdminSessionToken } from '@/lib/admin/gate';
+import { CONSOLE_TABS } from '@/components/admin/types';
 
 async function renderAdminPage(): Promise<string> {
   const AdminPage = (await import('../page')).default;
@@ -99,6 +100,13 @@ describe('the /admin page', () => {
     expect(html).toContain('data-admin="console"');
     expect(html).toContain('Covenant operations');
     expect(html).not.toContain('data-admin="gate"');
+    // All seven operator tabs render in the console nav — the Control Board
+    // section (founder directive, 2026-09-20) sits alongside Contracts.
+    expect(html).toContain('Contracts');
+    expect(html).toContain('Control Board');
+    for (const label of CONSOLE_TABS) {
+      expect(html).toContain(`>${label}</button>`);
+    }
   });
 
   it('renders the login gate for an invalid session cookie — fail closed', async () => {

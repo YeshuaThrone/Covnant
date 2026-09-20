@@ -1,9 +1,14 @@
 /**
- * Contracts — read-only list over the contracts store. The console shows
- * the record's metadata; the documents themselves stay in the vault.
+ * Contracts — the enriched /contracts master-data view plus the read-only
+ * index over the contracts store. The master block is the SAME hydration
+ * the /contracts page serves (resolveMasterLedger → engine-computed
+ * summary + ledger rows, passed down from the page's single seam — no new
+ * routes); the vault table below it keeps its structure untouched.
  */
 
+import type { MasterLedgerSection } from '../types';
 import type { ContractRow, SectionData } from '../types';
+import { MasterStatCards, SovereignLedgerTable } from '@/components/master/MasterData';
 import { SectionEmpty, SectionEyebrow, SectionUnavailable, StatusPill, type PillTone } from '../shared';
 
 const CONTRACT_TONE: Record<ContractRow['status'], PillTone> = {
@@ -11,7 +16,13 @@ const CONTRACT_TONE: Record<ContractRow['status'], PillTone> = {
   FINAL: 'jade',
 };
 
-export function ContractsSection({ contracts }: { contracts: SectionData<ContractRow[]> }) {
+export function ContractsSection({
+  contracts,
+  master,
+}: {
+  contracts: SectionData<ContractRow[]>;
+  master?: MasterLedgerSection;
+}) {
   if (contracts.kind === 'unavailable') {
     return (
       <div aria-label="Contracts">
@@ -33,13 +44,41 @@ export function ContractsSection({ contracts }: { contracts: SectionData<Contrac
         the vault — this list mirrors their state for the operator.
       </p>
 
+      {master ? (
+        <section aria-label="Master contract data" className="mt-6">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-white">
+              Master contract data — six verticals
+            </h3>
+            {master.demo ? (
+              <span
+                data-testid="demo-data-badge"
+                className="inline-flex shrink-0 items-center rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-300"
+              >
+                Demo data
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-2 max-w-2xl text-sm text-white/50">
+            The same master hydration the /contracts page serves — the six master
+            entertainment verticals with their 50 / 35 / 15 allocations, every figure
+            computed through the settlement engine&apos;s integer-cent path.
+            Per-vertical scoping stays on the /contracts page itself.
+          </p>
+          <div className="mt-4 space-y-4">
+            <MasterStatCards summary={master.summary} />
+            <SovereignLedgerTable records={master.records} />
+          </div>
+        </section>
+      ) : null}
+
       {rows.length === 0 ? (
         <SectionEmpty>
           No contracts stored yet — agreements appear here after the first one is
           saved in the vault.
         </SectionEmpty>
       ) : (
-        <div className="mt-6 overflow-x-auto rounded-lg border border-white/10">
+        <div className="mt-8 overflow-x-auto rounded-lg border border-white/10">
           <table className="status-table">
             <thead>
               <tr>
