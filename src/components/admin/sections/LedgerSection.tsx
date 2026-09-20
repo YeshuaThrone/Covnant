@@ -7,6 +7,8 @@
 
 import type { LedgerSummary } from '@/lib/admin/overview';
 import { formatChangeValue } from '@/lib/admin/console';
+import type { MasterLedgerSection } from '../types';
+import { MasterStatCards, SovereignLedgerTable } from '@/components/master/MasterData';
 import { SectionEyebrow } from '../shared';
 
 function currenciesOf(record: Record<string, number>): string {
@@ -16,7 +18,13 @@ function currenciesOf(record: Record<string, number>): string {
   return rendered || '—';
 }
 
-export function LedgerSection({ ledger }: { ledger: LedgerSummary }) {
+export function LedgerSection({
+  ledger,
+  master,
+}: {
+  ledger: LedgerSummary;
+  master?: MasterLedgerSection;
+}) {
   const { totals, holders } = ledger;
 
   return (
@@ -28,7 +36,34 @@ export function LedgerSection({ ledger }: { ledger: LedgerSummary }) {
         the ledger.
       </p>
 
-      <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+      {master ? (
+        <section aria-label="Master sovereign ledger" className="mt-6">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-white">
+              Master sovereign ledger — six verticals
+            </h3>
+            {master.demo ? (
+              <span
+                data-testid="demo-data-badge"
+                className="inline-flex shrink-0 items-center rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-300"
+              >
+                Demo data
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-2 max-w-2xl text-sm text-white/50">
+            The six master entertainment verticals with their 50 / 35 / 15
+            allocations — every figure computed through the settlement engine&apos;s
+            integer-cent path.
+          </p>
+          <div className="mt-4 space-y-4">
+            <MasterStatCards summary={master.summary} />
+            <SovereignLedgerTable records={master.records} />
+          </div>
+        </section>
+      ) : null}
+
+      <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
         <div className="glass-card p-4">
           <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Settlements</p>
           <p className="mt-1 text-2xl font-semibold text-white">{totals.count}</p>

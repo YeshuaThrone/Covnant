@@ -28,6 +28,8 @@ import type { AdminStoreResult } from '@/lib/admin/types';
 import { registrySummary, ledgerSummary } from '@/lib/admin/overview';
 import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { adminPageView } from '@/lib/admin/console';
+import { resolveMasterLedger } from '@/lib/master/masterStore';
+import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { AdminGate } from '@/components/admin/AdminGate';
 import { AdminConsole } from '@/components/admin/AdminConsole';
 import type { AdminConsoleData, ContractRow, SectionData } from '@/components/admin/types';
@@ -99,12 +101,22 @@ export default async function AdminPage() {
   }
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
     db ? listCreators(db) : Promise.resolve(null),
     db ? listAllowlists(db) : Promise.resolve(null),
+    resolveMasterLedger().then(
+      (resolved): AdminConsoleData['master'] => ({
+        kind: 'ready',
+        value: {
+          demo: resolved.demo,
+          summary: summarizeSovereignLedger(resolved.records),
+          records: [...resolved.records],
+        },
+      }),
+    ),
   ]);
 
   const data: AdminConsoleData = {
@@ -113,6 +125,7 @@ export default async function AdminPage() {
     contracts: toSectionData(contracts),
     creators: toSectionData(creators),
     allowlists: toSectionData(allowlists),
+    master,
   };
 
   return <AdminConsole data={data} />;

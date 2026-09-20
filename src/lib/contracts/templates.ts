@@ -1,11 +1,14 @@
 /**
  * Contract template catalog — directive §4 (twenty deterministic agreements).
  *
- * Five browsing categories span the industries the platform serves:
+ * Five browsing categories span the industries the platform serves, mapped
+ * onto the six master entertainment verticals (src/lib/master/taxonomy —
+ * the master taxonomy is the presentation vocabulary; non-standard labels
+ * like 'Film, TV & Hollywood' are banned by canon):
  *
- *   - MUSIC    — Music & Record Label (6)
- *   - FILM_TV  — Film, TV & Hollywood (4)
- *   - GAMING   — Gaming & Interactive (3)
+ *   - MUSIC    — Audio & Recorded Sound (6)
+ *   - FILM_TV  — Film & Television (4)
+ *   - GAMING   — Interactive & Digital Media (3)
  *   - CREATORS — Podcasts, Creators & Streamers (3)
  *   - FASHION  — Fashion & Apparel (4)
  *
@@ -16,6 +19,8 @@
  * Template ids are stable machine keys: ids of surviving agreements are kept
  * across renames so previously stored contracts still resolve.
  */
+
+import type { GlobalEntertainmentCategory } from '@/lib/master/taxonomy';
 
 export type ContractCategory = 'MUSIC' | 'FILM_TV' | 'GAMING' | 'CREATORS' | 'FASHION';
 
@@ -32,11 +37,11 @@ export const CATEGORY_ORDER: readonly ContractCategory[] = [
 ];
 
 export const CATEGORY_LABELS: Record<ContractCategory, string> = {
-  MUSIC: 'Music & Record Label',
-  FILM_TV: 'Film, TV & Hollywood',
-  GAMING: 'Gaming & Interactive',
+  MUSIC: 'Audio & Recorded Sound',
+  FILM_TV: 'Film & Television',
+  GAMING: 'Interactive & Digital Media',
   CREATORS: 'Podcasts, Creators & Streamers',
-  FASHION: 'Fashion & Apparel',
+  FASHION: 'Commercial & Brand Licensing',
 };
 
 /** Category blurbs shown atop each /templates section. */
@@ -55,8 +60,8 @@ export function industryForCategory(category: ContractCategory): ContractIndustr
 
 /** Labels for the persisted industry values (legacy rows render with these). */
 export const INDUSTRY_LABELS: Record<ContractIndustry, string> = {
-  MUSIC: 'Music & Record Label',
-  FILM_MEDIA_MERCH: 'Film, TV & Hollywood',
+  MUSIC: 'Audio & Recorded Sound',
+  FILM_MEDIA_MERCH: 'Film & Television',
 };
 
 export interface ContractTemplate {
@@ -132,7 +137,7 @@ export const TEMPLATES: readonly ContractTemplate[] = [
     ['parties', 'engagement', 'workMadeForHire', 'compensation', 'ownership', 'waiver', 'signatures'],
     'Commissions a session or engineering contribution as a work made for hire.',
   ),
-  // ── Film, TV & Hollywood (4) ──────────────────────────────────────────────
+  // ── Film & Television (4) ──────────────────────────────────────────────
   template(
     'FILM_SCREENPLAY_OPTION',
     'FILM_TV',
@@ -242,6 +247,43 @@ export function getTemplate(id: string): ContractTemplate | undefined {
 
 export function templatesByCategory(category: ContractCategory): readonly ContractTemplate[] {
   return TEMPLATES.filter((t) => t.category === category);
+}
+
+/**
+ * Template → master entertainment vertical (src/lib/master/taxonomy): the
+ * presentation mapping that groups the library under the founder's six
+ * verticals on /templates and the contract vault. Per-template, not
+ * per-browsing-category — the podcast agreements settle in Audio & Recorded
+ * Sound, the sponsorship deal in Commercial & Brand Licensing, while the
+ * music stays in Audio and fashion goods license under Commercial & Brand.
+ * Persistence (contracts.industry) is untouched — presentation only.
+ */
+export const TEMPLATE_VERTICAL: Record<ContractTemplate['id'], GlobalEntertainmentCategory> = {
+  MUSIC_SPLIT_SHEET: 'AUDIO_AND_RECORDED_SOUND',
+  MUSIC_PRODUCER_AGREEMENT: 'AUDIO_AND_RECORDED_SOUND',
+  MUSIC_MASTER_PURCHASE: 'AUDIO_AND_RECORDED_SOUND',
+  MUSIC_SYNC_LICENSE: 'AUDIO_AND_RECORDED_SOUND',
+  MUSIC_PUBLISHING_SPLIT: 'AUDIO_AND_RECORDED_SOUND',
+  MUSIC_WORK_FOR_HIRE: 'AUDIO_AND_RECORDED_SOUND',
+  FILM_SCREENPLAY_OPTION: 'FILM_AND_TELEVISION',
+  FILM_SCORE_COMPOSER: 'FILM_AND_TELEVISION',
+  FILM_DIRECTOR_ENGAGEMENT: 'FILM_AND_TELEVISION',
+  FILM_TALENT_RELEASE: 'FILM_AND_TELEVISION',
+  GAMING_MUSIC_SYNC: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  GAMING_STUDIO_ROYALTY_SPLIT: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  GAMING_VOICEOVER_MOCAP_RELEASE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  PODCAST_COHOST_GUEST_SPLIT: 'AUDIO_AND_RECORDED_SOUND',
+  PODCAST_CHANNEL_REVENUE_SHARE: 'AUDIO_AND_RECORDED_SOUND',
+  FILM_BRAND_ENDORSEMENT: 'COMMERCIAL_AND_BRAND_LICENSING',
+  FASHION_DESIGN_LICENSE: 'COMMERCIAL_AND_BRAND_LICENSING',
+  FASHION_APPAREL_PRODUCTION: 'COMMERCIAL_AND_BRAND_LICENSING',
+  FASHION_BRAND_COLLABORATION: 'COMMERCIAL_AND_BRAND_LICENSING',
+  FASHION_RUNWAY_TALENT_RELEASE: 'COMMERCIAL_AND_BRAND_LICENSING',
+};
+
+/** The library's agreements for one master vertical (may be empty — real coverage). */
+export function templatesByVertical(vertical: GlobalEntertainmentCategory): readonly ContractTemplate[] {
+  return TEMPLATES.filter((t) => TEMPLATE_VERTICAL[t.id] === vertical);
 }
 
 /** Clause display labels shared across templates; renderers live in generator.ts. */

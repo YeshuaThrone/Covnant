@@ -16,6 +16,15 @@ import { formatMinor, reconcileLedger } from '@/lib/ledger/reconciliation';
 import { SettlementTable } from '@/components/ledger/SettlementTable';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 import { VerificationBadge } from '@/components/brand/VerificationBadge';
+import { HeaderActions } from '@/components/workspace/HeaderActions';
+import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { resolveMasterLedger } from '@/lib/master/masterStore';
+import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
+import {
+  MasterCategoryTabs,
+  MasterStatCards,
+  SovereignLedgerTable,
+} from '@/components/master/MasterData';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,24 +45,54 @@ function attachRegistryPills(
   return rows.map((row) => withRegistryPills(row, assetByCode.get(row.cbtCode)));
 }
 
-export default async function LedgerPage() {
+export default async function LedgerPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>;
+}) {
+  const { category } = await searchParams;
+  const active = masterCategoryFromParam(category);
+
+  // The master data seam — demo library in preview (under the HeaderActions
+  // DEMO DATA badge), real settled rows otherwise. Engine-computed, always.
+  const { demo, records } = await resolveMasterLedger();
+  const scoped = active
+    ? records.filter((record) => record.category === active)
+    : records;
+  const summary = summarizeSovereignLedger(scoped);
+
   const rows = await listLedger();
   const assets = await listAssets();
   const recon = reconcileLedger(rows);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
-        Universal Royalty Ledger
-      </p>
-      <h1 className="mt-2 text-3xl font-semibold text-white">Ledger &amp; Settlement</h1>
+    <main className="mx-auto max-w-6xl px-6 py-10">
+      <div className="flex items-center justify-between gap-2.5">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
+          Universal Royalty Ledger
+        </p>
+        <HeaderActions demo={demo} />
+      </div>
+      <h1 className="mt-2 text-3xl font-semibold text-white">
+        Master Ledger &amp; Settlement History
+      </h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
-        Every settled transaction — direct or platform claim — reconciles through the engine&apos;s
-        BigInt path before it lands here. Expand a row for the per-holder disbursement detail:
-        gross share, withholding rate and deduction, net payout, tax form, and routing rail.
+        The administrator&apos;s full transaction history — every settled transaction
+        across the six master verticals reconciles through the engine&apos;s BigInt
+        path before it lands here. Click a vertical to swap the master data below;
+        expand a settlement row for per-holder disbursement detail.
       </p>
 
-      <section aria-label="Reconciliation audit" className="glass-card mt-8 p-6">
+      <div className="mt-8">
+        <MasterCategoryTabs active={active} basePath="/ledger" />
+      </div>
+
+      <section aria-label="Master ledger for this vertical" className="mt-6 space-y-4">
+        <MasterStatCards summary={summary} />
+        <SovereignLedgerTable records={scoped} />
+      </section>
+
+      <section aria-label="Reconciliation audit" className="glass-card mt-10 p-6">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold text-white">Reconciliation</h2>
           {recon.totalRows === 0 ? (

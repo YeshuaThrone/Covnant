@@ -1,5 +1,5 @@
 /**
- * /rights-holders — Compliance & payout overview — PR 4.
+ * /rights-holders — Compliance & payout overview.
  *
  * Aggregates every rights holder across all registered assets with their tax
  * compliance status (W-9 / W-8BEN / W-8BEN-E), payout routing, year-to-date
@@ -8,13 +8,23 @@
  * The engine evaluates 1099 thresholds per settlement (its settlement call passes
  * the per-event share, not a YTD accumulator), so the form column shows the
  * engine's own determination from the most recent settlement plus the profile's
- * standing compliance status.
+ * standing compliance status. Enriched with the six-vertical master data seam
+ * (founder canon): the sovereign ledger hydrates above the registry cards.
  */
 
 import { CovenantTaxEngine } from '@/engine/covenant-master-sdk';
 import type { SelfServeRightsHolder, TaxProfile } from '@/engine/covenant-master-sdk';
 import { listAssets } from '@/lib/sdk';
 import { holderStatsFrom, listLedger } from '@/lib/ledger/store';
+import { HeaderActions } from '@/components/workspace/HeaderActions';
+import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { resolveMasterLedger } from '@/lib/master/masterStore';
+import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
+import {
+  MasterCategoryTabs,
+  MasterStatCards,
+  SovereignLedgerTable,
+} from '@/components/master/MasterData';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +57,20 @@ function fmtMoney(amount: number, currency: string): string {
   return `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: decimals })} ${currency}`;
 }
 
-export default async function RightsHoldersPage() {
+export default async function RightsHoldersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>;
+}) {
+  const { category } = await searchParams;
+  const active = masterCategoryFromParam(category);
+
+  const { demo, records } = await resolveMasterLedger();
+  const scoped = active
+    ? records.filter((record) => record.category === active)
+    : records;
+  const summary = summarizeSovereignLedger(scoped);
+
   const [assets, ledger] = await Promise.all([listAssets(), listLedger()]);
   const stats = holderStatsFrom(ledger);
 
@@ -73,10 +96,13 @@ export default async function RightsHoldersPage() {
   const unverified = [...rows.values()].filter((r) => !r.taxProfile.isVerified).length;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
-        Rights Holder Registry
-      </p>
+    <main className="mx-auto max-w-6xl px-6 py-10">
+      <div className="flex items-center justify-between gap-2.5">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
+          Rights Holder Registry
+        </p>
+        <HeaderActions demo={demo} />
+      </div>
       <h1 className="mt-2 text-3xl font-semibold text-white">Rights Holders</h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
         Tax standing, payout routing, and year-to-date earnings for every rights holder across
@@ -84,12 +110,20 @@ export default async function RightsHoldersPage() {
         {unverified > 0 ? ` — ${unverified} with unverified tax profiles (backup withholding applies)` : ', all tax profiles verified'}.
       </p>
 
+      <div className="mt-8 space-y-4">
+        <MasterCategoryTabs active={active} basePath="/rights-holders" />
+        <MasterStatCards summary={summary} />
+        <SovereignLedgerTable records={scoped} />
+      </div>
+
+      <div className="gold-rule my-8" />
+
       {rows.size === 0 ? (
-        <div className="glass-card mt-8 p-10 text-center text-white/50">
+        <div className="glass-card p-10 text-center text-white/50">
           No rights holders yet. Register an asset in the Asset Studio first.
         </div>
       ) : (
-        <div className="mt-8 space-y-4">
+        <div className="space-y-4">
           {[...rows.values()].map((holder) => {
             const ytd = stats.get(holder.id);
             const currencies = ytd ? Object.keys(ytd.grossYtd) : [];

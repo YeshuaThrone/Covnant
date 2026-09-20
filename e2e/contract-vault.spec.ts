@@ -2,9 +2,10 @@ import { expect, test } from '@playwright/test';
 
 /**
  * Spec §07 (directive §4) — Contract Vault gates: 20 deterministic agreements
- * across five categories (Music & Record Label, Film/TV & Hollywood, Gaming &
- * Interactive, Podcasts/Creators & Streamers, Fashion & Apparel), the
- * /templates categorized
+ * across the SIX MASTER entertainment verticals (founder canon — Film &
+ * Television, Audio & Recorded Sound, Publishing & Literary, Live Performance
+ * & Comedy, Interactive & Digital Media, Commercial & Brand Licensing), the
+ * /templates master-vertical
  * library, auto-fill from the asset of record (names, splits, identifiers —
  * PRO/IPI never fabricated), Draft/Pending/Completed presentation, signature
  * tracking, and draft → final → export.
@@ -15,16 +16,17 @@ import { expect, test } from '@playwright/test';
  * invented numbers.
  */
 
-test('/templates lists 20 templates across the five industry sections', async ({ page }) => {
+test('/templates lists 20 templates across the six master vertical sections', async ({ page }) => {
   await page.goto('/templates');
 
-  // Five category sections render.
+  // All six master vertical sections render (founder taxonomy).
   for (const label of [
-    'Music & Record Label',
-    'Film, TV & Hollywood',
-    'Gaming & Interactive',
-    'Podcasts, Creators & Streamers',
-    'Fashion & Apparel',
+    'Film & Television',
+    'Audio & Recorded Sound',
+    'Publishing & Literary',
+    'Live Performance & Comedy',
+    'Interactive & Digital Media',
+    'Commercial & Brand Licensing',
   ]) {
     await expect(page.getByRole('heading', { name: label })).toBeVisible();
   }
@@ -78,20 +80,27 @@ test('/templates navigation generates an auto-filled agreement from the asset of
   await expect(page.getByText('No settled revenue for this asset yet.')).toBeVisible();
 });
 
-test('vault lists 20 templates under the five category tabs', async ({ page }) => {
+test('vault lists 20 templates under the six master vertical tabs', async ({ page }) => {
   await page.goto('/contracts');
 
   const templateCards = page.locator('a[href^="/contracts/new?template="]');
   await expect(templateCards).toHaveCount(20);
 
-  // Category tabs (href-scoped — card names also contain category words).
-  for (const key of ['MUSIC', 'FILM_TV', 'GAMING', 'CREATORS', 'FASHION']) {
+  // Master vertical tabs (href-scoped — card names also contain category words).
+  for (const key of [
+    'FILM_AND_TELEVISION',
+    'AUDIO_AND_RECORDED_SOUND',
+    'PUBLISHING_AND_LITERARY',
+    'LIVE_PERFORMANCE_AND_COMEDY',
+    'INTERACTIVE_AND_DIGITAL_MEDIA',
+    'COMMERCIAL_AND_BRAND_LICENSING',
+  ]) {
     await expect(page.locator(`a[href="/contracts?category=${key}"]`)).toBeVisible();
   }
 
-  // Filtering: Gaming & Interactive shows exactly its three agreements.
-  await page.locator('a[href="/contracts?category=GAMING"]').click();
-  await page.waitForURL(/category=GAMING/);
+  // Filtering: Interactive & Digital Media shows exactly its three agreements.
+  await page.locator('a[href="/contracts?category=INTERACTIVE_AND_DIGITAL_MEDIA"]').click();
+  await page.waitForURL(/category=INTERACTIVE_AND_DIGITAL_MEDIA/);
   await expect(page.locator('a[href^="/contracts/new?template="]')).toHaveCount(3);
   await expect(page.getByText('In-Game Music Sync Licensing')).toBeVisible();
 });

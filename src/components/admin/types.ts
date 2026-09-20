@@ -8,6 +8,7 @@
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
+import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
 
 export type SectionData<T> =
   | { kind: 'ready'; value: T }
@@ -24,12 +25,25 @@ export interface ContractRow {
   updatedAt: string;
 }
 
+/**
+ * The master ledger section payload (founder canon, CovnantMasterDataSDK):
+ * the six-vertical sovereign records with their engine-computed 50/35/15
+ * allocations. `demo` drives the DEMO DATA disclosure — the seeded library
+ * renders only behind it; real sessions carry real settled rows.
+ */
+export interface MasterLedgerSection {
+  demo: boolean;
+  summary: SovereignLedgerSummary;
+  records: SovereignLedgerRecord[];
+}
+
 export interface AdminConsoleData {
   registry: RegistrySummary;
   ledger: LedgerSummary;
   contracts: SectionData<ContractRow[]>;
   creators: SectionData<AdminCreatorProfile[]>;
   allowlists: SectionData<AdminAllowlistRow[]>;
+  master: SectionData<MasterLedgerSection>;
 }
 
 /** The six console tabs, in operator order. */

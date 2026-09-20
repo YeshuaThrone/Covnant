@@ -1,13 +1,26 @@
 /**
- * /pricing — membership plans (directive §5).
+ * /pricing — membership plans.
  *
- * Static luxury marketing view: tiers and feature copy only. No payments
- * integration of any kind — no checkout, no billing call, no payment rails.
- * Enrollment wording is honest: billing arrives in a later release, while
- * registration, agreements, and settlement are open today.
+ * Static luxury marketing view: tiers and feature copy, plus the six-vertical
+ * master data coverage strip (founder canon — every admin-tier page hydrates
+ * the master taxonomy). No payments integration of any kind — no checkout, no
+ * billing call, no payment rails. Enrollment wording is honest: billing
+ * arrives in a later release, while registration, agreements, and settlement
+ * are open today.
  */
 
 import Link from 'next/link';
+import { HeaderActions } from '@/components/workspace/HeaderActions';
+import { resolveMasterLedger } from '@/lib/master/masterStore';
+import { recordsForCategory } from '@/lib/master/masterStore';
+import { formatCents } from '@/lib/money/format';
+import {
+  MASTER_CATEGORY_ORDER,
+  MASTER_CATEGORY_LABELS,
+} from '@/lib/master/taxonomy';
+import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata = {
   title: 'Membership — Covnant',
@@ -58,17 +71,24 @@ const PLANS: Plan[] = [
       'Everything in Studio, governed as one estate',
       'Immutable ledger verification on every surface',
       'Read-only operations console for oversight',
-      'Template library across four creative industries',
+      'Template library across all six master verticals',
       'Audit runner over assets, splits, and settlements',
     ],
     cta: { href: '/templates', label: 'Review the library' },
   },
 ];
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  // The six-vertical coverage strip — the master ledger's live aggregates
+  // (demo library in preview, real settled rows otherwise).
+  const { demo, records } = await resolveMasterLedger();
+
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
-      <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Membership</p>
+    <main className="mx-auto max-w-6xl px-6 py-12">
+      <div className="flex items-center justify-between gap-2.5">
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Membership</p>
+        <HeaderActions demo={demo} />
+      </div>
       <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
         Own Your Creation. Keep Its Ledger.
       </h1>
@@ -77,6 +97,32 @@ export default function PricingPage() {
         identifiers, a vault that renders agreements from the asset of record, and a
         ledger that reconciles to the last minor unit.
       </p>
+      <div className="gold-rule my-8" />
+
+      <section aria-label="Master vertical coverage" className="space-y-4">
+        <h2 className="font-mono text-xs uppercase tracking-[0.3em] text-white/40">
+          One ledger — six master verticals
+        </h2>
+        <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3" data-testid="vertical-coverage-strip">
+          {MASTER_CATEGORY_ORDER.map((vertical) => {
+            const summary = summarizeSovereignLedger(recordsForCategory(records, vertical));
+            return (
+              <li key={vertical} className="glass-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">
+                  {MASTER_CATEGORY_LABELS[vertical]}
+                </p>
+                <p className="mt-1 font-mono text-sm text-gold">
+                  {formatCents(summary.grossVolumeCents)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-white/40">
+                  {summary.recordCount} settled record{summary.recordCount === 1 ? '' : 's'}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
       <div className="gold-rule my-8" />
 
       <ul className="grid gap-4 md:grid-cols-3" data-testid="plan-list">

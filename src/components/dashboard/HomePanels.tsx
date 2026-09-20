@@ -77,7 +77,7 @@ export function TransactionsPanel({ rows }: { rows: DisplayTransaction[] }): Rea
           {truncated ? (
             <div className="mt-4 flex justify-center">
               <Link
-                href="/ledger"
+                href="/transactions"
                 data-testid="transactions-see-more"
                 className="inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5 text-[11px] font-semibold text-gold-champagne transition-colors hover:bg-gold/20"
               >
