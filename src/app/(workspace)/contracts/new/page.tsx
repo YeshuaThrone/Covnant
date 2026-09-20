@@ -26,6 +26,8 @@ import type { ReactNode } from 'react';
 
 import { resolveExecutionLane, resolveLaneTemplate, type ExecutionLanePayload } from '@/lib/master/executionLane';
 import { listDemoLaneAssets } from '@/lib/master/masterStore';
+import { getTemplate } from '@/lib/contracts/templates';
+import NewContractLegacyView from '@/components/vault/NewContractLegacyView';
 import { formatCents } from '@/lib/money/format';
 
 export const dynamic = 'force-dynamic';
@@ -468,19 +470,25 @@ export default async function NewContractPage({
   const { template: templateKey, cbt } = await searchParams;
   if (!templateKey) redirect('/contracts');
 
-  // Fail-closed parity with the vault flow: an unknown template key has no
-  // record to pick an asset for — back to the vault, never an invented page.
-  const template = resolveLaneTemplate(templateKey);
-  if (!template) redirect('/contracts');
-  const templateName = template.library === 'atomic' ? template.atomicRecord.templateName : template.factoryRecord.templateName;
+  // Route dispatch: the lane owns the aliased production keys and the atomic
+  // registry; the vault's factory draft keys keep the legacy generation flow
+  // through the vault's ContractEditor (the vault links those for drafts).
+  const laneTemplate = resolveLaneTemplate(templateKey);
+  const laneOwnsKey = laneTemplate !== null && (laneTemplate.aliasResolved || laneTemplate.library === 'atomic');
 
-  if (!cbt) {
-    return <AssetPicker templateKey={templateKey} templateName={templateName} />;
-  }
+  if (laneTemplate && laneOwnsKey) {
+    // Fail-closed parity with the vault flow: an unknown template key has no
+    // record to pick an asset for — back to the vault, never an invented page.
+    const templateName =
+      laneTemplate.library === 'atomic' ? laneTemplate.atomicRecord.templateName : laneTemplate.factoryRecord.templateName;
 
-  const resolution = resolveExecutionLane({ templateKey, cbt });
-  if (!resolution.ok) notFound();
-  const { lane, demo } = resolution;
+    if (!cbt) {
+      return <AssetPicker templateKey={templateKey} templateName={templateName} />;
+    }
+
+    const resolution = resolveExecutionLane({ templateKey, cbt });
+    if (!resolution.ok) notFound();
+    const { lane, demo } = resolution;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 px-6 py-12">
@@ -505,4 +513,10 @@ export default async function NewContractPage({
       <ContractPreviewSection lane={lane} />
     </div>
   );
+  }
+
+  // Vault draft flow — the legacy factory path, restored verbatim. A key
+  // neither library knows redirects to the vault: no invented page, ever.
+  if (!getTemplate(templateKey)) redirect('/contracts');
+  return <NewContractLegacyView templateId={templateKey} cbt={cbt} />;
 }
