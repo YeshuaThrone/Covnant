@@ -22,18 +22,19 @@ test.describe('execution lane — founder URL hydration', () => {
     await expect(page.getByText('PRODUCTION_READY').first()).toBeVisible();
 
     // Asset of record — bound, nothing invented.
-    await expect(page.getByRole('heading', { name: 'E2E Pool Gate Song' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Asset of record' })).toBeVisible();
+    await expect(page.getByText('E2E Pool Gate Song').first()).toBeVisible();
     await expect(page.getByText('CBT-TRK-A51DF05B4279').first()).toBeVisible();
     await expect(page.getByText('US-S1Z-26-42791')).toBeVisible();
     await expect(page.getByText('bound · no manual entry, nothing invented')).toBeVisible();
 
     // Identities — full UCT blocks, never 'To be completed'.
-    await expect(page.getByText('Yeshua Throne')).toBeVisible();
-    await expect(page.getByText('0000-0001-2345-6789')).toBeVisible();
+    await expect(page.getByText('Yeshua Throne').first()).toBeVisible();
+    await expect(page.getByText('0000-0001-2345-6789').first()).toBeVisible();
     await expect(page.getByText('To be completed')).toHaveCount(0);
 
     // Pools — 50/35/15 reconciled in integer bps.
-    await expect(page.getByText('Ownership reserve', { exact: false })).toBeVisible();
+    await expect(page.getByText('Ownership reserve').first()).toBeVisible();
     await expect(page.getByText('5,000 bps').first()).toBeVisible();
     await expect(page.getByText('3,500 bps').first()).toBeVisible();
     await expect(page.getByText('1,500 bps').first()).toBeVisible();
@@ -43,10 +44,10 @@ test.describe('execution lane — founder URL hydration', () => {
     await expect(page.getByText('CVT-TRK-4279').first()).toBeVisible();
 
     // Guard verdicts visible in the payload.
-    await expect(page.getByText('Guard report', { exact: false })).toBeVisible();
+    await expect(page.getByText('Guard report').first()).toBeVisible();
 
     // DEMO disclosure.
-    await expect(page.getByText('DEMO DATA — seeded master-store record', { exact: false })).toBeVisible();
+    await expect(page.getByText('DEMO DATA — seeded master-store record').first()).toBeVisible();
   });
 
   test('blocks cross-domain execution behind a visible 409 verdict at the API while the page renders', async ({ request }) => {
