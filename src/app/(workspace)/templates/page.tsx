@@ -1,5 +1,11 @@
-import Link from 'next/link';
+import type {
+  AtomicContractRecord,
+  ContractTemplateRecord,
+} from '@/lib/master/masterStore';
 import {
+  bindAtomicEntity,
+  bindFactoryEntity,
+  executionTelemetryFor,
   masterTemplatesForCategory,
   resolveMasterTemplates,
   atomicRecordsForCategory,
@@ -7,35 +13,40 @@ import {
 } from '@/lib/master/masterStore';
 import {
   MASTER_CATEGORY_ORDER,
-  MASTER_CATEGORY_LABELS,
-  MASTER_CATEGORY_BLURBS,
   masterCategoryFromParam,
 } from '@/lib/master/taxonomy';
+import type {
+  ControlBoardState,
+  EntityBoundAtomicRecord,
+  EntityBoundFactoryTemplate,
+} from '@/lib/master/controlBoard';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
-import { MasterCategoryTabs } from '@/components/master/MasterData';
-import { FactoryTemplateGrid, AtomicTemplateGrid } from '@/components/master/MasterTemplates';
+import { TemplatesControlBoard } from '@/components/master/TemplatesControlBoard';
 
 export const dynamic = 'force-dynamic';
 
-/** One line of registry context, shared by every vertical's atomic block. */
-const ATOMIC_REGISTRY_BLURB =
-  'The Sovereign Clearing Framework atomic registry — granular sector clearing records with their entity types, telemetry metrics, and the same 50/35/15 allocation structure.';
+function bindFactoryPair(record: ContractTemplateRecord): EntityBoundFactoryTemplate {
+  return { record, entity: bindFactoryEntity(record), execution: executionTelemetryFor(record.templateId) };
+}
+
+function bindAtomicPair(record: AtomicContractRecord): EntityBoundAtomicRecord {
+  return { record, entity: bindAtomicEntity(record), execution: executionTelemetryFor(record.templateId) };
+}
 
 /**
- * /templates — the COVNANT SOVEREIGN CONTRACT FACTORY (founder canon,
- * CovnantTemplatesSDK), on the existing page shell: the six master
- * entertainment verticals tab the library, and every tab shows a fully
- * populated template library — every form of entertainment, none left out.
- * Each card renders its ContractTemplateRecord from the master template
- * store: jurisdiction, key clauses, the 50/35/15 allocation structure, and
- * the factory's execution history. Drafts and finalization live in the
- * Contract Vault.
+ * /templates — the COVNANT CONTROL BOARD (founder directive, 2026-09-20),
+ * on the existing page shell: the six master entertainment verticals tab
+ * the boards, and every tab renders a fully populated board — every form
+ * of entertainment, none left out.
  *
- * Beneath each vertical's factory grid, the SOVEREIGN CLEARING FRAMEWORK
- * ATOMIC REGISTRY (founder canon, CovnantAtomicDataSDK) renders its atomic
- * sector records — every card read from the master store's
- * AtomicContractRecord: sector chip, entityType, telemetryMetric, the
- * 50/35/15 structure, key clauses, execution status, and execution history.
+ * The server SSRs the default view (first paint) with every card
+ * entity-bound from the master store engine; the client board hydrates
+ * vertical swaps from the per-sector entity doors
+ * (GET /api/v1/entities/[sector]). Cards render their ContractTemplateRecord
+ * and AtomicContractRecord fields — jurisdiction, key clauses, the 50/35/15
+ * allocation structure, execution history — plus the CovnantAtomicDataSDK
+ * entity telemetry of their class: no inline literals anywhere (the honesty
+ * law). Drafts and finalization live in the Contract Vault.
  */
 export default async function TemplatesPage({
   searchParams,
@@ -50,7 +61,16 @@ export default async function TemplatesPage({
   // live-store execution counts otherwise. Store-computed, always.
   const { demo, records } = await resolveMasterTemplates();
   const { records: atomicRecords } = await resolveAtomicRegistry();
-  const verticals = active ? [active] : [...MASTER_CATEGORY_ORDER];
+
+  const board: ControlBoardState = {
+    demo,
+    active,
+    verticals: (active ? [active] : [...MASTER_CATEGORY_ORDER]).map((vertical) => ({
+      vertical,
+      factoryTemplates: masterTemplatesForCategory(records, vertical).map(bindFactoryPair),
+      atomicRecords: atomicRecordsForCategory(atomicRecords, vertical).map(bindAtomicPair),
+    })),
+  };
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">
@@ -59,70 +79,29 @@ export default async function TemplatesPage({
           <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Templates</p>
           <HeaderActions demo={demo} />
         </div>
-        <h1 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
-          Agreement Template Library
+        <h1 data-testid="control-board-title" className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+          Covnant Control Board
         </h1>
-        <p className="mt-4 max-w-2xl text-white/60">
-          {records.length} sovereign contract templates across the six master
-          entertainment verticals — every form of entertainment, each carrying its
-          governing jurisdiction, engineered key clauses, the 50/35/15 allocation
-          structure, and the factory&apos;s execution history. Click a vertical to swap
-          the library below.
+        <p
+          data-testid="control-board-subheader"
+          className="mt-2 font-mono text-xs uppercase tracking-[0.25em] text-gold-champagne md:text-sm"
+        >
+          Atomic Entity Clearing &amp; Real-Time Telemetry Matrix
         </p>
-        <p className="mt-3 max-w-2xl text-white/60">
-          Beneath each vertical, the Sovereign Clearing Framework&apos;s atomic registry
-          clears {atomicRecords.length} sector records across all 26 atomic sectors —
-          entity types, telemetry metrics, and the same 50/35/15 structure.
+        <p className="mt-4 max-w-2xl text-white/60">
+          {records.length} contract templates and {atomicRecords.length} atomic sector records
+          across the six master entertainment verticals and all 26 atomic sectors — click a
+          vertical to swap the boards below.
         </p>
       </header>
 
       <div className="mt-10">
-        <MasterCategoryTabs active={active} basePath="/templates" />
+        {/* Keyed by the server view: a client-side param navigation (e.g.
+            the All-verticals tab) re-renders the server board with new
+            initial props — remount so useState adopts them instead of
+            holding a stale single-vertical state. */}
+        <TemplatesControlBoard key={active ?? 'all'} initial={board} />
       </div>
-
-      <div className="mt-6 space-y-12">
-        {verticals.map((vertical) => {
-          const templates = masterTemplatesForCategory(records, vertical);
-          const atomic = atomicRecordsForCategory(atomicRecords, vertical);
-          return (
-            <section key={vertical} aria-label={MASTER_CATEGORY_LABELS[vertical]} data-testid="template-vertical-section">
-              <div className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-semibold text-white">{MASTER_CATEGORY_LABELS[vertical]}</h2>
-                <span className="font-mono text-xs text-white/40">
-                  {templates.length} template{templates.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <p className="mt-1 text-sm text-white/50">{MASTER_CATEGORY_BLURBS[vertical]}</p>
-              <div className="gold-rule mt-4" />
-
-              <FactoryTemplateGrid records={templates} />
-
-              <div className="mt-10" data-testid="atomic-registry-block">
-                <div className="flex items-baseline justify-between gap-4">
-                  <h3 className="font-mono text-xs uppercase tracking-[0.25em] text-gold">
-                    Sovereign Clearing Framework — Atomic Registry
-                  </h3>
-                  <span className="font-mono text-xs text-white/40">
-                    {atomic.length} atomic record{atomic.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-white/50">{ATOMIC_REGISTRY_BLURB}</p>
-                <div className="gold-rule mt-4" />
-
-                <AtomicTemplateGrid records={atomic} />
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      <p className="mt-12 text-sm text-white/50">
-        Working drafts, finalization, and export live in{' '}
-        <Link href="/contracts" className="text-gold hover:underline">
-          the Contract Vault
-        </Link>
-        .
-      </p>
     </div>
   );
 }

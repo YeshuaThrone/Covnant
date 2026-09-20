@@ -17,10 +17,38 @@ import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { listContracts } from '@/lib/contracts/store';
 import {
+  ATOMIC_SECTOR_ORDER,
+  ATOMIC_SECTOR_TO_VERTICAL,
   MASTER_CATEGORY_ORDER,
   MASTER_SUBCATEGORIES,
+  sectorsForVertical,
+  atomicSectorFromParam,
+  type AtomicSector,
   type GlobalEntertainmentCategory,
 } from './taxonomy';
+import {
+  ENTITY_TARGET_SPLIT,
+  TEMPLATE_PREFIX,
+  entityClassTag,
+  isFilmEntity,
+  isLiveEntity,
+  isMusicEntity,
+  isTvEntity,
+  type AtomicEntityClassTag,
+  type AtomicExecutionTelemetry,
+  type SovereignAtomicEntity,
+} from './CovnantAtomicDataSDK';
+
+// The atomic sector vocabulary keeps its masterStore import surface (existing
+// importers unchanged) while the client-side Control Board reads the same
+// canon from the pure taxonomy module — masterStore stays a server module.
+export {
+  ATOMIC_SECTOR_ORDER,
+  ATOMIC_SECTOR_TO_VERTICAL,
+  sectorsForVertical,
+  atomicSectorFromParam,
+  type AtomicSector,
+};
 import {
   settleSovereignRecord,
   type ClearinghouseStatus,
@@ -260,7 +288,7 @@ export interface ContractTemplateRecord {
   readonly verticalCategory: TemplateVerticalCategory;
   /** Industry-facing subcategory label (seeds use founder-verbatim labels). */
   readonly subCategory: string;
-  /** Jurisdiction of record, e.g. 'US-TX Sovereign Ledger Standard'. */
+  /** Jurisdiction of record, e.g. 'US-TX Ledger Standard'. */
   readonly governingJurisdiction: string;
   readonly splitStructure: TemplateSplitStructure;
   /** The template's engineered key clauses, in document order. */
@@ -324,7 +352,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Master Recording & Streaming Royalty Agreement',
     'AUDIO_SOUND',
     'Master Recording',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Sub-Second Micro-Royalty Routing', 'Direct PRO/ISRC Telemetry Binding', 'Dispute Immunity Shield'],
     'PRODUCTION_READY',
     1420,
@@ -334,7 +362,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Album Release & Master Royalty Distribution Agreement',
     'AUDIO_SOUND',
     'Commercial Music Releases',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Master Ownership Ledger Entry', 'Per-Stream Royalty Auto-Split', 'Reversion & Term Audit Gate'],
     'PRODUCTION_READY',
     1104,
@@ -344,7 +372,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Podcast Network & Episode Licensing',
     'AUDIO_SOUND',
     'Podcasts',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Per-Episode Micro-Royalty Routing', 'Dynamic Ad-Insert Telemetry Binding', 'Network Recapture Shield'],
     'PRODUCTION_READY',
     947,
@@ -354,7 +382,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Radio & Satellite Broadcast Sync License',
     'AUDIO_SOUND',
     'Radio & Satellite Streaming',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Broadcast Airplay Telemetry Binding', 'Station Clearance Escrow', 'Performance Rights Auto-Routing'],
     'PRODUCTION_READY',
     726,
@@ -364,7 +392,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Audiobook Production & Narration Rights Agreement',
     'AUDIO_SOUND',
     'Audiobooks',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Narration Deliverable Escrow', 'Per-Hour Listen Royalty Split', 'ISBN/ASIN Unified Registry'],
     'PRODUCTION_READY',
     638,
@@ -374,7 +402,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Sample Pack & Sound Effects Library License',
     'AUDIO_SOUND',
     'Sound Effects & Sample Libraries',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Sample Clearance Vault', 'Per-Insert Micro-License Telemetry', 'Derivative Work Immunity Shield'],
     'LEGAL_VAULT_LOCKED',
     583,
@@ -446,7 +474,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Audiobook & Digital E-Book Rights Acquisition',
     'PUBLISHING',
     'Audiobook Publishing',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Print-On-Demand Realtime Ledger', 'ISBN Unified Registry', 'Automated Author Drawdown'],
     'PRODUCTION_READY',
     512,
@@ -456,7 +484,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Print Book Publishing Agreement',
     'PUBLISHING',
     'Print Books',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Advance & Earn-Out Ledger', 'Print Run Royalty Telemetry', 'Subsidiary Rights Auto-Split'],
     'PRODUCTION_READY',
     486,
@@ -466,7 +494,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Digital E-Book Distribution & Royalty Agreement',
     'PUBLISHING',
     'e-Books',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Per-Copy Micro-Royalty Routing', 'Retail Channel Telemetry Binding', 'Reversion Audit Gate'],
     'PRODUCTION_READY',
     441,
@@ -476,7 +504,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Periodical & Serial Rights License',
     'PUBLISHING',
     'Periodicals',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Issue-by-Issue Settlement Gate', 'Serial Rights Telemetry Binding', 'Reprint Royalty Auto-Split'],
     'PRODUCTION_READY',
     397,
@@ -486,7 +514,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Academic & Trade Journal Licensing',
     'PUBLISHING',
     'Academic & Trade Journals',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Institutional Access Escrow', 'Citation Telemetry Binding', 'Author Royalty Auto-Routing'],
     'PRODUCTION_READY',
     318,
@@ -496,7 +524,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Sheet Music & Score Print License',
     'PUBLISHING',
     'Sheet Music & Scores',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Print Edition Royalty Split', 'Engraving Deliverable Escrow', 'Performance Right Registry'],
     'LEGAL_VAULT_LOCKED',
     218,
@@ -507,7 +535,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Live Stand-Up & Concert Touring Ticket Escrow',
     'LIVE_COMEDY',
     'Live Venue Performance',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Live Venue Settlement Gate', 'Promoter/Artist Instant Allocation', 'Ticket Sales Escrow'],
     'PRODUCTION_READY',
     320,
@@ -517,7 +545,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Stand-Up Special Production & Distribution Agreement',
     'LIVE_COMEDY',
     'Stand-Up & Comedy Specials',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Special Premiere Escrow Gate', 'Audience Telemetry Binding', 'Touring Rights Auto-Routing'],
     'PRODUCTION_READY',
     296,
@@ -527,7 +555,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Theater & Broadway Run License',
     'LIVE_COMEDY',
     'Live Theater & Broadway',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Weekly Gross Settlement Gate', 'House Seat Escrow Clearance', 'Creative Team Auto-Split'],
     'PRODUCTION_READY',
     274,
@@ -537,7 +565,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Festival & Touring Performance Agreement',
     'LIVE_COMEDY',
     'Concerts & Festival Touring',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Guarantee & Overage Escrow', 'Per-Show Settlement Telemetry', 'Cancellation Immunity Shield'],
     'PRODUCTION_READY',
     251,
@@ -547,7 +575,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Venue Ticketing & Box Office Settlement',
     'LIVE_COMEDY',
     'Venue Ticketing Ledgers',
-    'US-TX Sovereign Ledger Standard',
+    'US-TX Ledger Standard',
     ['Ticket Sales Escrow', 'Per-Scan Settlement Telemetry', 'Facility Fee Auto-Split'],
     'PRODUCTION_READY',
     228,
@@ -568,7 +596,7 @@ export const MASTER_TEMPLATE_LIBRARY: readonly ContractTemplateRecord[] = Object
     'Immersive & XR Experience License',
     'INTERACTIVE',
     'Immersive & XR',
-    'UK-ENG Sovereign Ledger Standard',
+    'UK-ENG Ledger Standard',
     ['Venue-Free Distribution Escrow', 'Session Telemetry Binding', 'Hardware Recapture Shield'],
     'LEGAL_VAULT_LOCKED',
     407,
@@ -759,64 +787,6 @@ export async function resolveMasterTemplates(): Promise<{
 // atomic records of the sectors that map to it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The founder's 26 atomic sectors (CovnantAtomicDataSDK canon) — exact. */
-export type AtomicSector =
-  | 'MUSIC'
-  | 'GAMING'
-  | 'INTERACTIVE'
-  | 'PODCASTING'
-  | 'STREAMING'
-  | 'SOCIAL_MEDIA'
-  | 'PUBLISHING'
-  | 'MOVIES'
-  | 'FILM'
-  | 'TV'
-  | 'VIDEO'
-  | 'SPORTS'
-  | 'MOTORSPORT'
-  | 'ARENA'
-  | 'ATHLETICS'
-  | 'FASHION'
-  | 'MODELING'
-  | 'CAD'
-  | 'VISUAL_ARTS'
-  | 'DESIGN'
-  | 'BOOKS'
-  | 'LITERATURE'
-  | 'DIGITAL_ASSETS'
-  | 'SOFTWARE'
-  | 'VTUBING'
-  | 'VIRTUAL_AVATARS';
-
-/** Canon display order of the 26 sectors — the registry manifest order. */
-export const ATOMIC_SECTOR_ORDER: readonly AtomicSector[] = Object.freeze([
-  'MUSIC',
-  'GAMING',
-  'INTERACTIVE',
-  'PODCASTING',
-  'STREAMING',
-  'SOCIAL_MEDIA',
-  'PUBLISHING',
-  'MOVIES',
-  'FILM',
-  'TV',
-  'VIDEO',
-  'SPORTS',
-  'MOTORSPORT',
-  'ARENA',
-  'ATHLETICS',
-  'FASHION',
-  'MODELING',
-  'CAD',
-  'VISUAL_ARTS',
-  'DESIGN',
-  'BOOKS',
-  'LITERATURE',
-  'DIGITAL_ASSETS',
-  'SOFTWARE',
-  'VTUBING',
-  'VIRTUAL_AVATARS',
-] as const);
 
 /**
  * One atomic clearing record of the Sovereign Clearing Framework (founder
@@ -837,35 +807,6 @@ export interface AtomicContractRecord {
   readonly timesExecuted: number;
 }
 
-/** Atomic sector → master vertical — the frozen six-tab filter mapping. */
-export const ATOMIC_SECTOR_TO_VERTICAL: Record<AtomicSector, GlobalEntertainmentCategory> = {
-  MUSIC: 'AUDIO_AND_RECORDED_SOUND',
-  PODCASTING: 'AUDIO_AND_RECORDED_SOUND',
-  MOVIES: 'FILM_AND_TELEVISION',
-  FILM: 'FILM_AND_TELEVISION',
-  TV: 'FILM_AND_TELEVISION',
-  VIDEO: 'FILM_AND_TELEVISION',
-  STREAMING: 'FILM_AND_TELEVISION',
-  PUBLISHING: 'PUBLISHING_AND_LITERARY',
-  BOOKS: 'PUBLISHING_AND_LITERARY',
-  LITERATURE: 'PUBLISHING_AND_LITERARY',
-  SPORTS: 'LIVE_PERFORMANCE_AND_COMEDY',
-  MOTORSPORT: 'LIVE_PERFORMANCE_AND_COMEDY',
-  ARENA: 'LIVE_PERFORMANCE_AND_COMEDY',
-  ATHLETICS: 'LIVE_PERFORMANCE_AND_COMEDY',
-  GAMING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  INTERACTIVE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  SOFTWARE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  DIGITAL_ASSETS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  CAD: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  SOCIAL_MEDIA: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  VTUBING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  VIRTUAL_AVATARS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
-  FASHION: 'COMMERCIAL_AND_BRAND_LICENSING',
-  MODELING: 'COMMERCIAL_AND_BRAND_LICENSING',
-  VISUAL_ARTS: 'COMMERCIAL_AND_BRAND_LICENSING',
-  DESIGN: 'COMMERCIAL_AND_BRAND_LICENSING',
-};
 
 /** Atomic record constructor — fills the canon split structure. */
 function atomicTemplate(
@@ -1242,6 +1183,201 @@ export function atomicRecordsForCategory(
     ? records.filter((record) => ATOMIC_SECTOR_TO_VERTICAL[record.atomicSector] === category)
     : [...records];
 }
+
+/** The atomic records of ONE sector — the per-sector API feed's base. */
+export function atomicRecordsForSector(
+  records: readonly AtomicContractRecord[],
+  sector: AtomicSector,
+): readonly AtomicContractRecord[] {
+  return records.filter((record) => record.atomicSector === sector);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATOMIC ENTITY BINDING (CovnantAtomicDataSDK canon) — the entity telemetry
+// layer of the Covnant Control Board. Every bound card reads its entity from
+// these maps THROUGH the typed SDK interfaces; components never inline
+// literals (the honesty law). Sectors without an SDK entity class keep their
+// telemetryMetric display — no force-fitting.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Entity telemetry seeds — the canon entity DATA, keyed by templateId and
+ * typed through the SDK interfaces. Every seed carries THE one canon
+ * 50/35/15 target split by reference — the split cannot drift per entity.
+ */
+const ENTITY_TELEMETRY_SEEDS: Readonly<Record<string, SovereignAtomicEntity>> = Object.freeze({
+  // MUSIC — the canonical master recording; its execution is the drop-5
+  // transaction seed wired in ENTITY_EXECUTION_SEEDS below.
+  'TPL-MUS-001': {
+    entityType: 'MASTER_RECORDING',
+    templateId: 'TPL-MUS-001',
+    isrcCode: 'US-S1Z-26-00001',
+    subSecondMicroRoyaltyRate: 0.0035,
+    proTelemetryBinding: 'ASCAP',
+    targetSplit: ENTITY_TARGET_SPLIT,
+  },
+  // FILM — the atomic theatrical record plus the factory film templates.
+  'TPL-FLM-001': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-001', isanCode: '0003-1A2F-9C4B-0002-W', theatricalGrossEscrowUSD: 4_250_000, studioOverlayActive: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-002': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-002', isanCode: '0007-5E6B-4A8F-0006-N', theatricalGrossEscrowUSD: 640_000, studioOverlayActive: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-003': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-003', isanCode: '0008-6F7C-5B9A-0007-V', theatricalGrossEscrowUSD: 480_000, studioOverlayActive: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-004': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-004', isanCode: '0004-2B3E-1D5C-0003-K', theatricalGrossEscrowUSD: 1_180_000, studioOverlayActive: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-005': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-005', isanCode: '0009-7A8D-6C1B-0008-J', theatricalGrossEscrowUSD: 310_000, studioOverlayActive: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-006': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-006', isanCode: '0006-4D5A-3F7E-0005-H', theatricalGrossEscrowUSD: 920_000, studioOverlayActive: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FLM-007': { entityType: 'FEATURE_FILM', templateId: 'TPL-FLM-007', isanCode: '0005-3C4F-2E6D-0004-T', theatricalGrossEscrowUSD: 3_640_000, studioOverlayActive: true, targetSplit: ENTITY_TARGET_SPLIT },
+  // TELEVISION — the network syndication record.
+  'TPL-TV-001': { entityType: 'LINEAR_TV', templateId: 'TPL-TV-001', nielsenFlightMinutes: 12_480, syndicationReversionLock: true, adInsertionMicroYieldUSD: 86_400, targetSplit: ENTITY_TARGET_SPLIT },
+  // PODCASTING — the network feed record.
+  'TPL-PDC-001': { entityType: 'PODCAST_NETWORK', templateId: 'TPL-PDC-001', downloadCountTelemetry: 1_284_000, dynamicAdInsertYieldUSD: 42_600, feedIsolationActive: true, targetSplit: ENTITY_TARGET_SPLIT },
+  // LIVE — the five stage-performance templates of the Contract Factory.
+  'TPL-LVE-001': { entityType: 'STAGE_PERFORMANCE', templateId: 'TPL-LVE-001', ticketEscrowBalanceUSD: 118_600, promoterInstantAllocationUSD: 41_510, houseSeatClearanceLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LVE-002': { entityType: 'STAGE_PERFORMANCE', templateId: 'TPL-LVE-002', ticketEscrowBalanceUSD: 1_046_000, promoterInstantAllocationUSD: 366_100, houseSeatClearanceLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LVE-003': { entityType: 'STAGE_PERFORMANCE', templateId: 'TPL-LVE-003', ticketEscrowBalanceUSD: 872_300, promoterInstantAllocationUSD: 305_305, houseSeatClearanceLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LVE-004': { entityType: 'STAGE_PERFORMANCE', templateId: 'TPL-LVE-004', ticketEscrowBalanceUSD: 394_600, promoterInstantAllocationUSD: 138_110, houseSeatClearanceLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LVE-009': { entityType: 'STAGE_PERFORMANCE', templateId: 'TPL-LVE-009', ticketEscrowBalanceUSD: 268_400, promoterInstantAllocationUSD: 93_940, houseSeatClearanceLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  // PUBLISHING — the atomic publishing record, the BOOKS and LITERATURE
+  // registry records, and the factory literary templates.
+  'TPL-PUB-001': { entityType: 'LITERARY_WORK', templateId: 'TPL-PUB-001', isbnNumber: '978-1-4028-9462-6', printOnDemandYieldUSD: 84_200, citationTelemetryCount: 1_260, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-BOK-001': { entityType: 'LITERARY_WORK', templateId: 'TPL-BOK-001', isbnNumber: '978-3-16-148410-0', printOnDemandYieldUSD: 57_400, citationTelemetryCount: 845, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LTR-001': { entityType: 'LITERARY_WORK', templateId: 'TPL-LTR-001', isbnNumber: '979-8-88645-112-8', printOnDemandYieldUSD: 22_800, citationTelemetryCount: 312, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-001': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-001', isbnNumber: '978-0-30-640615-7', printOnDemandYieldUSD: 46_900, citationTelemetryCount: 604, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-002': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-002', isbnNumber: '978-0-67-001962-6', printOnDemandYieldUSD: 38_600, citationTelemetryCount: 421, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-003': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-003', isbnNumber: '978-1-56619-909-3', printOnDemandYieldUSD: 31_200, citationTelemetryCount: 358, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-004': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-004', isbnNumber: '978-0-8044-2957-7', printOnDemandYieldUSD: 27_800, citationTelemetryCount: 296, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-005': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-005', isbnNumber: '978-1-86098-033-5', printOnDemandYieldUSD: 19_400, citationTelemetryCount: 512, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-LIT-006': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-006', isbnNumber: '978-0-19-852663-6', printOnDemandYieldUSD: 12_100, citationTelemetryCount: 187, targetSplit: ENTITY_TARGET_SPLIT },
+});
+
+/**
+ * The drop-5 transaction seed — the canonical Music record's execution
+ * telemetry: TPL-MUS-001, gross $125,000.00 (integer cents on the engine
+ * path), execution status CLEARED (the drop-2 execution canon). Components
+ * format cents; they never parse or inline the figures.
+ */
+const ENTITY_EXECUTION_SEEDS: Readonly<Record<string, AtomicExecutionTelemetry>> = Object.freeze({
+  'TPL-MUS-001': { executionState: 'CLEARED', grossVolumeCents: 12_500_000 },
+});
+
+/** The atomic sectors whose registry records bind an SDK entity class. */
+const ATOMIC_ENTITY_SECTORS: ReadonlySet<AtomicSector> = new Set<AtomicSector>([
+  'MUSIC',
+  'FILM',
+  'TV',
+  'PODCASTING',
+  'PUBLISHING',
+  'BOOKS',
+  'LITERATURE',
+]);
+
+/** Factory prefix → entity class tag; null when the prefix binds no entity. */
+function entityTagForFactoryId(templateId: string): AtomicEntityClassTag | null {
+  if (templateId.startsWith(TEMPLATE_PREFIX.MUSIC)) return 'MUSIC';
+  if (templateId.startsWith(TEMPLATE_PREFIX.FILM)) return 'FILM';
+  if (templateId.startsWith(TEMPLATE_PREFIX.TV)) return 'TV';
+  if (templateId.startsWith(TEMPLATE_PREFIX.PODCAST)) return 'PODCASTING';
+  if (templateId.startsWith(TEMPLATE_PREFIX.LIVE)) return 'LIVE';
+  if (TEMPLATE_PREFIX.PUBLISHING_FACTORY.some((prefix) => templateId.startsWith(prefix))) {
+    return 'PUBLISHING';
+  }
+  return null;
+}
+
+/**
+ * Bind an ATOMIC registry record to its SDK entity — sector-driven. Returns
+ * null when the sector carries no entity class (the card keeps its
+ * telemetryMetric display; no force-fitting).
+ */
+export function bindAtomicEntity(record: AtomicContractRecord): SovereignAtomicEntity | null {
+  if (!ATOMIC_ENTITY_SECTORS.has(record.atomicSector)) return null;
+  return ENTITY_TELEMETRY_SEEDS[record.templateId] ?? null;
+}
+
+/**
+ * Bind a FACTORY template to its SDK entity — prefix-driven. Returns null
+ * when the template prefix binds no entity class.
+ */
+export function bindFactoryEntity(record: ContractTemplateRecord): SovereignAtomicEntity | null {
+  if (entityTagForFactoryId(record.templateId) === null) return null;
+  return ENTITY_TELEMETRY_SEEDS[record.templateId] ?? null;
+}
+
+/** Execution telemetry of a bound entity — null when none is wired. */
+export function executionTelemetryFor(templateId: string): AtomicExecutionTelemetry | null {
+  return ENTITY_EXECUTION_SEEDS[templateId] ?? null;
+}
+
+/**
+ * Fail-closed shape validation for a SERVED entity — the four dropped
+ * guards enforce the class+prefix pairing; the podcast and publishing
+ * classes (unguarded in the canon) are checked against their own prefix
+ * canon and the shared 50/35/15 split. A failed check never serves.
+ */
+export function validateServedEntity(entity: SovereignAtomicEntity): boolean {
+  const splitHolds =
+    entity.targetSplit.ownership === 0.50 &&
+    entity.targetSplit.creative === 0.35 &&
+    entity.targetSplit.operations === 0.15;
+  switch (entity.entityType) {
+    case 'FEATURE_FILM':
+      return isFilmEntity(entity) && splitHolds;
+    case 'LINEAR_TV':
+      return isTvEntity(entity) && splitHolds;
+    case 'MASTER_RECORDING':
+      return isMusicEntity(entity) && splitHolds;
+    case 'STAGE_PERFORMANCE':
+      return isLiveEntity(entity) && splitHolds;
+    case 'PODCAST_NETWORK':
+      return entity.templateId.startsWith(TEMPLATE_PREFIX.PODCAST) && splitHolds;
+    case 'LITERARY_WORK':
+      return (
+        [...TEMPLATE_PREFIX.PUBLISHING_FACTORY, ...TEMPLATE_PREFIX.PUBLISHING_SECTOR].some(
+          (prefix) => entity.templateId.startsWith(prefix),
+        ) && splitHolds
+      );
+  }
+}
+
+/**
+ * Entity-layer integrity — the binding cannot drift silently:
+ * every record whose sector or prefix binds an entity MUST find its seed;
+ * every seed must belong to an actual record; every seed must pass its
+ * fail-closed guard. Fails LOUD at module load (the honesty gate).
+ */
+function assertEntityIntegrity(): void {
+  const factoryById = new Set(MASTER_TEMPLATE_LIBRARY.map((record) => record.templateId));
+  const atomicById = new Set(ATOMIC_TEMPLATE_REGISTRY.map((record) => record.templateId));
+  for (const record of ATOMIC_TEMPLATE_REGISTRY) {
+    const entity = bindAtomicEntity(record);
+    if (ATOMIC_ENTITY_SECTORS.has(record.atomicSector) && entity === null) {
+      throw new Error(
+        `masterStore: atomic record ${record.templateId} (${record.atomicSector}) binds no entity telemetry`,
+      );
+    }
+    if (entity !== null && !validateServedEntity(entity)) {
+      throw new Error(`masterStore: entity telemetry for ${record.templateId} fails its fail-closed guard`);
+    }
+  }
+  for (const record of MASTER_TEMPLATE_LIBRARY) {
+    const entity = bindFactoryEntity(record);
+    if (entity !== null && !validateServedEntity(entity)) {
+      throw new Error(`masterStore: entity telemetry for ${record.templateId} fails its fail-closed guard`);
+    }
+  }
+  for (const [templateId, entity] of Object.entries(ENTITY_TELEMETRY_SEEDS)) {
+    if (!factoryById.has(templateId) && !atomicById.has(templateId)) {
+      throw new Error(`masterStore: entity seed ${templateId} has no template record`);
+    }
+    const tag = entityTagForFactoryId(templateId);
+    if (tag !== null && entityClassTag(entity) !== tag) {
+      throw new Error(`masterStore: entity seed ${templateId} class ${entityClassTag(entity)} contradicts its prefix tag ${tag}`);
+    }
+  }
+  for (const templateId of Object.keys(ENTITY_EXECUTION_SEEDS)) {
+    if (ENTITY_TELEMETRY_SEEDS[templateId] === undefined) {
+      throw new Error(`masterStore: execution seed ${templateId} has no entity`);
+    }
+  }
+}
+assertEntityIntegrity();
 
 /** REAL mode for the atomic registry — counts derive from the live contract store. */
 export function applyAtomicRealExecutionCounts(

@@ -80,3 +80,19 @@ export function formatCentsSigned(cents: number): string {
   const formatted = formatCents(Math.abs(cents));
   return cents < 0 ? `−${formatted}` : `+${formatted}`;
 }
+
+/**
+ * The atomic entity canon's USD telemetry fields — whole-dollar amounts
+ * (theatrical gross escrow, ad-insert yields, print-on-demand yield,
+ * ticket escrow, promoter allocation). "$1,234.00" voice, thousands-grouped.
+ * Pure and deterministic — fixed grouping, no locale lookup — so the server
+ * render and the client hydration match byte-for-byte.
+ */
+export function formatUsdAmount(amount: number): string {
+  if (!Number.isFinite(amount) || amount < 0 || !Number.isInteger(amount)) {
+    throw new TypeError(
+      `formatUsdAmount requires a non-negative integer dollar amount, received: ${amount}`,
+    );
+  }
+  return `$${String(amount).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.00`;
+}

@@ -16,7 +16,7 @@ import { expect, test } from '@playwright/test';
  * invented numbers.
  */
 
-test('/templates hydrates the Sovereign Contract Factory across the six master verticals', async ({ page }) => {
+test('/templates hydrates the Covnant Control Board across the six master verticals', async ({ page }) => {
   await page.goto('/templates');
 
   // All six master vertical sections render (founder taxonomy).
@@ -50,14 +50,14 @@ test('/templates hydrates the Sovereign Contract Factory across the six master v
 
   // Jurisdiction, engineered clauses, and execution history render on the card.
   const aud = page.locator('[data-testid="factory-template-card"][data-template-id="TPL-AUD-001"]');
-  await expect(aud).toContainText('US-TX Sovereign Ledger Standard');
+  await expect(aud).toContainText('US-TX Ledger Standard');
   await expect(aud).toContainText('Sub-Second Micro-Royalty Routing');
   await expect(aud).toContainText('1,420 executions');
 
   // The DEMO DATA disclosure stays on the factory.
   await expect(page.getByTestId('demo-data-badge')).toBeVisible();
 
-  // The Sovereign Clearing Framework atomic registry joins the page — 26
+  // The atomic entity registry joins the page — 26
   // sector records beneath the factory grids, every field from the store.
   await expect(page.getByTestId('atomic-template-card')).toHaveCount(26);
   const flm = page.locator('[data-testid="atomic-template-card"][data-template-id="TPL-FLM-001"]');

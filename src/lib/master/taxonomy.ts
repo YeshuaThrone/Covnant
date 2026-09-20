@@ -123,3 +123,112 @@ export function isGlobalEntertainmentCategory(value: unknown): value is GlobalEn
     (MASTER_CATEGORY_ORDER as readonly string[]).includes(value)
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The founder's 26 ATOMIC SECTORS (CovnantAtomicDataSDK canon) — the granular
+// sector vocabulary of the atomic registry. Lives beside the master verticals
+// because the vertical tab system maps sectors onto tabs; this module is the
+// client-safe home (no store imports), so the Control Board's tab handlers
+// can read the sector→vertical mapping in the browser.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The founder's 26 atomic sectors — exact. */
+export type AtomicSector =
+  | 'MUSIC'
+  | 'GAMING'
+  | 'INTERACTIVE'
+  | 'PODCASTING'
+  | 'STREAMING'
+  | 'SOCIAL_MEDIA'
+  | 'PUBLISHING'
+  | 'MOVIES'
+  | 'FILM'
+  | 'TV'
+  | 'VIDEO'
+  | 'SPORTS'
+  | 'MOTORSPORT'
+  | 'ARENA'
+  | 'ATHLETICS'
+  | 'FASHION'
+  | 'MODELING'
+  | 'CAD'
+  | 'VISUAL_ARTS'
+  | 'DESIGN'
+  | 'BOOKS'
+  | 'LITERATURE'
+  | 'DIGITAL_ASSETS'
+  | 'SOFTWARE'
+  | 'VTUBING'
+  | 'VIRTUAL_AVATARS';
+
+/** Canon display order of the 26 sectors — the registry manifest order. */
+export const ATOMIC_SECTOR_ORDER: readonly AtomicSector[] = Object.freeze([
+  'MUSIC',
+  'GAMING',
+  'INTERACTIVE',
+  'PODCASTING',
+  'STREAMING',
+  'SOCIAL_MEDIA',
+  'PUBLISHING',
+  'MOVIES',
+  'FILM',
+  'TV',
+  'VIDEO',
+  'SPORTS',
+  'MOTORSPORT',
+  'ARENA',
+  'ATHLETICS',
+  'FASHION',
+  'MODELING',
+  'CAD',
+  'VISUAL_ARTS',
+  'DESIGN',
+  'BOOKS',
+  'LITERATURE',
+  'DIGITAL_ASSETS',
+  'SOFTWARE',
+  'VTUBING',
+  'VIRTUAL_AVATARS',
+] as const);
+
+/** Atomic sector → master vertical — the frozen six-tab filter mapping. */
+export const ATOMIC_SECTOR_TO_VERTICAL: Record<AtomicSector, GlobalEntertainmentCategory> = {
+  MUSIC: 'AUDIO_AND_RECORDED_SOUND',
+  PODCASTING: 'AUDIO_AND_RECORDED_SOUND',
+  MOVIES: 'FILM_AND_TELEVISION',
+  FILM: 'FILM_AND_TELEVISION',
+  TV: 'FILM_AND_TELEVISION',
+  VIDEO: 'FILM_AND_TELEVISION',
+  STREAMING: 'FILM_AND_TELEVISION',
+  PUBLISHING: 'PUBLISHING_AND_LITERARY',
+  BOOKS: 'PUBLISHING_AND_LITERARY',
+  LITERATURE: 'PUBLISHING_AND_LITERARY',
+  SPORTS: 'LIVE_PERFORMANCE_AND_COMEDY',
+  MOTORSPORT: 'LIVE_PERFORMANCE_AND_COMEDY',
+  ARENA: 'LIVE_PERFORMANCE_AND_COMEDY',
+  ATHLETICS: 'LIVE_PERFORMANCE_AND_COMEDY',
+  GAMING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  INTERACTIVE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  SOFTWARE: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  DIGITAL_ASSETS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  CAD: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  SOCIAL_MEDIA: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  VTUBING: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  VIRTUAL_AVATARS: 'INTERACTIVE_AND_DIGITAL_MEDIA',
+  FASHION: 'COMMERCIAL_AND_BRAND_LICENSING',
+  MODELING: 'COMMERCIAL_AND_BRAND_LICENSING',
+  VISUAL_ARTS: 'COMMERCIAL_AND_BRAND_LICENSING',
+  DESIGN: 'COMMERCIAL_AND_BRAND_LICENSING',
+};
+
+/** The atomic sectors a master vertical tab covers — the per-tab fetch set. */
+export function sectorsForVertical(vertical: GlobalEntertainmentCategory): AtomicSector[] {
+  return ATOMIC_SECTOR_ORDER.filter((sector) => ATOMIC_SECTOR_TO_VERTICAL[sector] === vertical);
+}
+
+/** Narrow a raw route param onto the sector canon; null when unknown. */
+export function atomicSectorFromParam(value: string): AtomicSector | null {
+  return (ATOMIC_SECTOR_ORDER as readonly string[]).includes(value)
+    ? (value as AtomicSector)
+    : null;
+}

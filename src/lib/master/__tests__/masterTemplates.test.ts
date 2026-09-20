@@ -27,7 +27,7 @@ const FOUNDER_SEEDS: readonly ContractTemplateRecord[] = [
     templateName: 'Master Recording & Streaming Royalty Agreement',
     verticalCategory: 'AUDIO_SOUND',
     subCategory: 'Master Recording',
-    governingJurisdiction: 'US-TX Sovereign Ledger Standard',
+    governingJurisdiction: 'US-TX Ledger Standard',
     splitStructure: { ownershipReserve: 50, creativePayout: 35, operationsYield: 15 },
     keyClauses: [
       'Sub-Second Micro-Royalty Routing',
@@ -57,7 +57,7 @@ const FOUNDER_SEEDS: readonly ContractTemplateRecord[] = [
     templateName: 'Audiobook & Digital E-Book Rights Acquisition',
     verticalCategory: 'PUBLISHING',
     subCategory: 'Audiobook Publishing',
-    governingJurisdiction: 'US-TX Sovereign Ledger Standard',
+    governingJurisdiction: 'US-TX Ledger Standard',
     splitStructure: { ownershipReserve: 50, creativePayout: 35, operationsYield: 15 },
     keyClauses: [
       'Print-On-Demand Realtime Ledger',
@@ -72,7 +72,7 @@ const FOUNDER_SEEDS: readonly ContractTemplateRecord[] = [
     templateName: 'Live Stand-Up & Concert Touring Ticket Escrow',
     verticalCategory: 'LIVE_COMEDY',
     subCategory: 'Live Venue Performance',
-    governingJurisdiction: 'US-TX Sovereign Ledger Standard',
+    governingJurisdiction: 'US-TX Ledger Standard',
     splitStructure: { ownershipReserve: 50, creativePayout: 35, operationsYield: 15 },
     keyClauses: [
       'Live Venue Settlement Gate',
