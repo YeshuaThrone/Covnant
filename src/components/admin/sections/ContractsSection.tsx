@@ -48,7 +48,7 @@ export function ContractsSection({
         <section aria-label="Master contract data" className="mt-6">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-white">
-              Master contract data — six verticals
+              Master contract data — every vertical of entertainment
             </h3>
             {master.demo ? (
               <span
@@ -60,9 +60,9 @@ export function ContractsSection({
             ) : null}
           </div>
           <p className="mt-2 max-w-2xl text-sm text-white/50">
-            The same master hydration the /contracts page serves — the six master
-            entertainment verticals with their 50 / 35 / 15 allocations, every figure
-            computed through the settlement engine&apos;s integer-cent path.
+            The same master hydration the /contracts page serves — every
+            vertical of entertainment with its 50 / 35 / 15 allocations, every
+            figure computed through the settlement engine&apos;s integer-cent path.
             Per-vertical scoping stays on the /contracts page itself.
           </p>
           <div className="mt-4 space-y-4">

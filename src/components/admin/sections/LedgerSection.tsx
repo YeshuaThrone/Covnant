@@ -40,7 +40,7 @@ export function LedgerSection({
         <section aria-label="Master sovereign ledger" className="mt-6">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-white">
-              Master sovereign ledger — six verticals
+              Master clearing ledger — every vertical of entertainment
             </h3>
             {master.demo ? (
               <span
@@ -52,7 +52,7 @@ export function LedgerSection({
             ) : null}
           </div>
           <p className="mt-2 max-w-2xl text-sm text-white/50">
-            The six master entertainment verticals with their 50 / 35 / 15
+            Every vertical of entertainment with its 50 / 35 / 15
             allocations — every figure computed through the settlement engine&apos;s
             integer-cent path.
           </p>
