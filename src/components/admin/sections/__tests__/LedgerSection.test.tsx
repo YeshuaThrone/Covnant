@@ -15,8 +15,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { bootDevSeedStore } from '@/lib/server/devSeed';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
-import { reconcileLedger, formatMinor } from '@/lib/ledger/reconciliation';
-import { attachRegistryPills, escrowStateFromRows } from '@/lib/ledger/finances';
+import { reconcileLedger, formatMinor, reconciliationHeadline } from '@/lib/ledger/reconciliation';
+import { escrowStateFromRows } from '@/lib/ledger/finances';
 import { buildLedgerFinancesSection } from '@/lib/admin/sectionPayloads';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
@@ -98,5 +98,41 @@ describe('LedgerSection — the finances surface', () => {
     );
     expect(markup).toContain('data-testid="demo-data-badge"');
     expect(markup).toContain('Demo data');
+  });
+});
+
+
+describe('LedgerSection — the easy-read reconciliation strip (founder addendum, 2026-09-21)', () => {
+  it('renders the four reference cards hydrated from the SAME reconcileLedger pass as the table', async () => {
+    const rows = await listLedger();
+    const assets = await listAssets();
+    const markup = renderToStaticMarkup(
+      <LedgerSection finances={buildLedgerFinancesSection(rows, assets)} />,
+    );
+
+    // The founder's reference panel: title, verification badge, explainer,
+    // and the four stat cards — the strip sits above the settlement table.
+    expect(markup).toContain('data-testid="reconciliation-strip"');
+    expect(markup).toContain('Gross settled');
+    expect(markup).toContain('Covenant fees');
+    expect(markup).toContain('Corner dust');
+    expect(markup).toContain('no floating-point arithmetic anywhere in this audit');
+
+    // EQUALITY against the engine output — the strip renders exactly the
+    // values reconcileLedger derives for the same rows, never copies.
+    const headline = reconciliationHeadline(reconcileLedger(rows));
+    expect(headline.settlements).toBe(rows.length);
+    if (headline.currency && headline.grossMinor !== null) {
+      expect(markup).toContain(formatMinor(headline.grossMinor, headline.currency));
+      expect(markup).toContain(formatMinor(headline.feesMinor!, headline.currency));
+      // The corner-dust card equals the settlement table's corner-dust
+      // column sum: one reconcile pass feeds card and table alike.
+      const tableDust = reconcileLedger(rows).byCurrency.reduce(
+        (sum, totals) => sum + totals.dustMinor,
+        0n,
+      );
+      expect(headline.dustMinor).toBe(tableDust);
+      expect(markup).toContain(formatMinor(headline.dustMinor!, headline.currency));
+    }
   });
 });

@@ -403,11 +403,7 @@ export function annualPayeeRows(payouts: readonly ResolvedPayeePayout[]): TaxAnn
     const engine = foldResolutions(group);
     return {
       year: Number(groupKey.slice(0, groupKey.indexOf('|'))),
-      ...payeeFields(
-        identityKey,
-        first.disbursement.rightsHolderId,
-        first.disbursement.rightsHolderName,
-      ),
+      ...payeeFields(identityKey, first.disbursement.rightsHolderName),
       forms: [...new Set(group.map((payout) => payout.resolution.formTriggered))],
       transactionCount: group.length,
       ...ledgerSums(group),

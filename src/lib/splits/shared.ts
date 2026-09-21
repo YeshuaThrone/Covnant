@@ -64,6 +64,7 @@ export const MEDIA_MEDIUMS: readonly MediaMedium[] = [
   'MUSIC_TRACK', 'MUSIC_ALBUM', 'SHEET_MUSIC', 'FEATURE_FILM', 'TV_SHOW',
   'TV_SEASON', 'TV_EPISODE', 'PODCAST_EPISODE', 'AUDIOBOOK', 'PRINT_BOOK',
   'EBOOK', 'MAGAZINE_SERIAL', 'VIDEO_GAME', 'LIVE_STREAM', 'MARS_ORBITAL_BROADCAST',
+  'LIVE_EVENT', 'GARMENT_LINE',
 ];
 
 export const MEDIUM_LABELS: Record<MediaMedium, string> = {
@@ -82,6 +83,8 @@ export const MEDIUM_LABELS: Record<MediaMedium, string> = {
   VIDEO_GAME: 'Video Game',
   LIVE_STREAM: 'Live Stream',
   MARS_ORBITAL_BROADCAST: 'Mars Orbital Broadcast',
+  LIVE_EVENT: 'Live Event',
+  GARMENT_LINE: 'Garment Line',
 };
 
 export interface HolderRoutingDraft {

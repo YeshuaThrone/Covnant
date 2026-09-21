@@ -14,8 +14,14 @@ import path from 'path';
  * (fl_w9Jsv85C · gemini-code-1787976937198_2.ts · 686 lines). This test is the
  * tripwire: if anyone edits the vendored file, CI fails until the change is
  * either reverted or re-blessed through a spec amendment.
+ *
+ * AMENDMENT 2026-09-21 (admin tax data sheet build, founder directive):
+ * MediaMedium extended with 'LIVE_EVENT' (CBT prefix LVE) and 'GARMENT_LINE'
+ * (CBT prefix FSH) — two additions and nothing else — so the founder's demo
+ * asset registry (Live Event, Garment Line) settles through the REAL engine
+ * instead of failing on an unknown medium. Re-blessed hash:
  */
-const VENDORED_SHA256 = 'b60ec9de98e5890305b60cfe7cba93c016a2acc0b7a05c8d140c07c21f38dcc5';
+const VENDORED_SHA256 = '2cafbd50197a1ad05d12cfa804cc746313e4389ef20167b1c6afe99e2b513288';
 
 describe('vendored engine integrity', () => {
   it('matches the blessed source-of-truth hash', () => {
