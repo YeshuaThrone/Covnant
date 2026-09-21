@@ -78,6 +78,49 @@ function EmvChip() {
   );
 }
 
+/**
+ * The Apple Wallet app icon — a white-outlined wallet holding the green /
+ * orange / blue card layers, per the founder's official-badge reference.
+ */
+function AppleWalletIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[26px] w-[26px] shrink-0">
+      <rect
+        x="2.9"
+        y="2.9"
+        width="18.2"
+        height="18.2"
+        rx="5.2"
+        fill="none"
+        stroke="#FFFFFF"
+        strokeWidth="1.8"
+      />
+      <rect x="6.1" y="6.5" width="11.8" height="2.7" rx="1.35" fill="#30D158" />
+      <rect x="6.1" y="10.3" width="11.8" height="2.7" rx="1.35" fill="#FF9F0A" />
+      <rect x="6.1" y="14.1" width="11.8" height="2.7" rx="1.35" fill="#0A84FF" />
+    </svg>
+  );
+}
+
+/**
+ * The Google Wallet mark — stacked pass layers (green / yellow / blue) with
+ * the red arc capping the top-right, per the founder's official-badge
+ * reference.
+ */
+function GoogleWalletMark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[26px] w-[26px] shrink-0">
+      <rect x="2.5" y="2.5" width="11" height="5.2" rx="2.6" fill="#34A853" />
+      <path
+        d="M13.5 2.5a6.2 6.2 0 0 1 6.2 6.2h-2.9a3.3 3.3 0 0 0-3.3-3.3z"
+        fill="#EA4335"
+      />
+      <rect x="2.5" y="9.4" width="14.3" height="5.2" rx="2.6" fill="#FBBC04" />
+      <rect x="2.5" y="16.3" width="17.2" height="5.2" rx="2.6" fill="#4285F4" />
+    </svg>
+  );
+}
+
 function DetailRow({
   label,
   value,
@@ -179,31 +222,43 @@ export function GoldNoteCard({
 
       {/* Wallet + copy actions directly under the card — honest affordances. */}
       <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* Official wallet badges per the founder's reference (fl_kYE4tGl5):
+            Apple = rounded rectangle + Wallet app icon, Google = stadium pill
+            + multicolor Wallet mark. Still disabled — no provisioning source
+            exists, so the affordance stays honest. */}
         <button
           type="button"
           data-testid="goldnote-wallet-apple"
           disabled
           title={walletNote}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-black px-4 py-2 text-sm font-semibold text-white opacity-80"
+          className="inline-flex h-[46px] items-center gap-2.5 rounded-[12px] bg-black px-4 text-left opacity-80"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-white">
-            <path d="M17.05 12.54c-.03-2.62 2.14-3.88 2.24-3.94-1.22-1.79-3.12-2.03-3.8-2.06-1.62-.16-3.16.95-3.98.95-.82 0-2.09-.93-3.43-.9-1.77.03-3.4 1.03-4.31 2.6-1.84 3.19-.47 7.91 1.32 10.5.87 1.26 1.91 2.68 3.28 2.63 1.31-.05 1.81-.85 3.4-.85 1.58 0 2.04.85 3.43.82 1.42-.03 2.32-1.28 3.19-2.55.98-1.43 1.38-2.81 1.4-2.88-.03-.01-2.7-1.03-2.74-4.32zM14.44 4.8c.72-.88 1.21-2.1 1.08-3.3-1.04.04-2.3.69-3.05 1.57-.67.78-1.26 2.02-1.1 3.21 1.16.09 2.35-.59 3.07-1.48z" />
-          </svg>
-           Apple Wallet
+          <AppleWalletIcon />
+          <span className="flex flex-col">
+            <span className="text-[11px] font-normal leading-[1.15] tracking-[0.01em] text-white/90">
+              Add to
+            </span>
+            <span className="mt-px text-[15px] font-semibold leading-[1.15] text-white">
+              Apple Wallet
+            </span>
+          </span>
         </button>
         <button
           type="button"
           data-testid="goldnote-wallet-google"
           disabled
           title={walletNote}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-black px-4 py-2 text-sm font-semibold text-white opacity-80"
+          className="inline-flex h-[46px] items-center gap-2.5 rounded-full bg-black px-4 text-left opacity-80"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
-            <path fill="currentColor" d="M12 5.5v4.03c0 .27-.22.49-.49.49h-.02a3.42 3.42 0 0 0-3.42 3.42v.02c0 .27-.22.49-.49.49H5.5A2.5 2.5 0 0 1 3 11.95 8.44 8.44 0 0 1 11.45 3.5h.06c.27 0 .49.22.49.49z" />
-            <path fill="currentColor" d="M20.5 12v.55a5.95 5.95 0 0 1-5.95 5.95h-.5a2.5 2.5 0 0 1-2.49-2.5v-1.98c0-.27.22-.49.49-.49h.02a3.42 3.42 0 0 0 3.42-3.42v-.02c0-.27.22-.49.49-.49h4.03c.27 0 .49.22.49.49z" />
-            <path fill="currentColor" d="M8.07 15.49v.02c0 .27-.22.49-.49.49H5.5a2.5 2.5 0 0 1-2.5-2.5v-.5c0-.27.22-.49.49-.49h1.98c.27 0 .49.22.49.49a3.42 3.42 0 0 0 2.11 2.49z" />
-          </svg>
-          Google Wallet
+          <GoogleWalletMark />
+          <span className="flex flex-col">
+            <span className="text-[11px] font-normal leading-[1.15] tracking-[0.01em] text-white/90">
+              Add to
+            </span>
+            <span className="mt-px text-[15px] font-semibold leading-[1.15] text-white">
+              Google Wallet
+            </span>
+          </span>
         </button>
         <button
           type="button"
