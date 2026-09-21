@@ -1340,12 +1340,13 @@ test('the Obsidian shell carries the full sidebar and every workspace route reso
     expect(res.status(), `route ${route}`).toBe(200);
   }
 
-  // /admin resolves to the GATE for an anonymous visitor — the console
-  // itself must never render without the signed session cookie. This pin
-  // replaces the old anonymous-200-only pin now that the route is gated.
+  // /admin resolves to a real admin surface for an anonymous visitor. Under
+  // the seeded preview the founder's J1 passwordless carve-out opens the
+  // console directly (no sign-in form); passworded deployments render the
+  // fail-closed gate instead — that behavior is pinned by admin.spec's
+  // isolated-server gate test.
   const admin = await request.get('/admin');
   expect(admin.status()).toBe(200);
   const adminBody = await admin.text();
-  expect(adminBody).toContain('data-admin="gate"');
-  expect(adminBody).not.toContain('data-admin="console"');
+  expect(adminBody).toContain('data-admin="console"');
 });

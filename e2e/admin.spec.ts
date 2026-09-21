@@ -3,7 +3,7 @@ import net from 'node:net';
 import { expect, test } from '@playwright/test';
 
 /**
- * Admin console e2e — the gate, the six gated sections, and the two real
+ * Admin console e2e — the gate, the seven gated sections, and the two real
  * mutations (compliance edit, allowlist flip) flowing to the action log.
  *
  * The compliance-edit flow runs against an ISOLATED server on a private
@@ -40,6 +40,10 @@ async function startIsolatedServer(): Promise<IsolatedServer> {
   const stub = spawn('node', ['./e2e/helpers/postgrest-stub.mjs'], {
     env: { ...process.env, PORT: String(stubPort) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Group leaders: teardown below signals the whole process group, because
+    // `npx next start` re-execs into a detached next-server grandchild that
+    // survives a plain parent kill — leaked servers then starve later boots.
+    detached: true,
   });
 
   const app = spawn('npx', ['next', 'start', '-p', String(appPort)], {
@@ -50,18 +54,32 @@ async function startIsolatedServer(): Promise<IsolatedServer> {
       ADMIN_DASHBOARD_PASSWORD: ADMIN_E2E_PASSWORD,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
 
-  await expect
-    .poll(async () => {
-      try {
-        const response = await fetch(`http://127.0.0.1:${appPort}/admin`);
-        return response.status;
-      } catch {
-        return 0;
-      }
-    })
-    .toBe(200);
+  const bootLog: string[] = [];
+  app.stdout?.on('data', (chunk: Buffer) => bootLog.push(chunk.toString()));
+  app.stderr?.on('data', (chunk: Buffer) => bootLog.push(chunk.toString()));
+
+  try {
+    await expect
+      .poll(async () => {
+        try {
+          const response = await fetch(`http://127.0.0.1:${appPort}/admin`);
+          return response.status;
+        } catch {
+          return 0;
+        }
+      }, { timeout: 30_000, intervals: [500] })
+      .toBe(200);
+  } catch (error) {
+    // The app never came up — surface the child's own boot output and exit
+    // code so the failure names itself instead of timing out blind.
+    throw new Error(
+      `isolated admin server on :${appPort} never became ready (exit ${app.exitCode}): ${bootLog.join('')}`,
+      { cause: error },
+    );
+  }
 
   return {
     baseUrl: `http://127.0.0.1:${appPort}`,
@@ -71,50 +89,65 @@ async function startIsolatedServer(): Promise<IsolatedServer> {
         app.once('exit', () => resolve());
         stub.once('exit', () => resolve());
       });
-      app.kill('SIGTERM');
-      stub.kill('SIGTERM');
+      // Negative-PID signals hit the whole process group — the only way the
+      // detached next-server grandchild actually dies with its wrapper.
+      if (app.pid) process.kill(-app.pid, 'SIGTERM');
+      if (stub.pid) process.kill(-stub.pid, 'SIGTERM');
       await stopped;
     },
   };
 }
 
-async function signIn(page: import('@playwright/test').Page, password: string): Promise<void> {
+/**
+ * The shared webServer runs the seeded preview, where the founder's J1
+ * passwordless carve-out (gate.ts: `!password && DON_DEV_SEED === '1'`)
+ * opens the console without a sign-in form. The fail-closed password gate
+ * itself is asserted on the isolated passworded server, where the gate
+ * actually runs.
+ */
+async function openConsole(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/admin');
-  await page.fill('#admin-password', password);
-  await page.click('button[type="submit"]');
   await expect(page.locator('[data-admin="console"]')).toBeVisible();
 }
 
 test('an anonymous visitor gets the gate — wrong password states it plainly, no console leaks', async ({
   page,
 }) => {
-  await page.goto('/admin');
+  // The seeded preview serves the console passwordless, so the fail-closed
+  // gate is asserted on the isolated passworded server — the deployment
+  // configuration where the gate actually runs.
+  const server = await startIsolatedServer();
+  try {
+    await page.goto(`${server.baseUrl}/admin`);
 
-  const gate = page.locator('[data-admin="gate"]');
-  await expect(gate).toBeVisible();
-  await expect(page.locator('[data-admin="console"]')).toHaveCount(0);
-  // No hints about what lies behind.
-  const body = await page.textContent('body');
-  expect(body).not.toContain('Creator profiles');
-  expect(body).not.toContain('Platform allowlists');
+    const gate = page.locator('[data-admin="gate"]');
+    await expect(gate).toBeVisible();
+    await expect(page.locator('[data-admin="console"]')).toHaveCount(0);
+    // No hints about what lies behind.
+    const body = await page.textContent('body');
+    expect(body).not.toContain('Creator profiles');
+    expect(body).not.toContain('Platform allowlists');
 
-  await page.fill('#admin-password', 'definitely-not-the-password');
-  await page.click('button[type="submit"]');
-  await expect(page.locator('[data-admin="gate"]').getByRole('alert')).toHaveText('Incorrect password.');
-  await expect(page.locator('[data-admin="console"]')).toHaveCount(0);
+    await page.fill('#admin-password', 'definitely-not-the-password');
+    await page.click('button[type="submit"]');
+    await expect(page.locator('[data-admin="gate"]').getByRole('alert')).toHaveText('Incorrect password.');
+    await expect(page.locator('[data-admin="console"]')).toHaveCount(0);
+  } finally {
+    await server.close();
+  }
 });
 
-test('a credentialed operator gets the console with all seven sections', async ({ page }) => {
-  await signIn(page, ADMIN_E2E_PASSWORD);
+test('the operator console opens with all eight sections under the seeded preview', async ({ page }) => {
+  await openConsole(page);
 
-  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Control Board', 'Allowlists']) {
+  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Tax', 'Control Board', 'Allowlists']) {
     await page.getByRole('button', { name: section, exact: true }).click();
     await expect(page.locator(`[aria-label="${section}"]`)).toBeVisible();
   }
 });
 
 test('the Control Board tab renders the master board; Ledger is the finances; Contracts is the registry', async ({ page }) => {
-  await signIn(page, ADMIN_E2E_PASSWORD);
+  await openConsole(page);
 
   // Control Board: the reused /templates board inside the console — vertical
   // tabs, isolated entity pills, the 50/35/15 badges, all store-backed.
