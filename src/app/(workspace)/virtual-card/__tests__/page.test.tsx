@@ -74,6 +74,29 @@ describe('/virtual-card — the GoldNote surface', () => {
     expect(html).toContain('data-testid="goldnote-wallet-note"');
   });
 
+  it('renders the real Apple and Google marks inside the wallet badges — both disabled', async () => {
+    const html = await renderVirtualCardPage();
+
+    // The real Apple logo — canonical simple-icons path data inside the
+    // Apple badge, not an invented wallet glyph.
+    const appleBadge = html.split('data-testid="goldnote-wallet-apple"')[1] ?? '';
+    expect(appleBadge).toContain('data-testid="goldnote-apple-mark"');
+    expect(appleBadge).toContain('M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04');
+
+    // The real Google G — official four-color construction inside the
+    // Google badge, not a stacked-pass approximation.
+    const googleBadge = html.split('data-testid="goldnote-wallet-google"')[1] ?? '';
+    expect(googleBadge).toContain('data-testid="goldnote-google-mark"');
+    expect(googleBadge).toContain('fill="#4285F4"');
+    expect(googleBadge).toContain('fill="#34A853"');
+    expect(googleBadge).toContain('fill="#FBBC05"');
+    expect(googleBadge).toContain('fill="#EA4335"');
+
+    // Both badges remain disabled — no provisioning source exists.
+    expect(appleBadge.slice(0, 200)).toContain('disabled');
+    expect(googleBadge.slice(0, 200)).toContain('disabled');
+  });
+
   it('renders the additional-payment disclosure and the ledger link — no fake account numbers', async () => {
     const html = await renderVirtualCardPage();
     expect(html).toContain('data-testid="goldnote-additional-payment"');
