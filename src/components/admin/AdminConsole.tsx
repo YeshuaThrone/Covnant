@@ -106,11 +106,11 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'registry' && <RegistrySection registry={data.registry} />}
         {tab === 'ledger' && (
           <LedgerSection
-            ledger={data.ledger}
+            finances={data.finances}
             master={data.master.kind === 'ready' ? data.master.value : undefined}
           />
         )}
-        {tab === 'contracts' && <ContractsSection contracts={data.contracts} master={data.master.kind === 'ready' ? data.master.value : undefined} />}
+        {tab === 'contracts' && <ContractsSection registry={data.contractRegistry} contracts={data.contracts} />}
         {tab === 'controlboard' && <ControlBoardSection board={data.controlBoard} />}
         {tab === 'allowlists' && (
           <AllowlistsSection

@@ -113,7 +113,7 @@ test('a credentialed operator gets the console with all seven sections', async (
   }
 });
 
-test('the Control Board tab renders the master board; Contracts stays intact', async ({ page }) => {
+test('the Control Board tab renders the master board; Ledger is the finances; Contracts is the registry', async ({ page }) => {
   await signIn(page, ADMIN_E2E_PASSWORD);
 
   // Control Board: the reused /templates board inside the console — vertical
@@ -133,13 +133,28 @@ test('the Control Board tab renders the master board; Contracts stays intact', a
   await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
   await expect(page).toHaveURL(/\/admin$/);
 
-  // Contracts: still intact — the enriched /contracts master hydration above
-  // the vault index.
+  // Contracts: the CONTRACT REGISTRY — CBT-stamped execution stamps, template
+  // bindings, and the vault index. NOT the money view — the settlement math
+  // tables are structurally absent here (founder directive, 2026-09-20).
   await page.getByRole('button', { name: 'Contracts', exact: true }).click();
   await expect(page.locator('[aria-label="Contracts"]')).toBeVisible();
-  await expect(page.locator('[data-testid="master-stat-cards"]')).toBeVisible();
+  await expect(page.locator('[data-testid="contract-execution-registry"]')).toBeVisible();
+  await expect(page.locator('[data-testid="template-binding-registry"]')).toBeVisible();
+  await expect(page.locator('[data-testid="contract-vault-index"]')).toBeVisible();
+  await expect(page.getByText('Contract executions')).toBeVisible();
+  await expect(page.locator('[data-testid="corner-dust-settlement-table"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="master-stat-cards"]')).toHaveCount(0);
+
+  // Ledger: the FINANCES surface — the corner-dust settlement chain restored,
+  // hydrated through the same engine paths the /ledger page reads (the demo
+  // door's seeded settlements render with their deterministic transaction ids).
+  await page.getByRole('button', { name: 'Ledger', exact: true }).click();
+  await expect(page.locator('[aria-label="Ledger"]')).toBeVisible();
+  await expect(page.locator('[data-testid="corner-dust-settlement-table"]')).toBeVisible();
+  await expect(page.locator('[data-testid="escrow-state-table"]')).toBeVisible();
+  await expect(page.getByText('DIR-DEMO-0001')).toBeVisible();
   await expect(page.locator('[data-testid="sovereign-ledger-table"]')).toBeVisible();
-  await expect(page.getByText('Contract vault records')).toBeVisible();
+  await expect(page.getByText('Master clearing ledger')).toBeVisible();
 });
 
 test('a compliance edit POSTs and the action log shows the change; the allowlist flip likewise', async ({

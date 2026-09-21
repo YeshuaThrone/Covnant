@@ -11,8 +11,9 @@
 
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
-import { withRegistryPills, type RegistryPill } from '@/lib/assets/registry-keys';
+import { attachRegistryPills } from '@/lib/ledger/finances';
 import { formatMinor, reconcileLedger } from '@/lib/ledger/reconciliation';
+import { seedDemoSettlementsIfEmpty } from '@/lib/admin/demoSeeds';
 import { SettlementTable } from '@/components/ledger/SettlementTable';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 import { VerificationBadge } from '@/components/brand/VerificationBadge';
@@ -27,23 +28,6 @@ import {
 } from '@/components/master/MasterData';
 
 export const dynamic = 'force-dynamic';
-
-type LedgerRowWithRegistry = Awaited<ReturnType<typeof listLedger>>[number] & {
-  registry: RegistryPill[];
-};
-
-/**
- * Black Box Shield — every ledger-bound row rides with its asset's registry
- * pills (canonical CBT/CVT audit keys plus sector keys), so payout views can
- * always display the identifiers next to the amounts.
- */
-function attachRegistryPills(
-  rows: Awaited<ReturnType<typeof listLedger>>,
-  assets: Awaited<ReturnType<typeof listAssets>>,
-): LedgerRowWithRegistry[] {
-  const assetByCode = new Map(assets.map((a) => [a.cbtCode, a]));
-  return rows.map((row) => withRegistryPills(row, assetByCode.get(row.cbtCode)));
-}
 
 export default async function LedgerPage({
   searchParams,
@@ -60,6 +44,10 @@ export default async function LedgerPage({
     ? records.filter((record) => record.category === active)
     : records;
   const summary = summarizeSovereignLedger(scoped);
+
+  // The demo door — dev-seed previews settle canonical rows through the real
+  // engine before listing (idempotent; real stores are never touched).
+  await seedDemoSettlementsIfEmpty();
 
   const rows = await listLedger();
   const assets = await listAssets();
@@ -175,6 +163,7 @@ export default async function LedgerPage({
         <SettlementTable
           rows={attachRegistryPills(rows, assets)}
           assets={assets.map((a) => ({ cbtCode: a.cbtCode, title: a.title }))}
+          statusByTransactionId={Object.fromEntries(recon.rows.map((r) => [r.transactionId, r.status]))}
         />
       </section>
 

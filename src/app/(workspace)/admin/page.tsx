@@ -21,6 +21,8 @@
 import { cookies } from 'next/headers';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
+import { seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
+import { buildContractRegistrySection, buildLedgerFinancesSection } from '@/lib/admin/sectionPayloads';
 import { listContracts, type StoredContract } from '@/lib/contracts/store';
 import { listCreators } from '@/lib/admin/creators';
 import { listAllowlists } from '@/lib/admin/allowlists';
@@ -148,6 +150,11 @@ export default async function AdminPage() {
     return <AdminGate />;
   }
 
+  // The demo door — dev-seed previews hydrate settlements, the vault, and the
+  // lane execution through the real engine paths before the reads (idempotent;
+  // Supabase-backed stores are never touched).
+  await seedAdminDemoDataIfEmpty();
+
   const db = supabaseFromEnv();
   const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry] = await Promise.all([
     listLedger(),
@@ -177,6 +184,11 @@ export default async function AdminPage() {
     allowlists: toSectionData(allowlists),
     master,
     controlBoard: buildControlBoardState(masterTemplates, atomicRegistry),
+    finances: buildLedgerFinancesSection(ledgerRows, assets),
+    contractRegistry: buildContractRegistrySection(
+      masterTemplates,
+      master.kind === 'ready' ? master.value.records : [],
+    ),
   };
 
   return <AdminConsole data={data} />;

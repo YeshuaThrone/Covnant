@@ -10,6 +10,7 @@ import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
 import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
+import type { SettlementRowView } from '@/lib/ledger/finances';
 
 export type SectionData<T> =
   | { kind: 'ready'; value: T }
@@ -38,6 +39,58 @@ export interface MasterLedgerSection {
   records: SovereignLedgerRecord[];
 }
 
+/**
+ * The Ledger section's FINANCES payload (founder directive, 2026-09-20):
+ * the settlement rows exactly as the /ledger page renders them — engine
+ * output through the shared selector layer, never copied strings. Escrow
+ * and payout state fold from the same rows on the client.
+ */
+export interface LedgerFinancesSection {
+  demo: boolean;
+  rows: SettlementRowView[];
+}
+
+/** One CBT-stamped contract execution — the master clearing ledger's lane landing. */
+export interface ExecutionStampRow {
+  executionId: string;
+  stampedAt: string;
+  ledgerId: string;
+  assetTitle: string;
+  /** Canonical CBT when the asset is known (null when the record predates the join). */
+  cbt: string | null;
+  /** Derived from the canonical CBT (null when the record predates derivation). */
+  cvt: string | null;
+  templateId: string | null;
+  /** The lane's vertical sector label, when the record carries one. */
+  sector: string | null;
+}
+
+/** One master template binding — the registry's template layer, never money. */
+export interface TemplateBindingRow {
+  templateId: string;
+  templateName: string;
+  /** The template's subCategory — the sector of record ('Master Recording', 'Audiobook Publishing'). */
+  sector: string;
+  verticalCategory: string;
+  executionStatus: string;
+  timesExecuted: number;
+  /** The bound atomic entity class pill (MUSIC, FILM, ...), when one binds. */
+  entityClassTag: string | null;
+  /** Lane telemetry execution state — CLEARED or HELD_IN_ESCROW. */
+  executionState: string | null;
+}
+
+/**
+ * The Contracts section's REGISTRY payload (founder directive, 2026-09-20):
+ * CBT-stamped executions, template bindings, and lineage — distinct from
+ * the money view, which lives on the Ledger tab.
+ */
+export interface ContractRegistrySection {
+  demo: boolean;
+  executions: ExecutionStampRow[];
+  templates: TemplateBindingRow[];
+}
+
 export interface AdminConsoleData {
   registry: RegistrySummary;
   ledger: LedgerSummary;
@@ -45,6 +98,10 @@ export interface AdminConsoleData {
   creators: SectionData<AdminCreatorProfile[]>;
   allowlists: SectionData<AdminAllowlistRow[]>;
   master: SectionData<MasterLedgerSection>;
+  /** The Ledger tab's finances surface — settlements one-truth with /ledger. */
+  finances: LedgerFinancesSection;
+  /** The Contracts tab's registry surface — executions + template bindings. */
+  contractRegistry: ContractRegistrySection;
   /**
    * The Covnant Control Board's server-bound state — the same entity-bound
    * board the /templates page SSRs, composed from the same master-store
