@@ -34,6 +34,25 @@ const BALANCE_CLASS =
   'mt-6 text-right text-4xl font-semibold tracking-tight text-slate-100 md:mt-8 md:text-5xl';
 const SUBLABEL_CLASS = 'mt-1 text-right text-xs text-slate-500';
 
+/** One billion dollars in integer cents — the compact-render threshold. */
+const ONE_BILLION_USD_CENTS = 100_000_000_000;
+const ONE_TENTH_BILLION_USD_CENTS = ONE_BILLION_USD_CENTS / 10;
+
+/**
+ * Founder directive 2026-09-21 — at full width "$1,000,000,000.00"
+ * overlaps the card placeholder, so buckets of $1B or more render compact
+ * ($1B, $1.5B), DERIVED from the engine cents by integer math — never a
+ * hardcoded display string. Truncation-only at tenth precision (a display
+ * figure never rounds money up, matching the ledger's display voice).
+ * Values below $1B keep the exact formatCents rendering untouched.
+ */
+function formatBucketBalance(cents: number): string {
+  if (cents < ONE_BILLION_USD_CENTS) return formatCents(cents);
+  const wholeBillions = Math.floor(cents / ONE_BILLION_USD_CENTS);
+  const tenths = Math.floor((cents % ONE_BILLION_USD_CENTS) / ONE_TENTH_BILLION_USD_CENTS);
+  return tenths === 0 ? `$${wholeBillions}B` : `$${wholeBillions}.${tenths}B`;
+}
+
 /** ── The three account cards — the holder's three vault buckets ── */
 
 function BucketCard({
@@ -53,7 +72,7 @@ function BucketCard({
     <section data-testid={testId} className={CARD_CLASS} aria-label={ariaLabel}>
       <h3 className="text-sm font-medium text-slate-400">{title}</h3>
       <p data-testid={`${testId}-balance`} className={BALANCE_CLASS}>
-        {formatCents(balanceCents)}
+        {formatBucketBalance(balanceCents)}
       </p>
       <p className={SUBLABEL_CLASS}>{sublabel}</p>
     </section>

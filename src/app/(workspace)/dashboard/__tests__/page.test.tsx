@@ -79,7 +79,15 @@ describe('/dashboard — The Don composition', () => {
     // reserve bucket across five seeded UDR settlements).
     expect(html).toContain('$3,300,000.00');
     expect(html).toContain('$650,000.00');
-    expect(html).toContain('$1,000,000,000.00');
+    // Founder directive 2026-09-21 — at full width '$1,000,000,000.00'
+    // overlaps the card placeholder, so the reserve renders compact ($1B),
+    // derived from the engine cents, not a display string. The full string
+    // must not appear AS the reserve balance — other surfaces (revenue
+    // streams) keep their exact formatting.
+    expect(html).toContain('$1B');
+    const reserveBalance = html.split('data-testid="account-card-reserve-balance"')[1] ?? '';
+    expect(reserveBalance).toContain('$1B');
+    expect(reserveBalance.slice(0, 200)).not.toContain('$1,000,000,000.00');
   });
 
   it('renders the revenue streams strip and NO quick actions (goldBoardUiSpec)', async () => {
