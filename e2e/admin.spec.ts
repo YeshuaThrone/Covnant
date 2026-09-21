@@ -141,7 +141,7 @@ test('the Control Board tab renders the master board; Ledger is the finances; Co
   await expect(page.locator('[data-testid="contract-execution-registry"]')).toBeVisible();
   await expect(page.locator('[data-testid="template-binding-registry"]')).toBeVisible();
   await expect(page.locator('[data-testid="contract-vault-index"]')).toBeVisible();
-  await expect(page.getByText('Contract executions')).toBeVisible();
+  await expect(page.locator('[aria-label="Contract execution stamps"]')).toBeVisible();
   await expect(page.locator('[data-testid="corner-dust-settlement-table"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="master-stat-cards"]')).toHaveCount(0);
 

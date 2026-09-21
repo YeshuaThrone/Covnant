@@ -11,7 +11,7 @@ import { CovenantMasterSDK } from '@/engine/covenant-master-sdk';
 import { supabaseFromEnv } from './supabase';
 
 /** v1: 0% direct-path platform fee; the social path's 10% lives in the claim engine. */
-const PLATFORM_FEE_PERCENTAGE = 0;
+export const PLATFORM_FEE_PERCENTAGE = 0;
 
 declare global {
   // eslint-disable-next-line no-var

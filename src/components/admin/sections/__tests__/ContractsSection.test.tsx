@@ -21,6 +21,7 @@ import { resolveMasterLedger, resolveMasterTemplates } from '@/lib/master/master
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
+import { cvtDisplayCode } from '@/lib/splits/codes';
 import { listContracts } from '@/lib/contracts/store';
 import type { ContractRow } from '@/components/admin/types';
 import { ContractsSection } from '../ContractsSection';
@@ -56,9 +57,13 @@ describe('ContractsSection — the contract registry', () => {
     expect(payload.executions.length).toBeGreaterThan(0);
     const stamp = payload.executions[0];
     expect(stamp.executionId.startsWith('CBT-EXEC-')).toBe(true);
-    expect(stamp.cbt).toBe('CBT-TRK-A51DF05B4279');
-    expect(stamp.cvt).toMatch(/^CVT-/);
-    expect(stamp.templateId).toBe('TPL-AUD-001');
+    // The stamp's lineage is the minted binding's own pair — the CVT derives
+    // from the CBT by the display-code path, never an invented pairing.
+    const { cbt } = stamp;
+    expect(cbt).not.toBeNull();
+    if (cbt === null) return; // narrows the nullable lineage type for the checker
+    expect(stamp.cvt).toBe(cvtDisplayCode(cbt));
+    expect(stamp.templateId).toMatch(/^TPL-/);
 
     const markup = renderToStaticMarkup(
       <ContractsSection registry={payload} contracts={{ kind: 'ready', value: [] }} />,

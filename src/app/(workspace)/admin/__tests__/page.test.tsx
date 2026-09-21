@@ -26,6 +26,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/sdk', () => ({
+  PLATFORM_FEE_PERCENTAGE: 0,
   listAssets: async () => [],
 }));
 

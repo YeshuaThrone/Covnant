@@ -16,7 +16,7 @@
  */
 
 import { CovenantMasterSDK, type CovenantBlockAsset, type MediaMedium, type SelfServeRightsHolder, type SettlementResult, type SettlementCurrency, type UniversalAssetIdentifier } from '@/engine/covenant-master-sdk';
-import { getSdk, indexAsset } from '@/lib/sdk';
+import { PLATFORM_FEE_PERCENTAGE } from '@/lib/sdk';
 import { isDevSeedMode } from '@/lib/server/devSeed';
 import { supabaseFromEnv } from '@/lib/supabase';
 import { listLedger, rememberSettlement } from '@/lib/ledger/store';
@@ -158,7 +158,12 @@ function mappedIdentifiersFor(asset: MasterDemoAsset): UniversalAssetIdentifier 
   return mapped;
 }
 
-/** Register one canonical demo asset on an SDK instance (idempotent per CBT). */
+/**
+ * Register one canonical demo asset on an SDK instance (idempotent per CBT).
+ * PRIVATE instances only: the shared singleton and the global asset index are
+ * the app's live data paths — the e2e asset-studio flow registers its own
+ * asset of record and must start from the index it finds, never demo state.
+ */
 function registerDemoAsset(sdk: CovenantMasterSDK, asset: MasterDemoAsset): CovenantBlockAsset | null {
   const medium = mediumForKind(asset.kind);
   if (medium === null) return null;
@@ -172,7 +177,6 @@ function registerDemoAsset(sdk: CovenantMasterSDK, asset: MasterDemoAsset): Cove
     createdTimestamp: DEMO_SEED_INSTANT,
   };
   sdk.registerInMemory(block);
-  indexAsset(block);
   return block;
 }
 
@@ -204,6 +208,9 @@ const DEMO_SETTLEMENTS: readonly DemoSettlement[] = [
   { cbt: 'CBT-FLM-7C3A91D2E40B', grossAmount: 98760.5432, currency: 'USD', platform: 'YOUTUBE_CONTENT_ID' },
 ];
 
+/** The direct-path engine instance — the same 0% fee as the app singleton, private to the demo door. */
+const DEMO_DIRECT_SDK = new CovenantMasterSDK(PLATFORM_FEE_PERCENTAGE);
+
 /** The 10% social-fee engine instance — the claims webhook's fee path. */
 const SOCIAL_FEE_SDK = new CovenantMasterSDK(0.10);
 
@@ -211,7 +218,7 @@ async function settleDemoRow(
   settlement: DemoSettlement,
   sequence: number,
 ): Promise<SettlementResult> {
-  const sdk = settlement.platform === 'DIRECT' ? getSdk() : SOCIAL_FEE_SDK;
+  const sdk = settlement.platform === 'DIRECT' ? DEMO_DIRECT_SDK : SOCIAL_FEE_SDK;
   const result = await sdk.processRoyaltySettlement({
     transactionId: demoTransactionId(sequence),
     cbtCode: settlement.cbt,
@@ -238,7 +245,7 @@ export async function seedDemoSettlementsIfEmpty(): Promise<void> {
   if (rows.length > 0) return;
 
   for (const asset of MASTER_DEMO_ASSET_REGISTRY) {
-    registerDemoAsset(getSdk(), asset);
+    registerDemoAsset(DEMO_DIRECT_SDK, asset);
     registerDemoAsset(SOCIAL_FEE_SDK, asset);
   }
   for (const [index, settlement] of DEMO_SETTLEMENTS.entries()) {
@@ -268,7 +275,7 @@ export async function seedDemoContractsIfEmpty(): Promise<void> {
   for (const demo of DEMO_CONTRACTS) {
     const seedAsset = registryByCbt.get(demo.cbt);
     if (seedAsset === undefined) continue;
-    const block = registerDemoAsset(getSdk(), seedAsset);
+    const block = registerDemoAsset(DEMO_DIRECT_SDK, seedAsset);
     if (block === null) continue;
     // The vault context hydrates from the asset's engine block; the fee of
     // record is the lane agreement's own store value — never a derived guess.
@@ -287,8 +294,14 @@ export async function seedDemoContractsIfEmpty(): Promise<void> {
   console.error('demo-seed: contract vault seeded through the vault paths (demo door).');
 }
 
-/** The lane's demo execution binding — the founder's reference pair. */
-const DEMO_LANE_BINDING = { templateKey: 'TPL-AUD-001', cbt: 'CBT-TRK-A51DF05B4279' } as const;
+/**
+ * The lane's demo execution binding — the live-escrow pair (sector-matched
+ * template and asset). Deliberately NOT the audio canonical asset: the
+ * asset-studio e2e registers that title through the UI and asserts the
+ * registered-asset count on /assets, where the master clearing ledger (with
+ * this mint's landing record) also renders.
+ */
+const DEMO_LANE_BINDING = { templateKey: 'TPL-LVE-009', cbt: 'CBT-LVE-5D2E8A4B91C7' } as const;
 
 /** The binding asset's title — the mint's fingerprint in the clearing ledger. */
 const DEMO_LANE_ASSET_TITLE =
