@@ -211,3 +211,46 @@ export function reconcileLedger(rows: LedgerRow[]): LedgerReconciliation {
     byCurrency: totalsByCurrency(rows),
   };
 }
+
+/**
+ * The easy-read reconciliation strip's headline (founder addendum,
+ * 2026-09-21 — restored from the pre-split Ledger surface). Derived from
+ * the SAME engine pass as the per-currency settlement table: the settlement
+ * count is honest across currencies; the money cards only carry values when
+ * every settlement shares one currency — the ledger stores no FX, so
+ * currencies are never summed across each other.
+ */
+export interface ReconciliationHeadline {
+  status: 'RECONCILED' | 'ATTENTION';
+  settlements: number;
+  currency: string | null;
+  grossMinor: bigint | null;
+  feesMinor: bigint | null;
+  dustMinor: bigint | null;
+}
+
+export function reconciliationHeadline(
+  reconciliation: LedgerReconciliation,
+): ReconciliationHeadline {
+  const { byCurrency, status } = reconciliation;
+  const settlements = byCurrency.reduce((sum, totals) => sum + totals.settlements, 0);
+  const only = byCurrency.length === 1 ? byCurrency[0] : undefined;
+  if (!only) {
+    return {
+      status,
+      settlements,
+      currency: null,
+      grossMinor: null,
+      feesMinor: null,
+      dustMinor: null,
+    };
+  }
+  return {
+    status,
+    settlements,
+    currency: only.currency,
+    grossMinor: only.grossMinor,
+    feesMinor: only.feesMinor,
+    dustMinor: only.dustMinor,
+  };
+}

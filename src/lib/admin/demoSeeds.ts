@@ -43,19 +43,26 @@ export function isDemoDoorOpen(): boolean {
   return demoDoorOpen();
 }
 
-/** Demo asset kind → engine medium (assets without one do not settle). */
-function mediumForKind(kind: string): MediaMedium | null {
+/** Demo asset kind → engine medium. An unmapped registry kind throws — the seed list and the registry must stay in sync. */
+function mediumForKind(kind: string): MediaMedium {
   switch (kind) {
     case 'Music Track':
       return 'MUSIC_TRACK';
     case 'Feature Film':
       return 'FEATURE_FILM';
+    case 'Live Event':
+      return 'LIVE_EVENT';
     case 'Print Book':
       return 'PRINT_BOOK';
     case 'Game Asset Bundle':
       return 'VIDEO_GAME';
+    case 'Garment Line':
+      return 'GARMENT_LINE';
     default:
-      return null;
+      // A registry kind the settlement engine cannot register is a seed
+      // bug — fail the seed loudly, never a silent skip that would leave
+      // the settlement path with an unhydrated asset.
+      throw new Error(`demo-seed: no MediaMedium maps the registry kind "${kind}"`);
   }
 }
 
@@ -122,14 +129,24 @@ function payoutRoutingFor(name: string, pool: LanePoolPartySeed['pool']): SelfSe
 }
 
 function rightsHoldersFor(asset: MasterDemoAsset): SelfServeRightsHolder[] {
+  // Pool-internal units set each party's share WITHIN its canon pool — the
+  // pool's parties together carry exactly the pool's 50/35/15 weight (the
+  // reconciliation the execution lane runs). Assigning the full pool
+  // percentage per party over-disburses the settlement (payee shares beyond
+  // the gross, the fee pushed negative) — money no tax sheet may report.
+  const unitsByPool = new Map<LanePoolPartySeed['pool'], number>();
+  for (const party of asset.poolRoster) {
+    unitsByPool.set(party.pool, (unitsByPool.get(party.pool) ?? 0) + party.poolUnits);
+  }
   return asset.poolRoster.map((party, index) => {
     const identity = UCT_DEMO_IDENTITIES[party.identityKey];
     const name = identity?.name ?? party.role;
+    const poolUnits = unitsByPool.get(party.pool) ?? 0;
     return {
       id: `${party.identityKey}-demo-${index}`,
       name,
       role: roleForPool(party.pool),
-      splitPercentage: POOL_SPLIT_PERCENT[party.pool],
+      splitPercentage: (party.poolUnits / poolUnits) * POOL_SPLIT_PERCENT[party.pool],
       taxProfile: taxProfileForPool(party.pool),
       payoutRouting: payoutRoutingFor(name, party.pool),
       confirmedByArtist: true,
@@ -164,9 +181,8 @@ function mappedIdentifiersFor(asset: MasterDemoAsset): UniversalAssetIdentifier 
  * the app's live data paths — the e2e asset-studio flow registers its own
  * asset of record and must start from the index it finds, never demo state.
  */
-function registerDemoAsset(sdk: CovenantMasterSDK, asset: MasterDemoAsset): CovenantBlockAsset | null {
+function registerDemoAsset(sdk: CovenantMasterSDK, asset: MasterDemoAsset): CovenantBlockAsset {
   const medium = mediumForKind(asset.kind);
-  if (medium === null) return null;
   const block: CovenantBlockAsset = {
     cvtCode: cvtDisplayCode(asset.cbt),
     cbtCode: asset.cbt,
@@ -199,20 +215,26 @@ interface DemoSettlement {
  * The demo settlement script — odd minor units on both fee paths so the
  * engine's integer-cent dust sweep produces a nonzero corner dust on every
  * row (DIRECT settles on the app's 0% singleton; the social platforms settle
- * on the 10% claims-path fee).
+ * on the 10% claims-path fee). Every demo asset settles at least once, so
+ * every UCT identity in the master store carries cleared transactions — the
+ * tax surfaces report EVERY creator, never a curated subset.
  */
 const DEMO_SETTLEMENTS: readonly DemoSettlement[] = [
   { cbt: 'CBT-TRK-A51DF05B4279', grossAmount: 12500.3337, currency: 'USD', platform: 'DIRECT' },
   { cbt: 'CBT-TRK-A51DF05B4279', grossAmount: 4380.9013, currency: 'USD', platform: 'DIRECT' },
   { cbt: 'CBT-TRK-A51DF05B4279', grossAmount: 2300.7777, currency: 'USD', platform: 'SPOTIFY' },
   { cbt: 'CBT-FLM-7C3A91D2E40B', grossAmount: 98760.5432, currency: 'USD', platform: 'YOUTUBE_CONTENT_ID' },
+  { cbt: 'CBT-LVE-5D2E8A4B91C7', grossAmount: 7712.6149, currency: 'USD', platform: 'DIRECT' },
+  { cbt: 'CBT-GAM-8B4D0C6E2F1A', grossAmount: 51240.8173, currency: 'USD', platform: 'DIRECT' },
+  { cbt: 'CBT-FSH-3F7A1B9D5E2C', grossAmount: 9085.2217, currency: 'USD', platform: 'DIRECT' },
+  { cbt: 'CBT-BOK-2E6B4F08A3D9', grossAmount: 4470.3591, currency: 'USD', platform: 'DIRECT' },
 ];
 
 /** The direct-path engine instance — the same 0% fee as the app singleton, private to the demo door. */
 const DEMO_DIRECT_SDK = new CovenantMasterSDK(PLATFORM_FEE_PERCENTAGE);
 
-/** The 10% social-fee engine instance — the claims webhook's fee path. */
-const SOCIAL_FEE_SDK = new CovenantMasterSDK(0.10);
+/** The 10% social-fee engine instance — the claims webhook's fee path (the engine takes a percent: 10.00, the claims path's own convention). */
+const SOCIAL_FEE_SDK = new CovenantMasterSDK(10.00);
 
 async function settleDemoRow(
   settlement: DemoSettlement,

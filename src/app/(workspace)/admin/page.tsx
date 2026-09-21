@@ -22,7 +22,7 @@ import { cookies } from 'next/headers';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
-import { buildContractRegistrySection, buildLedgerFinancesSection } from '@/lib/admin/sectionPayloads';
+import { buildContractRegistrySection, buildLedgerFinancesSection, buildTaxSection } from '@/lib/admin/sectionPayloads';
 import { listContracts, type StoredContract } from '@/lib/contracts/store';
 import { listCreators } from '@/lib/admin/creators';
 import { listAllowlists } from '@/lib/admin/allowlists';
@@ -189,6 +189,7 @@ export default async function AdminPage() {
       masterTemplates,
       master.kind === 'ready' ? master.value.records : [],
     ),
+    tax: buildTaxSection(ledgerRows, assets, toSectionData(contracts)),
   };
 
   return <AdminConsole data={data} />;

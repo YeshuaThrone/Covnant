@@ -18,11 +18,25 @@ import { cvtDisplayCode } from '@/lib/splits/codes';
 import { isDemoDoorOpen, listDemoLaneExecutions } from '@/lib/admin/demoSeeds';
 import { MASTER_DEMO_ASSET_REGISTRY, bindFactoryEntity, executionTelemetryFor } from '@/lib/master/masterStore';
 import { entityClassTag } from '@/lib/master/CovnantAtomicDataSDK';
+import {
+  annualPayeeRows,
+  buildTaxJoinContext,
+  currencyRollupRows,
+  isDemoLedger,
+  periodSummaryRows,
+  resolvePayeePayouts,
+  transactionRegisterRows,
+  withholdingRegisterRows,
+  type TaxJoinContext,
+} from '@/lib/tax/withholding';
 import type { SovereignLedgerRecord } from '@/lib/master/sovereignLedger';
 import type {
   ContractRegistrySection,
+  ContractRow,
   ExecutionStampRow,
   LedgerFinancesSection,
+  SectionData,
+  TaxSectionData,
   TemplateBindingRow,
 } from '@/components/admin/types';
 
@@ -88,5 +102,72 @@ export function buildContractRegistrySection(
   }));
 
   return { demo: masterTemplates.demo, executions, templates };
+}
+
+/** The event's US state jurisdiction from the agreement's governing law ('US-TX Ledger Standard' → 'TX'). */
+function stateFromGoverningLaw(law: string): string | null {
+  const match = /^US-([A-Z]{2})\b/.exec(law);
+  return match ? match[1] : null;
+}
+
+/**
+ * The admin console's tax join context — the SAME joins the Tax tab and the
+ * CSV export use. Exported so payout-level tests fold through one builder.
+ */
+export function buildAdminTaxJoinContext(
+  assets: ListAssetsResult,
+  contracts: SectionData<ContractRow[]>,
+): TaxJoinContext {
+  return buildTaxJoinContext(assets, {
+    entityTypeLabels: MASTER_DEMO_ASSET_REGISTRY.map((asset) => ({
+      cbtCode: asset.cbt,
+      label: asset.kind,
+    })),
+    templateBindings: [
+      ...(contracts.kind === 'ready'
+        ? contracts.value.map((contract) => ({
+            cbtCode: contract.cbtCode,
+            templateId: contract.templateId,
+          }))
+        : []),
+      ...listDemoLaneExecutions().map((execution) => ({
+        cbtCode: execution.cbt ?? '',
+        templateId: execution.templateId,
+      })),
+    ],
+    eventStates: MASTER_DEMO_ASSET_REGISTRY.flatMap((asset) => {
+      const state = stateFromGoverningLaw(asset.agreement.governingLaw);
+      return state ? [{ cbtCode: asset.cbt, state }] : [];
+    }),
+  });
+}
+
+/**
+ * The Tax section's payload — the founder's tax data sheet. Every USD
+ * settlement's disbursements resolve through CovnantTaxEngineSDK (the tax
+ * engine of record) in chronological order with running per-payee YTD; the
+ * ledger layer keeps its own exact minor-unit sums. Joins derive from the
+ * stores of record: template bindings from the vault contracts plus the
+ * lane execution stamps, entity types from the asset registry plus the
+ * demo registry's kinds, event states from the agreements' governing law.
+ * The register covers EVERY creator with cleared history — never a
+ * curated subset (founder addendum, 2026-09-21).
+ */
+export function buildTaxSection(
+  rows: ListLedgerResult,
+  assets: ListAssetsResult,
+  contracts: SectionData<ContractRow[]>,
+): TaxSectionData {
+  const joinContext = buildAdminTaxJoinContext(assets, contracts);
+  const fold = resolvePayeePayouts(rows, joinContext);
+  return {
+    demo: isDemoLedger(rows),
+    payees: withholdingRegisterRows(fold.payouts, fold.ytdByPayee),
+    periods: periodSummaryRows(rows, fold.payouts),
+    annual: annualPayeeRows(fold.payouts),
+    transactions: transactionRegisterRows(rows, fold.payouts, joinContext),
+    currencies: currencyRollupRows(rows),
+    excludedNonUsdSettlements: fold.excludedNonUsdSettlements,
+  };
 }
 

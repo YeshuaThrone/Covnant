@@ -16,13 +16,13 @@
  */
 
 import { useMemo } from 'react';
-import { formatMinor, reconcileLedger } from '@/lib/ledger/reconciliation';
+import { formatMinor, reconciliationHeadline, reconcileLedger } from '@/lib/ledger/reconciliation';
 import { escrowStateFromRows } from '@/lib/ledger/finances';
 import { microToNumber } from '@/lib/fixed-point';
 import { formatLedgerAmount } from '@/lib/ledger/micro-adapter';
 import type { LedgerFinancesSection, MasterLedgerSection } from '../types';
 import { MasterStatCards, SovereignLedgerTable } from '@/components/master/MasterData';
-import { SectionEyebrow } from '../shared';
+import { SectionEyebrow, StatusPill } from '../shared';
 import { SettlementRowsTable } from '@/components/ledger/SettlementRows';
 
 function DemoBadge() {
@@ -43,9 +43,10 @@ export function LedgerSection({
   finances: LedgerFinancesSection;
   master?: MasterLedgerSection;
 }) {
-  // One reconciliation pass drives both the per-currency table and the row
-  // status badges — the /ledger page's own engine output.
+  // One reconciliation pass drives the headline strip, the per-currency
+  // table, and the row status badges — the /ledger page's own engine output.
   const reconciliation = useMemo(() => reconcileLedger(finances.rows), [finances.rows]);
+  const headline = useMemo(() => reconciliationHeadline(reconciliation), [reconciliation]);
   const escrow = useMemo(() => escrowStateFromRows(finances.rows), [finances.rows]);
 
   return (
@@ -71,6 +72,61 @@ export function LedgerSection({
         </div>
       ) : (
         <>
+          {/* Easy-read reconciliation strip — restored from the pre-split surface (founder addendum, 2026-09-21). Same engine pass as the table below. */}
+          <section aria-label="Reconciliation" className="mt-6">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-white">Reconciliation</h3>
+              <StatusPill
+                label={headline.status === 'RECONCILED' ? 'Verified' : 'Attention'}
+                tone={headline.status === 'RECONCILED' ? 'jade' : 'red'}
+              />
+            </div>
+            <p className="mt-2 max-w-2xl text-sm text-white/50">
+              Holder distributions sum to gross minus the stored fee which carries the
+              corner dust, net equals gross minus withholding per holder, no
+              floating-point arithmetic anywhere in this audit.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4" data-testid="reconciliation-strip">
+              <div className="glass-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Settlements</p>
+                <p className="mt-1 text-2xl font-semibold text-white" data-testid="reconciliation-settlements">
+                  {headline.settlements}
+                </p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Gross settled</p>
+                <p className="mt-1 text-2xl font-semibold text-gold" data-testid="reconciliation-gross">
+                  {headline.currency && headline.grossMinor !== null
+                    ? formatMinor(headline.grossMinor, headline.currency)
+                    : 'Per currency' }
+                </p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Covenant fees</p>
+                <p className="mt-1 text-2xl font-semibold text-gold" data-testid="reconciliation-fees">
+                  {headline.currency && headline.feesMinor !== null
+                    ? formatMinor(headline.feesMinor, headline.currency)
+                    : 'Per currency' }
+                </p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Corner dust</p>
+                <p className="mt-1 text-2xl font-semibold text-gold" data-testid="reconciliation-dust">
+                  {headline.currency && headline.dustMinor !== null
+                    ? formatMinor(headline.dustMinor, headline.currency)
+                    : 'Per currency' }
+                </p>
+              </div>
+            </div>
+            {headline.currency === null ? (
+              <p className="mt-3 font-mono text-xs text-white/30">
+                Multi-currency ledger — the headline reads per currency in the
+                settlement chain below; the ledger stores no FX, so currencies are
+                never summed across each other.
+              </p>
+            ) : null}
+          </section>
+
           {/* Per-currency settlement chain — the /ledger page's reconciliation engine output, formatted in exact minor units. */}
           <section aria-label="Corner-dust settlement chain" className="mt-6">
             <h3 className="text-lg font-semibold text-white">

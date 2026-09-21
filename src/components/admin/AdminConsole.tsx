@@ -18,6 +18,7 @@ import { OverviewSection } from './sections/OverviewSection';
 import { CreatorsSection } from './sections/CreatorsSection';
 import { RegistrySection } from './sections/RegistrySection';
 import { LedgerSection } from './sections/LedgerSection';
+import { TaxSection } from './sections/TaxSection';
 import { ContractsSection } from './sections/ContractsSection';
 import { AllowlistsSection } from './sections/AllowlistsSection';
 import { ControlBoardSection } from './sections/ControlBoardSection';
@@ -27,6 +28,7 @@ export type AdminTab =
   | 'creators'
   | 'registry'
   | 'ledger'
+  | 'tax'
   | 'contracts'
   | 'controlboard'
   | 'allowlists';
@@ -37,6 +39,7 @@ const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'registry', label: 'UCT Registry' },
   { id: 'ledger', label: 'Ledger' },
   { id: 'contracts', label: 'Contracts' },
+  { id: 'tax', label: 'Tax' },
   { id: 'controlboard', label: 'Control Board' },
   { id: 'allowlists', label: 'Allowlists' },
 ];
@@ -111,6 +114,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
           />
         )}
         {tab === 'contracts' && <ContractsSection registry={data.contractRegistry} contracts={data.contracts} />}
+        {tab === 'tax' && <TaxSection tax={data.tax} />}
         {tab === 'controlboard' && <ControlBoardSection board={data.controlBoard} />}
         {tab === 'allowlists' && (
           <AllowlistsSection
