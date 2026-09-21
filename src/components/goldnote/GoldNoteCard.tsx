@@ -13,15 +13,17 @@
  * the page header.
  *
  * There is no card-PAN, account, or routing source in this build, so the
- * number renders as a pending placeholder and the copy action stays
- * disabled — honesty over decoration. Full account/routing numbers exist
- * server-side only and would surface exclusively through the owner-only
- * reveal contract when that source lands.
+ * number renders as a pending placeholder: the copy control says so
+ * honestly instead of copying placeholder digits, and the wallet badges
+ * open an honest provisioning-status dialog instead of implying a pass
+ * was added. Full account/routing numbers exist server-side only and
+ * would surface exclusively through the owner-only reveal contract when
+ * that source lands.
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface GoldNoteCardProps {
   /** The holder identity — stage name from the session or seeded persona. */
@@ -49,6 +51,116 @@ function formatCents(cents: bigint): string {
   const rem = abs % 100n;
   const body = `${dollars.toLocaleString('en-US')}.${rem.toString().padStart(2, '0')}`;
   return negative ? `−$${body}` : `$${body}`;
+}
+
+/** The wallets whose badges open the provisioning-status dialog. */
+type WalletKey = 'apple' | 'google';
+
+const WALLET_NAMES: Record<WalletKey, string> = {
+  apple: 'Apple Wallet',
+  google: 'Google Wallet',
+};
+
+/** Honest copy feedback — the pending message never implies digits were copied. */
+const COPY_NO_NUMBER_MESSAGE = 'No card number issued yet — nothing to copy';
+const COPY_COPIED_MESSAGE = 'Copied';
+const COPY_FAILED_MESSAGE = 'Copy failed — nothing was copied';
+
+/**
+ * Clipboard write with a legacy fallback for non-secure contexts. Returns
+ * whether anything was actually copied — the caller reports honestly on
+ * failure instead of claiming a copy that never happened.
+ */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Clipboard API unavailable or rejected — try the legacy path below.
+  }
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The wallet provisioning-status dialog — the honest behavior behind the
+ * badges. Named by the wallet (aria-labelledby the wallet-name heading),
+ * body = the wallet note VERBATIM; closes via the close button, a backdrop
+ * click, or Escape. It explains the provisioning status — it never fakes
+ * or implies a wallet pass was added.
+ */
+function WalletProvisioningDialog({
+  walletName,
+  note,
+  onClose,
+}: {
+  walletName: string;
+  note: string;
+  onClose: () => void;
+}): React.JSX.Element {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Minimal focus management: the close button takes focus on open; the
+  // opener returns focus to its badge on close.
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      data-testid="goldnote-wallet-dialog-backdrop"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="goldnote-wallet-dialog-title"
+        data-testid="goldnote-wallet-dialog"
+        className="w-full max-w-sm rounded-2xl border border-gold/40 bg-obsidian p-6 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.65)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h3
+          id="goldnote-wallet-dialog-title"
+          className="font-mono text-xs font-bold uppercase tracking-[0.25em] text-gold-champagne"
+        >
+          {walletName}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-slate-200">{note}</p>
+        <button
+          ref={closeButtonRef}
+          type="button"
+          data-testid="goldnote-wallet-dialog-close"
+          onClick={onClose}
+          className="mt-5 inline-flex items-center rounded-lg border border-gold/50 bg-white/[0.04] px-4 py-2 text-sm font-medium text-gold-champagne transition-colors hover:border-gold hover:bg-white/[0.08]"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** The metallic EMV chip — pure SVG, gold-toned contacts. */
@@ -163,7 +275,48 @@ export function GoldNoteCard({
   walletNote,
 }: GoldNoteCardProps) {
   const [noteDismissed, setNoteDismissed] = useState(false);
+  const [activeWallet, setActiveWallet] = useState<WalletKey | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const walletOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = cardNumberMasked === PENDING_PLACEHOLDER;
+
+  // Clear the transient copy timer on unmount — no feedback after teardown.
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+
+  const closeWalletDialog = () => {
+    setActiveWallet(null);
+    walletOpenerRef.current?.focus();
+    walletOpenerRef.current = null;
+  };
+
+  const showCopyFeedback = (message: string) => {
+    setCopyFeedback(message);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopyFeedback(null), 2500);
+  };
+
+  // The honesty law: the pending placeholder is not a card number, so it is
+  // never written to the clipboard as if it were one.
+  const handleCopyNumber = () => {
+    if (pending) {
+      showCopyFeedback(COPY_NO_NUMBER_MESSAGE);
+      return;
+    }
+    void copyTextToClipboard(cardNumberMasked).then((copied) => {
+      showCopyFeedback(copied ? COPY_COPIED_MESSAGE : COPY_FAILED_MESSAGE);
+    });
+  };
+
+  const openWalletDialog = (wallet: WalletKey, opener: HTMLButtonElement) => {
+    walletOpenerRef.current = opener;
+    setActiveWallet(wallet);
+  };
 
   return (
     <div data-testid="goldnote-surface">
@@ -232,14 +385,16 @@ export function GoldNoteCard({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {/* Official wallet badges per the founder's reference (fl_kYE4tGl5):
             real Apple logo silhouette on the rounded rectangle, real Google G
-            in the official four colors on the stadium pill. Still disabled —
-            no provisioning source exists, so the affordance stays honest. */}
+            in the official four colors on the stadium pill. Click opens the
+            honest provisioning-status dialog — no provisioning source exists,
+            so the dialog explains instead of implying a pass was added. */}
         <button
           type="button"
           data-testid="goldnote-wallet-apple"
-          disabled
           title={walletNote}
-          className="inline-flex h-[46px] items-center gap-2.5 rounded-[12px] bg-black px-4 text-left opacity-80"
+          aria-haspopup="dialog"
+          onClick={(event) => openWalletDialog('apple', event.currentTarget)}
+          className="inline-flex h-[46px] cursor-pointer items-center gap-2.5 rounded-[12px] bg-black px-4 text-left opacity-80 transition hover:opacity-100 active:scale-[0.98]"
         >
           <AppleLogoMark />
           <span className="flex flex-col">
@@ -254,9 +409,10 @@ export function GoldNoteCard({
         <button
           type="button"
           data-testid="goldnote-wallet-google"
-          disabled
           title={walletNote}
-          className="inline-flex h-[46px] items-center gap-2.5 rounded-full bg-black px-4 text-left opacity-80"
+          aria-haspopup="dialog"
+          onClick={(event) => openWalletDialog('google', event.currentTarget)}
+          className="inline-flex h-[46px] cursor-pointer items-center gap-2.5 rounded-full bg-black px-4 text-left opacity-80 transition hover:opacity-100 active:scale-[0.98]"
         >
           <GoogleGMark />
           <span className="flex flex-col">
@@ -271,12 +427,21 @@ export function GoldNoteCard({
         <button
           type="button"
           data-testid="goldnote-copy-number"
-          disabled={pending}
           title={pending ? 'Card number pending — nothing to copy yet' : 'Copy card number'}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-500/50 bg-white/[0.04] px-4 py-2 text-sm text-slate-300 enabled:hover:border-gold/50 enabled:hover:text-gold-champagne disabled:opacity-50"
+          onClick={handleCopyNumber}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-500/50 bg-white/[0.04] px-4 py-2 text-sm text-slate-300 transition hover:border-gold/50 hover:text-gold-champagne active:scale-[0.98]"
         >
           Copy card number
         </button>
+        {copyFeedback && (
+          <span
+            data-testid="goldnote-copy-feedback"
+            role="status"
+            className="text-xs font-medium text-gold-champagne"
+          >
+            {copyFeedback}
+          </span>
+        )}
       </div>
       {!noteDismissed && (
         <p
@@ -356,6 +521,15 @@ export function GoldNoteCard({
           </span>
         </a>
       </section>
+
+      {/* The honest wallet provisioning dialog — explains, never provisions. */}
+      {activeWallet && (
+        <WalletProvisioningDialog
+          walletName={WALLET_NAMES[activeWallet]}
+          note={walletNote}
+          onClose={closeWalletDialog}
+        />
+      )}
     </div>
   );
 }
