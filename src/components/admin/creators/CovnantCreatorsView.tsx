@@ -1,8 +1,10 @@
 /**
  * CovnantCreatorsView — the founder-directed Creators View (v2.7.2,
  * signup-aligned per the Signup API Contract art_gOfrFMCA): every card leads
- * with the creator's signup identity, carries the Universal Covnant Tag as a
- * PROMINENT field with its issuance date, and shows missing values honestly
+ * with the creator's signup identity, carries the Universal Covnant Tag as the
+ * PROMINENT top-right identity chip with its issuance date (founder direction
+ * 2026-09-22: the UCT lives in the issuance slot where the status pill used to
+ * sit), and shows missing values honestly
  * ("Not provided" / "Not attributed") instead of inventing them.
  *
  * Purely presentational and data-driven: every value arrives in CreatorCardData.
@@ -49,6 +51,41 @@ function StatusPill({ status }: { status: CreatorCardData['status'] }) {
   );
 }
 
+/**
+ * The issuance slot — the card's top-right corner, where the UCT lives
+ * (founder direction 2026-09-22). A provisioned UCT renders as the gold
+ * identity chip with its issuance date; a pending creator shows the honest
+ * "UCT pending" ghost so the slot never lies or sits empty without cause.
+ */
+function UctChip({ card }: { card: CreatorCardData }) {
+  if (card.uct) {
+    return (
+      <div
+        data-testid="uct-chip"
+        className="shrink-0 rounded-lg border border-gold/30 bg-obsidian-950/60 px-3 py-1.5 text-right"
+      >
+        <p className="font-mono text-sm font-semibold text-gold-champagne">{card.uct}</p>
+        {card.uctCreatedAt ? (
+          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">
+            issued {card.uctCreatedAt.slice(0, 10)}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  if (card.status === 'PENDING') {
+    return (
+      <span
+        data-testid="uct-chip-pending"
+        className="inline-flex shrink-0 items-center rounded-full border border-amber-300/25 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.25em] text-amber-300/70"
+      >
+        UCT pending
+      </span>
+    );
+  }
+  return null;
+}
+
 function CreatorCard({ card }: { card: CreatorCardData }) {
   return (
     <article
@@ -63,7 +100,7 @@ function CreatorCard({ card }: { card: CreatorCardData }) {
             {card.legal_name}
           </p>
         </div>
-        <StatusPill status={card.status} />
+        <UctChip card={card} />
       </div>
 
       <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
@@ -93,22 +130,12 @@ function CreatorCard({ card }: { card: CreatorCardData }) {
         </div>
       </dl>
 
-      {/* The creator-root identity — prominent, never a footer footnote. */}
-      <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border border-gold/25 bg-obsidian-950/60 px-4 py-3">
-        <p className={FIELD_LABEL_CLASS}>Universal Covnant Tag</p>
-        {card.uct ? (
-          <p className="font-mono text-sm font-semibold text-gold-champagne">
-            {card.uct}
-            {card.uctCreatedAt ? (
-              <span className="ml-3 text-xs font-normal text-white/40">
-                issued {card.uctCreatedAt.slice(0, 10)}
-              </span>
-            ) : null}
-          </p>
-        ) : (
-          <p className="font-mono text-sm text-white/40">Not yet on file</p>
-        )}
-      </div>
+      {/* Issuance state — always explicit, never a footer footnote. */}
+      {card.status ? (
+        <div className="mt-4 flex items-center justify-start">
+          <StatusPill status={card.status} />
+        </div>
+      ) : null}
     </article>
   );
 }
