@@ -19,6 +19,8 @@ import { AuditRunner } from '@/components/vault/AuditRunner';
 import { VerificationBadge } from '@/components/brand/VerificationBadge';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
 import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { formatCentsBigint } from '@/lib/money/format';
+import { cornerDustRemainder } from '@/lib/tax/controlBoardSummary';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import {
@@ -26,6 +28,20 @@ import {
   MasterStatCards,
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
+
+/**
+ * PATCH v2.6.4 — the summary-level corner-dust figure, IDENTICAL to the
+ * /admin Ledger tab's derivation (one truth, never copied strings — the
+ * finances selector header): the adapter's DERIVED sweep remainder over the
+ * reconciliation's recorded dust, in the patch's strict 2-decimal voice.
+ * The sweep identity of record (reconcileRow: the stored fee = finalFee =
+ * base fee + dust) puts every collected dust cent inside the fee layer, so
+ * the remainder reads $0.00 under the sweep — derived from the engine's own
+ * totals, never a display literal.
+ */
+function summaryDustDisplay(dustOfRecordMinor: bigint): string {
+  return formatCentsBigint(cornerDustRemainder(dustOfRecordMinor, dustOfRecordMinor));
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -113,7 +129,7 @@ export default async function LedgerPage({
                   <th className="px-4 py-3">Currency</th>
                   <th className="px-4 py-3 text-right">Settlements</th>
                   <th className="px-4 py-3 text-right">Gross</th>
-                  <th className="px-4 py-3 text-right">Fees (incl. dust)</th>
+                  <th className="px-4 py-3 text-right">Fees (incl. corner dust)</th>
                   <th className="px-4 py-3 text-right">Corner dust</th>
                 </tr>
               </thead>
@@ -129,7 +145,7 @@ export default async function LedgerPage({
                       {formatMinor(t.feesMinor, t.currency)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-white/60">
-                      {formatMinor(t.dustMinor, t.currency)}
+                      {summaryDustDisplay(t.dustMinor)}
                     </td>
                   </tr>
                 ))}

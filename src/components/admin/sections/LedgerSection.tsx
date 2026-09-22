@@ -25,6 +25,24 @@ import { MasterStatCards, SovereignLedgerTable } from '@/components/master/Maste
 import { SectionEyebrow, StatusPill } from '../shared';
 import { SettlementRowsTable } from '@/components/ledger/SettlementRows';
 
+import { formatCentsBigint } from '@/lib/money/format';
+import { cornerDustRemainder } from '@/lib/tax/controlBoardSummary';
+
+/**
+ * PATCH v2.6.4 — the summary-level corner-dust figure: the adapter's DERIVED
+ * sweep remainder over the reconciliation's recorded dust, rendered in the
+ * patch's strict 2-decimal voice. The sweep identity of record (reconcileRow:
+ * the stored fee = finalFee = base fee + dust) puts every collected dust cent
+ * inside the fee layer, so the dust swept into fees IS the recorded dust and
+ * the remainder reads $0.00 under the sweep — derived from the engine's own
+ * totals through the adapter, never a display literal. Detail-level dust
+ * cells keep their real engine values: the audit trail the patch leaves
+ * alone.
+ */
+function summaryDustDisplay(dustOfRecordMinor: bigint): string {
+  return formatCentsBigint(cornerDustRemainder(dustOfRecordMinor, dustOfRecordMinor));
+}
+
 function DemoBadge() {
   return (
     <span
@@ -102,7 +120,7 @@ export function LedgerSection({
                 </p>
               </div>
               <div className="glass-card p-4">
-                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Covenant fees</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Fees (incl. corner dust)</p>
                 <p className="mt-1 text-2xl font-semibold text-gold" data-testid="reconciliation-fees">
                   {headline.currency && headline.feesMinor !== null
                     ? formatMinor(headline.feesMinor, headline.currency)
@@ -113,7 +131,7 @@ export function LedgerSection({
                 <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Corner dust</p>
                 <p className="mt-1 text-2xl font-semibold text-gold" data-testid="reconciliation-dust">
                   {headline.currency && headline.dustMinor !== null
-                    ? formatMinor(headline.dustMinor, headline.currency)
+                    ? summaryDustDisplay(headline.dustMinor)
                     : 'Per currency' }
                 </p>
               </div>
@@ -134,7 +152,8 @@ export function LedgerSection({
             </h3>
             <p className="mt-2 max-w-2xl text-sm text-white/50">
               The engine&apos;s integer path: gross minus platform fees (fees include the
-              swept dust) — corner dust isolated per currency, never a float sum.
+              swept dust) — the summary dust column reads the derived sweep remainder,
+              nothing left outside the fee layer, never a float sum.
             </p>
             <div className="mt-4 overflow-x-auto rounded-lg border border-white/10" data-testid="corner-dust-settlement-table">
               <table className="status-table">
@@ -143,7 +162,7 @@ export function LedgerSection({
                     <th className="px-4 py-3 font-medium">Currency</th>
                     <th className="px-4 py-3 font-medium">Settlements</th>
                     <th className="px-4 py-3 font-medium text-right">Gross</th>
-                    <th className="px-4 py-3 font-medium text-right">Fees incl. dust</th>
+                    <th className="px-4 py-3 font-medium text-right">Fees (incl. corner dust)</th>
                     <th className="px-4 py-3 font-medium text-right">Corner dust</th>
                   </tr>
                 </thead>
@@ -159,7 +178,7 @@ export function LedgerSection({
                         {formatMinor(totals.feesMinor, totals.currency)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90" data-testid="corner-dust-minor-cell">
-                        {formatMinor(totals.dustMinor, totals.currency)}
+                        {summaryDustDisplay(totals.dustMinor)}
                       </td>
                     </tr>
                   ))}

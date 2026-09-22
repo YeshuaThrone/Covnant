@@ -11,20 +11,20 @@
  * tax-escrow lock state with its reason. The ledger net is the PRE-TAX
  * distributable; the engine resolves the final clean yield before the
  * 50/35/15 release. HELD_IN_TAX_ESCROW rows read amber with the lock
- * reason visible; CLEARED rows stay normal. The CSV download hands the
+ * reason visible; CLEARED rows read "Released" — the patch v2.6.4 label
+ * voice, mapped at render only: the stored state of record (TaxLockState +
+ * lockReason) never changes. The CSV download hands the
  * tax agent the whole sheet — both layers, every creator of record.
  */
 
 import { formatMinor } from '@/lib/ledger/reconciliation';
+import { formatCentsBigint } from '@/lib/money/format';
+import { escrowStatusOf, formTagOf, tinStatusOf } from '@/lib/tax/controlBoardSummary';
+import type { TaxLockState } from '@/lib/tax/CovnantTaxComplianceSDK';
 import { SectionEyebrow, StatusPill } from '../shared';
 import type { TaxSectionData, TaxPayeeRowView } from '../types';
 
 const usdCentsFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-
-/** Engine-layer USD cents formatted for display. */
-function formatEngineCents(cents: bigint): string {
-  return usdCentsFormat.format(Number(cents) / 100);
-}
 
 /** Combined effective rate as a percent. */
 function formatRate(rate: number): string {
@@ -47,9 +47,18 @@ function DemoBadge() {
   );
 }
 
-/** The tax-escrow lock chip — amber with the reason visible (canon: honesty). */
-function LockChip({ state, reason }: { state: string; reason: string | null }) {
-  if (state !== 'HELD_IN_TAX_ESCROW') return null;
+/**
+ * The tax-escrow lock chip — the patch v2.6.4 display canon over the state
+ * of record. The adapter's escrowStatus is the derived DATA token ('CLEARED'
+ * or the lock reason of record); the label layer alone renders the patch's
+ * voice: a cleared payout reads "Released" (released from tax escrow), a
+ * held one stays amber with the reason visible (canon: honesty). The stored
+ * TaxLockState + lockReason never change.
+ */
+function LockChip({ state, reason }: { state: TaxLockState; reason: string | null }) {
+  if (escrowStatusOf(state, reason) === 'CLEARED') {
+    return <StatusPill label="Released" tone="jade" />;
+  }
   return (
     <span className="inline-flex flex-col items-start gap-1">
       <StatusPill label="Held in tax escrow" tone="amber" />
@@ -128,16 +137,23 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
-                  {tax.payees.map((payee) => (
+                  {tax.payees.map((payee) => {
+                    // The patch's display canon at the render layer: the TIN
+                    // label maps through the adapter's fail-closed boundary
+                    // (canon tokens pass through), and the form tag suppresses
+                    // the 1099 forms behind the corporate exemption. The
+                    // row's stored view is never mutated.
+                    const tinStatus = tinStatusOf(payee.tinStatus);
+                    return (
                     <tr key={payee.payeeId}>
                       <td className="px-4 py-3 text-white">{payeeCell(payee)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{payee.isni ?? 'Not on file'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{payee.ipi ?? 'Not on file'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{payee.jurisdiction ?? 'Not on file'}</td>
                       <td className="px-4 py-3">
-                        <StatusPill label={payee.tinStatus} tone={payee.tinStatus === 'VERIFIED' ? 'jade' : 'amber'} />
+                        <StatusPill label={tinStatus} tone={tinStatus === 'VERIFIED' ? 'jade' : 'amber'} />
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/60">{payee.forms.join(' | ')}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-white/60">{formTagOf(payee)}</td>
                       <td className="px-4 py-3 text-right text-white/60">{payee.transactionCount}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/80">
                         {formatMinor(payee.grossMinor, 'USD')}
@@ -158,7 +174,8 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                         <LockChip state={payee.lockState} reason={payee.lockReason} />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -208,13 +225,13 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                         {formatMinor(period.netMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
-                        {formatEngineCents(period.engine.withheldCents)}
+                        {formatCentsBigint(period.engine.withheldCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
-                        {formatEngineCents(period.engine.stateTaxCents)}
+                        {formatCentsBigint(period.engine.stateTaxCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-gold">
-                        {formatEngineCents(period.engine.netCents)}
+                        {formatCentsBigint(period.engine.netCents)}
                       </td>
                     </tr>
                   ))}
@@ -325,13 +342,13 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                         {formatMinor(row.netMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
-                        {formatEngineCents(row.engine.withheldCents)}
+                        {formatCentsBigint(row.engine.withheldCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
-                        {formatEngineCents(row.engine.stateTaxCents)}
+                        {formatCentsBigint(row.engine.stateTaxCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-gold">
-                        {formatEngineCents(row.engine.netCents)}
+                        {formatCentsBigint(row.engine.netCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/80">
                         {formatRate(row.effectiveRate)}

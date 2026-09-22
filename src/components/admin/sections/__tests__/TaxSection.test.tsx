@@ -20,11 +20,14 @@ import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { buildTaxSection } from '@/lib/admin/sectionPayloads';
 import { buildTaxExportCsv, parseCsv } from '@/lib/tax/exportCsv';
+import { formatWithholdingRow, tinStatusOf } from '@/lib/tax/controlBoardSummary';
+import { formatCentsBigint } from '@/lib/money/format';
 import { TaxSection } from '../TaxSection';
 import type { LedgerRow } from '@/lib/ledger/store';
-import type { ContractRow, SectionData } from '@/components/admin/types';
+import type { ContractRow, SectionData, TaxSectionData } from '@/components/admin/types';
 
 let rows: LedgerRow[];
+let tax: TaxSectionData;
 let markup: string;
 let payeeNames: string[];
 let heldPayees: { name: string; reason: string | null }[];
@@ -37,7 +40,7 @@ beforeAll(async () => {
   rows = await listLedger();
   const assets = await listAssets();
   const contracts: SectionData<ContractRow[]> = { kind: 'ready', value: [] };
-  const tax = buildTaxSection(rows, assets, contracts);
+  tax = buildTaxSection(rows, assets, contracts);
   markup = renderToStaticMarkup(<TaxSection tax={tax} />);
 
   payeeNames = tax.payees.map((payee) => payee.payeeName);
@@ -71,6 +74,59 @@ describe('TaxSection — the tax data sheet', () => {
     }
   });
 
+  it('renders CLEARED escrow rows as Released — the label layer alone (patch v2.6.4)', () => {
+    const clearedPayees = tax.payees.filter((payee) => payee.lockState === 'CLEARED');
+    expect(clearedPayees.length, 'the demo branches include a cleared payee').toBeGreaterThan(0);
+    // The patch's label voice rendered for cleared payouts...
+    expect(markup).toContain('Released');
+    // ...while the state of record stays CLEARED on every composer row —
+    // the render maps the adapter's escrowStatus token, never the stored
+    // TaxLockState + lockReason (C4: both engine lock reasons survive).
+    for (const payee of clearedPayees) {
+      expect(payee.lockState).toBe('CLEARED');
+    }
+    expect(markup).toContain('Held in tax escrow');
+  });
+
+  it('renders the adapter form tags — corporate suppression and the PENDING tag', () => {
+    // EQUALITY against the adapter's own display mapping over the same
+    // composer rows — never a duplicated literal.
+    for (const payee of tax.payees) {
+      expect(markup, `form tag for ${payee.payeeName}`).toContain(formatWithholdingRow(payee).formTag);
+    }
+    const exempt = tax.payees.find((payee) => payee.forms.includes('EXEMPT_CORPORATE'));
+    expect(exempt, 'the demo branches include an EXEMPT_CORPORATE payee').toBeDefined();
+    expect(formatWithholdingRow(exempt!).formTag).toBe('EXEMPT_CORPORATE');
+    const pending = tax.payees.find((payee) => payee.tinStatus === 'PENDING');
+    expect(pending, 'the demo branches include a PENDING TIN payee').toBeDefined();
+    // This dataset's PENDING payee carries the corporate exemption: the
+    // suppression rule takes precedence over the (PENDING) tag. The suffix
+    // itself is pinned at the adapter on a non-exempt row
+    // (controlBoardSummary.test.ts — 'tags the form (PENDING)...'); here the
+    // render maps whatever the adapter decides, per the equality loop above.
+    expect(formatWithholdingRow(pending!).formTag).toBe('EXEMPT_CORPORATE');
+    expect(markup).toContain(formatWithholdingRow(pending!).formTag);
+  });
+
+  it('renders the TIN labels through the adapter boundary map', () => {
+    for (const payee of tax.payees) {
+      expect(markup, `TIN label for ${payee.payeeName}`).toContain(tinStatusOf(payee.tinStatus));
+    }
+  });
+
+  it('renders the engine figures through the shared bigint formatter (no float path)', () => {
+    // The engine totals of record, formatted by the shared formatCentsBigint
+    // — the composer's own figures, never a duplicated literal.
+    for (const period of tax.periods) {
+      expect(markup).toContain(formatCentsBigint(period.engine.withheldCents));
+      expect(markup).toContain(formatCentsBigint(period.engine.stateTaxCents));
+      expect(markup).toContain(formatCentsBigint(period.engine.netCents));
+    }
+    for (const row of tax.transactions) {
+      expect(markup).toContain(formatCentsBigint(row.engine.netCents));
+    }
+  });
+
   it('shows the effective rate column on the register', () => {
     expect(markup).toContain('Effective rate');
   });
@@ -92,13 +148,13 @@ describe('TaxSection — the CSV the download hands the tax agent', () => {
   it('parses back with every creator and every CBT stamp of record', async () => {
     const assets = await listAssets();
     const contracts: SectionData<ContractRow[]> = { kind: 'ready', value: [] };
-    const tax = buildTaxSection(rows, assets, contracts);
-    const csv = buildTaxExportCsv(tax);
+    const exportTax = buildTaxSection(rows, assets, contracts);
+    const csv = buildTaxExportCsv(exportTax);
     const flat = parseCsv(csv).flat();
     for (const name of payeeNames) {
       expect(flat).toContain(name);
     }
-    for (const row of tax.transactions) {
+    for (const row of exportTax.transactions) {
       expect(flat).toContain(row.cbt);
     }
   });

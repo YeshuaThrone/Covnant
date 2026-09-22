@@ -17,10 +17,13 @@ import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { reconcileLedger, formatMinor, reconciliationHeadline } from '@/lib/ledger/reconciliation';
 import { escrowStateFromRows } from '@/lib/ledger/finances';
-import { buildLedgerFinancesSection } from '@/lib/admin/sectionPayloads';
+import { buildLedgerFinancesSection, buildTaxSection } from '@/lib/admin/sectionPayloads';
+import { cornerDustRemainder, reconcilePeriodSummary } from '@/lib/tax/controlBoardSummary';
+import { formatCentsBigint } from '@/lib/money/format';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { LedgerSection } from '../LedgerSection';
+import type { ContractRow, SectionData } from '@/components/admin/types';
 
 beforeAll(async () => {
   // The dev-seed boot — settlements land through the REAL settlement engine.
@@ -47,9 +50,13 @@ describe('LedgerSection — the finances surface', () => {
       expect(currencyBlock, `gross ${totals.grossMinor} ${totals.currency} rendered`).toBe(true);
       expect(markup.includes(formatMinor(totals.feesMinor, totals.currency)),
         `fees ${totals.feesMinor} ${totals.currency} rendered`).toBe(true);
-      // Corner dust of record — the founder's restored view, engine-exact.
-      expect(markup.includes(formatMinor(totals.dustMinor, totals.currency)),
-        `corner dust ${totals.dustMinor} ${totals.currency} rendered`).toBe(true);
+      // Corner dust — summary level renders the patch's DERIVED sweep
+      // remainder (patch v2.6.4), the same adapter expression per currency
+      // block; the real per-row engine values stay in the settlement
+      // records below (the audit trail the patch leaves alone).
+      const summaryDust = formatCentsBigint(cornerDustRemainder(totals.dustMinor, totals.dustMinor));
+      expect(markup.includes(summaryDust),
+        `derived dust remainder ${summaryDust} rendered for ${totals.currency}`).toBe(true);
     }
 
     // The settlement math chain headers, in order of the surface.
@@ -114,7 +121,10 @@ describe('LedgerSection — the easy-read reconciliation strip (founder addendum
     // and the four stat cards — the strip sits above the settlement table.
     expect(markup).toContain('data-testid="reconciliation-strip"');
     expect(markup).toContain('Gross settled');
-    expect(markup).toContain('Covenant fees');
+    // PATCH v2.6.4 — the fees figure carries the sweep's label of record;
+    // the pre-patch card name is gone from the surface.
+    expect(markup).toContain('Fees (incl. corner dust)');
+    expect(markup).not.toContain('Covenant fees');
     expect(markup).toContain('Corner dust');
     expect(markup).toContain('no floating-point arithmetic anywhere in this audit');
 
@@ -125,14 +135,42 @@ describe('LedgerSection — the easy-read reconciliation strip (founder addendum
     if (headline.currency && headline.grossMinor !== null) {
       expect(markup).toContain(formatMinor(headline.grossMinor, headline.currency));
       expect(markup).toContain(formatMinor(headline.feesMinor!, headline.currency));
-      // The corner-dust card equals the settlement table's corner-dust
+      // The corner-dust card still equals the settlement table's corner-dust
       // column sum: one reconcile pass feeds card and table alike.
       const tableDust = reconcileLedger(rows).byCurrency.reduce(
         (sum, totals) => sum + totals.dustMinor,
         0n,
       );
       expect(headline.dustMinor).toBe(tableDust);
-      expect(markup).toContain(formatMinor(headline.dustMinor!, headline.currency));
+    }
+  });
+
+  it('renders the DERIVED dust remainder at summary level — the adapter summary figure, never a literal (patch v2.6.4)', async () => {
+    const rows = await listLedger();
+    const assets = await listAssets();
+    const markup = renderToStaticMarkup(
+      <LedgerSection finances={buildLedgerFinancesSection(rows, assets)} />,
+    );
+
+    // The adapter's cleared period summary over the SAME register the Tax
+    // tab reads — the composer path, on the live dev-seed store.
+    const contracts: SectionData<ContractRow[]> = { kind: 'ready', value: [] };
+    const summary = reconcilePeriodSummary(
+      buildTaxSection(rows, assets, contracts).transactions,
+    );
+    // Under the sweep identity the summary's dust reads zero — DERIVED by
+    // the adapter (its own test pins the expression); here we pin the RENDER.
+    expect(summary.displayCornerDust).toBe('$0.00');
+    expect(markup).toContain('data-testid="reconciliation-dust"');
+    expect(markup).toContain(summary.displayCornerDust);
+
+    // Mirror agreement: the /ledger page derives the SAME remainder per
+    // currency from the SAME reconciliation pass — the two surfaces cannot
+    // disagree (one truth, never copied strings).
+    for (const totals of reconcileLedger(rows).byCurrency) {
+      expect(formatCentsBigint(cornerDustRemainder(totals.dustMinor, totals.dustMinor))).toBe(
+        summary.displayCornerDust,
+      );
     }
   });
 });
