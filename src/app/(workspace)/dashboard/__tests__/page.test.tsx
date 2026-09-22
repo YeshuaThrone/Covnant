@@ -7,7 +7,8 @@
  * avatar chip, three vault-bucket cards with right-aligned balances, the
  * REVENUE STREAMS strip (store-read, per goldBoardUiSpec — Quick Actions
  * are REMOVED), the ADMIN console pill in the page-header slot, carousel
- * dots, View all → /ledger, payout rail tiles (RTP instant, ACH +3
+ * dots, no View all button (founder directive 2026-09-22: /ledger is a
+ * backend data page), payout rail tiles (RTP instant, ACH +3
  * business days), dense transaction rows with debit/credit pairs + See
  * more, the readiness panel — plus the brand rails: browser title, no
  * blue palette, no fabricated identity (no UCT rendered, no account
@@ -118,10 +119,10 @@ describe('/dashboard — The Don composition', () => {
     }
   });
 
-  it('wires View all to the Ownership Ledger and renders three carousel dots', async () => {
+  it('renders three carousel dots and NO View all button (founder directive 2026-09-22: /ledger is a backend data page)', async () => {
     const html = await renderDashboardPage();
-    expect(html).toContain('data-testid="accounts-view-all"');
-    expect(html).toContain('href="/ledger"');
+    expect(html).not.toContain('data-testid="accounts-view-all"');
+    expect(html).not.toContain('View all');
     expect(html).toContain('data-testid="carousel-dots"');
     expect((html.match(/role="tab"/g) ?? []).length).toBe(3);
   });
@@ -154,7 +155,10 @@ describe('/dashboard — The Don composition', () => {
     expect(html).toContain('DR $2,000,000,000.00 / CR $0.00');
     expect(html).toContain('−$250,000.00'); // payout displayed as outflow
     expect(html).toContain('data-testid="transactions-see-more"');
-    expect(html).toContain('href="/ledger"');
+    // See more wires to the holder-facing /transactions surface — NOT /ledger
+    // (founder directive 2026-09-22: the Master Ledger & Settlement History
+    // is a backend data page, removed from this page as a destination).
+    expect(html).toContain('href="/transactions"');
   });
 
   it('renders the quiet readiness side panel with text-labeled states', async () => {

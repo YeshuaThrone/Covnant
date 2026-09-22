@@ -2,7 +2,7 @@
  * /dashboard — THE DON, the money-first home (the BANKAPPDT&MOBILE bank
  * reference, element-for-element): left sidebar (the shell), greeting row
  * with avatar chip, the Accounts label with three cards, right-aligned
- * balances + sublabels, carousel dots / View all, compact square action
+ * balances + sublabels, carousel dots, compact square action
  * tiles, dense transactions card with See more, quiet readiness panel,
  * thin footer (the shell's).
  *
@@ -232,19 +232,11 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
       <div className="gold-rule my-6 md:my-8" />
 
       {/* Accounts — the three vault buckets as wide calm balance cards;
-          one-card carousel on mobile. "View all" wires to the Ownership
-          Ledger, the full-financial-picture surface (real route). */}
+          one-card carousel on mobile. The former "View all → /ledger" button
+          is removed (founder directive 2026-09-22: the Master Ledger &
+          Settlement History surface is a backend data page). */}
       <section aria-label="Accounts">
-        <div className="flex items-center justify-between gap-4">
-          <SectionLabel>Accounts</SectionLabel>
-          <Link
-            href="/ledger"
-            data-testid="accounts-view-all"
-            className="inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5 text-[11px] font-semibold text-gold-champagne transition-colors hover:bg-gold/20"
-          >
-            View all
-          </Link>
-        </div>
+        <SectionLabel>Accounts</SectionLabel>
         <div
           id="accounts-row"
           data-testid="accounts-row"
