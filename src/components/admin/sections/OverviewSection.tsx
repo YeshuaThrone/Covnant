@@ -6,6 +6,7 @@
  */
 
 import { AuditRunner } from '@/components/vault/AuditRunner';
+import { RevenueStreamsStrip } from '@/components/dashboard/HomePanels';
 import { allowlistsSummary } from '@/lib/admin/overviewShared';
 import { formatChangeValue } from '@/lib/admin/console';
 import type { AdminConsoleData, ContractRow } from '../types';
@@ -73,6 +74,40 @@ export function OverviewSection({ data }: { data: AdminConsoleData }) {
       <div className="gold-rule mt-10 w-64" />
       <div className="mt-8 max-w-2xl">
         <AuditRunner />
+      </div>
+
+      {/* Revenue streams — moved off the Gold Board (founder directive
+          2026-09-22), rendered under Smart Ledger Verification. The
+          operator's platform-wide mirror of the holder strip: every payee's
+          royalty-ingest vault credit legs grouped by the split run's source.
+          Store-read only — the empty and unavailable states are honest. */}
+      <div className="mt-8 max-w-2xl" aria-label="Revenue streams">
+        <SectionEyebrow>Revenue streams</SectionEyebrow>
+        <p className="mt-2 text-[13px] leading-relaxed text-white/40">
+          Platform-wide royalty inflow by source — aggregated from the GL&apos;s
+          royalty-ingest vault credit legs. Store-read; nothing invented.
+        </p>
+        <div className="mt-3">
+          {data.revenueStreams.kind === 'ready' ? (
+            data.revenueStreams.value.length > 0 ? (
+              <RevenueStreamsStrip streams={data.revenueStreams.value} />
+            ) : (
+              <p
+                data-testid="revenue-streams-empty-admin"
+                className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 text-sm leading-relaxed text-white/40"
+              >
+                No royalty postings yet — streams appear with the first royalty ingest.
+              </p>
+            )
+          ) : (
+            <p
+              data-testid="revenue-streams-unavailable"
+              className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 text-sm leading-relaxed text-white/40"
+            >
+              Revenue stream read failed ({data.revenueStreams.code}) — {data.revenueStreams.message}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

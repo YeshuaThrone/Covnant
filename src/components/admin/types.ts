@@ -11,6 +11,7 @@ import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
 import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
 import type { SettlementRowView } from '@/lib/ledger/finances';
+import type { GoldBoardRevenueStream } from '../../../covnant-sdk/src/contracts/goldBoardUiSpec';
 import type {
   TaxAnnualRowView,
   TaxCurrencyRowView,
@@ -147,6 +148,12 @@ export interface AdminConsoleData {
    * engine so the console section renders the identical library.
    */
   controlBoard: ControlBoardState;
+  /**
+   * The Overview tab's Revenue Streams strip (founder directive 2026-09-22:
+   * moved off the Gold Board, rendered under Smart Ledger Verification) —
+   * platform-wide royalty inflow by source, store-read only.
+   */
+  revenueStreams: SectionData<GoldBoardRevenueStream[]>;
 }
 
 /** The eight console tabs, in operator order. */

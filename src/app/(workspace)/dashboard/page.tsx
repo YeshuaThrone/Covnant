@@ -42,7 +42,6 @@ import {
 import { CarouselDots } from '@/components/dashboard/CarouselDots';
 import {
   ReadinessChecklist,
-  RevenueStreamsStrip,
   TransactionsPanel,
 } from '@/components/dashboard/HomePanels';
 import {
@@ -253,15 +252,6 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
         <SectionLabel>Payouts</SectionLabel>
         <div className="mt-3">
           <PayoutRailTiles tiles={payouts} />
-        </div>
-      </section>
-
-      {/* Revenue streams — the holder's royalty inflow by source, aggregated
-          from the holder-scoped GL (store-read only). */}
-      <section aria-label="Revenue streams" className="mt-8 md:mt-10">
-        <SectionLabel>Revenue streams</SectionLabel>
-        <div className="mt-3">
-          <RevenueStreamsStrip streams={data.revenue_streams} />
         </div>
       </section>
 

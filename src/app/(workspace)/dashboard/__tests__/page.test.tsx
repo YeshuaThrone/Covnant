@@ -4,11 +4,12 @@
  * store boots through the real engines (DON_DEV_SEED=1, no mocks — the
  * same path the e2e harness and preview use). Pins the Gold Board UI spec
  * (goldBoardUiSpec) element-for-element — THE DON wordmark, greeting +
- * avatar chip, three vault-bucket cards with right-aligned balances, the
- * REVENUE STREAMS strip (store-read, per goldBoardUiSpec — Quick Actions
- * are REMOVED), the ADMIN console pill in the page-header slot, carousel
- * dots, no View all button (founder directive 2026-09-22: /ledger is a
- * backend data page), payout rail tiles (RTP instant, ACH +3
+ * avatar chip, three vault-bucket cards with right-aligned balances, NO
+ * revenue streams strip (founder directive 2026-09-22: moved to the admin
+ * Overview) and NO Quick Actions (goldBoardUiSpec), the ADMIN console pill
+ * in the page-header slot, carousel dots, no View all button (founder
+ * directive 2026-09-22: /ledger is a backend data page), payout rail tiles
+ * (RTP instant, ACH +3
  * business days), dense transaction rows with debit/credit pairs + See
  * more, the readiness panel — plus the brand rails: browser title, no
  * blue palette, no fabricated identity (no UCT rendered, no account
@@ -91,17 +92,10 @@ describe('/dashboard — The Don composition', () => {
     expect(reserveBalance.slice(0, 200)).not.toContain('$1,000,000,000.00');
   });
 
-  it('renders the revenue streams strip and NO quick actions (goldBoardUiSpec)', async () => {
+  it('renders NO revenue streams strip (founder directive 2026-09-22: moved to the admin Overview, under Smart Ledger Verification) and NO quick actions (goldBoardUiSpec)', async () => {
     const html = await renderDashboardPage();
-    expect(html).toContain('Revenue streams');
-    expect(html).toContain('data-testid="revenue-streams"');
-    // Store-read per-source royalty inflow — Spotify (two settlements),
-    // Amazon Music, YouTube Music, Bandcamp (one each).
-    expect((html.match(/data-testid="revenue-stream"/g) ?? []).length).toBe(4);
-    expect(html).toContain('Spotify');
-    expect(html).toContain('Amazon Music');
-    expect(html).toContain('YouTube Music');
-    expect(html).toContain('Bandcamp');
+    expect(html).not.toContain('Revenue streams');
+    expect(html).not.toContain('data-testid="revenue-streams"');
     // Quick actions are REMOVED — the strip is read-only financial truth.
     expect(html).not.toContain('data-testid="quick-actions"');
     expect(html).not.toContain('Quick actions');

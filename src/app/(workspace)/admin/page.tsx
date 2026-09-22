@@ -48,6 +48,9 @@ import type {
   ContractTemplateRecord,
 } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
+import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
+import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
+import { getStore, type Store } from '@/lib/server/store';
 import { AdminGate } from '@/components/admin/AdminGate';
 import { AdminConsole } from '@/components/admin/AdminConsole';
 import type { AdminConsoleData, ContractRow, SectionData } from '@/components/admin/types';
@@ -139,6 +142,30 @@ function safeContractsRead(): Promise<AdminStoreResult<ContractRow[]>> {
     );
 }
 
+/**
+ * The Overview tab's Revenue Streams strip (founder directive 2026-09-22):
+ * platform-wide royalty inflow by source over the Don store — the same
+ * derivation as the Gold Board's strip, widened to every payee. One failing
+ * store read must never take the console down (the console's own contract),
+ * so both the store resolution and the aggregation degrade to the section's
+ * honest unavailable state.
+ */
+async function safeRevenueStreamsRead(): Promise<AdminConsoleData['revenueStreams']> {
+  try {
+    // The Don store door — the same environment branch dashboardLive uses:
+    // dev-seed previews read the booted seeded store; production reads the
+    // configured store.
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    return { kind: 'ready', value: await platformRevenueStreams(donStore) };
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'revenue_streams_store_failed',
+      message: 'Revenue stream store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -156,7 +183,7 @@ export default async function AdminPage() {
   await seedAdminDemoDataIfEmpty();
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -174,6 +201,7 @@ export default async function AdminPage() {
     ),
     resolveMasterTemplates(),
     resolveAtomicRegistry(),
+    safeRevenueStreamsRead(),
   ]);
 
   const data: AdminConsoleData = {
@@ -191,6 +219,7 @@ export default async function AdminPage() {
       master.kind === 'ready' ? master.value.records : [],
     ),
     tax: buildTaxSection(ledgerRows, assets, toSectionData(contracts)),
+    revenueStreams,
   };
 
   return <AdminConsole data={data} />;
