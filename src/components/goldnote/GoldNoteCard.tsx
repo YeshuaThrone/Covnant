@@ -25,6 +25,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { formatCentsBigint } from '@/lib/money/format';
+
 export interface GoldNoteCardProps {
   /** The holder identity — stage name from the session or seeded persona. */
   holderName: string;
@@ -42,16 +44,6 @@ export interface GoldNoteCardProps {
 
 /** The pending number row — rendered when no real card-number source exists. */
 export const PENDING_PLACEHOLDER = '•••• •••• •••• ••••';
-
-/** Renders integer cents as a plain dollar string (never a float path). */
-function formatCents(cents: bigint): string {
-  const negative = cents < 0n;
-  const abs = negative ? -cents : cents;
-  const dollars = abs / 100n;
-  const rem = abs % 100n;
-  const body = `${dollars.toLocaleString('en-US')}.${rem.toString().padStart(2, '0')}`;
-  return negative ? `−$${body}` : `$${body}`;
-}
 
 /** The wallets whose badges open the provisioning-status dialog. */
 type WalletKey = 'apple' | 'google';
@@ -471,7 +463,7 @@ export function GoldNoteCard({
             Card details
           </h2>
           <p className="font-mono text-sm text-gold-champagne" data-testid="goldnote-balance">
-            {formatCents(availableBalanceCents)}{' '}
+            {formatCentsBigint(availableBalanceCents)}{' '}
             <span className="text-[11px] text-slate-500">available</span>
           </p>
         </div>

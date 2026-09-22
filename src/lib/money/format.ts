@@ -82,6 +82,23 @@ export function formatCentsSigned(cents: number): string {
 }
 
 /**
+ * The bigint variant — integer cents that may exceed the number-typed
+ * path's safe range (the dev-seed reserve carries billion-dollar
+ * settlements). Promoted from the GoldNoteCard's local formatter,
+ * behavior-identical: exact /100n integer math, fixed thousands grouping
+ * (no locale lookup, so server render and hydration match byte-for-byte),
+ * the true minus, strict 2 decimals.
+ */
+export function formatCentsBigint(cents: bigint): string {
+  const negative = cents < 0n;
+  const magnitude = negative ? -cents : cents;
+  const whole = magnitude / 100n;
+  const frac = (magnitude % 100n).toString().padStart(2, '0');
+  const wholeGrouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${negative ? '−' : ''}$${wholeGrouped}.${frac}`;
+}
+
+/**
  * The atomic entity canon's USD telemetry fields — whole-dollar amounts
  * (theatrical gross escrow, ad-insert yields, print-on-demand yield,
  * ticket escrow, promoter allocation). "$1,234.00" voice, thousands-grouped.
