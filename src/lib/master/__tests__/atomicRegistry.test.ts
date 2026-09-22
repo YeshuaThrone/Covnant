@@ -20,10 +20,12 @@ import {
 } from '../masterStore';
 import { MASTER_CATEGORY_ORDER } from '../taxonomy';
 
-/** The founder's 26 atomic sectors — the canon list, exact. */
+/** The founder's 26 atomic sectors plus the three generation-4 expansion
+ *  sectors (SPORTS_AND_ATHLETICS, ESPORTS, SPONSORSHIP, 2026-09-22) — canon order, exact. */
 const CANON_ATOMIC_SECTORS: readonly AtomicSector[] = [
   'MUSIC',
   'GAMING',
+  'ESPORTS',
   'INTERACTIVE',
   'PODCASTING',
   'STREAMING',
@@ -37,11 +39,13 @@ const CANON_ATOMIC_SECTORS: readonly AtomicSector[] = [
   'MOTORSPORT',
   'ARENA',
   'ATHLETICS',
+  'SPORTS_AND_ATHLETICS',
   'FASHION',
   'MODELING',
   'CAD',
   'VISUAL_ARTS',
   'DESIGN',
+  'SPONSORSHIP',
   'BOOKS',
   'LITERATURE',
   'DIGITAL_ASSETS',
@@ -132,11 +136,11 @@ const FOUNDER_ATOMIC_SEEDS: readonly AtomicContractRecord[] = [
 ];
 
 describe('atomic registry — founder canon shape', () => {
-  it('carries the completed 26-record atomic registry', () => {
-    expect(ATOMIC_TEMPLATE_REGISTRY).toHaveLength(26);
+  it('carries the completed 29-record atomic registry', () => {
+    expect(ATOMIC_TEMPLATE_REGISTRY).toHaveLength(29);
   });
 
-  it('declares the 26 atomic sectors in exact canon order', () => {
+  it('declares the 29 atomic sectors in exact canon order', () => {
     expect(ATOMIC_SECTOR_ORDER).toEqual(CANON_ATOMIC_SECTORS);
   });
 
@@ -208,7 +212,7 @@ describe('atomic registry — founder canon shape', () => {
 });
 
 describe('atomic registry — every sector covered, no empty tab', () => {
-  it('covers ALL 26 atomic sectors with at least one record', () => {
+  it('covers ALL 29 atomic sectors with at least one record', () => {
     for (const sector of CANON_ATOMIC_SECTORS) {
       const inSector = ATOMIC_TEMPLATE_REGISTRY.filter((r) => r.atomicSector === sector);
       expect(inSector.length, `atomic sector ${sector} has no record`).toBeGreaterThanOrEqual(1);
@@ -229,13 +233,14 @@ describe('atomic registry — every sector covered, no empty tab', () => {
     expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'FILM_AND_TELEVISION')).toHaveLength(5);
     expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'AUDIO_AND_RECORDED_SOUND')).toHaveLength(2);
     expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'PUBLISHING_AND_LITERARY')).toHaveLength(3);
-    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'LIVE_PERFORMANCE_AND_COMEDY')).toHaveLength(4);
-    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'INTERACTIVE_AND_DIGITAL_MEDIA')).toHaveLength(8);
-    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'COMMERCIAL_AND_BRAND_LICENSING')).toHaveLength(4);
+    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'LIVE_PERFORMANCE_AND_COMEDY')).toHaveLength(3);
+    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'SPORTS_AND_ATHLETICS')).toHaveLength(2);
+    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'INTERACTIVE_AND_DIGITAL_MEDIA')).toHaveLength(9);
+    expect(atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'COMMERCIAL_AND_BRAND_LICENSING')).toHaveLength(5);
   });
 
   it('maps every canon sector onto a master vertical — no unmapped sector', () => {
-    expect(Object.keys(ATOMIC_SECTOR_TO_VERTICAL)).toHaveLength(26);
+    expect(Object.keys(ATOMIC_SECTOR_TO_VERTICAL)).toHaveLength(29);
     for (const sector of CANON_ATOMIC_SECTORS) {
       expect(ATOMIC_SECTOR_TO_VERTICAL[sector]).toBeDefined();
     }

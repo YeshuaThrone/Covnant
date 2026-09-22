@@ -41,7 +41,7 @@ function entitiesRoute(sector: string): string {
   return `/api/v1/entities/${sector}`;
 }
 
-/** Narrow a URL category param onto the six-vertical canon; null otherwise. */
+/** Narrow a URL category param onto the seven-vertical canon; null otherwise. */
 function categoryFromSearch(search: string): GlobalEntertainmentCategory | null {
   const raw = new URLSearchParams(search).get('category');
   if (raw === null) return null;

@@ -21,15 +21,22 @@ import {
 } from '../masterStore';
 import { ATOMIC_SECTOR_TO_VERTICAL, sectorsForVertical } from '../taxonomy';
 import type {
+  AthleteContractEntity,
+  EsportsStreamEntity,
   FilmEntity,
   LivePerformanceEntity,
   MusicEntity,
   PodcastEntity,
   PublishingEntity,
+  SocialChannelEntity,
+  SponsorshipDealEntity,
   TelevisionEntity,
+  TournamentEventEntity,
 } from '../CovnantAtomicDataSDK';
 
-/** The sectors whose registry records carry an SDK entity class (canon). */
+/** The sectors whose registry records carry an SDK entity class (canon):
+ *  the founder's seven bound sectors plus the five generation-4 expansion
+ *  sectors (2026-09-22). */
 const ENTITY_BOUND_SECTORS = [
   'MUSIC',
   'FILM',
@@ -38,6 +45,11 @@ const ENTITY_BOUND_SECTORS = [
   'PUBLISHING',
   'BOOKS',
   'LITERATURE',
+  'SPORTS',
+  'SPORTS_AND_ATHLETICS',
+  'ESPORTS',
+  'SOCIAL_MEDIA',
+  'SPONSORSHIP',
 ] as const;
 
 const atomicById = (id: string): AtomicContractRecord => {
@@ -96,6 +108,50 @@ describe('atomic entity binding — sector-driven', () => {
     // Sector-driven literary bindings: BOOKS and LITERATURE registry records.
     expect((bindAtomicEntity(atomicById('TPL-BOK-001')) as PublishingEntity).isbnNumber).toBe('978-3-16-148410-0');
     expect((bindAtomicEntity(atomicById('TPL-LTR-001')) as PublishingEntity).isbnNumber).toBe('979-8-88645-112-8');
+  });
+
+  it('binds the five generation-4 expansion seeds with the spec telemetry verbatim', () => {
+    // The video's Nike basketball contract — SPORTS, TPL-SPT-.
+    const athlete = bindAtomicEntity(atomicById('TPL-SPT-001')) as AthleteContractEntity;
+    expect(athlete.entityType).toBe('ATHLETE_CONTRACT');
+    expect(athlete.templateId).toBe('TPL-SPT-001');
+    expect(athlete.contractId).toBe('NK-404-BAL');
+    expect(athlete.sport).toBe('Basketball');
+    expect(athlete.sponsorshipGuaranteeUSD).toBe(2_400_000);
+    expect(athlete.endorsementExclusivityLock).toBe(true);
+    expect(athlete.targetSplit).toEqual({ ownership: 0.50, creative: 0.35, operations: 0.15 });
+
+    // The video's PGA TOUR 2026 purse — SPORTS_AND_ATHLETICS, TPL-TRN-.
+    const tournament = bindAtomicEntity(atomicById('TPL-TRN-001')) as TournamentEventEntity;
+    expect(tournament.entityType).toBe('TOURNAMENT_EVENT');
+    expect(tournament.eventId).toBe('PGA-TOUR-2026-AUG');
+    expect(tournament.discipline).toBe('Golf');
+    expect(tournament.prizePurseEscrowUSD).toBe(12_500_000);
+    expect(tournament.payoutReleaseLock).toBe(true);
+
+    // The video's Twitch/Epic stream — ESPORTS, TPL-ESX-.
+    const stream = bindAtomicEntity(atomicById('TPL-ESX-001')) as EsportsStreamEntity;
+    expect(stream.entityType).toBe('ESPORTS_STREAM');
+    expect(stream.streamId).toBe('TW-888');
+    expect(stream.game).toBe('Fortnite');
+    expect(stream.streamMonetizationYieldUSD).toBe(86_400);
+    expect(stream.clipLicensingLock).toBe(false);
+
+    // The monetized platform channel — SOCIAL_MEDIA, TPL-SOC-.
+    const channel = bindAtomicEntity(atomicById('TPL-SOC-001')) as SocialChannelEntity;
+    expect(channel.entityType).toBe('SOCIAL_CHANNEL');
+    expect(channel.platform).toBe('TIKTOK');
+    expect(channel.channelId).toBe('SOC-7401');
+    expect(channel.contentMatchYieldUSD).toBe(12_000);
+    expect(channel.monetizationReviewLock).toBe(true);
+
+    // The cross-industry brand deal — SPONSORSHIP, TPL-SPN-.
+    const deal = bindAtomicEntity(atomicById('TPL-SPN-001')) as SponsorshipDealEntity;
+    expect(deal.entityType).toBe('SPONSORSHIP_DEAL');
+    expect(deal.brandPartner).toBe('Nike');
+    expect(deal.campaignId).toBe('SPN-2026-40');
+    expect(deal.dealValueUSD).toBe(950_000);
+    expect(deal.activationWindowLock).toBe(false);
   });
 
   it('keeps every sector WITHOUT an entity class on telemetryMetric — no force-fitting', () => {
@@ -225,12 +281,13 @@ describe('the module-load integrity gate and per-tab fetch set', () => {
     }
   });
 
-  it('maps every vertical onto its sector doors — six verticals partition 26 sectors', () => {
+  it('maps every vertical onto its sector doors — seven verticals partition 29 sectors', () => {
     const verticals = [
       'AUDIO_AND_RECORDED_SOUND',
       'FILM_AND_TELEVISION',
       'PUBLISHING_AND_LITERARY',
       'LIVE_PERFORMANCE_AND_COMEDY',
+      'SPORTS_AND_ATHLETICS',
       'INTERACTIVE_AND_DIGITAL_MEDIA',
       'COMMERCIAL_AND_BRAND_LICENSING',
     ] as const;
@@ -243,6 +300,6 @@ describe('the module-load integrity gate and per-tab fetch set', () => {
       }
       total += sectors.length;
     }
-    expect(total).toBe(26);
+    expect(total).toBe(29);
   });
 });

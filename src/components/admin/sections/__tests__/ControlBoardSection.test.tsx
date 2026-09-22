@@ -80,12 +80,24 @@ describe('the /admin Control Board section', () => {
     expect(html).toContain(`${atomicCount} atomic sector records`);
   });
 
-  it('renders the reused board — six vertical tabs, entity pills, split badges', async () => {
+  it('renders the reused board — seven vertical tabs, entity pills, split badges', async () => {
     const html = await renderSection();
 
     // The board mounts in its all-verticals initial view — fully populated.
-    expect((html.match(/data-testid="vertical-tab"/g) ?? []).length).toBe(6);
-    for (const tag of ['MUSIC', 'FILM', 'TV', 'PODCASTING', 'LIVE', 'PUBLISHING']) {
+    expect((html.match(/data-testid="vertical-tab"/g) ?? []).length).toBe(7);
+    for (const tag of [
+      'MUSIC',
+      'FILM',
+      'TV',
+      'PODCASTING',
+      'LIVE',
+      'PUBLISHING',
+      // The four generation-4 expansion pills ride the same badge machinery.
+      'SPORTS',
+      'ESPORTS',
+      'SOCIAL',
+      'SPONSORSHIP',
+    ]) {
       expect(
         html.match(new RegExp(`data-entity-class="${tag}"`, 'g'))?.length ?? 0,
       ).toBeGreaterThanOrEqual(1);
@@ -97,6 +109,13 @@ describe('the /admin Control Board section', () => {
     expect(html).toContain('Ownership reserve 50%');
     expect(html).toContain('Creative payout 35%');
     expect(html).toContain('Operations yield 15%');
+
+    // Generation-4 expansion telemetry, rendered verbatim from the store seeds.
+    expect(html).toContain('NK-404-BAL');
+    expect(html).toContain('PGA-TOUR-2026-AUG');
+    expect(html).toContain('TW-888');
+    expect(html).toContain('SOC-7401');
+    expect(html).toContain('Nike');
 
     // The Control Board branding law holds in the console too.
     expect(html.match(/[Ss]overeign/g)).toBeNull();

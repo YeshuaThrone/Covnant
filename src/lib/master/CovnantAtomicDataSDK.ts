@@ -1,16 +1,21 @@
 /**
- * CovnantAtomicDataSDK — the six isolated atomic entity classes (founder
- * canon drop, 2026-09-20), EXACTLY as dropped: film, television, music,
- * podcast, live performance, and publishing — each with its typed entity
- * literal, its template-id prefix canon, its domain telemetry, and the
- * compiler-locked 50/35/15 target split (the canon structure as fractions).
+ * CovnantAtomicDataSDK — the isolated atomic entity classes: the founder's
+ * six-canon drop (2026-09-20) plus the five generation-4 expansion classes
+ * (approved build, 2026-09-22): ATHLETE_CONTRACT, TOURNAMENT_EVENT,
+ * ESPORTS_STREAM, SOCIAL_CHANNEL, and SPONSORSHIP_DEAL — the entertainment
+ * forms of sports, esports, social monetization, and brand sponsorship.
+ * Each class carries its typed entity literal, its template-id prefix canon,
+ * its domain telemetry, and the compiler-locked 50/35/15 target split.
  *
- * PURE CANON — this module imports nothing and depends on no store. The
+ * PURE CANON — this module imports nothing at RUNTIME and depends on no
+ * store (the engine union import below is type-only). The
  * master store (src/lib/master/masterStore) holds the entity DATA and the
  * binding; components never inline entity literals (the honesty law). The
- * four fail-closed guards enforce the canon binding rule: an entity's class
+ * nine fail-closed guards enforce the canon binding rule: an entity's class
  * AND its template-id prefix must both match before the class is claimed.
  */
+
+import type { SocialEntertainmentPlatform } from '@/engine/covenant-master-sdk';
 
 /** The canon target split — 0.50 ownership / 0.35 creative / 0.15 operations. */
 export interface EntityTargetSplit {
@@ -95,14 +100,95 @@ export interface PublishingEntity {
   readonly targetSplit: EntityTargetSplit;
 }
 
-/** The isolated entity union — one class per entity, never bundled. */
+// ─────────────────────────────────────────────────────────────────────────────
+// GENERATION-4 EXPANSION CLASSES (approved build, 2026-09-22): five new forms
+// of entertainment in the exact canon shape — typed interface, prefix-canon
+// template id, domain telemetry from the video vocabulary, and the shared
+// compiler-locked 50/35/15 split (ENTITY_TARGET_SPLIT stays the ONE split
+// constant; no class carries its own split literal).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Athlete contract entity — brand sponsorship and endorsement money. */
+export interface AthleteContractEntity {
+  readonly entityType: 'ATHLETE_CONTRACT';
+  /** Template prefix canon: TPL-SPT-*. */
+  readonly templateId: string;
+  /** Video vocabulary: contract_id NK_404. */
+  readonly contractId: string;
+  /** Video vocabulary: sport: basketball. */
+  readonly sport: string;
+  readonly sponsorshipGuaranteeUSD: number;
+  readonly endorsementExclusivityLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Tournament event entity — prize-purse escrow and placement settlement. */
+export interface TournamentEventEntity {
+  readonly entityType: 'TOURNAMENT_EVENT';
+  /** Template prefix canon: TPL-TRN-*. */
+  readonly templateId: string;
+  /** Video vocabulary: event_id (PGA TOUR 2026). */
+  readonly eventId: string;
+  /** The sport or game the tournament is played in. */
+  readonly discipline: string;
+  /** Video vocabulary: prize purse. */
+  readonly prizePurseEscrowUSD: number;
+  readonly payoutReleaseLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Esports stream entity — Twitch/Epic-style stream monetization. */
+export interface EsportsStreamEntity {
+  readonly entityType: 'ESPORTS_STREAM';
+  /** Template prefix canon: TPL-ESX-*. */
+  readonly templateId: string;
+  /** Video vocabulary: stream_id TW_888. */
+  readonly streamId: string;
+  /** Video vocabulary: game: Fortnite. */
+  readonly game: string;
+  readonly streamMonetizationYieldUSD: number;
+  readonly clipLicensingLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Social channel entity — monetized platform channels and content matching. */
+export interface SocialChannelEntity {
+  readonly entityType: 'SOCIAL_CHANNEL';
+  /** Template prefix canon: TPL-SOC-*. */
+  readonly templateId: string;
+  /** The canon SocialEntertainmentPlatform union (engine SDK, type-only). */
+  readonly platform: SocialEntertainmentPlatform;
+  readonly channelId: string;
+  readonly contentMatchYieldUSD: number;
+  readonly monetizationReviewLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Sponsorship deal entity — the cross-industry brand-deal connective form. */
+export interface SponsorshipDealEntity {
+  readonly entityType: 'SPONSORSHIP_DEAL';
+  /** Template prefix canon: TPL-SPN-*. */
+  readonly templateId: string;
+  readonly brandPartner: string;
+  readonly campaignId: string;
+  readonly dealValueUSD: number;
+  readonly activationWindowLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** The isolated entity union — the six founder-canon classes plus the five expansion classes. */
 export type SovereignAtomicEntity =
   | FilmEntity
   | TelevisionEntity
   | MusicEntity
   | PodcastEntity
   | LivePerformanceEntity
-  | PublishingEntity;
+  | PublishingEntity
+  | AthleteContractEntity
+  | TournamentEventEntity
+  | EsportsStreamEntity
+  | SocialChannelEntity
+  | SponsorshipDealEntity;
 
 /**
  * The drop-2 execution canon: every entity execution reports exactly one of
@@ -124,7 +210,11 @@ export type AtomicEntityClassTag =
   | 'TV'
   | 'PODCASTING'
   | 'LIVE'
-  | 'PUBLISHING';
+  | 'PUBLISHING'
+  | 'SPORTS'
+  | 'ESPORTS'
+  | 'SOCIAL'
+  | 'SPONSORSHIP';
 
 
 /** The class tag of an entity — the pill-badge vocabulary, one per class. */
@@ -142,6 +232,15 @@ export function entityClassTag(entity: SovereignAtomicEntity): AtomicEntityClass
       return 'LIVE';
     case 'LITERARY_WORK':
       return 'PUBLISHING';
+    case 'ATHLETE_CONTRACT':
+    case 'TOURNAMENT_EVENT':
+      return 'SPORTS';
+    case 'ESPORTS_STREAM':
+      return 'ESPORTS';
+    case 'SOCIAL_CHANNEL':
+      return 'SOCIAL';
+    case 'SPONSORSHIP_DEAL':
+      return 'SPONSORSHIP';
   }
 }
 
@@ -155,10 +254,16 @@ export const TEMPLATE_PREFIX = {
   PUBLISHING_FACTORY: ['TPL-PUB-', 'TPL-LIT-'],
   /** Sector-driven literary bindings (BOOKS and LITERATURE registries). */
   PUBLISHING_SECTOR: ['TPL-BOK-', 'TPL-LTR-'],
+  /** Generation-4 expansion prefixes (2026-09-22). */
+  SPORTS: 'TPL-SPT-',
+  TOURNAMENT: 'TPL-TRN-',
+  ESPORTS: 'TPL-ESX-',
+  SOCIAL: 'TPL-SOC-',
+  SPONSORSHIP: 'TPL-SPN-',
 } as const;
 
 /**
- * The four fail-closed guards — class AND prefix must both match. An entity
+ * The fail-closed guards — class AND prefix must both match. An entity
  * claiming a class with a foreign template prefix fails its guard, and a
  * guard failure never serves (the route fails closed on it).
  */
@@ -183,10 +288,10 @@ export type AtomicEntityTypeName = SovereignAtomicEntity['entityType'];
 
 /**
  * The two drop-series guards the founder's registry left unguarded, completed
- * by the Universal Execution Lane expansion (2026-09-20): all six isolated
- * classes now carry the fail-closed class+prefix pairing invariant. No new
- * entity classes are invented — the class union is still EXACTLY the
- * founder's six drops.
+ * by the Universal Execution Lane expansion (2026-09-20): all six founder-canon
+ * classes now carry the fail-closed class+prefix pairing invariant. The five
+ * generation-4 expansion classes below (2026-09-22) ship with their guards the
+ * same way — new classes come only from founder-approved canon.
  */
 export function isPodcastEntity(entity: SovereignAtomicEntity): entity is PodcastEntity {
   return entity.entityType === 'PODCAST_NETWORK' && entity.templateId.startsWith(TEMPLATE_PREFIX.PODCAST);
@@ -201,9 +306,51 @@ export function isPublishingEntity(entity: SovereignAtomicEntity): entity is Pub
   );
 }
 
+/**
+ * The five generation-4 expansion guards (2026-09-22) — class AND prefix,
+ * fail-closed, exactly like the six above. Required by the serving route: a
+ * class without a guard cannot be served at all (the route 502s on a
+ * guard-failed entity), so the guards ship WITH the classes.
+ */
+export function isAthleteContractEntity(entity: SovereignAtomicEntity): entity is AthleteContractEntity {
+  return (
+    entity.entityType === 'ATHLETE_CONTRACT' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.SPORTS)
+  );
+}
+
+export function isTournamentEventEntity(entity: SovereignAtomicEntity): entity is TournamentEventEntity {
+  return (
+    entity.entityType === 'TOURNAMENT_EVENT' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.TOURNAMENT)
+  );
+}
+
+export function isEsportsStreamEntity(entity: SovereignAtomicEntity): entity is EsportsStreamEntity {
+  return (
+    entity.entityType === 'ESPORTS_STREAM' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.ESPORTS)
+  );
+}
+
+export function isSocialChannelEntity(entity: SovereignAtomicEntity): entity is SocialChannelEntity {
+  return (
+    entity.entityType === 'SOCIAL_CHANNEL' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.SOCIAL)
+  );
+}
+
+export function isSponsorshipDealEntity(entity: SovereignAtomicEntity): entity is SponsorshipDealEntity {
+  return (
+    entity.entityType === 'SPONSORSHIP_DEAL' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.SPONSORSHIP)
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GUARD REGISTRY (Universal Execution Lane expansion, 2026-09-20): EVERY
-// atomic sector — all 26 — and every factory vertical gets a guard binding
+// atomic sector — the founder's 26 plus the three generation-4 expansion
+// sectors — and every factory vertical gets a guard binding
 // entityType↔templateId. Sectors whose canon carries an SDK entity class bind
 // that class; sectors without one bind `null` — the guard then requires the
 // record to claim NO entity class (its telemetryMetric display is the canon,
@@ -211,7 +358,7 @@ export function isPublishingEntity(entity: SovereignAtomicEntity): entity is Pub
 //
 // This module stays PURE CANON: the registry's sector keys are string
 // literals here, and the master store's integrity gate asserts the registry
-// covers the taxonomy's 26 sectors and 6 factory verticals exactly.
+// covers the taxonomy's 29 sectors and 6 factory verticals exactly.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** One guard binding — a sector's template-id prefix canon and entity class. */
@@ -225,28 +372,41 @@ export interface SectorGuardBinding {
   readonly entityType: AtomicEntityTypeName | null;
 }
 
-/** The 26 atomic-sector guard bindings — one per sector, no sector left out. */
+/** The 29 atomic-sector guard bindings — one per sector, no sector left out. */
 export const ATOMIC_SECTOR_GUARDS: readonly SectorGuardBinding[] = Object.freeze([
   { guardId: 'GUARD-SECTOR-MUSIC', sector: 'MUSIC', prefixes: ['TPL-MUS-'], entityType: 'MASTER_RECORDING' },
   { guardId: 'GUARD-SECTOR-GAMING', sector: 'GAMING', prefixes: ['TPL-GAM-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-ESPORTS', sector: 'ESPORTS', prefixes: ['TPL-ESX-'], entityType: 'ESPORTS_STREAM' },
   { guardId: 'GUARD-SECTOR-INTERACTIVE', sector: 'INTERACTIVE', prefixes: ['TPL-IXP-'], entityType: null },
   { guardId: 'GUARD-SECTOR-PODCASTING', sector: 'PODCASTING', prefixes: ['TPL-PDC-'], entityType: 'PODCAST_NETWORK' },
   { guardId: 'GUARD-SECTOR-STREAMING', sector: 'STREAMING', prefixes: ['TPL-STR-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-SOCIAL_MEDIA', sector: 'SOCIAL_MEDIA', prefixes: ['TPL-SOC-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-SOCIAL_MEDIA', sector: 'SOCIAL_MEDIA', prefixes: ['TPL-SOC-'], entityType: 'SOCIAL_CHANNEL' },
   { guardId: 'GUARD-SECTOR-PUBLISHING', sector: 'PUBLISHING', prefixes: ['TPL-PUB-'], entityType: 'LITERARY_WORK' },
   { guardId: 'GUARD-SECTOR-MOVIES', sector: 'MOVIES', prefixes: ['TPL-MOV-'], entityType: null },
   { guardId: 'GUARD-SECTOR-FILM', sector: 'FILM', prefixes: ['TPL-FLM-'], entityType: 'FEATURE_FILM' },
   { guardId: 'GUARD-SECTOR-TV', sector: 'TV', prefixes: ['TPL-TV-'], entityType: 'LINEAR_TV' },
   { guardId: 'GUARD-SECTOR-VIDEO', sector: 'VIDEO', prefixes: ['TPL-VID-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-SPORTS', sector: 'SPORTS', prefixes: ['TPL-SPT-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-SPORTS', sector: 'SPORTS', prefixes: ['TPL-SPT-'], entityType: 'ATHLETE_CONTRACT' },
   { guardId: 'GUARD-SECTOR-MOTORSPORT', sector: 'MOTORSPORT', prefixes: ['TPL-MTR-'], entityType: null },
   { guardId: 'GUARD-SECTOR-ARENA', sector: 'ARENA', prefixes: ['TPL-ARN-'], entityType: null },
   { guardId: 'GUARD-SECTOR-ATHLETICS', sector: 'ATHLETICS', prefixes: ['TPL-ATH-'], entityType: null },
+  {
+    guardId: 'GUARD-SECTOR-SPORTS_AND_ATHLETICS',
+    sector: 'SPORTS_AND_ATHLETICS',
+    prefixes: ['TPL-TRN-'],
+    entityType: 'TOURNAMENT_EVENT',
+  },
   { guardId: 'GUARD-SECTOR-FASHION', sector: 'FASHION', prefixes: ['TPL-FSH-'], entityType: null },
   { guardId: 'GUARD-SECTOR-MODELING', sector: 'MODELING', prefixes: ['TPL-MDL-'], entityType: null },
   { guardId: 'GUARD-SECTOR-CAD', sector: 'CAD', prefixes: ['TPL-CAD-'], entityType: null },
   { guardId: 'GUARD-SECTOR-VISUAL_ARTS', sector: 'VISUAL_ARTS', prefixes: ['TPL-VIS-'], entityType: null },
   { guardId: 'GUARD-SECTOR-DESIGN', sector: 'DESIGN', prefixes: ['TPL-DES-'], entityType: null },
+  {
+    guardId: 'GUARD-SECTOR-SPONSORSHIP',
+    sector: 'SPONSORSHIP',
+    prefixes: ['TPL-SPN-'],
+    entityType: 'SPONSORSHIP_DEAL',
+  },
   { guardId: 'GUARD-SECTOR-BOOKS', sector: 'BOOKS', prefixes: ['TPL-BOK-'], entityType: 'LITERARY_WORK' },
   { guardId: 'GUARD-SECTOR-LITERATURE', sector: 'LITERATURE', prefixes: ['TPL-LTR-'], entityType: 'LITERARY_WORK' },
   { guardId: 'GUARD-SECTOR-DIGITAL_ASSETS', sector: 'DIGITAL_ASSETS', prefixes: ['TPL-DGA-'], entityType: null },

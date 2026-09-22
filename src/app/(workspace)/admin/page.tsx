@@ -90,7 +90,7 @@ function toSectionData<T>(result: AdminStoreResult<T> | null): SectionData<T> {
 /**
  * The Control Board's server seam — the same composition the /templates
  * page and the per-sector entity doors run over the master store: every
- * factory template and atomic record of the six verticals, entity-bound
+ * factory template and atomic record of the seven verticals, entity-bound
  * with its CovnantAtomicDataSDK telemetry and execution history before
  * anything renders. No literals — the board is the store's library.
  */

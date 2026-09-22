@@ -82,7 +82,7 @@ export default async function LedgerPage({
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
         The administrator&apos;s full transaction history — every settled transaction
-        across the six master verticals reconciles through the engine&apos;s BigInt
+        across the seven master verticals reconciles through the engine&apos;s BigInt
         path before it lands here. Click a vertical to swap the master data below;
         expand a settlement row for per-holder disbursement detail.
       </p>

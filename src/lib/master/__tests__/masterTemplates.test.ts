@@ -8,17 +8,22 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  ATOMIC_TEMPLATE_REGISTRY,
   MASTER_TEMPLATE_LIBRARY,
   TEMPLATE_VERTICAL_TO_MASTER,
+  atomicRecordsForCategory,
   masterTemplatesForCategory,
   applyRealExecutionCounts,
+  resolveMasterLedger,
   resolveMasterTemplates,
   type ContractTemplateRecord,
   type TemplateVerticalCategory,
 } from '../masterStore';
 import {
+  MASTER_CATEGORY_CODES,
   MASTER_CATEGORY_ORDER,
   MASTER_SUBCATEGORIES,
+  type GlobalEntertainmentCategory,
 } from '../taxonomy';
 
 const FOUNDER_SEEDS: readonly ContractTemplateRecord[] = [
@@ -121,12 +126,21 @@ describe('master template library — founder canon shape', () => {
 });
 
 describe('master template library — every form of entertainment covered', () => {
-  it('covers all six master verticals', () => {
+  it('covers all six factory verticals — the expansion vertical rides the atomic registry', () => {
     for (const category of MASTER_CATEGORY_ORDER) {
       const vertical = Object.entries(TEMPLATE_VERTICAL_TO_MASTER).find(
         ([, master]) => master === category,
       )?.[0] as TemplateVerticalCategory | undefined;
-      expect(vertical, `no compact code maps to ${category}`).toBeDefined();
+      if (vertical === undefined) {
+        // SPORTS_AND_ATHLETICS — the generation-4 expansion vertical: the
+        // factory is the six-compact-code canon; its forms are atomic.
+        expect(category).toBe('SPORTS_AND_ATHLETICS');
+        expect(
+          atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, category).length,
+          `${category} has no atomic record — a vertical is left out`,
+        ).toBeGreaterThanOrEqual(1);
+        continue;
+      }
       const inVertical = MASTER_TEMPLATE_LIBRARY.filter((t) => t.verticalCategory === vertical);
       expect(
         inVertical.length,
@@ -135,32 +149,58 @@ describe('master template library — every form of entertainment covered', () =
     }
   });
 
-  it('covers EVERY master taxonomy subcategory — no form left out', () => {
-    for (const category of MASTER_CATEGORY_ORDER) {
-      for (const subcategory of MASTER_SUBCATEGORIES[category]) {
-        const covering = MASTER_TEMPLATE_LIBRARY.find(
-          (t) =>
-            TEMPLATE_VERTICAL_TO_MASTER[t.verticalCategory] === category &&
-            t.subCategory === subcategory,
-        );
-        expect(
-          covering,
-          `master taxonomy subcategory "${subcategory}" (${category}) has no template`,
-        ).toBeDefined();
+  it('covers EVERY master taxonomy subcategory — no form left out', async () => {
+    const previous = process.env.DON_DEV_SEED;
+    process.env.DON_DEV_SEED = '1';
+    try {
+      const { records: ledger } = await resolveMasterLedger();
+      for (const category of MASTER_CATEGORY_ORDER) {
+        const factoryVertical = (
+          Object.entries(TEMPLATE_VERTICAL_TO_MASTER) as [
+            TemplateVerticalCategory,
+            GlobalEntertainmentCategory,
+          ][]
+        ).find(([, master]) => master === category);
+        for (const subcategory of MASTER_SUBCATEGORIES[category]) {
+          if (factoryVertical === undefined) {
+            // The expansion vertical carries no factory code — its forms are
+            // covered by the seeded master ledger (the real settle path).
+            expect(
+              ledger.some((row) => row.category === category && row.subcategory === subcategory),
+              `master taxonomy subcategory "${subcategory}" (${category}) has no seeded ledger row`,
+            ).toBe(true);
+          } else {
+            const covering = MASTER_TEMPLATE_LIBRARY.find(
+              (t) =>
+                TEMPLATE_VERTICAL_TO_MASTER[t.verticalCategory] === category &&
+                t.subCategory === subcategory,
+            );
+            expect(
+              covering,
+              `master taxonomy subcategory "${subcategory}" (${category}) has no template`,
+            ).toBeDefined();
+          }
+        }
       }
+    } finally {
+      if (previous === undefined) delete process.env.DON_DEV_SEED;
+      else process.env.DON_DEV_SEED = previous;
     }
   });
 });
 
 describe('master template library — tab filter mapping', () => {
-  it('maps the six compact founder codes onto the six master tabs, bijectively', () => {
+  it('maps the six compact founder codes bijectively; the expansion vertical rides its ledger code', () => {
     const codes = Object.keys(TEMPLATE_VERTICAL_TO_MASTER) as TemplateVerticalCategory[];
     expect(codes).toHaveLength(6);
     const mapped = codes.map((code) => TEMPLATE_VERTICAL_TO_MASTER[code]);
     expect(new Set(mapped).size).toBe(6);
     for (const category of MASTER_CATEGORY_ORDER) {
+      if (category === 'SPORTS_AND_ATHLETICS') continue; // no factory code — atomic canon
       expect(mapped).toContain(category);
     }
+    // The seventh vertical's ledgerId code (CVN-<CAT4>-...) is the master code.
+    expect(MASTER_CATEGORY_CODES.SPORTS_AND_ATHLETICS).toBe('SPRT');
   });
 
   it('filters the library per vertical tab; null returns the whole library', () => {
@@ -170,6 +210,12 @@ describe('master template library — tab filter mapping', () => {
     let covered = 0;
     for (const category of MASTER_CATEGORY_ORDER) {
       const scoped = masterTemplatesForCategory(MASTER_TEMPLATE_LIBRARY, category);
+      if (category === 'SPORTS_AND_ATHLETICS') {
+        // The factory is the six-compact-code canon — the expansion vertical's
+        // contract forms are atomic, not factory; the filter reads [] honestly.
+        expect(scoped).toHaveLength(0);
+        continue;
+      }
       expect(scoped.length).toBeGreaterThanOrEqual(1);
       for (const record of scoped) {
         expect(TEMPLATE_VERTICAL_TO_MASTER[record.verticalCategory]).toBe(category);

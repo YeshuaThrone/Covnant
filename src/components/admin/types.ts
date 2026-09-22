@@ -45,7 +45,7 @@ export interface ContractRow {
 
 /**
  * The master ledger section payload (founder canon, CovnantMasterDataSDK):
- * the six-vertical sovereign records with their engine-computed 50/35/15
+ * the seven-vertical sovereign records with their engine-computed 50/35/15
  * allocations. `demo` drives the DEMO DATA disclosure — the seeded library
  * renders only behind it; real sessions carry real settled rows.
  */

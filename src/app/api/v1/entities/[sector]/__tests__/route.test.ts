@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/entities/[sector] — the per-sector entity route contract
  * (founder directive, 2026-09-20, dynamic entity routing): every one of the
- * 26 canonical sectors serves its entities from the master store engine
+ * 29 canonical sectors serves its entities from the master store engine
  * (atomic records bound to their SDK entities, the parent vertical's factory
  * templates bound by prefix, execution telemetry riding the store), unknown
  * sectors fail closed with a 404, an empty sector read fails closed with a
@@ -79,7 +79,32 @@ describe('GET /api/v1/entities/[sector]', () => {
     expect(factory.length).toBe(6);
   });
 
-  it('serves every one of the 26 canonical sectors — none empty, all with the right vertical', async () => {
+  it('serves the Sports & Athletics sector door with the bound tournament entity telemetry', async () => {
+    // The generation-4 expansion sector rides the SAME dynamic door — no fork.
+    const response = await GET(
+      sectorRequest('SPORTS_AND_ATHLETICS'),
+      sectorContext('SPORTS_AND_ATHLETICS'),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.sector).toBe('SPORTS_AND_ATHLETICS');
+    expect(body.vertical).toBe('SPORTS_AND_ATHLETICS');
+    expect(body.demo).toBe(true);
+    const atomic = body.atomicRecords as Array<Record<string, unknown>>;
+    expect(atomic.length).toBeGreaterThanOrEqual(1);
+    const tournament = atomic.find((r) => (r.record as Record<string, unknown>).templateId === 'TPL-TRN-001');
+    expect(tournament).toBeDefined();
+    const entity = tournament?.entity as Record<string, unknown>;
+    expect(entity.entityType).toBe('TOURNAMENT_EVENT');
+    expect(entity.eventId).toBe('PGA-TOUR-2026-AUG');
+    expect(entity.discipline).toBe('Golf');
+    expect(entity.prizePurseEscrowUSD).toBe(12_500_000);
+    expect(entity.payoutReleaseLock).toBe(true);
+  });
+
+  it('serves every one of the 29 canonical sectors — none empty, all with the right vertical', async () => {
     for (const sector of ATOMIC_SECTOR_ORDER) {
       const response = await GET(sectorRequest(sector), sectorContext(sector));
       expect(response.status, `sector ${sector}`).toBe(200);
@@ -92,7 +117,7 @@ describe('GET /api/v1/entities/[sector]', () => {
     }
   });
 
-  it('fails closed with 404 on a sector outside the canonical 26 — echoing the offender', async () => {
+  it('fails closed with 404 on a sector outside the canonical 29 — echoing the offender', async () => {
     const response = await GET(sectorRequest('GALACTIC'), sectorContext('GALACTIC'));
     expect(response.status).toBe(404);
     const body = (await response.json()) as Record<string, unknown>;

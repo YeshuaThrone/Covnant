@@ -126,6 +126,41 @@ function entityTelemetryRows(entity: SovereignAtomicEntity): Array<[string, stri
         ['Print-on-demand yield', formatUsdAmount(entity.printOnDemandYieldUSD)],
         ['Citation telemetry', executionsLabel(entity.citationTelemetryCount)],
       ];
+    case 'ATHLETE_CONTRACT':
+      return [
+        ['Contract id', entity.contractId],
+        ['Sport', entity.sport],
+        ['Sponsorship guarantee', formatUsdAmount(entity.sponsorshipGuaranteeUSD)],
+        ['Endorsement exclusivity', entity.endorsementExclusivityLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'TOURNAMENT_EVENT':
+      return [
+        ['Event id', entity.eventId],
+        ['Discipline', entity.discipline],
+        ['Prize purse escrow', formatUsdAmount(entity.prizePurseEscrowUSD)],
+        ['Payout release', entity.payoutReleaseLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'ESPORTS_STREAM':
+      return [
+        ['Stream id', entity.streamId],
+        ['Game', entity.game],
+        ['Stream monetization yield', formatUsdAmount(entity.streamMonetizationYieldUSD)],
+        ['Clip licensing', entity.clipLicensingLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'SOCIAL_CHANNEL':
+      return [
+        ['Platform', entity.platform],
+        ['Channel id', entity.channelId],
+        ['Content match yield', formatUsdAmount(entity.contentMatchYieldUSD)],
+        ['Monetization review', entity.monetizationReviewLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'SPONSORSHIP_DEAL':
+      return [
+        ['Brand partner', entity.brandPartner],
+        ['Campaign id', entity.campaignId],
+        ['Deal value', formatUsdAmount(entity.dealValueUSD)],
+        ['Activation window', entity.activationWindowLock ? 'LOCKED' : 'OPEN'],
+      ];
   }
 }
 

@@ -3,7 +3,7 @@
  * surface. Two honest modes, one record shape:
  *
  *   - DEMO (isDevSeedMode): the seeded master library — the founder's
- *     8-records-per-vertical richness floor, 48 records, every allocation
+ *     8-records-per-vertical richness floor, 56 records, every allocation
  *     computed through the real settle path in settleSovereignRecord.
  *     Rendered ONLY under the DEMO DATA disclosure.
  *   - REAL: derived from the live stores — each settled royalty row becomes
@@ -35,11 +35,16 @@ import {
   TEMPLATE_PREFIX,
   ATOMIC_SECTOR_GUARDS,
   entityClassTag,
+  isAthleteContractEntity,
+  isEsportsStreamEntity,
   isFilmEntity,
   isLiveEntity,
   isMusicEntity,
   isPodcastEntity,
   isPublishingEntity,
+  isSocialChannelEntity,
+  isSponsorshipDealEntity,
+  isTournamentEventEntity,
   isTvEntity,
   type AtomicEntityClassTag,
   type AtomicExecutionTelemetry,
@@ -141,6 +146,16 @@ const SEED_LIBRARY: Record<GlobalEntertainmentCategory, readonly SeedEntry[]> = 
     { title: 'District Players — Rep Season', subcategory: 'Live Theater & Broadway', grossCents: 272_300_000, holderKey: 'holder-district-players' },
     { title: 'Meridian Amphitheater Circuit', subcategory: 'Concerts & Festival Touring', grossCents: 921_700_000, holderKey: 'holder-meridian-circuit' },
     { title: 'Festival Grounds — Box Office Pool', subcategory: 'Venue Ticketing Ledgers', grossCents: 655_200_000, holderKey: 'holder-festival-grounds-pool' },
+  ],
+  SPORTS_AND_ATHLETICS: [
+    { title: 'Crown Circuit Invitational — Prize Purse', subcategory: 'Tournament Prize Pools', grossCents: 1_250_000_000, holderKey: 'holder-crown-circuit-invitational' },
+    { title: 'Meridian Open — Championship Purse', subcategory: 'Tournament Prize Pools', grossCents: 3_140_000_000, holderKey: 'holder-meridian-open-purse' },
+    { title: 'Gold Spikes Meet — Track Purse', subcategory: 'Tournament Prize Pools', grossCents: 640_200_000, holderKey: 'holder-gold-spikes-meet' },
+    { title: 'Apex Courtwear — Season Sponsorship', subcategory: 'Traditional Sponsorship', grossCents: 950_300_000, holderKey: 'holder-apex-courtwear' },
+    { title: 'Ironvale Bancorp — League Sponsorship', subcategory: 'Traditional Sponsorship', grossCents: 2_270_000_000, holderKey: 'holder-ironvale-bancorp' },
+    { title: 'Northgate Banking — Kit Sponsorship', subcategory: 'Traditional Sponsorship', grossCents: 388_000_000, holderKey: 'holder-northgate-banking' },
+    { title: 'Meridian Speed Club — Endorsement Program', subcategory: 'Athlete Endorsements', grossCents: 240_900_000, holderKey: 'holder-meridian-speed-club' },
+    { title: 'Summit Pro Cycles — Signature Endorsement', subcategory: 'Athlete Endorsements', grossCents: 110_400_000, holderKey: 'holder-summit-pro-cycles' },
   ],
   INTERACTIVE_AND_DIGITAL_MEDIA: [
     { title: 'Vault Runners — Game of Record', subcategory: 'Video Games', grossCents: 3_120_000_000, holderKey: 'holder-vault-runners-studio' },
@@ -842,7 +857,8 @@ function atomicTemplate(
 }
 
 /**
- * The atomic registry — 26 sector records. The seven founder-verbatim seeds
+ * The atomic registry — 29 sector records (the founder's 26 plus the three
+ * generation-4 expansion records). The seven founder-verbatim seeds
  * lead EXACTLY as dropped (ids, names, sectors, entity types, telemetry
  * metrics, clauses, counts); the remaining sectors complete the founder's
  * standing directive that no sector form is left out.
@@ -951,7 +967,7 @@ export const ATOMIC_TEMPLATE_REGISTRY: readonly AtomicContractRecord[] = Object.
     'PRODUCTION_READY',
     430,
   ),
-  // ── LIVE_PERFORMANCE_AND_COMEDY ─────────────────────────────────────────
+  // ── SPORTS_AND_ATHLETICS ─────────────────────────────────────────────
   atomicTemplate(
     'TPL-SPT-001',
     'League Broadcast Rights Clearing',
@@ -962,6 +978,17 @@ export const ATOMIC_TEMPLATE_REGISTRY: readonly AtomicContractRecord[] = Object.
     'PRODUCTION_READY',
     880,
   ),
+  atomicTemplate(
+    'TPL-TRN-001',
+    'Tournament Event Prize Purse Clearing',
+    'SPORTS_AND_ATHLETICS',
+    'Tournament Organizer',
+    'Prize Purse Escrow Receipts and Placement Results',
+    ['Prize Purse Escrow Lock', 'Placement Settlement Gate', 'Payout Release Isolation Shield'],
+    'PRODUCTION_READY',
+    540,
+  ),
+  // ── LIVE_PERFORMANCE_AND_COMEDY ─────────────────────────────────────────
   atomicTemplate(
     'TPL-MTR-001',
     'Motorsport Circuit Trackage Media Rights Agreement',
@@ -1002,6 +1029,16 @@ export const ATOMIC_TEMPLATE_REGISTRY: readonly AtomicContractRecord[] = Object.
     ['Microtransaction Settlement Escrow', 'Studio Distribution Yield Gate', 'Save Asset Isolation Lock'],
     'PRODUCTION_READY',
     1180,
+  ),
+  atomicTemplate(
+    'TPL-ESX-001',
+    'Esports Stream Monetization Clearing',
+    'ESPORTS',
+    'Esports Organization',
+    'Stream View Hours and Clip Licensing Receipts',
+    ['Stream Monetization Escrow Lock', 'Clip Licensing Settlement Gate', 'Stream Asset Isolation Shield'],
+    'PRODUCTION_READY',
+    720,
   ),
   atomicTemplate(
     'TPL-IXP-001',
@@ -1113,6 +1150,16 @@ export const ATOMIC_TEMPLATE_REGISTRY: readonly AtomicContractRecord[] = Object.
     ['License Term Escrow Lock', 'Derivative Use Settlement Gate', 'Portfolio Asset Isolation'],
     'PRODUCTION_READY',
     460,
+  ),
+  atomicTemplate(
+    'TPL-SPN-001',
+    'Brand Sponsorship Deal Clearing',
+    'SPONSORSHIP',
+    'Brand Partner',
+    'Sponsorship Guarantee Receipts and Activation Impressions',
+    ['Deal Value Escrow Lock', 'Activation Window Settlement Gate', 'Campaign Asset Isolation Shield'],
+    'PRODUCTION_READY',
+    610,
   ),
 ]);
 
@@ -1254,6 +1301,17 @@ const ENTITY_TELEMETRY_SEEDS: Readonly<Record<string, SovereignAtomicEntity>> = 
   'TPL-LIT-004': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-004', isbnNumber: '978-0-8044-2957-7', printOnDemandYieldUSD: 27_800, citationTelemetryCount: 296, targetSplit: ENTITY_TARGET_SPLIT },
   'TPL-LIT-005': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-005', isbnNumber: '978-1-86098-033-5', printOnDemandYieldUSD: 19_400, citationTelemetryCount: 512, targetSplit: ENTITY_TARGET_SPLIT },
   'TPL-LIT-006': { entityType: 'LITERARY_WORK', templateId: 'TPL-LIT-006', isbnNumber: '978-0-19-852663-6', printOnDemandYieldUSD: 12_100, citationTelemetryCount: 187, targetSplit: ENTITY_TARGET_SPLIT },
+  // SPORTS & ATHLETICS — the generation-4 expansion seeds (approved build,
+  // 2026-09-22): the athlete contract and the tournament purse, canon-
+  // plausible demo values disclosed under the DEMO DATA badge.
+  'TPL-SPT-001': { entityType: 'ATHLETE_CONTRACT', templateId: 'TPL-SPT-001', contractId: 'NK-404-BAL', sport: 'Basketball', sponsorshipGuaranteeUSD: 2_400_000, endorsementExclusivityLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-TRN-001': { entityType: 'TOURNAMENT_EVENT', templateId: 'TPL-TRN-001', eventId: 'PGA-TOUR-2026-AUG', discipline: 'Golf', prizePurseEscrowUSD: 12_500_000, payoutReleaseLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  // ESPORTS — the Twitch/Epic stream seed (video vocabulary).
+  'TPL-ESX-001': { entityType: 'ESPORTS_STREAM', templateId: 'TPL-ESX-001', streamId: 'TW-888', game: 'Fortnite', streamMonetizationYieldUSD: 86_400, clipLicensingLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  // SOCIAL — the monetized platform channel seed (canon platform union).
+  'TPL-SOC-001': { entityType: 'SOCIAL_CHANNEL', templateId: 'TPL-SOC-001', platform: 'TIKTOK', channelId: 'SOC-7401', contentMatchYieldUSD: 12_000, monetizationReviewLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  // SPONSORSHIP — the cross-industry brand-deal seed.
+  'TPL-SPN-001': { entityType: 'SPONSORSHIP_DEAL', templateId: 'TPL-SPN-001', brandPartner: 'Nike', campaignId: 'SPN-2026-40', dealValueUSD: 950_000, activationWindowLock: false, targetSplit: ENTITY_TARGET_SPLIT },
 });
 
 /**
@@ -1275,6 +1333,12 @@ const ATOMIC_ENTITY_SECTORS: ReadonlySet<AtomicSector> = new Set<AtomicSector>([
   'PUBLISHING',
   'BOOKS',
   'LITERATURE',
+  // Generation-4 expansion (2026-09-22): the five new entertainment forms.
+  'SPORTS',
+  'SPORTS_AND_ATHLETICS',
+  'ESPORTS',
+  'SOCIAL_MEDIA',
+  'SPONSORSHIP',
 ]);
 
 /** Factory prefix → entity class tag; null when the prefix binds no entity. */
@@ -1315,10 +1379,10 @@ export function executionTelemetryFor(templateId: string): AtomicExecutionTeleme
 }
 
 /**
- * Fail-closed shape validation for a SERVED entity — the four dropped
- * guards enforce the class+prefix pairing; the podcast and publishing
- * classes (unguarded in the canon) are checked against their own prefix
- * canon and the shared 50/35/15 split. A failed check never serves.
+ * Fail-closed shape validation for a SERVED entity — the nine fail-closed
+ * guards (six founder-canon classes plus the five expansion classes) enforce
+ * the class+prefix pairing and the shared 50/35/15 split. A failed check
+ * never serves.
  */
 export function validateServedEntity(entity: SovereignAtomicEntity): boolean {
   const splitHolds =
@@ -1338,6 +1402,16 @@ export function validateServedEntity(entity: SovereignAtomicEntity): boolean {
       return isPodcastEntity(entity) && splitHolds;
     case 'LITERARY_WORK':
       return isPublishingEntity(entity) && splitHolds;
+    case 'ATHLETE_CONTRACT':
+      return isAthleteContractEntity(entity) && splitHolds;
+    case 'TOURNAMENT_EVENT':
+      return isTournamentEventEntity(entity) && splitHolds;
+    case 'ESPORTS_STREAM':
+      return isEsportsStreamEntity(entity) && splitHolds;
+    case 'SOCIAL_CHANNEL':
+      return isSocialChannelEntity(entity) && splitHolds;
+    case 'SPONSORSHIP_DEAL':
+      return isSponsorshipDealEntity(entity) && splitHolds;
   }
 }
 
@@ -1647,7 +1721,7 @@ function assertLaneRegistriesIntegrity(): void {
   const atomicGuardSectors = ATOMIC_SECTOR_GUARDS.map((binding) => binding.sector);
   const atomicSectorSet = new Set(atomicGuardSectors);
   if (atomicGuardSectors.length !== ATOMIC_SECTOR_ORDER.length || !ATOMIC_SECTOR_ORDER.every((sector) => atomicSectorSet.has(sector))) {
-    throw new Error('masterStore: the guard registry does not cover all 26 atomic sectors exactly once');
+    throw new Error('masterStore: the guard registry does not cover every atomic sector exactly once');
   }
   const guardIdSet = new Set([...ATOMIC_SECTOR_GUARDS, ...FACTORY_VERTICAL_GUARDS].map((binding) => binding.guardId));
   if (guardIdSet.size !== ATOMIC_SECTOR_GUARDS.length + FACTORY_VERTICAL_GUARDS.length) {

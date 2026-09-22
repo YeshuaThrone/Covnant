@@ -8,7 +8,7 @@
  * The engine evaluates 1099 thresholds per settlement (its settlement call passes
  * the per-event share, not a YTD accumulator), so the form column shows the
  * engine's own determination from the most recent settlement plus the profile's
- * standing compliance status. Enriched with the six-vertical master data seam
+ * standing compliance status. Enriched with the seven-vertical master data seam
  * (founder canon): the sovereign ledger hydrates above the registry cards.
  */
 

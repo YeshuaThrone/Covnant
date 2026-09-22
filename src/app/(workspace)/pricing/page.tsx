@@ -101,7 +101,7 @@ export default async function PricingPage() {
 
       <section aria-label="Master vertical coverage" className="space-y-4">
         <h2 className="font-mono text-xs uppercase tracking-[0.3em] text-white/40">
-          One ledger — six master verticals
+          One ledger — seven master verticals
         </h2>
         <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3" data-testid="vertical-coverage-strip">
           {MASTER_CATEGORY_ORDER.map((vertical) => {

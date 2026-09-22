@@ -47,7 +47,7 @@ describe('lane template resolution — either library, alias map, fail closed', 
   });
 
   it('resolves every atomic registry id', () => {
-    expect(ATOMIC_TEMPLATE_REGISTRY.length).toBe(26);
+    expect(ATOMIC_TEMPLATE_REGISTRY.length).toBe(29);
     for (const record of ATOMIC_TEMPLATE_REGISTRY) {
       const resolution = resolveLaneTemplate(record.templateId);
       expect(resolution, `${record.templateId} must resolve`).not.toBeNull();
@@ -231,7 +231,7 @@ describe('guard verdicts — fail closed, allowlist is the only cross-domain doo
   });
 
   it('registers every atomic sector and factory vertical on the route manifest', () => {
-    expect(EXECUTION_LANE_ROUTE_MANIFEST.length).toBe(26 + 6);
+    expect(EXECUTION_LANE_ROUTE_MANIFEST.length).toBe(29 + 6);
     for (const record of ATOMIC_TEMPLATE_REGISTRY) {
       expect(EXECUTION_LANE_ROUTE_MANIFEST, `${record.atomicSector} must be on the manifest`).toContain(record.atomicSector);
     }

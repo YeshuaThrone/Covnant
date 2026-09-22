@@ -1,6 +1,6 @@
 /**
  * MasterData — the shared presentational layer of the admin master data
- * surfaces (founder canon, CovnantMasterDataSDK): the six-vertical tab bar,
+ * surfaces (founder canon, CovnantMasterDataSDK): the seven-vertical tab bar,
  * the allocation stat cards, and the sovereign ledger table. PURE PRESENTATION
  * — every dollar rendered here arrives as an engine-computed integer-cent
  * figure from the master ledger store; nothing is formatted from a constant.

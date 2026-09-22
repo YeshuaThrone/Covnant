@@ -35,7 +35,7 @@ function bindAtomicPair(record: AtomicContractRecord): EntityBoundAtomicRecord {
 
 /**
  * /templates — the COVNANT CONTROL BOARD (founder directive, 2026-09-20),
- * on the existing page shell: the six master entertainment verticals tab
+ * on the existing page shell: the seven master entertainment verticals tab
  * the boards, and every tab renders a fully populated board — every form
  * of entertainment, none left out.
  *
@@ -90,7 +90,7 @@ export default async function TemplatesPage({
         </p>
         <p className="mt-4 max-w-2xl text-white/60">
           {records.length} contract templates and {atomicRecords.length} atomic sector records
-          across the six master entertainment verticals and all 26 atomic sectors — click a
+          across the seven master entertainment verticals and all 29 atomic sectors — click a
           vertical to swap the boards below.
         </p>
       </header>

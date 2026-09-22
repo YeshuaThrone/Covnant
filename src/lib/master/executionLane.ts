@@ -377,6 +377,61 @@ function formatEntityTelemetry(entity: SovereignAtomicEntity): LaneTelemetry {
           { label: 'Citation Telemetry', value: `${entity.citationTelemetryCount.toLocaleString('en-US')} citations` },
         ],
       };
+    case 'ATHLETE_CONTRACT':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Contract ID', value: entity.contractId },
+          { label: 'Sport', value: entity.sport },
+          { label: 'Sponsorship Guarantee', value: formatUsdAmount(entity.sponsorshipGuaranteeUSD) },
+          { label: 'Endorsement Exclusivity', value: entity.endorsementExclusivityLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'TOURNAMENT_EVENT':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Event ID', value: entity.eventId },
+          { label: 'Discipline', value: entity.discipline },
+          { label: 'Prize Purse Escrow', value: formatUsdAmount(entity.prizePurseEscrowUSD) },
+          { label: 'Payout Release', value: entity.payoutReleaseLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'ESPORTS_STREAM':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Stream ID', value: entity.streamId },
+          { label: 'Game', value: entity.game },
+          { label: 'Stream Monetization Yield', value: formatUsdAmount(entity.streamMonetizationYieldUSD) },
+          { label: 'Clip Licensing', value: entity.clipLicensingLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'SOCIAL_CHANNEL':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Platform', value: entity.platform },
+          { label: 'Channel ID', value: entity.channelId },
+          { label: 'Content Match Yield', value: formatUsdAmount(entity.contentMatchYieldUSD) },
+          { label: 'Monetization Review', value: entity.monetizationReviewLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'SPONSORSHIP_DEAL':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Brand Partner', value: entity.brandPartner },
+          { label: 'Campaign ID', value: entity.campaignId },
+          { label: 'Deal Value', value: formatUsdAmount(entity.dealValueUSD) },
+          { label: 'Activation Window', value: entity.activationWindowLock ? 'Locked' : 'Open' },
+        ],
+      };
   }
 }
 

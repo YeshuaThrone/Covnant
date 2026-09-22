@@ -40,7 +40,7 @@ export default async function CatalogPage({
   const { category } = await searchParams;
   const active = masterCategoryFromParam(category);
 
-  // The master data seam — the six-vertical sovereign ledger above the
+  // The master data seam — the seven-vertical sovereign ledger above the
   // registry grid; demo library in preview (under the HeaderActions badge),
   // real settled rows otherwise.
   const { demo, records } = await resolveMasterLedger();
