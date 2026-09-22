@@ -94,6 +94,11 @@ const SEED_INSTANTS = {
   esports: '2026-09-13T15:00:00.000Z',
   social: '2026-09-14T15:00:00.000Z',
   sponsorship: '2026-09-15T15:00:00.000Z',
+  film: '2026-09-16T15:00:00.000Z',
+  tv: '2026-09-17T15:00:00.000Z',
+  podcast: '2026-09-18T15:00:00.000Z',
+  live: '2026-09-19T15:00:00.000Z',
+  publishing: '2026-09-20T15:00:00.000Z',
 } as const;
 
 /** Creator 50% — label 50%: exact splits, zero dust on every run. */
@@ -144,6 +149,18 @@ const SEED_RUNS: ReadonlyArray<{
   { source: 'Twitch', period: '2026-09', at: SEED_INSTANTS.esports, workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 8_640_000, withCreator: false },
   { source: 'TikTok', period: '2026-09', at: SEED_INSTANTS.social, workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 1_200_000, withCreator: false },
   { source: 'Nike', period: '2026-09', at: SEED_INSTANTS.sponsorship, workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 95_000_000, withCreator: false },
+  // The flow-kind widening runs (2026-09-22 founder directive — the page
+  // must read like the whole entertainment world clears through Covnant):
+  // every industry class represented through the same label-only demo
+  // allocation, so the by-industry cut shows all ten class tags and the
+  // by-flow-kind cut shows every registered kind. Sources are store-side
+  // counterparty strings of record (ledger drilldowns); the analytics
+  // layer never renders them.
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.film, workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 420_000_000, withCreator: false },
+  { source: 'Broadcast Partners', period: '2026-09', at: SEED_INSTANTS.tv, workId: 'TPL-TV-001', workTitle: 'Broadcast Ad Insert Settlement', gross: 310_000_000, withCreator: false },
+  { source: 'Apple Podcasts', period: '2026-09', at: SEED_INSTANTS.podcast, workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 96_400_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.live, workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 236_800_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.publishing, workId: 'TPL-PUB-001', workTitle: 'Print Royalty Settlement', gross: 84_200_000, withCreator: false },
 ];
 
 /** Expected per-run creator allocation (gross × 5,000 BPS — all exact). */

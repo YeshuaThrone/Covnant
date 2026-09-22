@@ -1,9 +1,13 @@
 /**
  * Analytics — the console's royalty-flow views (generation-4 spec,
- * 2026-09-22): the ONE clearing ledger read three ways — by industry (the
- * bound atomic entity class of the underlying asset), by source (the
- * split run's source of record), and by transaction type (the journal
- * kind of record). Store-read only, integer-cent math, descending rows.
+ * 2026-09-22; structural flow-kind rework per the 2026-09-22 founder
+ * directive): the ONE clearing ledger read three ways — by industry (the
+ * bound atomic entity class of the underlying asset), by flow kind (the
+ * registered structural economic kind — the intelligence layer speaks
+ * structure, never counterparty names), and by transaction type (the
+ * journal kind of record). Store-read only, integer-cent math, descending
+ * rows; brand and counterparty strings never render here — they live on
+ * entity cards and ledger drilldowns.
  *
  * Presentation follows the platform's established language — the gold-rule
  * divider and eyebrow titles of the Overview's Revenue Streams block, with
@@ -16,6 +20,7 @@
  */
 
 import { formatCentsBigint } from '@/lib/money/format';
+import { flowKindLabel } from '@/lib/master/flowKinds';
 import type { AnalyticsCut, PlatformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
 import { SectionEyebrow, SectionUnavailable } from '../shared';
 import type { SectionData } from '../types';
@@ -43,7 +48,14 @@ function DemoBadge() {
 }
 
 /** The three cuts, in the spec's order — id is the stable testid stem. */
-const CUTS: readonly { id: string; title: string; description: string; pick: (flows: PlatformAnalyticsFlows) => AnalyticsCut }[] = [
+const CUTS: readonly {
+  id: string;
+  title: string;
+  description: string;
+  pick: (flows: PlatformAnalyticsFlows) => AnalyticsCut;
+  /** Row-label mapper — the flow-kind cut maps its structural rows through the registered labels. */
+  label?: (label: string) => string;
+}[] = [
   {
     id: 'industry',
     title: 'By industry',
@@ -51,10 +63,11 @@ const CUTS: readonly { id: string; title: string; description: string; pick: (fl
     pick: (flows) => flows.byIndustry,
   },
   {
-    id: 'source',
-    title: 'By source',
-    description: "Gross royalty inflow by the split run's source of record.",
-    pick: (flows) => flows.bySource,
+    id: 'flow-kind',
+    title: 'By flow kind',
+    description: "Gross royalty inflow by the registered economic flow kind of the underlying asset — the clearinghouse's structural vocabulary.",
+    pick: (flows) => flows.byFlowKind,
+    label: flowKindLabel,
   },
   {
     id: 'transaction-type',
@@ -88,11 +101,13 @@ function CutBlock({
   cutId,
   title,
   description,
+  label,
   cut,
 }: {
   cutId: string;
   title: string;
   description: string;
+  label?: (label: string) => string;
   cut: AnalyticsCut;
 }) {
   const readyRows = cut.state === 'ready' ? cut.rows : [];
@@ -117,7 +132,7 @@ function CutBlock({
                   className="flex items-center justify-between gap-4 py-2"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-slate-200">{row.label}</span>
+                    <span className="block truncate text-sm text-slate-200">{label ? label(row.label) : row.label}</span>
                     <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-slate-700/50">
                       <span
                         data-testid={`analytics-cut-${cutId}-bar`}
@@ -157,7 +172,7 @@ export function AnalyticsSection({
         {demo ? <DemoBadge /> : null}
       </div>
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/50">
-        The one clearing ledger read three ways — by industry, by source, and by
+        The one clearing ledger read three ways — by industry, by flow kind, and by
         transaction type. Every figure is derived from the store at render time;
         a cut with nothing behind it says so.
       </p>
@@ -173,6 +188,7 @@ export function AnalyticsSection({
               cutId={cut.id}
               title={cut.title}
               description={cut.description}
+              label={cut.label}
               cut={cut.pick(analytics.value)}
             />
           ))}

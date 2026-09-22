@@ -4,9 +4,11 @@
  * renders all three cuts with rows; an empty cut renders the honest copy
  * (never a blank block, never '--'); an unavailable read renders the
  * section-unavailable state. The live dev-seed case renders the REAL
- * derivation over the REAL seeded store — the multi-industry clearing
- * demo (MUSIC, SPORTS, ESPORTS, SOCIAL, SPONSORSHIP rows, descending)
- * with the demo-data badge disclosing it.
+ * derivation over the REAL seeded store — the whole-entertainment-world
+ * clearing demo (every industry class tag, every registered flow kind,
+ * descending) with the demo-data badge disclosing it — and pins the
+ * 2026-09-22 structural directive: NO counterparty or brand string from
+ * the seeds renders on the intelligence layer.
  */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -18,7 +20,7 @@ import type { PlatformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
 import { AnalyticsSection, shareOfCutTotal } from '../AnalyticsSection';
 
 describe('shareOfCutTotal — the bar-width derivation', () => {
-  it('is the row\'s integer-percent share of the cut total — bigint math', () => {
+  it("is the row's integer-percent share of the cut total — bigint math", () => {
     // 250 of 1,000 → 25%.
     expect(shareOfCutTotal(250n, 1_000n)).toBe(25);
     // Truncating integer division: 1 of 3 → 33%, not 33.33.
@@ -26,7 +28,7 @@ describe('shareOfCutTotal — the bar-width derivation', () => {
   });
 
   it('floors a nonzero row at a 1% sliver so descending order stays visible', () => {
-    // 1,490,000 of 834,823,333,336 truncates to 0 — the sliver keeps it on screen.
+    // 1,490,000,000 of 834,823,333,336 truncates to 0 — the sliver keeps it on screen.
     expect(shareOfCutTotal(1_490_000_000n, 834_823_333_336n)).toBe(1);
     expect(shareOfCutTotal(1n, 1n)).toBe(100);
   });
@@ -39,7 +41,7 @@ describe('shareOfCutTotal — the bar-width derivation', () => {
 
 function cut(state: 'empty' | 'unavailable'): PlatformAnalyticsFlows {
   const c = { state, rows: [] };
-  return { byIndustry: c, bySource: c, byTransactionType: c };
+  return { byIndustry: c, byFlowKind: c, byTransactionType: c };
 }
 
 function renderSection(
@@ -61,9 +63,11 @@ describe('AnalyticsSection — the ready state', () => {
         { label: 'SPORTS', totalCents: 1_490_000_000n },
       ],
     },
-    bySource: {
+    byFlowKind: {
       state: 'ready',
-      rows: [{ label: 'Nike', totalCents: 335_000_000n }],
+      // The registered structural kinds — the derivation emits the kind
+      // of record, the section maps it through the registered labels.
+      rows: [{ label: 'BRAND_PARTNERSHIP', totalCents: 335_000_000n }],
     },
     byTransactionType: {
       state: 'ready',
@@ -75,22 +79,36 @@ describe('AnalyticsSection — the ready state', () => {
     const html = renderSection(flows);
 
     expect(html).toContain('By industry');
-    expect(html).toContain('By source');
+    expect(html).toContain('By flow kind');
     expect(html).toContain('By transaction type');
     expect(html).toContain('SPORTS');
     expect(html).toContain('MUSIC');
-    expect(html).toContain('Nike');
+    expect(html).toContain('Brand Partnership');
     expect(html).toContain('royalty_ingest');
     // The bigint-cent formatter's exact figures — never a rounded float.
     expect(html).toContain('$14,900,000.00');
     expect(html).toContain('$3,350,000.00');
   });
 
+  it('renders the flow-kind rows through the registered structural labels — never the raw kind enum', () => {
+    const html = renderSection(flows);
+
+    expect(html).toContain('Brand Partnership');
+    expect(html).not.toContain('BRAND_PARTNERSHIP');
+  });
+
+  it('never renders a counterparty or brand string — the intelligence layer speaks structure', () => {
+    const html = renderSection(flows);
+
+    expect(html).not.toContain('Nike');
+    expect(html).not.toContain('Spotify');
+  });
+
   it('renders each cut as a row block with stable testids', () => {
     const html = renderSection(flows);
 
     expect(html).toContain('data-testid="analytics-cut-industry-row"');
-    expect(html).toContain('data-testid="analytics-cut-source-row"');
+    expect(html).toContain('data-testid="analytics-cut-flow-kind-row"');
     expect(html).toContain('data-testid="analytics-cut-transaction-type-row"');
   });
 
@@ -100,7 +118,7 @@ describe('AnalyticsSection — the ready state', () => {
     // One gold rule per cut block, in the Overview's Revenue Streams rhythm.
     expect((html.match(/gold-rule/g) ?? []).length).toBe(3);
     expect(html).toContain('data-testid="analytics-cut-industry"');
-    expect(html).toContain('data-testid="analytics-cut-source"');
+    expect(html).toContain('data-testid="analytics-cut-flow-kind"');
     expect(html).toContain('data-testid="analytics-cut-transaction-type"');
   });
 
@@ -126,7 +144,7 @@ describe('AnalyticsSection — the ready state', () => {
     const rows = (html.match(/data-testid="analytics-cut-[a-z-]+-row"/g) ?? []).length;
     const bars = (html.match(/data-testid="analytics-cut-[a-z-]+-bar"/g) ?? []).length;
 
-    expect(rows).toBe(4); // 2 industry + 1 source + 1 transaction-type
+    expect(rows).toBe(4); // 2 industry + 1 flow-kind + 1 transaction-type
     expect(bars).toBe(rows);
   });
 
@@ -141,7 +159,7 @@ describe('AnalyticsSection — the honest off-happy-path states', () => {
     const html = renderSection(cut('empty'));
 
     expect(html).toContain('data-testid="analytics-cut-industry-empty"');
-    expect(html).toContain('data-testid="analytics-cut-source-empty"');
+    expect(html).toContain('data-testid="analytics-cut-flow-kind-empty"');
     expect(html).toContain('data-testid="analytics-cut-transaction-type-empty"');
     expect(html).toContain('No royalty postings yet');
     // The canon: never a placeholder value.
@@ -152,6 +170,7 @@ describe('AnalyticsSection — the honest off-happy-path states', () => {
     const html = renderSection(cut('unavailable'));
 
     expect(html).toContain('data-testid="analytics-cut-industry-unavailable"');
+    expect(html).toContain('data-testid="analytics-cut-flow-kind-unavailable"');
     expect(html).toContain('showing nothing rather than a wrong number');
   });
 
@@ -185,9 +204,55 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     html = renderSection(flows, true);
   });
 
-  it('renders the multi-industry clearing demo — all five classes including the four new ones', () => {
-    for (const label of ['MUSIC', 'SPORTS', 'ESPORTS', 'SOCIAL', 'SPONSORSHIP']) {
+  it('renders the whole-entertainment-world clearing demo — every industry class tag', () => {
+    for (const label of [
+      'MUSIC',
+      'FILM',
+      'TV',
+      'PODCASTING',
+      'LIVE',
+      'PUBLISHING',
+      'SPORTS',
+      'ESPORTS',
+      'SOCIAL',
+      'SPONSORSHIP',
+    ]) {
       expect(html).toContain(`>${label}</span>`);
+    }
+  });
+
+  it('renders every registered flow kind through the structural labels', () => {
+    for (const label of [
+      'Royalty Distribution',
+      'Brand Partnership',
+      'Prize Purse',
+      'Platform Content Monetization',
+    ]) {
+      expect(html).toContain(`>${label}</span>`);
+    }
+    // The raw kind enums never render — the registered labels do.
+    expect(html).not.toContain('ROYALTY_DISTRIBUTION');
+  });
+
+  it('renders NO counterparty or brand string from the seeds — the 2026-09-22 structural directive', () => {
+    // Every seeded source of record — the counterparties live in the store
+    // (ledger drilldowns, entity cards), never on the intelligence layer.
+    for (const brand of [
+      'Nike',
+      'Spotify',
+      'YouTube Music',
+      'Amazon Music',
+      'Bandcamp',
+      'PGA Tour',
+      'Twitch',
+      'TikTok',
+      'Meridian Cinemas',
+      'Broadcast Partners',
+      'Apple Podcasts',
+      'Ticketmaster',
+      'Reader Platforms',
+    ]) {
+      expect(html).not.toContain(brand);
     }
   });
 
@@ -207,7 +272,7 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     const widths = [...block.matchAll(/data-testid="analytics-cut-industry-bar"/g)].map(
       (match) => block.slice(match.index).match(/width:(\d+)%/)?.[1] ?? '',
     );
-    expect(widths.length).toBeGreaterThanOrEqual(5);
+    expect(widths.length).toBeGreaterThanOrEqual(10);
     const numeric = widths.map(Number);
     for (let i = 1; i < numeric.length; i += 1) {
       expect(numeric[i]).toBeLessThanOrEqual(numeric[i - 1]);
@@ -216,10 +281,22 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     expect(numeric[0]).toBeGreaterThanOrEqual(90);
   });
 
-  it('renders the seeded source and transaction-type cuts exactly', () => {
-    // The two Nike settlements merge into one source row; the royalty
-    // journals' kind of record is the single transaction-type row.
-    expect(html).toContain('$3,350,000.00');
+  it('renders the seeded flow-kind cut exactly — every kind, descending, structural only', () => {
+    // Σ over the royalty-holding classes (music + film + tv + podcast +
+    // live + publishing runs); the purse, the brand money, the platform
+    // creator yields — each its own structural row.
+    expect(html).toContain('$8,344,807,333.36'); // Royalty Distribution
+    expect(html).toContain('$12,500,000.00'); // Prize Purse
+    expect(html).toContain('$3,350,000.00'); // Brand Partnership
+    expect(html).toContain('$98,400.00'); // Platform Content Monetization
+    const flowRows = (html.match(/data-testid="analytics-cut-flow-kind-row"/g) ?? []).length;
+    expect(flowRows).toBe(4);
+  });
+
+  it('renders the transaction-type cut honest to the journals — one kind of record', () => {
+    // Every royalty journal's kind of record — the single royalty_ingest row
+    // over the whole widened demo ledger (Σ all seeded grosses).
+    expect(html).toContain('$8,360,755,733.36');
     expect(html).toContain('royalty_ingest');
     expect(
       (html.match(/data-testid="analytics-cut-transaction-type-row"/g) ?? []).length,

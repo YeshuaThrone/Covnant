@@ -51,6 +51,7 @@ import {
   type LanePoolName,
   type SovereignAtomicEntity,
 } from './CovnantAtomicDataSDK';
+import { flowKindForEntity, type FlowKind } from './flowKinds';
 import { buildUct, isValidUct } from '@/lib/covnant/uct';
 
 // The atomic sector vocabulary keeps its masterStore import surface (existing
@@ -1706,6 +1707,25 @@ export function listDemoLaneAssets(): readonly Pick<MasterDemoAsset, 'cbt' | 'ki
 }
 
 /**
+ * The bound atomic entity record of a work reference of record — the ONE
+ * resolution chain (canonical template seeds first, then the CBT asset
+ * registry) that every structural view over a work derives from: the
+ * entity class tag and the registered flow kind both read it.
+ */
+export function entityRecordForWorkRef(workRef: string): SovereignAtomicEntity | null {
+  const byTemplateId = ENTITY_TELEMETRY_SEEDS[workRef];
+  if (byTemplateId !== undefined) return byTemplateId;
+  const asset = demoAssetForCbt(workRef);
+  if (asset === undefined) return null;
+  for (const record of ATOMIC_TEMPLATE_REGISTRY) {
+    if (record.atomicSector !== asset.sector) continue;
+    const bound = bindAtomicEntity(record);
+    if (bound !== null) return bound;
+  }
+  return null;
+}
+
+/**
  * The bound entity class of a work reference of record — the analytics
  * industry cut's join key (analyticsFlows resolves a royalty journal's
  * split-run line items to the entity class their money cleared for). Two
@@ -1716,16 +1736,22 @@ export function listDemoLaneAssets(): readonly Pick<MasterDemoAsset, 'cbt' | 'ki
  * never force-fitted.
  */
 export function entityClassForWorkRef(workRef: string): AtomicEntityClassTag | null {
-  const byTemplateId = ENTITY_TELEMETRY_SEEDS[workRef];
-  if (byTemplateId !== undefined) return entityClassTag(byTemplateId);
-  const asset = demoAssetForCbt(workRef);
-  if (asset === undefined) return null;
-  for (const record of ATOMIC_TEMPLATE_REGISTRY) {
-    if (record.atomicSector !== asset.sector) continue;
-    const bound = bindAtomicEntity(record);
-    if (bound !== null) return entityClassTag(bound);
-  }
-  return null;
+  const record = entityRecordForWorkRef(workRef);
+  return record === null ? null : entityClassTag(record);
+}
+
+/**
+ * The registered flow kind of record of a work reference — the analytics'
+ * structural grouping key (the 2026-09-22 directive: the intelligence
+ * layer speaks structure, never counterparty names). Resolved through the
+ * same chain as the entity class, mapped over the entity TYPES so the
+ * athlete-contract and tournament-event forms keep their distinct flow
+ * kinds. Unresolved references have no structural kind — null, never a
+ * guess.
+ */
+export function flowKindForWorkRef(workRef: string): FlowKind | null {
+  const record = entityRecordForWorkRef(workRef);
+  return record === null ? null : flowKindForEntity(record);
 }
 
 /**

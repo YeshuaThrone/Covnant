@@ -1,8 +1,10 @@
 /**
  * Platform analytics flows — the operator's three views over the one
- * clearing ledger (generation-4 spec, 2026-09-22): gross royalty inflow
- * grouped BY INDUSTRY (the bound atomic entity class of the underlying
- * asset), BY SOURCE (the split run's source of record), and BY
+ * clearing ledger (generation-4 spec, 2026-09-22; flow-kind rework per the
+ * 2026-09-22 founder directive): gross royalty inflow grouped BY INDUSTRY
+ * (the bound atomic entity class of the underlying asset), BY FLOW KIND
+ * (the registered structural economic kind of the underlying asset — the
+ * intelligence layer speaks structure, never counterparty names), and BY
  * TRANSACTION TYPE (the journal kind of record).
  *
  * Same derivation family as `revenueStreams.ts`, generalized across every
@@ -12,15 +14,18 @@
  * they count, integer-cent math throughout (bigint accumulation — the
  * cents never touch a float), every grouping sorted descending.
  *
- * Honesty law, per cut: an industry row is never force-fitted — a journal
- * whose split run resolves to no bound entity class contributes to the
- * source and transaction-type cuts but no industry row; a cut with no
+ * Honesty law, per cut: an industry or flow-kind row is never force-fitted
+ * — a journal whose split run resolves to no bound entity contributes to
+ * the transaction-type cut but no industry or flow-kind row; a cut with no
  * rows reports `empty`; a store read that fails reports `unavailable`.
- * Nothing invented, nothing averaged, no fabricated totals.
+ * Nothing invented, nothing averaged, no fabricated totals — and no
+ * counterparty or brand string anywhere in a cut (those live on entity
+ * cards and ledger drilldowns).
  */
 
-import type { AtomicEntityClassTag } from '@/lib/master/CovnantAtomicDataSDK';
-import { entityClassForWorkRef } from '@/lib/master/masterStore';
+import { flowKindForEntity, type FlowKind } from '@/lib/master/flowKinds';
+import { entityClassTag, type SovereignAtomicEntity } from '@/lib/master/CovnantAtomicDataSDK';
+import { entityRecordForWorkRef } from '@/lib/master/masterStore';
 import type { SplitRunRecord } from '@/lib/don/types';
 import type { GlEntryRecord, GlJournalRecord } from '@/modules/don/records';
 import type { Store } from '@/lib/server/store';
@@ -50,7 +55,7 @@ export interface AnalyticsCut {
 
 export interface PlatformAnalyticsFlows {
   readonly byIndustry: AnalyticsCut;
-  readonly bySource: AnalyticsCut;
+  readonly byFlowKind: AnalyticsCut;
   readonly byTransactionType: AnalyticsCut;
 }
 
@@ -104,41 +109,68 @@ function unavailableCut(): AnalyticsCut {
 }
 
 /**
- * The entity class of record of a split run — resolved when EVERY line
- * item of the run resolves and they all agree on one class (the
- * settlement shape of record: one asset per run). A run whose line items
- * resolve to nothing or disagree contributes no industry row — its money
- * stays in the source and transaction-type cuts, never misattributed.
+ * The run's bound atomic entity records — resolved when EVERY line item
+ * of the run resolves (the settlement shape of record: one asset per
+ * run). A run whose line items resolve to nothing contributes no industry
+ * or flow-kind row — its money stays in the transaction-type cut, never
+ * misattributed.
  */
-async function industryOfClass(
+async function recordsOfRun(
   store: Store,
   run: SplitRunRecord,
-): Promise<AtomicEntityClassTag | null> {
+): Promise<readonly SovereignAtomicEntity[] | null> {
   const lineItems = await store.listRoyaltyLineItemsByRun(run.id);
   if (lineItems.length === 0) return null;
-  let industry: AtomicEntityClassTag | null = null;
+  const records: SovereignAtomicEntity[] = [];
   for (const lineItem of lineItems) {
-    const boundClass = entityClassForWorkRef(lineItem.work_id);
-    if (boundClass === null) return null;
-    if (industry === null) industry = boundClass;
-    else if (industry !== boundClass) return null;
+    const record = entityRecordForWorkRef(lineItem.work_id);
+    if (record === null) return null;
+    records.push(record);
   }
-  return industry;
+  return records;
 }
 
-/** The by-industry cut — the line items' bound entity classes, holder credits attributed. */
-async function industryTotals(store: Store, scan: RoyaltyFlowScan): Promise<Map<string, bigint>> {
-  const totals = new Map<string, bigint>();
+/**
+ * The unanimous structural view over a run's records — the view value
+ * every record agrees on, or null when they disagree (a mixed run is
+ * never force-fitted to one row).
+ */
+function unanimousView<T>(
+  records: readonly SovereignAtomicEntity[],
+  view: (record: SovereignAtomicEntity) => T,
+): T | null {
+  if (records.length === 0) return null;
+  const first = view(records[0]);
+  for (const record of records) {
+    if (view(record) !== first) return null;
+  }
+  return first;
+}
+
+/** The by-industry and by-flow-kind cuts — the line-item join both share. */
+async function structuralTotals(
+  store: Store,
+  scan: RoyaltyFlowScan,
+): Promise<{ readonly byIndustry: Map<string, bigint>; readonly byFlowKind: Map<FlowKind, bigint> }> {
+  const byIndustry = new Map<string, bigint>();
+  const byFlowKind = new Map<FlowKind, bigint>();
   for (const journal of scan.journals) {
     const run = scan.runOf.get(journal.id);
     if (run === undefined) continue;
     const holderCredit = holderCreditOf(scan.entriesByJournal.get(journal.id));
     if (holderCredit <= 0n) continue;
-    const industry = await industryOfClass(store, run);
-    if (industry === null) continue;
-    totals.set(industry, (totals.get(industry) ?? 0n) + holderCredit);
+    const records = await recordsOfRun(store, run);
+    if (records === null) continue;
+    const industry = unanimousView(records, entityClassTag);
+    if (industry !== null) {
+      byIndustry.set(industry, (byIndustry.get(industry) ?? 0n) + holderCredit);
+    }
+    const flowKind = unanimousView(records, flowKindForEntity);
+    if (flowKind !== null) {
+      byFlowKind.set(flowKind, (byFlowKind.get(flowKind) ?? 0n) + holderCredit);
+    }
   }
-  return totals;
+  return { byIndustry, byFlowKind };
 }
 
 /**
@@ -154,37 +186,38 @@ export async function platformAnalyticsFlows(store: Store): Promise<PlatformAnal
   } catch {
     return {
       byIndustry: unavailableCut(),
-      bySource: unavailableCut(),
+      byFlowKind: unavailableCut(),
       byTransactionType: unavailableCut(),
     };
   }
 
-  const bySource = new Map<string, bigint>();
   const byTransactionType = new Map<string, bigint>();
   for (const journal of scan.journals) {
     const holderCredit = holderCreditOf(scan.entriesByJournal.get(journal.id));
     if (holderCredit <= 0n) continue;
-    const run = scan.runOf.get(journal.id);
-    if (run === undefined) continue;
-    bySource.set(run.source, (bySource.get(run.source) ?? 0n) + holderCredit);
     byTransactionType.set(
       journal.kind,
       (byTransactionType.get(journal.kind) ?? 0n) + holderCredit,
     );
   }
 
-  // The industry cut fails alone: its extra join (the per-run line items
-  // and the entity binding) is the only read the other two cuts don't need.
+  // The industry and flow-kind cuts fail alone: their extra join (the
+  // per-run line items and the entity binding) is the only read the
+  // transaction-type cut doesn't need.
   let byIndustry: AnalyticsCut;
+  let byFlowKind: AnalyticsCut;
   try {
-    byIndustry = cutFrom(await industryTotals(store, scan));
+    const structural = await structuralTotals(store, scan);
+    byIndustry = cutFrom(structural.byIndustry);
+    byFlowKind = cutFrom(structural.byFlowKind);
   } catch {
     byIndustry = unavailableCut();
+    byFlowKind = unavailableCut();
   }
 
   return {
     byIndustry,
-    bySource: cutFrom(bySource),
+    byFlowKind,
     byTransactionType: cutFrom(byTransactionType),
   };
 }

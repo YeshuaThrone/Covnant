@@ -150,19 +150,21 @@ describe('bootDevSeedStore — the seeded content', () => {
     const escrowedTotal = escrows.reduce((sum, row) => sum + row.withheld_cents, 0);
     expect(escrowedTotal).toBe(DEV_SEED_TARGETS.reserve_cents);
 
-    // The GL: ten royalty ingests (five music-platform runs plus the five
-    // generation-4 demo runs — the athlete contract, tournament purse, esports
-    // stream, social channel, and sponsorship deal) + one release + four payout
-    // holds + two payout settlements, all posted — the hash chain links every
-    // journal to its predecessor.
+    // The GL: fifteen royalty ingests (five music-platform runs plus the
+    // five generation-4 demo runs — the athlete contract, tournament purse,
+    // esports stream, social channel, and sponsorship deal — plus the five
+    // flow-kind widening runs for film, TV, podcasting, live, and
+    // publishing) + one release + four payout holds + two payout
+    // settlements, all posted — the hash chain links every journal to its
+    // predecessor.
     const journals = await store.listGlJournals();
-    expect(journals).toHaveLength(17);
+    expect(journals).toHaveLength(22);
     const bySequence = [...journals].sort((a, b) => a.sequence - b.sequence);
     for (let i = 1; i < bySequence.length; i += 1) {
       expect(bySequence[i].prev_hash).toBe(bySequence[i - 1].entry_hash);
     }
     expect(bySequence.every((journal) => journal.state === 'posted')).toBe(true);
-    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(10);
+    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(15);
     expect(bySequence.filter((journal) => journal.kind === 'pending_release')).toHaveLength(1);
     expect(bySequence.filter((journal) => journal.kind === 'payout_hold')).toHaveLength(4);
     expect(bySequence.filter((journal) => journal.kind === 'payout_settled')).toHaveLength(2);
