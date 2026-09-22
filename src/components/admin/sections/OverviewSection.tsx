@@ -81,6 +81,7 @@ export function OverviewSection({ data }: { data: AdminConsoleData }) {
           operator's platform-wide mirror of the holder strip: every payee's
           royalty-ingest vault credit legs grouped by the split run's source.
           Store-read only — the empty and unavailable states are honest. */}
+      <div className="gold-rule mt-10 w-64" />
       <div className="mt-8 max-w-2xl" aria-label="Revenue streams">
         <SectionEyebrow>Revenue streams</SectionEyebrow>
         <p className="mt-2 text-[13px] leading-relaxed text-white/40">
