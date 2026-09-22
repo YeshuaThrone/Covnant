@@ -97,6 +97,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'creators' && (
           <CreatorsSection
             creators={profiles}
+            demo={data.creatorsDemo}
             onProfileUpdated={(profile) =>
               setProfiles((current) =>
                 current.kind === 'ready'

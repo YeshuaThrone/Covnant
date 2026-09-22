@@ -21,7 +21,7 @@
 import { cookies } from 'next/headers';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
-import { seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
+import { isDemoDoorOpen, seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
 import { buildContractRegistrySection, buildLedgerFinancesSection, buildTaxSection } from '@/lib/admin/sectionPayloads';
 import { listContracts, type StoredContract } from '@/lib/contracts/store';
 import { listCreators } from '@/lib/admin/creators';
@@ -181,6 +181,7 @@ export default async function AdminPage() {
     ledger: ledgerSummary(ledgerRows),
     contracts: toSectionData(contracts),
     creators: toSectionData(creators),
+    creatorsDemo: isDemoDoorOpen(),
     allowlists: toSectionData(allowlists),
     master,
     controlBoard: buildControlBoardState(masterTemplates, atomicRegistry),

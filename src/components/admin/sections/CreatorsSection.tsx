@@ -31,6 +31,20 @@ import {
 import { KYC_STATUSES, TAX_FORM_TYPES, type AdminCreatorProfile, type KycStatus, type TaxFormType } from '@/lib/admin/types';
 import type { SectionData } from '../types';
 import { ReadOnlyChip, SectionEmpty, SectionEyebrow, SectionUnavailable, StatusPill, type PillTone } from '../shared';
+import { CovnantCreatorsView } from '../creators/CovnantCreatorsView';
+import { DEMO_CREATOR_CARDS, mapProfileToCard } from '@/lib/admin/creatorCards';
+
+/** The per-section demo disclosure — the Ledger/Tax badge, reused verbatim. */
+function DemoBadge() {
+  return (
+    <span
+      data-testid="demo-data-badge"
+      className="inline-flex shrink-0 items-center rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-300"
+    >
+      Demo data
+    </span>
+  );
+}
 
 const KYC_TONE: Record<KycStatus, PillTone> = {
   PENDING_INITIALIZATION: 'neutral',
@@ -330,14 +344,38 @@ function CreatorEditor({
 
 export function CreatorsSection({
   creators,
+  demo,
   onProfileUpdated,
 }: {
   creators: SectionData<AdminCreatorProfile[]>;
+  /** True exactly when the demo door is open — gates the disclosed demo cards. */
+  demo: boolean;
   onProfileUpdated: (profile: AdminCreatorProfile) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   if (creators.kind === 'unavailable') {
+    if (demo) {
+      // The disclosed demo door: creator_profiles has no in-memory shadow, so
+      // the store cannot answer here — and the founder's Creators View (v2.7.2)
+      // is what replaces the unavailable placeholder. Demo cards render ONLY
+      // behind the DemoBadge disclosure; a closed door keeps the fail-closed state.
+      return (
+        <div aria-label="Creators">
+          <SectionEyebrow>Creator profiles</SectionEyebrow>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <DemoBadge />
+            <p className="text-sm text-white/50">
+              Disclosed demo preview — demo creator cards. Real signup rows render
+              here once Supabase is configured.
+            </p>
+          </div>
+          <div className="mt-4">
+            <CovnantCreatorsView cards={DEMO_CREATOR_CARDS} />
+          </div>
+        </div>
+      );
+    }
     return (
       <div aria-label="Creators">
         <SectionEyebrow>Creator profiles</SectionEyebrow>
@@ -359,6 +397,17 @@ export function CreatorsSection({
         admin-editable with a logged, confirmed write; everything else is
         read-only.
       </p>
+
+      {profiles.length > 0 && (
+        <div className="mt-6">
+          <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-gold-champagne/80">
+            Creators View — signup-aligned cards
+          </p>
+          <div className="mt-3">
+            <CovnantCreatorsView cards={profiles.map(mapProfileToCard)} />
+          </div>
+        </div>
+      )}
 
       {profiles.length === 0 ? (
         <div className="mt-6">

@@ -131,6 +131,8 @@ export interface AdminConsoleData {
   ledger: LedgerSummary;
   contracts: SectionData<ContractRow[]>;
   creators: SectionData<AdminCreatorProfile[]>;
+  /** True exactly when the demo door is open — gates the Creators tab's disclosed demo cards. */
+  creatorsDemo: boolean;
   allowlists: SectionData<AdminAllowlistRow[]>;
   master: SectionData<MasterLedgerSection>;
   /** The Ledger tab's finances surface — settlements one-truth with /ledger. */
