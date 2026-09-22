@@ -49,6 +49,7 @@ import type {
 } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
+import { platformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
 import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
 import { AdminGate } from '@/components/admin/AdminGate';
@@ -166,6 +167,27 @@ async function safeRevenueStreamsRead(): Promise<AdminConsoleData['revenueStream
   }
 }
 
+/**
+ * The Analytics tab's payload (generation-4 spec, 2026-09-22): the same
+ * Don store door as the Revenue Streams read, over the platformAnalyticsFlows
+ * derivation — the three cuts by industry, source, and transaction type.
+ * One failing store read must never take the console down: both the store
+ * resolution and the derivation degrade to the section's honest
+ * unavailable state.
+ */
+async function safeAnalyticsRead(): Promise<AdminConsoleData['analytics']> {
+  try {
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    return { kind: 'ready', value: await platformAnalyticsFlows(donStore) };
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'analytics_store_failed',
+      message: 'Analytics store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -183,7 +205,7 @@ export default async function AdminPage() {
   await seedAdminDemoDataIfEmpty();
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -202,6 +224,7 @@ export default async function AdminPage() {
     resolveMasterTemplates(),
     resolveAtomicRegistry(),
     safeRevenueStreamsRead(),
+    safeAnalyticsRead(),
   ]);
 
   const data: AdminConsoleData = {
@@ -220,6 +243,8 @@ export default async function AdminPage() {
     ),
     tax: buildTaxSection(ledgerRows, assets, toSectionData(contracts)),
     revenueStreams,
+    analytics,
+    analyticsDemo: isDemoDoorOpen(),
   };
 
   return <AdminConsole data={data} />;

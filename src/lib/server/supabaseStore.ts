@@ -425,6 +425,17 @@ export class SupabaseStore implements Store {
     );
   }
 
+  async listRoyaltyLineItemsByRun(splitRunId: string): Promise<RoyaltyLineItemRecord[]> {
+    return this.many<RoyaltyLineItemRecord>(
+      this.client
+        .from(TABLES.royaltyLineItems)
+        .select()
+        .eq('split_run_id', splitRunId)
+        .order('created_at', { ascending: true }),
+      'listRoyaltyLineItemsByRun',
+    );
+  }
+
   // --- Ledger transactions ---
 
   async insertLedgerTransaction(

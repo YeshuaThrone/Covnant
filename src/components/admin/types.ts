@@ -7,6 +7,7 @@
 
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
+import type { PlatformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
 import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
@@ -154,9 +155,17 @@ export interface AdminConsoleData {
    * platform-wide royalty inflow by source, store-read only.
    */
   revenueStreams: SectionData<GoldBoardRevenueStream[]>;
+  /**
+   * The Analytics tab's three cuts (generation-4 spec, 2026-09-22): the
+   * one ledger's royalty inflow by industry, by source, and by
+   * transaction type — store-read only, per-cut honest states.
+   */
+  analytics: SectionData<PlatformAnalyticsFlows>;
+  /** True exactly when the demo door is open — gates the Analytics tab's disclosed demo badge. */
+  analyticsDemo: boolean;
 }
 
-/** The eight console tabs, in operator order. */
+/** The nine console tabs, in operator order. */
 export const CONSOLE_TABS = [
   'Overview',
   'Creators',
@@ -165,6 +174,7 @@ export const CONSOLE_TABS = [
   'Contracts',
   'Tax',
   'Control Board',
+  'Analytics',
   'Allowlists',
 ] as const;
 

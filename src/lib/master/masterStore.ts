@@ -1706,6 +1706,29 @@ export function listDemoLaneAssets(): readonly Pick<MasterDemoAsset, 'cbt' | 'ki
 }
 
 /**
+ * The bound entity class of a work reference of record — the analytics
+ * industry cut's join key (analyticsFlows resolves a royalty journal's
+ * split-run line items to the entity class their money cleared for). Two
+ * reference forms resolve: the entity template id (the telemetry library's
+ * own ids, e.g. TPL-MUS-001) and the canonical demo CBT (the demo asset
+ * registry's sector binding, e.g. CBT-TRK-A51DF05B4279). Returns null when
+ * the reference resolves to no bound entity class — an industry row is
+ * never force-fitted.
+ */
+export function entityClassForWorkRef(workRef: string): AtomicEntityClassTag | null {
+  const byTemplateId = ENTITY_TELEMETRY_SEEDS[workRef];
+  if (byTemplateId !== undefined) return entityClassTag(byTemplateId);
+  const asset = demoAssetForCbt(workRef);
+  if (asset === undefined) return null;
+  for (const record of ATOMIC_TEMPLATE_REGISTRY) {
+    if (record.atomicSector !== asset.sector) continue;
+    const bound = bindAtomicEntity(record);
+    if (bound !== null) return entityClassTag(bound);
+  }
+  return null;
+}
+
+/**
  * The lane registries' integrity gate — runs once at module load and THROWS
  * on any violation (the devSeed law: never a half-seeded store):
  *   - the guard registry covers all 26 atomic sectors and all 6 factory

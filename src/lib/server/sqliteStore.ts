@@ -802,6 +802,14 @@ export class SqliteStore implements Store {
     return Promise.resolve(record);
   }
 
+  async listRoyaltyLineItemsByRun(splitRunId: string): Promise<RoyaltyLineItemRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM royalty_line_items WHERE split_run_id = ? ORDER BY rowid ASC`)
+        .all(splitRunId) as RoyaltyLineItemRecord[],
+    );
+  }
+
   async insertLedgerTransaction(
     row: Omit<LedgerTransactionRecord, 'id' | 'kind'> & {
       kind?: LedgerTransactionRecord['kind'];

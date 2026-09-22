@@ -333,6 +333,14 @@ export class InMemoryStore implements Store {
     return record;
   }
 
+  async listRoyaltyLineItemsByRun(splitRunId: string): Promise<RoyaltyLineItemRecord[]> {
+    return sortByTime(
+      this.royaltyLineItems.filter((row) => row.split_run_id === splitRunId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
   // --- Ledger transactions ---
 
   async insertLedgerTransaction(

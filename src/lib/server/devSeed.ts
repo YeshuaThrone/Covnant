@@ -89,6 +89,11 @@ const SEED_INSTANTS = {
   settle_ach: '2026-09-09T10:05:00.000Z',
   payout_rtp_2: '2026-09-10T14:00:00.000Z',
   payout_ach_2: '2026-09-10T14:05:00.000Z',
+  sports: '2026-09-11T15:00:00.000Z',
+  tournament: '2026-09-12T15:00:00.000Z',
+  esports: '2026-09-13T15:00:00.000Z',
+  social: '2026-09-14T15:00:00.000Z',
+  sponsorship: '2026-09-15T15:00:00.000Z',
 } as const;
 
 /** Creator 50% — label 50%: exact splits, zero dust on every run. */
@@ -99,9 +104,20 @@ const LABEL_BPS = 5_000;
 const RELEASED_NET_CENTS = 316_666_666_668;
 
 /**
- * The five seeded royalty runs. Sources are the distribution platforms;
- * each gross is an even number of cents so the 50% creator allocation is
- * exact. The two totals that matter:
+ * The seeded royalty runs — the founder persona's five music-platform
+ * settlements plus the generation-4 multi-industry runs (the athlete
+ * guarantee, the tournament purse, the stream yield, the social yield,
+ * the sponsorship deal). The work reference of record on EVERY run is the
+ * bound entity template of the underlying asset (the analytics industry
+ * cut's join key), and every gross is an even number of cents so the
+ * splits are exact.
+ *
+ * The music runs clear 50/50 to the persona (creator, withheld) and the
+ * demo rights group (label). The generation-4 runs clear 100% to the demo
+ * rights group — the founder persona's pinned vault targets stay exact,
+ * and the demo-data badge discloses all of it.
+ *
+ * The two totals that matter for the persona's vault:
  *   Σ creator allocations = 416,666,666,668
  *   Σ withheld (24% of each allocation, no verified TIN) = 100,000,000,000
  */
@@ -109,14 +125,25 @@ const SEED_RUNS: ReadonlyArray<{
   source: string;
   period: string;
   at: string;
+  workId: string;
   workTitle: string;
   gross: number;
+  withCreator: boolean;
 }> = [
-  { source: 'Spotify', period: '2026-08', at: SEED_INSTANTS.spotify_aug, workTitle: 'Midnight Clear', gross: 200_000_000_000 },
-  { source: 'YouTube Music', period: '2026-08', at: SEED_INSTANTS.youtube_aug, workTitle: 'Gold Hours', gross: 200_000_000_000 },
-  { source: 'Amazon Music', period: '2026-08', at: SEED_INSTANTS.amazon_aug, workTitle: 'Sovereign Season', gross: 200_000_000_000 },
-  { source: 'Spotify', period: '2026-09', at: SEED_INSTANTS.spotify_sep, workTitle: 'Midnight Clear', gross: 200_000_000_000 },
-  { source: 'Bandcamp', period: '2026-09', at: SEED_INSTANTS.bandcamp, workTitle: 'Gold Hours', gross: 33_333_333_336 },
+  // The music-platform settlement story (the persona's five runs).
+  { source: 'Spotify', period: '2026-08', at: SEED_INSTANTS.spotify_aug, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 200_000_000_000, withCreator: true },
+  { source: 'YouTube Music', period: '2026-08', at: SEED_INSTANTS.youtube_aug, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 200_000_000_000, withCreator: true },
+  { source: 'Amazon Music', period: '2026-08', at: SEED_INSTANTS.amazon_aug, workId: 'TPL-MUS-001', workTitle: 'Sovereign Season', gross: 200_000_000_000, withCreator: true },
+  { source: 'Spotify', period: '2026-09', at: SEED_INSTANTS.spotify_sep, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 200_000_000_000, withCreator: true },
+  { source: 'Bandcamp', period: '2026-09', at: SEED_INSTANTS.bandcamp, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 33_333_333_336, withCreator: true },
+  // The generation-4 multi-industry runs (demo-disclosed, canon-plausible:
+  // the athlete guarantee, the tournament purse, the stream yield, the
+  // social yield, the sponsorship deal).
+  { source: 'Nike', period: '2026-09', at: SEED_INSTANTS.sports, workId: 'TPL-SPT-001', workTitle: 'Nike Basketball Endorsement', gross: 240_000_000, withCreator: false },
+  { source: 'PGA Tour', period: '2026-09', at: SEED_INSTANTS.tournament, workId: 'TPL-TRN-001', workTitle: 'PGA Tour Purse Settlement', gross: 1_250_000_000, withCreator: false },
+  { source: 'Twitch', period: '2026-09', at: SEED_INSTANTS.esports, workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 8_640_000, withCreator: false },
+  { source: 'TikTok', period: '2026-09', at: SEED_INSTANTS.social, workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 1_200_000, withCreator: false },
+  { source: 'Nike', period: '2026-09', at: SEED_INSTANTS.sponsorship, workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 95_000_000, withCreator: false },
 ];
 
 /** Expected per-run creator allocation (gross × 5,000 BPS — all exact). */
@@ -225,6 +252,16 @@ async function seedRoyaltyRun(
   store: InMemoryStore,
   run: (typeof SEED_RUNS)[number],
 ): Promise<void> {
+  const splits = run.withCreator
+    ? [
+        { payee_id: DEV_SEED_CREATOR.payee_id, payee_name: DEV_SEED_CREATOR.stage_name, role: 'creator' as const, share_bps: CREATOR_BPS },
+        { payee_id: 'rh_thrones_label_don', payee_name: 'Thrones Rights Group', role: 'label' as const, share_bps: LABEL_BPS },
+      ]
+    : [
+        // The generation-4 runs clear to the demo rights group of record —
+        // the founder persona's pinned vault targets stay exact.
+        { payee_id: 'rh_thrones_label_don', payee_name: 'Thrones Rights Group', role: 'label' as const, share_bps: 10_000 },
+      ];
   const result = await calculateUdrSplits(
     store,
     {
@@ -235,13 +272,10 @@ async function seedRoyaltyRun(
       rail: 'ach',
       line_items: [
         {
-          work_id: `seed-work-${run.workTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          work_id: run.workId,
           work_title: run.workTitle,
           amount_cents: run.gross,
-          splits: [
-            { payee_id: DEV_SEED_CREATOR.payee_id, payee_name: DEV_SEED_CREATOR.stage_name, role: 'creator', share_bps: CREATOR_BPS },
-            { payee_id: 'rh_thrones_label_don', payee_name: 'Thrones Rights Group', role: 'label', share_bps: LABEL_BPS },
-          ],
+          splits,
         },
       ],
     },
@@ -250,8 +284,8 @@ async function seedRoyaltyRun(
   if (!result.ok) {
     throw new Error(`dev seed royalty run ${run.source} ${run.period} failed: ${result.code} ${result.message}`);
   }
-  const expected = expectedWithheld(expectedAllocation(run.gross));
-  const actual = BigInt(result.value.withholding[0]?.withheld_cents ?? 0);
+  const expected = run.withCreator ? expectedWithheld(expectedAllocation(run.gross)) : 0n;
+  const actual = result.value.withholding.reduce((sum, row) => sum + BigInt(row.withheld_cents), 0n);
   if (actual !== expected) {
     throw new Error(
       `dev seed withholding drift on ${run.source} ${run.period}: expected ${expected}, got ${actual}`,

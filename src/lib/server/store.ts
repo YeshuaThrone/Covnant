@@ -234,6 +234,8 @@ export interface Store {
   insertRoyaltyLineItem(
     row: Omit<RoyaltyLineItemRecord, 'id'>,
   ): Promise<RoyaltyLineItemRecord>;
+  /** The royalty line items of ONE split run — the per-run read the analytics industry cut joins on. */
+  listRoyaltyLineItemsByRun(splitRunId: string): Promise<RoyaltyLineItemRecord[]>;
 
   // --- Ledger transactions (UDR allocations + payout flows) ---
   insertLedgerTransaction(

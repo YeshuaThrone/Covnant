@@ -67,6 +67,12 @@ beforeAll(async () => {
       excludedNonUsdSettlements: 0,
     },
     controlBoard: {} as ControlBoardState,
+    analytics: {
+      kind: 'unavailable',
+      code: 'analytics_store_failed',
+      message: 'Analytics store read failed.',
+    },
+    analyticsDemo: true,
   };
 });
 
