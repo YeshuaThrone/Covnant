@@ -15,6 +15,16 @@
  * the founder persona's pinned vault targets are untouched — and every
  * value is demo-disclosed through the DEMO DATA badge.
  *
+ * ANALYTICS DENSIFICATION (2026-09-23): the company analytics page needs a
+ * daily CURVE, not dots — the widening above left ~10 active days in the
+ * ledger. A second table of label-only runs puts 2-3 further settlements on
+ * every empty day between the story runs, so the ledger covers 2026-08-20
+ * through 2026-09-23 with no zero-journal day and 2-4 points on most days
+ * of the trailing 30. Same real engine path, same label-only allocation
+ * (founder targets, escrows, payouts untouched), same demo disclosure; the
+ * publishing cohort — and its deliberate 92,000,000-cent tie — is
+ * deliberately NOT densified.
+ *
  * IDENTITY: the persona is Yeshua Throne (the founder), payee
  * `rh_yeshua_throne_don`, KYC-approved, bank-linked, PROVISIONED on the
  * sandbox rail.
@@ -86,7 +96,7 @@ export function isDevSeedMode(): boolean {
   return process.env.DON_DEV_SEED === '1' || process.env.VERCEL_ENV === 'preview';
 }
 
-/** Deterministic seed clock — every record lands on one of these instants. */
+/** Deterministic seed clock — every record lands on one of these instants or a densifier day slot. */
 const SEED_INSTANTS = {
   spotify_aug: '2026-08-20T12:00:00.000Z',
   youtube_aug: '2026-08-29T12:00:00.000Z',
@@ -189,7 +199,8 @@ const RELEASED_NET_CENTS = 316_666_666_668;
  *   Σ creator allocations = 416,666,666,668
  *   Σ withheld (24% of each allocation, no verified TIN) = 100,000,000,000
  */
-const SEED_RUNS: ReadonlyArray<{
+/** One seeded settlement — the shape both run tables share. */
+interface SeedRun {
   source: string;
   period: string;
   at: string;
@@ -197,7 +208,9 @@ const SEED_RUNS: ReadonlyArray<{
   workTitle: string;
   gross: number;
   withCreator: boolean;
-}> = [
+}
+
+const SEED_RUNS: ReadonlyArray<SeedRun> = [
   // The music-platform settlement story (the persona's five runs).
   { source: 'Spotify', period: '2026-08', at: SEED_INSTANTS.spotify_aug, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 200_000_000_000, withCreator: true },
   { source: 'YouTube Music', period: '2026-08', at: SEED_INSTANTS.youtube_aug, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 200_000_000_000, withCreator: true },
@@ -288,6 +301,103 @@ const SEED_RUNS: ReadonlyArray<{
   { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit4_p2, workId: 'TPL-LIT-004', workTitle: 'Translation Print Royalty Settlement', gross: 34_000_000, withCreator: false },
   { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit5_p2, workId: 'TPL-LIT-005', workTitle: 'Academic Print Royalty Settlement', gross: 11_600_000, withCreator: false },
   { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit6_p2, workId: 'TPL-LIT-006', workTitle: 'Audiobook-Print Royalty Settlement', gross: 8_300_000, withCreator: false },
+];
+
+// ── The analytics densification runs (2026-09-23) ───────────────────────────
+// Label-only settlements on the days the tables above leave empty, so the
+// company analytics area chart reads as a daily CURVE. The rotation walks the
+// nineteen non-music, non-publishing entities (the publishing cohort's
+// deliberate tie must not move; MUSIC's five-run story must not grow), 2-3
+// entities per day at staggered slot hours — every day 2026-08-21 through
+// 2026-09-23 carries journal points. The per-entity additions are built so
+// each multi-entity cohort keeps its internal order exactly: every film's
+// three densifier points sum to 157,000,000 cents and every live entity's to
+// 111,000,000, so the cleared-total gaps between siblings never cross.
+
+/**
+ * The densifier day's settlement slots — 09:30, 10:30, 11:30 UTC, clear of
+ * every story instant already in the ledger.
+ */
+function densifierInstant(day: string, slot: number): string {
+  return `${day}T${String(9 + slot).padStart(2, '0')}:30:00.000Z`;
+}
+
+/** A densifier run — day + slot expand to the deterministic instant; period derives from the day. */
+interface DensifierRun {
+  readonly day: string;
+  readonly slot: number;
+  readonly source: string;
+  readonly workId: string;
+  readonly workTitle: string;
+  readonly gross: number;
+}
+
+const DENSIFIER_RUNS: ReadonlyArray<DensifierRun> = [
+  // The FILM rotation — three further distribution settlements per release
+  // (the lead film TPL-FLM-001 takes a fourth), sums equal at 157,000,000.
+  { day: '2026-08-21', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 61_000_000 },
+  { day: '2026-08-21', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-002', workTitle: 'Independent Feature Distribution Settlement', gross: 58_000_000 },
+  { day: '2026-08-21', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-003', workTitle: 'Festival Acquisition Settlement', gross: 63_000_000 },
+  { day: '2026-08-22', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-004', workTitle: 'Studio Release Settlement', gross: 65_000_000 },
+  { day: '2026-08-22', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-005', workTitle: 'Platform Premiere Settlement', gross: 57_000_000 },
+  { day: '2026-08-22', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-006', workTitle: 'Wide Release Settlement', gross: 59_000_000 },
+  { day: '2026-08-23', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-007', workTitle: 'Limited Release Settlement', gross: 62_000_000 },
+  { day: '2026-08-27', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 52_000_000 },
+  { day: '2026-08-27', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-002', workTitle: 'Independent Feature Distribution Settlement', gross: 55_000_000 },
+  { day: '2026-08-28', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-003', workTitle: 'Festival Acquisition Settlement', gross: 51_000_000 },
+  { day: '2026-08-28', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-004', workTitle: 'Studio Release Settlement', gross: 49_000_000 },
+  { day: '2026-08-28', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-005', workTitle: 'Platform Premiere Settlement', gross: 54_000_000 },
+  { day: '2026-08-29', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-006', workTitle: 'Wide Release Settlement', gross: 53_000_000 },
+  { day: '2026-08-29', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-007', workTitle: 'Limited Release Settlement', gross: 50_000_000 },
+  { day: '2026-09-03', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 44_000_000 },
+  { day: '2026-09-03', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-002', workTitle: 'Independent Feature Distribution Settlement', gross: 44_000_000 },
+  { day: '2026-09-04', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-003', workTitle: 'Festival Acquisition Settlement', gross: 43_000_000 },
+  { day: '2026-09-04', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-004', workTitle: 'Studio Release Settlement', gross: 43_000_000 },
+  { day: '2026-09-04', slot: 2, source: 'Meridian Cinemas', workId: 'TPL-FLM-005', workTitle: 'Platform Premiere Settlement', gross: 46_000_000 },
+  { day: '2026-09-05', slot: 0, source: 'Meridian Cinemas', workId: 'TPL-FLM-006', workTitle: 'Wide Release Settlement', gross: 45_000_000 },
+  { day: '2026-09-05', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-007', workTitle: 'Limited Release Settlement', gross: 45_000_000 },
+  { day: '2026-09-23', slot: 1, source: 'Meridian Cinemas', workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 40_000_000 },
+  // The LIVE rotation — three further box-office settlements per stage
+  // (sums equal at 111,000,000; cohort order preserved).
+  { day: '2026-08-23', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 37_000_000 },
+  { day: '2026-08-23', slot: 2, source: 'Ticketmaster', workId: 'TPL-LVE-002', workTitle: 'Arena Residency Settlement', gross: 38_000_000 },
+  { day: '2026-08-24', slot: 0, source: 'Ticketmaster', workId: 'TPL-LVE-003', workTitle: 'Theater Tour Settlement', gross: 36_000_000 },
+  { day: '2026-08-24', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-004', workTitle: 'Club Tour Settlement', gross: 35_000_000 },
+  { day: '2026-08-24', slot: 2, source: 'Ticketmaster', workId: 'TPL-LVE-009', workTitle: 'Festival Stage Settlement', gross: 40_000_000 },
+  { day: '2026-08-30', slot: 0, source: 'Ticketmaster', workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 36_000_000 },
+  { day: '2026-08-30', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-002', workTitle: 'Arena Residency Settlement', gross: 35_000_000 },
+  { day: '2026-08-31', slot: 0, source: 'Ticketmaster', workId: 'TPL-LVE-003', workTitle: 'Theater Tour Settlement', gross: 38_000_000 },
+  { day: '2026-08-31', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-004', workTitle: 'Club Tour Settlement', gross: 38_000_000 },
+  { day: '2026-08-31', slot: 2, source: 'Ticketmaster', workId: 'TPL-LVE-009', workTitle: 'Festival Stage Settlement', gross: 36_000_000 },
+  { day: '2026-09-05', slot: 2, source: 'Ticketmaster', workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 38_000_000 },
+  { day: '2026-09-08', slot: 0, source: 'Ticketmaster', workId: 'TPL-LVE-002', workTitle: 'Arena Residency Settlement', gross: 38_000_000 },
+  { day: '2026-09-08', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-003', workTitle: 'Theater Tour Settlement', gross: 37_000_000 },
+  { day: '2026-09-09', slot: 0, source: 'Ticketmaster', workId: 'TPL-LVE-004', workTitle: 'Club Tour Settlement', gross: 38_000_000 },
+  { day: '2026-09-09', slot: 1, source: 'Ticketmaster', workId: 'TPL-LVE-009', workTitle: 'Festival Stage Settlement', gross: 35_000_000 },
+  // The single-entity rotation — TV, podcast, and the connective brand
+  // money, three further settlements each (cohorts of one: only the totals
+  // grow, the ranks cannot move).
+  { day: '2026-08-25', slot: 0, source: 'Broadcast Partners', workId: 'TPL-TV-001', workTitle: 'Broadcast Ad Insert Settlement', gross: 58_000_000 },
+  { day: '2026-08-25', slot: 1, source: 'Apple Podcasts', workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 31_000_000 },
+  { day: '2026-08-25', slot: 2, source: 'Nike', workId: 'TPL-SPT-001', workTitle: 'Nike Basketball Endorsement', gross: 84_000_000 },
+  { day: '2026-08-26', slot: 0, source: 'PGA Tour', workId: 'TPL-TRN-001', workTitle: 'PGA Tour Purse Settlement', gross: 210_000_000 },
+  { day: '2026-08-26', slot: 1, source: 'Twitch', workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 1_440_000 },
+  { day: '2026-08-26', slot: 2, source: 'TikTok', workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 240_000 },
+  { day: '2026-08-27', slot: 0, source: 'Nike', workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 38_000_000 },
+  { day: '2026-09-01', slot: 0, source: 'Broadcast Partners', workId: 'TPL-TV-001', workTitle: 'Broadcast Ad Insert Settlement', gross: 64_000_000 },
+  { day: '2026-09-01', slot: 1, source: 'Apple Podcasts', workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 36_000_000 },
+  { day: '2026-09-01', slot: 2, source: 'Nike', workId: 'TPL-SPT-001', workTitle: 'Nike Basketball Endorsement', gross: 88_000_000 },
+  { day: '2026-09-02', slot: 0, source: 'PGA Tour', workId: 'TPL-TRN-001', workTitle: 'PGA Tour Purse Settlement', gross: 225_000_000 },
+  { day: '2026-09-02', slot: 1, source: 'Twitch', workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 1_920_000 },
+  { day: '2026-09-02', slot: 2, source: 'TikTok', workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 320_000 },
+  { day: '2026-09-03', slot: 0, source: 'Nike', workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 44_000_000 },
+  { day: '2026-09-10', slot: 0, source: 'Broadcast Partners', workId: 'TPL-TV-001', workTitle: 'Broadcast Ad Insert Settlement', gross: 71_000_000 },
+  { day: '2026-09-10', slot: 1, source: 'Apple Podcasts', workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 42_000_000 },
+  { day: '2026-09-19', slot: 0, source: 'Nike', workId: 'TPL-SPT-001', workTitle: 'Nike Basketball Endorsement', gross: 92_000_000 },
+  { day: '2026-09-19', slot: 1, source: 'PGA Tour', workId: 'TPL-TRN-001', workTitle: 'PGA Tour Purse Settlement', gross: 240_000_000 },
+  { day: '2026-09-20', slot: 0, source: 'Twitch', workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 2_400_000 },
+  { day: '2026-09-20', slot: 1, source: 'TikTok', workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 400_000 },
+  { day: '2026-09-23', slot: 0, source: 'Nike', workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 47_500_000 },
 ];
 
 /** Expected per-run creator allocation (gross × 5,000 BPS — all exact). */
@@ -394,7 +504,7 @@ async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
  */
 async function seedRoyaltyRun(
   store: InMemoryStore,
-  run: (typeof SEED_RUNS)[number],
+  run: SeedRun,
 ): Promise<void> {
   const splits = run.withCreator
     ? [
@@ -562,9 +672,21 @@ async function seedStore(store: InMemoryStore): Promise<void> {
   await seedSyncLibrary(store);
 
   // 1) RESERVE + PENDING: five real settlement runs (withheld → reserve,
-  //    net → pending).
+  //    net → pending), then the analytics densifier's label-only days —
+  //    the SAME engine path, so every curve point is a real settlement.
   for (const run of SEED_RUNS) {
     await seedRoyaltyRun(store, run);
+  }
+  for (const densifier of DENSIFIER_RUNS) {
+    await seedRoyaltyRun(store, {
+      source: densifier.source,
+      period: densifier.day.slice(0, 7),
+      at: densifierInstant(densifier.day, densifier.slot),
+      workId: densifier.workId,
+      workTitle: densifier.workTitle,
+      gross: densifier.gross,
+      withCreator: false,
+    });
   }
 
   // 2) AVAILABLE: the creator releases the settled pending bucket.

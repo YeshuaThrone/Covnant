@@ -155,22 +155,21 @@ describe('bootDevSeedStore — the seeded content', () => {
     const escrowedTotal = escrows.reduce((sum, row) => sum + row.withheld_cents, 0);
     expect(escrowedTotal).toBe(DEV_SEED_TARGETS.reserve_cents);
 
-    // The GL: sixty-one royalty ingests (five music-platform runs plus the
-    // five generation-4 demo runs — the athlete contract, tournament purse,
-    // esports stream, social channel, and sponsorship deal — plus the five
-    // flow-kind widening runs for film, TV, podcasting, live, and
-    // publishing, plus the forty-six intelligence-widening runs that give
-    // every registered atomic entity a staggered journal history) + one
-    // release + four payout holds + two payout settlements, all posted —
-    // the hash chain links every journal to its predecessor.
+    // The GL: one hundred twenty-six journals — one hundred nineteen royalty
+    // ingests (the sixty-one story/widening runs of the tables above plus
+    // the fifty-eight analytics-densifier runs that put 2-3 settlements on
+    // every empty day from 2026-08-21 through 2026-09-23 — same engine
+    // path, same label-only allocation) + one release + four payout holds +
+    // two payout settlements, all posted — the hash chain links every
+    // journal to its predecessor.
     const journals = await store.listGlJournals();
-    expect(journals).toHaveLength(68);
+    expect(journals).toHaveLength(126);
     const bySequence = [...journals].sort((a, b) => a.sequence - b.sequence);
     for (let i = 1; i < bySequence.length; i += 1) {
       expect(bySequence[i].prev_hash).toBe(bySequence[i - 1].entry_hash);
     }
     expect(bySequence.every((journal) => journal.state === 'posted')).toBe(true);
-    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(61);
+    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(119);
     expect(bySequence.filter((journal) => journal.kind === 'pending_release')).toHaveLength(1);
     expect(bySequence.filter((journal) => journal.kind === 'payout_hold')).toHaveLength(4);
     expect(bySequence.filter((journal) => journal.kind === 'payout_settled')).toHaveLength(2);
@@ -265,17 +264,24 @@ describe('bootDevSeedStore — the intelligence widening (per-entity journal his
     expect(escrows).toHaveLength(5);
   });
 
-  it('ranks the film cohort across its seven cleared entities with a two-point trend', async () => {
+  it('ranks the film cohort across its seven cleared entities with a densified trend', async () => {
     await bootDevSeedStore();
     const store = getStore();
     const film = await entityIntelligence('TPL-FLM-001', store);
     expect(film?.class).toBe('FEATURE_FILM');
-    expect(film?.cleared).toBe(685_000_000n);
+    // Two story settlements + four densifier points = 882,000,000 cents.
+    expect(film?.cleared).toBe(882_000_000n);
     expect(film?.cohort).toEqual({ rank: 1n, of: 7n });
-    // Two staggered settlements, newest first — the real series.
+    // Six staggered settlements, newest first — the real series the
+    // sparkline and area chart read. The densifier days slot BETWEEN the
+    // story instants, never over them.
     expect(film?.trend).toEqual([
+      { at: '2026-09-23T10:30:00.000Z', credit: 40_000_000n },
       { at: '2026-09-21T17:30:00.000Z', credit: 265_000_000n },
       { at: '2026-09-16T15:00:00.000Z', credit: 420_000_000n },
+      { at: '2026-09-03T10:30:00.000Z', credit: 44_000_000n },
+      { at: '2026-08-27T10:30:00.000Z', credit: 52_000_000n },
+      { at: '2026-08-21T09:30:00.000Z', credit: 61_000_000n },
     ]);
     const runnerUp = await entityIntelligence('TPL-FLM-004', store);
     expect(runnerUp?.cohort).toEqual({ rank: 2n, of: 7n });
@@ -286,14 +292,16 @@ describe('bootDevSeedStore — the intelligence widening (per-entity journal his
     const store = getStore();
     const arena = await entityIntelligence('TPL-LVE-002', store);
     expect(arena?.class).toBe('STAGE_PERFORMANCE');
-    expect(arena?.cleared).toBe(579_500_000n);
+    // 579,500,000 story total + three densifier box-office points (equal
+    // 111,000,000 additions hold every live sibling's rank).
+    expect(arena?.cleared).toBe(690_500_000n);
     expect(arena?.cohort).toEqual({ rank: 1n, of: 5n });
-    // The generation-4 box-office run (Sep 19) plus its widening second —
-    // two points, and rank 3 of 5.
+    // The generation-4 box-office run (Sep 19) plus its widening second
+    // plus the densifier points — five points, and rank 3 of 5.
     const legacy = await entityIntelligence('TPL-LVE-001', store);
-    expect(legacy?.cleared).toBe(355_200_000n);
+    expect(legacy?.cleared).toBe(466_200_000n);
     expect(legacy?.cohort).toEqual({ rank: 3n, of: 5n });
-    expect(legacy?.trend).toHaveLength(2);
+    expect(legacy?.trend).toHaveLength(5);
   });
 
   it('clears the deliberate publishing tie — both works rank 3 of 9 and rank 4 is vacant', async () => {
@@ -319,10 +327,11 @@ describe('bootDevSeedStore — the intelligence widening (per-entity journal his
     const athlete = await entityIntelligence('TPL-SPT-001', store);
     expect(athlete?.class).toBe('ATHLETE_CONTRACT');
     expect(athlete?.cohort).toEqual({ rank: 1n, of: 1n });
-    // The widened cleared total (336_000_000 cents) beside the canon
-    // guarantee (2_400_000 USD) — bigint end to end, units stated by the
-    // derivation and formatted at display.
-    expect(athlete?.cleared).toBe(336_000_000n);
+    // The widened cleared total (600,000,000 cents — the story pair plus
+    // three densifier settlements) beside the canon guarantee (2,400,000
+    // USD) — bigint end to end, units stated by the derivation and
+    // formatted at display.
+    expect(athlete?.cleared).toBe(600_000_000n);
     expect(athlete?.promisedUSD).toBe(2_400_000n);
     // The master recording's five-run music story is unchanged by the
     // widening — the trend stays five points, the total exact.
@@ -330,5 +339,80 @@ describe('bootDevSeedStore — the intelligence widening (per-entity journal his
     expect(music?.trend).toHaveLength(5);
     expect(music?.cleared).toBe(833_333_333_336n);
     expect(music?.cohort).toEqual({ rank: 1n, of: 1n });
+  });
+});
+
+describe('bootDevSeedStore — the analytics densification (the daily curve)', () => {
+  it('covers every day from the first story run through today — no zero-journal day', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    const journals = (await store.listGlJournals()).filter(
+      (journal) => journal.kind === 'royalty_ingest',
+    );
+    const countsByDay = new Map<string, number>();
+    for (const journal of journals) {
+      const day = journal.created_at.slice(0, 10);
+      countsByDay.set(day, (countsByDay.get(day) ?? 0) + 1);
+    }
+
+    // Walk 2026-08-20 → 2026-09-23 deterministically (UTC days).
+    const days: string[] = [];
+    for (let t = Date.UTC(2026, 7, 20); t <= Date.UTC(2026, 8, 23); t += 86_400_000) {
+      days.push(new Date(t).toISOString().slice(0, 10));
+    }
+    expect(days[0]).toBe('2026-08-20');
+    expect(days[days.length - 1]).toBe('2026-09-23');
+
+    // The curve never breaks: every single day carries at least one point.
+    for (const day of days) {
+      expect(countsByDay.get(day) ?? 0, `${day} coverage`).toBeGreaterThanOrEqual(1);
+    }
+
+    // Density across the trailing 30 days (2026-08-25 → 2026-09-23): most
+    // days carry the design's 2-4 points, and the ONLY single-point days
+    // are the four story days of record — the September music settlements
+    // (Sep 6/7) and the generation-4 story runs (Sep 11/12) — while only
+    // the widening pile-up days (Sep 18/21/22) exceed the band.
+    const trailing = days.slice(-30);
+    expect(trailing[0]).toBe('2026-08-25');
+    const singlePointDays = trailing.filter((day) => countsByDay.get(day) === 1);
+    expect(singlePointDays.sort()).toEqual(['2026-09-06', '2026-09-07', '2026-09-11', '2026-09-12']);
+    const inBand = trailing.filter((day) => {
+      const count = countsByDay.get(day) ?? 0;
+      return count >= 2 && count <= 4;
+    });
+    expect(inBand).toHaveLength(23);
+  });
+
+  it('densifies the rotation entities to five-plus trend points and leaves the publishing tie at its deliberate two', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    // Every densifier-rotation entity now trends 5+ points (the lead film
+    // six) — real sparkline material, every point a real settlement.
+    for (const templateId of [
+      'TPL-FLM-001', 'TPL-FLM-002', 'TPL-FLM-003', 'TPL-FLM-004', 'TPL-FLM-005', 'TPL-FLM-006', 'TPL-FLM-007',
+      'TPL-TV-001', 'TPL-PDC-001',
+      'TPL-LVE-001', 'TPL-LVE-002', 'TPL-LVE-003', 'TPL-LVE-004', 'TPL-LVE-009',
+      'TPL-SPT-001', 'TPL-TRN-001', 'TPL-ESX-001', 'TPL-SOC-001', 'TPL-SPN-001',
+    ]) {
+      const readout = await entityIntelligence(templateId, store);
+      expect(readout?.trend.length, `${templateId} densified points`).toBeGreaterThanOrEqual(5);
+    }
+    // The publishing cohort is deliberately NOT densified: exactly two
+    // points each, and the deliberate tie stands untouched — the same
+    // totals from different point values, rank 4 still vacant.
+    for (const templateId of [
+      'TPL-PUB-001', 'TPL-BOK-001', 'TPL-LTR-001',
+      'TPL-LIT-001', 'TPL-LIT-002', 'TPL-LIT-003', 'TPL-LIT-004', 'TPL-LIT-005', 'TPL-LIT-006',
+    ]) {
+      const readout = await entityIntelligence(templateId, store);
+      expect(readout?.trend.length, `${templateId} undensified points`).toBe(2);
+    }
+    const lit3 = await entityIntelligence('TPL-LIT-003', store);
+    const lit4 = await entityIntelligence('TPL-LIT-004', store);
+    expect(lit3?.cleared).toBe(92_000_000n);
+    expect(lit4?.cleared).toBe(92_000_000n);
+    expect(lit3?.cohort).toEqual({ rank: 3n, of: 9n });
+    expect(lit4?.cohort).toEqual({ rank: 3n, of: 9n });
   });
 });
