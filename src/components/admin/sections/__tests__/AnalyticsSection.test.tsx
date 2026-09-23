@@ -260,9 +260,9 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     // The five music-platform runs (Σ gross = 833,333,333,336 cents) land
     // as the MUSIC row; the athlete guarantee + tournament purse as SPORTS.
     expect(html).toContain('$8,333,333,333.36');
-    expect(html).toContain('$14,900,000.00');
+    expect(html).toContain('$20,860,000.00');
     // Descending order: the MUSIC row precedes the SPORTS row.
-    expect(html.indexOf('$8,333,333,333.36')).toBeLessThan(html.indexOf('$14,900,000.00'));
+    expect(html.indexOf('$8,333,333,333.36')).toBeLessThan(html.indexOf('$20,860,000.00'));
   });
 
   it('renders the descending order through the industry bars', () => {
@@ -285,10 +285,10 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     // Σ over the royalty-holding classes (music + film + tv + podcast +
     // live + publishing runs); the purse, the brand money, the platform
     // creator yields — each its own structural row.
-    expect(html).toContain('$8,344,807,333.36'); // Royalty Distribution
-    expect(html).toContain('$12,500,000.00'); // Prize Purse
-    expect(html).toContain('$3,350,000.00'); // Brand Partnership
-    expect(html).toContain('$98,400.00'); // Platform Content Monetization
+    expect(html).toContain('$8,391,958,933.36'); // Royalty Distribution
+    expect(html).toContain('$17,500,000.00'); // Prize Purse
+    expect(html).toContain('$4,785,000.00'); // Brand Partnership
+    expect(html).toContain('$147,600.00'); // Platform Content Monetization
     const flowRows = (html.match(/data-testid="analytics-cut-flow-kind-row"/g) ?? []).length;
     expect(flowRows).toBe(4);
   });
@@ -296,7 +296,7 @@ describe('AnalyticsSection — the live dev-seed render', () => {
   it('renders the transaction-type cut honest to the journals — one kind of record', () => {
     // Every royalty journal's kind of record — the single royalty_ingest row
     // over the whole widened demo ledger (Σ all seeded grosses).
-    expect(html).toContain('$8,360,755,733.36');
+    expect(html).toContain('$8,414,391,533.36');
     expect(html).toContain('royalty_ingest');
     expect(
       (html.match(/data-testid="analytics-cut-transaction-type-row"/g) ?? []).length,
