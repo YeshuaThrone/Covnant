@@ -8,6 +8,7 @@
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { PlatformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
+import type { EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
 import type { SovereignLedgerRecord, SovereignLedgerSummary } from '@/lib/master/sovereignLedger';
@@ -163,9 +164,18 @@ export interface AdminConsoleData {
   analytics: SectionData<PlatformAnalyticsFlows>;
   /** True exactly when the demo door is open — gates the Analytics tab's disclosed demo badge. */
   analyticsDemo: boolean;
+  /**
+   * The Intelligence tab's payload (2026-09-22 founder directive): every
+   * registered atomic entity's four-read intelligence readout over the
+   * same Don store door as the Analytics read — store-read only, one
+   * honest union for the whole roster.
+   */
+  intelligence: SectionData<readonly EntityIntelligence[]>;
+  /** True exactly when the demo door is open — gates the Intelligence tab's disclosed demo badge. */
+  intelligenceDemo: boolean;
 }
 
-/** The nine console tabs, in operator order. */
+/** The ten console tabs, in operator order. */
 export const CONSOLE_TABS = [
   'Overview',
   'Creators',
@@ -175,6 +185,7 @@ export const CONSOLE_TABS = [
   'Tax',
   'Control Board',
   'Analytics',
+  'Intelligence',
   'Allowlists',
 ] as const;
 

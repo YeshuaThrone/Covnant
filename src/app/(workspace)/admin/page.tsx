@@ -50,6 +50,7 @@ import type {
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
 import { platformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
+import { entityIntelligence, type EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
 import { AdminGate } from '@/components/admin/AdminGate';
@@ -188,6 +189,53 @@ async function safeAnalyticsRead(): Promise<AdminConsoleData['analytics']> {
   }
 }
 
+/**
+ * The Intelligence tab's payload (2026-09-22 founder directive: "we need
+ * real analytics like the NFL would have on their players"): every
+ * registered atomic entity read through the entityIntelligence derivation
+ * over the same Don store door as the Analytics read — the four reads per
+ * entity. The roster is the FULL registered universe, from both template
+ * registries: the atomic registry's sector-bound records (bindAtomicEntity)
+ * and the factory templates that bind an entity class (bindFactoryEntity),
+ * deduplicated by template id. One failing store read must never take the
+ * console down: both the store resolution and the per-entity fan-out
+ * degrade to the section's honest unavailable state.
+ */
+async function safeIntelligenceRead(): Promise<AdminConsoleData['intelligence']> {
+  try {
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    const [{ records: atomicRecords }, { records: factoryRecords }] = await Promise.all([
+      resolveAtomicRegistry(),
+      resolveMasterTemplates(),
+    ]);
+    const identities = new Set<string>();
+    const readouts: EntityIntelligence[] = [];
+    const addEntity = async (templateId: string) => {
+      if (identities.has(templateId)) return;
+      identities.add(templateId);
+      const readout = await entityIntelligence(templateId, donStore);
+      if (readout !== null) readouts.push(readout);
+    };
+    // Both registries, each through its own typed binding — the atomic
+    // sector-bound records and the factory templates that bind a class.
+    for (const record of atomicRecords) {
+      const entity = bindAtomicEntity(record);
+      if (entity !== null) await addEntity(entity.templateId);
+    }
+    for (const record of factoryRecords) {
+      const entity = bindFactoryEntity(record);
+      if (entity !== null) await addEntity(entity.templateId);
+    }
+    return { kind: 'ready', value: readouts };
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'intelligence_store_failed',
+      message: 'Intelligence store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -205,7 +253,7 @@ export default async function AdminPage() {
   await seedAdminDemoDataIfEmpty();
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics, intelligence] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -225,6 +273,7 @@ export default async function AdminPage() {
     resolveAtomicRegistry(),
     safeRevenueStreamsRead(),
     safeAnalyticsRead(),
+    safeIntelligenceRead(),
   ]);
 
   const data: AdminConsoleData = {
@@ -245,6 +294,8 @@ export default async function AdminPage() {
     revenueStreams,
     analytics,
     analyticsDemo: isDemoDoorOpen(),
+    intelligence,
+    intelligenceDemo: isDemoDoorOpen(),
   };
 
   return <AdminConsole data={data} />;

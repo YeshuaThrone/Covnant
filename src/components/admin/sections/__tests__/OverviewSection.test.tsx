@@ -73,6 +73,12 @@ beforeAll(async () => {
       message: 'Analytics store read failed.',
     },
     analyticsDemo: true,
+    intelligence: {
+      kind: 'unavailable',
+      code: 'intelligence_store_failed',
+      message: 'Intelligence store read failed.',
+    },
+    intelligenceDemo: true,
   };
 });
 

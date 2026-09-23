@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * AdminConsole — the gated operator console shell. Renders the seven
+ * AdminConsole — the gated operator console shell. Renders the ten
  * sections as tabs (Overview, Creators, Registry, Ledger, Contracts,
- * Control Board, Allowlists) in the established obsidian/deep-gold
- * language.
+ * Control Board, Allowlists, Analytics, Intelligence) in the established
+ * obsidian/deep-gold language.
  *
  * Mutation results are lifted here (updated creator profile / allowlist
  * row from the mutation response) so a section stays consistent when the
@@ -23,6 +23,7 @@ import { ContractsSection } from './sections/ContractsSection';
 import { AllowlistsSection } from './sections/AllowlistsSection';
 import { ControlBoardSection } from './sections/ControlBoardSection';
 import { AnalyticsSection } from './sections/AnalyticsSection';
+import { IntelligenceSection } from './sections/IntelligenceSection';
 
 export type AdminTab =
   | 'overview'
@@ -33,6 +34,7 @@ export type AdminTab =
   | 'contracts'
   | 'controlboard'
   | 'analytics'
+  | 'intelligence'
   | 'allowlists';
 
 const TABS: readonly { id: AdminTab; label: string }[] = [
@@ -44,6 +46,7 @@ const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'tax', label: 'Tax' },
   { id: 'controlboard', label: 'Control Board' },
   { id: 'analytics', label: 'Analytics' },
+  { id: 'intelligence', label: 'Intelligence' },
   { id: 'allowlists', label: 'Allowlists' },
 ];
 
@@ -121,6 +124,9 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'tax' && <TaxSection tax={data.tax} />}
         {tab === 'controlboard' && <ControlBoardSection board={data.controlBoard} />}
         {tab === 'analytics' && <AnalyticsSection analytics={data.analytics} demo={data.analyticsDemo} />}
+        {tab === 'intelligence' && (
+          <IntelligenceSection intelligence={data.intelligence} demo={data.intelligenceDemo} />
+        )}
         {tab === 'allowlists' && (
           <AllowlistsSection
             allowlists={allowlists}
