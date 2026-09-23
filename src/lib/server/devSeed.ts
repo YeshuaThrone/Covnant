@@ -4,6 +4,17 @@
  * EXCLUSIVELY through the real settlement engine — every rendered dollar
  * comes from a store read; nothing here is a display string.
  *
+ * INTELLIGENCE WIDENING (2026-09-23): beyond the founder's story, the seed
+ * clears per-entity journal histories for EVERY registered atomic entity —
+ * at least two staggered label-only settlements each, so the Entity
+ * Intelligence tab's trends read as real series and the multi-entity class
+ * families (film, live, publishing) rank against real cohort totals. One
+ * DELIBERATE tie: TPL-LIT-003 and TPL-LIT-004 clear the same exact total
+ * from different point values, so the standard-competition rank-sharing is
+ * visible in the UI. Every added run clears 100% to the demo rights group —
+ * the founder persona's pinned vault targets are untouched — and every
+ * value is demo-disclosed through the DEMO DATA badge.
+ *
  * IDENTITY: the persona is Yeshua Throne (the founder), payee
  * `rh_yeshua_throne_don`, KYC-approved, bank-linked, PROVISIONED on the
  * sandbox rail.
@@ -99,6 +110,58 @@ const SEED_INSTANTS = {
   podcast: '2026-09-18T15:00:00.000Z',
   live: '2026-09-19T15:00:00.000Z',
   publishing: '2026-09-20T15:00:00.000Z',
+  // ── The intelligence widening instants ──────────────────────────────
+  // Second settlements for the ten generation-4 entities (staggered across
+  // 2026-09-21), and both settlements for the eighteen entities the ledger
+  // had never credited (wave one staggered across 2026-09-13…18, wave two
+  // across 2026-09-22). Fixed, deterministic — the trend window is rendered
+  // exactly as these instants carry it, never smoothed.
+  sports_2: '2026-09-21T15:00:00.000Z',
+  tournament_2: '2026-09-21T15:30:00.000Z',
+  esports_2: '2026-09-21T16:00:00.000Z',
+  social_2: '2026-09-21T16:30:00.000Z',
+  sponsorship_2: '2026-09-21T17:00:00.000Z',
+  film_2: '2026-09-21T17:30:00.000Z',
+  tv_2: '2026-09-21T18:00:00.000Z',
+  podcast_2: '2026-09-21T18:30:00.000Z',
+  live_2: '2026-09-21T19:00:00.000Z',
+  publishing_2: '2026-09-21T19:30:00.000Z',
+  flm2_p1: '2026-09-13T09:30:00.000Z',
+  flm3_p1: '2026-09-13T10:30:00.000Z',
+  flm4_p1: '2026-09-14T09:30:00.000Z',
+  flm5_p1: '2026-09-14T10:30:00.000Z',
+  flm6_p1: '2026-09-15T09:30:00.000Z',
+  flm7_p1: '2026-09-15T10:30:00.000Z',
+  lve2_p1: '2026-09-16T09:30:00.000Z',
+  lve3_p1: '2026-09-16T10:30:00.000Z',
+  lve4_p1: '2026-09-16T11:30:00.000Z',
+  lve9_p1: '2026-09-17T09:30:00.000Z',
+  bok1_p1: '2026-09-17T10:30:00.000Z',
+  ltr1_p1: '2026-09-17T11:30:00.000Z',
+  lit1_p1: '2026-09-18T09:30:00.000Z',
+  lit2_p1: '2026-09-18T10:30:00.000Z',
+  lit3_p1: '2026-09-18T11:30:00.000Z',
+  lit4_p1: '2026-09-18T12:30:00.000Z',
+  lit5_p1: '2026-09-18T13:30:00.000Z',
+  lit6_p1: '2026-09-18T14:30:00.000Z',
+  flm2_p2: '2026-09-22T09:00:00.000Z',
+  flm3_p2: '2026-09-22T09:30:00.000Z',
+  flm4_p2: '2026-09-22T10:00:00.000Z',
+  flm5_p2: '2026-09-22T10:30:00.000Z',
+  flm6_p2: '2026-09-22T11:00:00.000Z',
+  flm7_p2: '2026-09-22T11:30:00.000Z',
+  lve2_p2: '2026-09-22T12:00:00.000Z',
+  lve3_p2: '2026-09-22T12:30:00.000Z',
+  lve4_p2: '2026-09-22T13:00:00.000Z',
+  lve9_p2: '2026-09-22T13:30:00.000Z',
+  bok1_p2: '2026-09-22T14:00:00.000Z',
+  ltr1_p2: '2026-09-22T14:30:00.000Z',
+  lit1_p2: '2026-09-22T15:00:00.000Z',
+  lit2_p2: '2026-09-22T15:30:00.000Z',
+  lit3_p2: '2026-09-22T16:00:00.000Z',
+  lit4_p2: '2026-09-22T16:30:00.000Z',
+  lit5_p2: '2026-09-22T17:00:00.000Z',
+  lit6_p2: '2026-09-22T17:30:00.000Z',
 } as const;
 
 /** Creator 50% — label 50%: exact splits, zero dust on every run. */
@@ -161,6 +224,70 @@ const SEED_RUNS: ReadonlyArray<{
   { source: 'Apple Podcasts', period: '2026-09', at: SEED_INSTANTS.podcast, workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 96_400_000, withCreator: false },
   { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.live, workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 236_800_000, withCreator: false },
   { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.publishing, workId: 'TPL-PUB-001', workTitle: 'Print Royalty Settlement', gross: 84_200_000, withCreator: false },
+  // ── The intelligence widening runs (2026-09-23) ──────────────────────
+  // Per-entity journal histories for the Entity Intelligence tab: every
+  // registered atomic entity clears through at least two staggered
+  // settlements (a real trend series, never a single point), and the
+  // multi-entity class families rank against real cohort totals. All
+  // label-only — the founder persona's pinned vault targets stay exact —
+  // and every value is demo-disclosed through the DEMO DATA badge.
+  // Second settlements for the ten generation-4 entities.
+  { source: 'Nike', period: '2026-09', at: SEED_INSTANTS.sports_2, workId: 'TPL-SPT-001', workTitle: 'Nike Basketball Endorsement', gross: 96_000_000, withCreator: false },
+  { source: 'PGA Tour', period: '2026-09', at: SEED_INSTANTS.tournament_2, workId: 'TPL-TRN-001', workTitle: 'PGA Tour Purse Settlement', gross: 500_000_000, withCreator: false },
+  { source: 'Twitch', period: '2026-09', at: SEED_INSTANTS.esports_2, workId: 'TPL-ESX-001', workTitle: 'Fortnite Stream Monetization', gross: 4_320_000, withCreator: false },
+  { source: 'TikTok', period: '2026-09', at: SEED_INSTANTS.social_2, workId: 'TPL-SOC-001', workTitle: 'Content Match Monetization', gross: 600_000, withCreator: false },
+  { source: 'Nike', period: '2026-09', at: SEED_INSTANTS.sponsorship_2, workId: 'TPL-SPN-001', workTitle: 'Nike Brand Partnership', gross: 47_500_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.film_2, workId: 'TPL-FLM-001', workTitle: 'Theatrical Distribution Settlement', gross: 265_000_000, withCreator: false },
+  { source: 'Broadcast Partners', period: '2026-09', at: SEED_INSTANTS.tv_2, workId: 'TPL-TV-001', workTitle: 'Broadcast Ad Insert Settlement', gross: 124_000_000, withCreator: false },
+  { source: 'Apple Podcasts', period: '2026-09', at: SEED_INSTANTS.podcast_2, workId: 'TPL-PDC-001', workTitle: 'Podcast Feed Settlement', gross: 38_560_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.live_2, workId: 'TPL-LVE-001', workTitle: 'Box Office Settlement', gross: 118_400_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.publishing_2, workId: 'TPL-PUB-001', workTitle: 'Print Royalty Settlement', gross: 41_000_000, withCreator: false },
+  // The FILM family — six further registered films, two staggered
+  // theatrical settlements each (cohort of seven).
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm2_p1, workId: 'TPL-FLM-002', workTitle: 'Independent Feature Distribution Settlement', gross: 180_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm3_p1, workId: 'TPL-FLM-003', workTitle: 'Festival Acquisition Settlement', gross: 220_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm4_p1, workId: 'TPL-FLM-004', workTitle: 'Studio Release Settlement', gross: 310_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm5_p1, workId: 'TPL-FLM-005', workTitle: 'Platform Premiere Settlement', gross: 140_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm6_p1, workId: 'TPL-FLM-006', workTitle: 'Wide Release Settlement', gross: 260_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm7_p1, workId: 'TPL-FLM-007', workTitle: 'Limited Release Settlement', gross: 205_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm2_p2, workId: 'TPL-FLM-002', workTitle: 'Independent Feature Distribution Settlement', gross: 150_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm3_p2, workId: 'TPL-FLM-003', workTitle: 'Festival Acquisition Settlement', gross: 145_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm4_p2, workId: 'TPL-FLM-004', workTitle: 'Studio Release Settlement', gross: 190_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm5_p2, workId: 'TPL-FLM-005', workTitle: 'Platform Premiere Settlement', gross: 115_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm6_p2, workId: 'TPL-FLM-006', workTitle: 'Wide Release Settlement', gross: 95_000_000, withCreator: false },
+  { source: 'Meridian Cinemas', period: '2026-09', at: SEED_INSTANTS.flm7_p2, workId: 'TPL-FLM-007', workTitle: 'Limited Release Settlement', gross: 88_000_000, withCreator: false },
+  // The LIVE family — four further registered stage performances, two
+  // staggered box-office settlements each (cohort of five).
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve2_p1, workId: 'TPL-LVE-002', workTitle: 'Arena Residency Settlement', gross: 402_600_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve3_p1, workId: 'TPL-LVE-003', workTitle: 'Theater Tour Settlement', gross: 341_500_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve4_p1, workId: 'TPL-LVE-004', workTitle: 'Club Tour Settlement', gross: 188_900_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve9_p1, workId: 'TPL-LVE-009', workTitle: 'Festival Stage Settlement', gross: 96_700_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve2_p2, workId: 'TPL-LVE-002', workTitle: 'Arena Residency Settlement', gross: 176_900_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve3_p2, workId: 'TPL-LVE-003', workTitle: 'Theater Tour Settlement', gross: 156_300_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve4_p2, workId: 'TPL-LVE-004', workTitle: 'Club Tour Settlement', gross: 74_200_000, withCreator: false },
+  { source: 'Ticketmaster', period: '2026-09', at: SEED_INSTANTS.lve9_p2, workId: 'TPL-LVE-009', workTitle: 'Festival Stage Settlement', gross: 42_300_000, withCreator: false },
+  // The PUBLISHING family — nine further registered literary works, two
+  // staggered print settlements each (cohort of nine). THE DELIBERATE TIE:
+  // TPL-LIT-003 (65_000_000 + 27_000_000) and TPL-LIT-004 (58_000_000 +
+  // 34_000_000) clear the SAME exact total, 92_000_000 cents, from
+  // different point values — the standard-competition rank-sharing (both
+  // rank 3 of 9, rank 4 vacant) is visible in the demo UI.
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.bok1_p1, workId: 'TPL-BOK-001', workTitle: 'Hardcover Royalty Settlement', gross: 58_500_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.ltr1_p1, workId: 'TPL-LTR-001', workTitle: 'Literary Magazine Settlement', gross: 31_400_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit1_p1, workId: 'TPL-LIT-001', workTitle: 'Frontlist Print Royalty Settlement', gross: 72_600_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit2_p1, workId: 'TPL-LIT-002', workTitle: 'Backlist Print Royalty Settlement', gross: 47_300_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit3_p1, workId: 'TPL-LIT-003', workTitle: 'Serialized Print Royalty Settlement', gross: 65_000_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit4_p1, workId: 'TPL-LIT-004', workTitle: 'Translation Print Royalty Settlement', gross: 58_000_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit5_p1, workId: 'TPL-LIT-005', workTitle: 'Academic Print Royalty Settlement', gross: 23_800_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit6_p1, workId: 'TPL-LIT-006', workTitle: 'Audiobook-Print Royalty Settlement', gross: 16_900_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.bok1_p2, workId: 'TPL-BOK-001', workTitle: 'Hardcover Royalty Settlement', gross: 26_000_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.ltr1_p2, workId: 'TPL-LTR-001', workTitle: 'Literary Magazine Settlement', gross: 14_800_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit1_p2, workId: 'TPL-LIT-001', workTitle: 'Frontlist Print Royalty Settlement', gross: 33_900_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit2_p2, workId: 'TPL-LIT-002', workTitle: 'Backlist Print Royalty Settlement', gross: 21_700_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit3_p2, workId: 'TPL-LIT-003', workTitle: 'Serialized Print Royalty Settlement', gross: 27_000_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit4_p2, workId: 'TPL-LIT-004', workTitle: 'Translation Print Royalty Settlement', gross: 34_000_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit5_p2, workId: 'TPL-LIT-005', workTitle: 'Academic Print Royalty Settlement', gross: 11_600_000, withCreator: false },
+  { source: 'Reader Platforms', period: '2026-09', at: SEED_INSTANTS.lit6_p2, workId: 'TPL-LIT-006', workTitle: 'Audiobook-Print Royalty Settlement', gross: 8_300_000, withCreator: false },
 ];
 
 /** Expected per-run creator allocation (gross × 5,000 BPS — all exact). */

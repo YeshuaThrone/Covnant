@@ -1,7 +1,11 @@
 /**
  * The dev-seed boot — the flag gate and the seeded content through the real
  * engines: deterministic balances, the hash-chained GL, in-flight payouts,
- * the tax profile, and the demo persona.
+ * the tax profile, and the demo persona. The intelligence widening
+ * (2026-09-23) is pinned here too: every registered atomic entity trends
+ * over at least two staggered journal points, the multi-entity class
+ * families rank against real cohort totals, and the deliberate publishing
+ * tie shares its rank exactly.
  *
  * THE FOUNDER'S INTEGRITY TEST (rendered here as store-level assertions):
  * the portfolio amounts are CONSTRUCTED through the real settlement engine
@@ -25,6 +29,7 @@ import {
   DEV_SEED_UCT,
   isDevSeedMode,
 } from '@/lib/server/devSeed';
+import { entityIntelligence } from '@/lib/admin/entityIntelligence';
 import { loadDashboardResolution, loadSessionDashboard } from '@/lib/server/dashboardLive';
 import { getStore, setStore } from '@/lib/server/store';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
@@ -150,21 +155,22 @@ describe('bootDevSeedStore — the seeded content', () => {
     const escrowedTotal = escrows.reduce((sum, row) => sum + row.withheld_cents, 0);
     expect(escrowedTotal).toBe(DEV_SEED_TARGETS.reserve_cents);
 
-    // The GL: fifteen royalty ingests (five music-platform runs plus the
+    // The GL: sixty-one royalty ingests (five music-platform runs plus the
     // five generation-4 demo runs — the athlete contract, tournament purse,
     // esports stream, social channel, and sponsorship deal — plus the five
     // flow-kind widening runs for film, TV, podcasting, live, and
-    // publishing) + one release + four payout holds + two payout
-    // settlements, all posted — the hash chain links every journal to its
-    // predecessor.
+    // publishing, plus the forty-six intelligence-widening runs that give
+    // every registered atomic entity a staggered journal history) + one
+    // release + four payout holds + two payout settlements, all posted —
+    // the hash chain links every journal to its predecessor.
     const journals = await store.listGlJournals();
-    expect(journals).toHaveLength(22);
+    expect(journals).toHaveLength(68);
     const bySequence = [...journals].sort((a, b) => a.sequence - b.sequence);
     for (let i = 1; i < bySequence.length; i += 1) {
       expect(bySequence[i].prev_hash).toBe(bySequence[i - 1].entry_hash);
     }
     expect(bySequence.every((journal) => journal.state === 'posted')).toBe(true);
-    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(15);
+    expect(bySequence.filter((journal) => journal.kind === 'royalty_ingest')).toHaveLength(61);
     expect(bySequence.filter((journal) => journal.kind === 'pending_release')).toHaveLength(1);
     expect(bySequence.filter((journal) => journal.kind === 'payout_hold')).toHaveLength(4);
     expect(bySequence.filter((journal) => journal.kind === 'payout_settled')).toHaveLength(2);
@@ -211,5 +217,118 @@ describe('bootDevSeedStore — the seeded content', () => {
     expect(secondShape).toEqual(firstShape);
     const vault = await getStore().getVault(DEV_SEED_CREATOR.payee_id);
     expect(vault!.available_balance).toBe(DEV_SEED_TARGETS.available_cents);
+  });
+});
+
+describe('bootDevSeedStore — the intelligence widening (per-entity journal histories)', () => {
+  /**
+   * The registered atomic entity seeds of record (the master store's entity
+   * telemetry library) — every one must trend in the demo ledger. A class
+   * that registers a new entity extends this list additively.
+   */
+  const REGISTERED_ENTITIES = [
+    'TPL-MUS-001',
+    'TPL-FLM-001', 'TPL-FLM-002', 'TPL-FLM-003', 'TPL-FLM-004', 'TPL-FLM-005', 'TPL-FLM-006', 'TPL-FLM-007',
+    'TPL-TV-001',
+    'TPL-PDC-001',
+    'TPL-LVE-001', 'TPL-LVE-002', 'TPL-LVE-003', 'TPL-LVE-004', 'TPL-LVE-009',
+    'TPL-PUB-001', 'TPL-BOK-001', 'TPL-LTR-001',
+    'TPL-LIT-001', 'TPL-LIT-002', 'TPL-LIT-003', 'TPL-LIT-004', 'TPL-LIT-005', 'TPL-LIT-006',
+    'TPL-SPT-001',
+    'TPL-TRN-001',
+    'TPL-ESX-001',
+    'TPL-SOC-001',
+    'TPL-SPN-001',
+  ];
+
+  it('gives every registered atomic entity a real trend series — at least two staggered journal points', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    for (const templateId of REGISTERED_ENTITIES) {
+      const readout = await entityIntelligence(templateId, store);
+      expect(readout, templateId).not.toBeNull();
+      expect(readout?.trend.length, `${templateId} trend points`).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('keeps every widening run label-only — the founder persona keeps its exact pinned vault', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    // The widening runs clear 100% to the demo rights group — the founder's
+    // targets (and the five withholding receipts that build the reserve)
+    // are untouched by the widening.
+    const vault = await store.getVault(DEV_SEED_CREATOR.payee_id);
+    expect(vault!.available_balance).toBe(DEV_SEED_TARGETS.available_cents);
+    expect(vault!.pending_balance).toBe(DEV_SEED_TARGETS.pending_cents);
+    expect(vault!.reserve_balance).toBe(DEV_SEED_TARGETS.reserve_cents);
+    const escrows = await store.listTaxEscrowByCreator(DEV_SEED_CREATOR.payee_id, 2026);
+    expect(escrows).toHaveLength(5);
+  });
+
+  it('ranks the film cohort across its seven cleared entities with a two-point trend', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    const film = await entityIntelligence('TPL-FLM-001', store);
+    expect(film?.class).toBe('FEATURE_FILM');
+    expect(film?.cleared).toBe(685_000_000n);
+    expect(film?.cohort).toEqual({ rank: 1n, of: 7n });
+    // Two staggered settlements, newest first — the real series.
+    expect(film?.trend).toEqual([
+      { at: '2026-09-21T17:30:00.000Z', credit: 265_000_000n },
+      { at: '2026-09-16T15:00:00.000Z', credit: 420_000_000n },
+    ]);
+    const runnerUp = await entityIntelligence('TPL-FLM-004', store);
+    expect(runnerUp?.cohort).toEqual({ rank: 2n, of: 7n });
+  });
+
+  it('ranks the live cohort across its five cleared stage performances', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    const arena = await entityIntelligence('TPL-LVE-002', store);
+    expect(arena?.class).toBe('STAGE_PERFORMANCE');
+    expect(arena?.cleared).toBe(579_500_000n);
+    expect(arena?.cohort).toEqual({ rank: 1n, of: 5n });
+    // The generation-4 box-office run (Sep 19) plus its widening second —
+    // two points, and rank 3 of 5.
+    const legacy = await entityIntelligence('TPL-LVE-001', store);
+    expect(legacy?.cleared).toBe(355_200_000n);
+    expect(legacy?.cohort).toEqual({ rank: 3n, of: 5n });
+    expect(legacy?.trend).toHaveLength(2);
+  });
+
+  it('clears the deliberate publishing tie — both works rank 3 of 9 and rank 4 is vacant', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    const lit3 = await entityIntelligence('TPL-LIT-003', store);
+    const lit4 = await entityIntelligence('TPL-LIT-004', store);
+    // Equal totals from different point values (65M + 27M vs 58M + 34M).
+    expect(lit3?.cleared).toBe(92_000_000n);
+    expect(lit4?.cleared).toBe(92_000_000n);
+    expect(lit3?.cohort).toEqual({ rank: 3n, of: 9n });
+    expect(lit4?.cohort).toEqual({ rank: 3n, of: 9n });
+    // The next total below the tie skips the vacant rank 4 — standard
+    // competition ranking, visible in the demo data.
+    const bok = await entityIntelligence('TPL-BOK-001', store);
+    expect(bok?.cleared).toBe(84_500_000n);
+    expect(bok?.cohort).toEqual({ rank: 5n, of: 9n });
+  });
+
+  it('keeps the single-entity classes honest — cohort of one, promised read beside cleared', async () => {
+    await bootDevSeedStore();
+    const store = getStore();
+    const athlete = await entityIntelligence('TPL-SPT-001', store);
+    expect(athlete?.class).toBe('ATHLETE_CONTRACT');
+    expect(athlete?.cohort).toEqual({ rank: 1n, of: 1n });
+    // The widened cleared total (336_000_000 cents) beside the canon
+    // guarantee (2_400_000 USD) — bigint end to end, units stated by the
+    // derivation and formatted at display.
+    expect(athlete?.cleared).toBe(336_000_000n);
+    expect(athlete?.promisedUSD).toBe(2_400_000n);
+    // The master recording's five-run music story is unchanged by the
+    // widening — the trend stays five points, the total exact.
+    const music = await entityIntelligence('TPL-MUS-001', store);
+    expect(music?.trend).toHaveLength(5);
+    expect(music?.cleared).toBe(833_333_333_336n);
+    expect(music?.cohort).toEqual({ rank: 1n, of: 1n });
   });
 });
