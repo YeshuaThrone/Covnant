@@ -577,13 +577,20 @@ function momentum30For(
   const currentStart = shiftDay(anchorDay, -29);
   const priorStart = shiftDay(anchorDay, -59);
   const priorEnd = shiftDay(anchorDay, -30);
-  let current = 0n;
-  let prior = 0n;
-  for (const [at, credit] of credits) {
+  const entries = [...credits];
+  // Summed via reduce, not `let acc = 0n` loops: `next build`'s file tracer
+  // (@vercel/nft) statically folds zero-initialized bigint accumulators
+  // through the minifier's inlined percent math and executes `0n / 0n` at
+  // trace time, killing the build with `RangeError: Division by zero`. A
+  // reduce call is opaque to that folder; runtime behavior is identical.
+  const current = entries.reduce((acc, [at, credit]) => {
     const day = dayKeyOf(at);
-    if (day >= currentStart && day <= anchorDay) current += credit;
-    else if (day >= priorStart && day <= priorEnd) prior += credit;
-  }
+    return day >= currentStart && day <= anchorDay ? acc + credit : acc;
+  }, 0n);
+  const prior = entries.reduce((acc, [at, credit]) => {
+    const day = dayKeyOf(at);
+    return day >= priorStart && day <= priorEnd ? acc + credit : acc;
+  }, 0n);
   if (prior === 0n) return null;
   return flooredPercentDelta(current - prior, prior);
 }

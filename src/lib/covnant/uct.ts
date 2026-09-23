@@ -30,11 +30,11 @@
  *   not a secret, not an auth factor — identity verification uses
  *   email/OTP, never code fragments.
  *
- * Pure and synchronous: the only runtime dependency is node:crypto for the
- * serial draw.
+ * Pure and synchronous: no module-level runtime dependency — the serial draw
+ * uses the Web Crypto CSPRNG global, available in Node (19+) and every
+ * browser, so the module bundles isomorphically (the client graph needs the
+ * pure checksum path; only the server draws serials).
  */
-
-import { randomBytes } from 'node:crypto';
 
 /** Every valid UCT ever minted by this module matches this shape. */
 export const UCT_PATTERN = /^UCT-[A-Z]{2}-\d{4}-[0-9A-F]{8}-[0-9A-Z]{2}$/;
@@ -81,9 +81,13 @@ export function buildUct(jurisdiction: string, year: number, serial: string): st
   return `${prefix}-${uctChecksum(prefix)}`;
 }
 
-/** A crypto-random 8-hex serial (32 bits) drawn from crypto.randomBytes. */
+/** A crypto-random 8-hex serial (32 bits) drawn from the Web Crypto CSPRNG. */
 export function uctSerial(): string {
-  return randomBytes(SERIAL_HEX_BYTES).toString('hex').toUpperCase();
+  return Array.from(crypto.getRandomValues(new Uint8Array(SERIAL_HEX_BYTES)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  )
+    .join('')
+    .toUpperCase();
 }
 
 /** The current issuance year (UTC — issuance facts never drift on timezone). */
