@@ -1,12 +1,13 @@
 /**
- * /admin analytics payload wiring (generation-4 spec, 2026-09-22): the
- * page payload carries the analytics field, read through the same Don
- * store door as the Revenue Streams read, and fails safe to the honest
- * unavailable state when the analytics store read throws — the console
- * itself must never go down because one derivation failed. The
- * AdminConsole component is replaced with a capture shim so the exact
- * server-built payload object is asserted (the section render states are
- * pinned in AnalyticsSection.test.tsx).
+ * /admin analytics payload wiring (spec art_rRYEJBpS): the page payload
+ * carries the analytics field — `companyAnalytics` for EVERY registered
+ * window (7d / 30d / 90d / all), read through the same Don store door as
+ * the Revenue Streams read — and fails safe to the honest unavailable
+ * state when the store read throws or the derivation returns its
+ * fail-closed null. The console itself must never go down because one
+ * derivation failed. The AdminConsole component is replaced with a
+ * capture shim so the exact server-built payload object is asserted (the
+ * section render states are pinned in AnalyticsSection.test.tsx).
  */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,12 +23,12 @@ vi.mock('@/components/admin/AdminConsole', async (importOriginal) => ({
   },
 }));
 
-vi.mock('@/lib/admin/analyticsFlows', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/admin/analyticsFlows')>();
+vi.mock('@/lib/admin/companyAnalytics', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/admin/companyAnalytics')>();
   return {
     ...actual,
     // Flipped per-test: by default the REAL derivation runs against the store.
-    platformAnalyticsFlows: vi.fn(actual.platformAnalyticsFlows),
+    companyAnalytics: vi.fn(actual.companyAnalytics),
   };
 });
 
@@ -83,7 +84,7 @@ vi.mock('@/lib/admin/allowlists', () => ({
 }));
 
 import { mintAdminSessionToken } from '@/lib/admin/gate';
-import { platformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
+import { companyAnalytics } from '@/lib/admin/companyAnalytics';
 
 async function renderAdminPageWithSession(): Promise<void> {
   const AdminPage = (await import('../page')).default;
@@ -97,11 +98,11 @@ beforeEach(() => {
   // seeded in-memory store, exactly like the dashboard page tests. The
   // mocked derivation delegates to the real one unless a test overrides it.
   process.env.DON_DEV_SEED = '1';
-  vi.mocked(platformAnalyticsFlows).mockClear();
+  vi.mocked(companyAnalytics).mockClear();
 });
 
 describe('the /admin analytics payload', () => {
-  it('carries the analytics field derived store-read from the seeded ledger', async () => {
+  it('carries every registered window derived store-read from the seeded ledger', async () => {
     const token = mintAdminSessionToken(new Date(), process.env);
     expect(token).not.toBeNull();
     cookieValue = token ?? undefined;
@@ -110,18 +111,24 @@ describe('the /admin analytics payload', () => {
 
     expect(capturedData).toBeDefined();
     const analytics = capturedData?.analytics as
-      | { kind: string; value?: { byIndustry: { state: string; rows: { label: string }[] } } }
+      | { kind: string; value?: Record<string, { window: string; kpis: { runCount: number; totalClearedCents: bigint } }> }
       | undefined;
     expect(analytics?.kind).toBe('ready');
-    // The multi-industry clearing demo — MUSIC plus the four new classes.
-    const labels = analytics?.value?.byIndustry.rows.map((row) => row.label);
-    expect(labels).toEqual(expect.arrayContaining(['MUSIC', 'SPORTS', 'ESPORTS', 'SOCIAL', 'SPONSORSHIP']));
+    // Every registered window the section's filter can pick — derived before first paint.
+    const windows = analytics?.value ?? {};
+    for (const window of ['7d', '30d', '90d', 'all']) {
+      expect(windows[window]?.window).toBe(window);
+      expect(windows[window]?.kpis.runCount).toBeGreaterThan(0);
+    }
+    // The widened demo ledger — 119 royalty runs settle the whole roster.
+    expect(windows.all?.kpis.runCount).toBe(119);
+    expect(windows['7d']?.kpis.runCount).toBe(47);
     // Demo data always disclosed.
     expect(capturedData?.analyticsDemo).toBe(true);
   });
 
   it('fails safe to the honest unavailable state when the analytics read throws', async () => {
-    vi.mocked(platformAnalyticsFlows).mockImplementationOnce(async () => {
+    vi.mocked(companyAnalytics).mockImplementationOnce(async () => {
       throw new Error('analytics derivation exploded');
     });
     const token = mintAdminSessionToken(new Date(), process.env);
@@ -131,6 +138,20 @@ describe('the /admin analytics payload', () => {
 
     // The console still renders — one failing read never takes it down.
     expect(capturedData).toBeDefined();
+    expect(capturedData?.analytics).toEqual({
+      kind: 'unavailable',
+      code: 'analytics_store_failed',
+      message: 'Analytics store read failed.',
+    });
+  });
+
+  it('fails safe when the derivation returns its fail-closed null', async () => {
+    vi.mocked(companyAnalytics).mockImplementationOnce(async () => null);
+    const token = mintAdminSessionToken(new Date(), process.env);
+    cookieValue = token ?? undefined;
+
+    await renderAdminPageWithSession();
+
     expect(capturedData?.analytics).toEqual({
       kind: 'unavailable',
       code: 'analytics_store_failed',

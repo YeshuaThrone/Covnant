@@ -49,7 +49,7 @@ import type {
 } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
-import { platformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
+import { companyAnalytics } from '@/lib/admin/companyAnalytics';
 import { entityIntelligence, type EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
@@ -169,17 +169,30 @@ async function safeRevenueStreamsRead(): Promise<AdminConsoleData['revenueStream
 }
 
 /**
- * The Analytics tab's payload (generation-4 spec, 2026-09-22): the same
- * Don store door as the Revenue Streams read, over the platformAnalyticsFlows
- * derivation — the three cuts by industry, source, and transaction type.
- * One failing store read must never take the console down: both the store
- * resolution and the derivation degrade to the section's honest
- * unavailable state.
+ * The Analytics tab's payload (spec art_rRYEJBpS): `companyAnalytics` for
+ * EVERY registered window (7d / 30d / 90d / all) over the same Don store
+ * door as the Revenue Streams read — one pass, so the section's window
+ * filter picks among pre-derived windows and never re-fetches. One failing
+ * store read must never take the console down: both the store resolution
+ * and the derivations degrade to the section's honest unavailable state.
  */
-async function safeAnalyticsRead(): Promise<AdminConsoleData['analytics']> {
+async function safeCompanyAnalyticsRead(): Promise<AdminConsoleData['analytics']> {
   try {
     const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
-    return { kind: 'ready', value: await platformAnalyticsFlows(donStore) };
+    const [d7, d30, d90, dAll] = await Promise.all([
+      companyAnalytics(donStore, '7d'),
+      companyAnalytics(donStore, '30d'),
+      companyAnalytics(donStore, '90d'),
+      companyAnalytics(donStore, 'all'),
+    ]);
+    if (d7 === null || d30 === null || d90 === null || dAll === null) {
+      return {
+        kind: 'unavailable',
+        code: 'analytics_store_failed',
+        message: 'Analytics store read failed.',
+      };
+    }
+    return { kind: 'ready', value: { '7d': d7, '30d': d30, '90d': d90, all: dAll } };
   } catch {
     return {
       kind: 'unavailable',
@@ -272,7 +285,7 @@ export default async function AdminPage() {
     resolveMasterTemplates(),
     resolveAtomicRegistry(),
     safeRevenueStreamsRead(),
-    safeAnalyticsRead(),
+    safeCompanyAnalyticsRead(),
     safeIntelligenceRead(),
   ]);
 

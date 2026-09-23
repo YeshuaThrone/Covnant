@@ -77,7 +77,13 @@ export function groupInteger(value: number): string {
 }
 
 /** The registered class vocabulary — one label per union arm (a missing arm fails the build here too). */
-const CLASS_LABELS: Record<EntityIntelligence['class'], string> = {
+/**
+ * The entity classes' display labels — the structural vocabulary. The
+ * Analytics tab's promised-vs-cleared rows and tables reuse this map so
+ * a class label is registered exactly once (the intelligence layer owns
+ * the vocabulary; the analytics page renders it).
+ */
+export const CLASS_LABELS: Record<EntityIntelligence['class'], string> = {
   FEATURE_FILM: 'Feature films',
   LINEAR_TV: 'Linear TV',
   MASTER_RECORDING: 'Master recordings',

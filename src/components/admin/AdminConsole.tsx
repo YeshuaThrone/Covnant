@@ -123,7 +123,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'contracts' && <ContractsSection registry={data.contractRegistry} contracts={data.contracts} />}
         {tab === 'tax' && <TaxSection tax={data.tax} />}
         {tab === 'controlboard' && <ControlBoardSection board={data.controlBoard} />}
-        {tab === 'analytics' && <AnalyticsSection analytics={data.analytics} demo={data.analyticsDemo} />}
+        {tab === 'analytics' && <AnalyticsSection analytics={data.analytics} intelligence={data.intelligence} demo={data.analyticsDemo} />}
         {tab === 'intelligence' && (
           <IntelligenceSection intelligence={data.intelligence} demo={data.intelligenceDemo} />
         )}

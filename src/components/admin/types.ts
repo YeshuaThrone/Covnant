@@ -7,7 +7,7 @@
 
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
-import type { PlatformAnalyticsFlows } from '@/lib/admin/analyticsFlows';
+import type { AnalyticsWindow, CompanyAnalytics } from '@/lib/admin/companyAnalytics';
 import type { EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
@@ -33,6 +33,17 @@ export type {
 export type SectionData<T> =
   | { kind: 'ready'; value: T }
   | { kind: 'unavailable'; code: string; message: string };
+
+/**
+ * The Analytics tab's company payload — the derivation module's read for
+ * EVERY registered window (7d / 30d / 90d / all), each derived server-side
+ * by `companyAnalytics` over the same store door as its siblings. The
+ * section's window filter is a client-side pick over these pre-derived
+ * windows: the whole page is one prop-driven read of one safe payload per
+ * window, and the filter never re-fetches — every window the page can show
+ * was already derived from the store before first paint.
+ */
+export type CompanyAnalyticsWindows = Record<AnalyticsWindow, CompanyAnalytics>;
 
 /** One read-only contract row — the console shows the record, not the document. */
 export interface ContractRow {
@@ -157,11 +168,13 @@ export interface AdminConsoleData {
    */
   revenueStreams: SectionData<GoldBoardRevenueStream[]>;
   /**
-   * The Analytics tab's three cuts (generation-4 spec, 2026-09-22): the
-   * one ledger's royalty inflow by industry, by source, and by
-   * transaction type — store-read only, per-cut honest states.
+   * The Analytics tab's payload — the Elite Dashboard company page (spec
+   * art_rRYEJBpS): `companyAnalytics` over the same Don store door as the
+   * Revenue Streams and Intelligence reads, derived for every window
+   * (7d / 30d / 90d / all) so the page's window filter re-renders from
+   * store-derived payloads without a refetch. Store-read only.
    */
-  analytics: SectionData<PlatformAnalyticsFlows>;
+  analytics: SectionData<CompanyAnalyticsWindows>;
   /** True exactly when the demo door is open — gates the Analytics tab's disclosed demo badge. */
   analyticsDemo: boolean;
   /**
