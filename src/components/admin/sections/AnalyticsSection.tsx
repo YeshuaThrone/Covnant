@@ -247,9 +247,17 @@ function KpiCard({ testid, label, value, note }: { testid: string; label: string
   );
 }
 
+/**
+ * The section-header rhythm — the gold rule is a standalone hairline ABOVE
+ * the words, with label and copy flowing below it (IntelligenceSection's
+ * ProfileBlock pattern). The rule element is height:1px; wrapping text
+ * INSIDE it overflows the hairline and piles the header onto the block
+ * below — text over text, text over table.
+ */
 function BlockHeader({ label, copy }: { label: string; copy: string }) {
   return (
-    <div className="gold-rule w-64">
+    <div>
+      <div className="gold-rule w-64" aria-hidden="true" />
       <p className="mt-8 font-mono text-xs uppercase tracking-[0.3em] text-gold-champagne">{label}</p>
       <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-white/40">{copy}</p>
     </div>
