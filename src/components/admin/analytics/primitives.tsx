@@ -153,6 +153,35 @@ export interface PairedLineSeries {
   readonly points: readonly bigint[];
 }
 
+/** An interior axis tick — the label text plus its position as a 0..1 fraction of the plot width. */
+export interface MidTick {
+  readonly label: string;
+  readonly fraction: number;
+}
+
+/**
+ * Interior x-axis tick labels — `tickCount` evenly spaced positions strictly
+ * between the series' first and last points (the edges keep their own
+ * endpoint labels). A `YYYY-MM-DD` day of record renders as its MM-DD
+ * form; any other label passes through verbatim — nothing is reformatted
+ * by guess. Duplicate positions collapse so a short series never stacks
+ * two ticks on one spot.
+ */
+export function midTickLabels(labels: readonly string[], tickCount = 5): readonly MidTick[] {
+  const count = labels.length;
+  if (tickCount <= 0 || count < 3) return [];
+  const ticks: MidTick[] = [];
+  const seen = new Set<number>();
+  for (let k = 1; k <= tickCount; k += 1) {
+    const index = Math.round((k * (count - 1)) / (tickCount + 1));
+    if (index <= 0 || index >= count - 1 || seen.has(index)) continue;
+    seen.add(index);
+    const raw = labels[index];
+    ticks.push({ label: /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.slice(5) : raw, fraction: index / (count - 1) });
+  }
+  return ticks;
+}
+
 const PAIRED_TONES: Record<PairedLineSeries['tone'], string> = {
   champagne: GOLD_CHAMPAGNE,
   slate: SLATE_LABEL,
@@ -162,7 +191,10 @@ const PAIRED_TONES: Record<PairedLineSeries['tone'], string> = {
  * Cleared volume over time — the gradient area under a gold line, on the
  * slate baseline track. Renders EVERY point (gold dots), pairs optional
  * thin line series on the main scale, and labels the first and last x
- * positions. The wrapper's aria-label carries the exact window total.
+ * positions. `xAxisMidTicks` opts into evenly spaced interior date ticks
+ * between the endpoints (default off — the first/last-only treatment is
+ * unchanged for existing consumers). The wrapper's aria-label carries the
+ * exact window total.
  */
 export function AreaChart({
   series,
@@ -173,6 +205,7 @@ export function AreaChart({
   width = 720,
   height = 240,
   gradientId = 'covnant-area-gold-gradient',
+  xAxisMidTicks = false,
 }: {
   series: readonly AreaSeriesPoint[];
   pairedSeries?: readonly PairedLineSeries[];
@@ -182,6 +215,7 @@ export function AreaChart({
   width?: number;
   height?: number;
   gradientId?: string;
+  xAxisMidTicks?: boolean;
 }) {
   if (series.length === 0) return <ChartEmpty label={emptyLabel} />;
 
@@ -265,6 +299,19 @@ export function AreaChart({
         <text x={PAD_X} y={height - 6} fontSize={11} fill={SLATE_LABEL}>
           {series[0].label}
         </text>
+        {(xAxisMidTicks ? midTickLabels(series.map((p) => p.label)) : []).map((tick) => (
+          <text
+            key={`chart-area-mid-tick-${tick.fraction}`}
+            data-testid="chart-area-mid-tick"
+            x={snap(PAD_X + tick.fraction * plotWidth)}
+            y={height - 6}
+            fontSize={11}
+            fill={SLATE_LABEL}
+            textAnchor="middle"
+          >
+            {tick.label}
+          </text>
+        ))}
         <text x={width - PAD_X} y={height - 6} fontSize={11} fill={SLATE_LABEL} textAnchor="end">
           {series[series.length - 1].label}
         </text>
@@ -451,7 +498,7 @@ export function Donut({
                 style={{ backgroundColor: tone.fill, opacity: tone.opacity }}
                 aria-hidden="true"
               />
-              <span className="min-w-0 flex-1 truncate text-slate-200">{row.label}</span>
+              <span className="flex-1 text-slate-200">{row.label}</span>
               <span className="shrink-0 font-mono text-slate-100">{format(row.valueCents)}</span>
               <span className="w-10 shrink-0 text-right font-mono text-xs text-white/40">
                 {shareLabel(row.valueCents, total)}

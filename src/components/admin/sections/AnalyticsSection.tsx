@@ -239,7 +239,7 @@ function KpiCard({ testid, label, value, note }: { testid: string; label: string
       className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-4"
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">{label}</p>
-      <p className="mt-2 truncate font-mono text-base text-gold-champagne" title={value}>
+      <p className="mt-2 font-mono text-base tracking-tighter text-gold-champagne" title={value}>
         {value}
       </p>
       <p className="mt-1 font-mono text-[10px] text-white/30">{note}</p>
@@ -406,6 +406,7 @@ export function CompanyAnalyticsView({
             seriesLabel="Cleared gross"
             ariaLabel="Cleared volume by day"
             emptyLabel={EMPTY_WINDOW_COPY}
+            xAxisMidTicks
           />
         </div>
       </div>

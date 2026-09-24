@@ -23,6 +23,7 @@ import {
   HBar,
   heatAlpha,
   HeatCell,
+  midTickLabels,
   polylinePoints,
   Scatter,
   scatterPositions,
@@ -222,6 +223,53 @@ describe('AreaChart', () => {
     expect(html).toContain('No runs cleared in this window.');
     expect(html).not.toContain('$');
     expect(html).not.toContain('<svg');
+  });
+
+  it('renders no interior ticks by default — the first/last-only treatment is unchanged', () => {
+    const html = render(
+      <AreaChart series={AREA_SERIES} ariaLabel="Cleared volume by day" emptyLabel="No runs cleared in this window." />,
+    );
+    expect(html).not.toContain('chart-area-mid-tick');
+    expect(html).not.toContain('Sep 2');
+    expect(html).not.toContain('Sep 3');
+  });
+
+  it('opts into evenly spaced interior date ticks between the endpoint labels', () => {
+    const html = render(
+      <AreaChart
+        series={AREA_SERIES}
+        ariaLabel="Cleared volume by day"
+        emptyLabel="No runs cleared in this window."
+        xAxisMidTicks
+      />,
+    );
+    expect(count(html, 'data-testid="chart-area-mid-tick"')).toBe(2);
+    expect(html).toContain('Sep 2');
+    expect(html).toContain('Sep 3');
+    // The endpoints keep their own labels exactly as before.
+    expect(html).toContain('Sep 1');
+    expect(html).toContain('Sep 4');
+  });
+});
+
+describe('midTickLabels — the interior x-axis tick derivation', () => {
+  const DAYS = Array.from({ length: 35 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 7, 20 + i));
+    return d.toISOString().slice(0, 10);
+  });
+
+  it('picks evenly spaced interior positions and renders YYYY-MM-DD days as MM-DD', () => {
+    const ticks = midTickLabels(DAYS);
+    expect(ticks).toHaveLength(5);
+    expect(ticks.map((t) => t.label)).toEqual(['08-26', '08-31', '09-06', '09-12', '09-17']);
+    expect(ticks.map((t) => t.fraction)).toEqual([6 / 34, 11 / 34, 17 / 34, 23 / 34, 28 / 34]);
+  });
+
+  it('returns nothing for a short series and passes non-date labels through verbatim', () => {
+    expect(midTickLabels(DAYS, 0)).toEqual([]);
+    expect(midTickLabels(['a', 'b'])).toEqual([]);
+    const passthrough = midTickLabels(['a', 'b', 'c', 'd']);
+    expect(passthrough.map((t) => t.label)).toEqual(['b', 'c']);
   });
 });
 
