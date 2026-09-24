@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * AdminConsole — the gated operator console shell. Renders the ten
+ * AdminConsole — the gated operator console shell. Renders the eleven
  * sections as tabs (Overview, Creators, Registry, Ledger, Contracts,
- * Control Board, Allowlists, Analytics, Intelligence) in the established
- * obsidian/deep-gold language.
+ * Control Board, Allowlists, Analytics, Intelligence, Creator Analytics)
+ * in the established obsidian/deep-gold language.
  *
  * Mutation results are lifted here (updated creator profile / allowlist
  * row from the mutation response) so a section stays consistent when the
@@ -24,6 +24,7 @@ import { AllowlistsSection } from './sections/AllowlistsSection';
 import { ControlBoardSection } from './sections/ControlBoardSection';
 import { AnalyticsSection } from './sections/AnalyticsSection';
 import { IntelligenceSection } from './sections/IntelligenceSection';
+import { CreatorAnalyticsSection } from './sections/CreatorAnalyticsSection';
 
 export type AdminTab =
   | 'overview'
@@ -35,6 +36,7 @@ export type AdminTab =
   | 'controlboard'
   | 'analytics'
   | 'intelligence'
+  | 'creator-analytics'
   | 'allowlists';
 
 const TABS: readonly { id: AdminTab; label: string }[] = [
@@ -47,6 +49,7 @@ const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'controlboard', label: 'Control Board' },
   { id: 'analytics', label: 'Analytics' },
   { id: 'intelligence', label: 'Intelligence' },
+  { id: 'creator-analytics', label: 'Creator Analytics' },
   { id: 'allowlists', label: 'Allowlists' },
 ];
 
@@ -126,6 +129,12 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'analytics' && <AnalyticsSection analytics={data.analytics} intelligence={data.intelligence} demo={data.analyticsDemo} />}
         {tab === 'intelligence' && (
           <IntelligenceSection intelligence={data.intelligence} demo={data.intelligenceDemo} />
+        )}
+        {tab === 'creator-analytics' && (
+          <CreatorAnalyticsSection
+            creatorAnalytics={data.creatorAnalytics}
+            demo={data.creatorAnalyticsDemo}
+          />
         )}
         {tab === 'allowlists' && (
           <AllowlistsSection

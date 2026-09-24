@@ -8,6 +8,7 @@
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { AnalyticsWindow, CompanyAnalytics } from '@/lib/admin/companyAnalytics';
+import type { CreatorAnalyticsFlows } from '@/lib/admin/creatorAnalytics';
 import type { EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
@@ -44,6 +45,24 @@ export type SectionData<T> =
  * was already derived from the store before first paint.
  */
 export type CompanyAnalyticsWindows = Record<AnalyticsWindow, CompanyAnalytics>;
+
+/**
+ * The Creator Analytics tab's window-filter id — the page's pre-derived
+ * creator windows. The derivation module's own `CreatorWindowDays` (7 / 30
+ * / 90, `null` for ALL) rides inside each payload and lights the filter.
+ */
+export type CreatorAnalyticsWindowId = '7d' | '30d' | '90d' | 'all';
+
+/**
+ * The Creator Analytics tab's payload (spec art_UccVWZpj) — the creator-side
+ * derivation's read for EVERY registered window, each derived server-side by
+ * `creatorAnalytics` over the same store door as its siblings. The section's
+ * window filter is a client-side pick over these pre-derived windows: the
+ * whole tab is one prop-driven read of one safe payload per window, and the
+ * filter never re-fetches — every window the page can show was already
+ * derived from the store before first paint.
+ */
+export type CreatorAnalyticsWindows = Record<CreatorAnalyticsWindowId, CreatorAnalyticsFlows>;
 
 /** One read-only contract row — the console shows the record, not the document. */
 export interface ContractRow {
@@ -186,9 +205,19 @@ export interface AdminConsoleData {
   intelligence: SectionData<readonly EntityIntelligence[]>;
   /** True exactly when the demo door is open — gates the Intelligence tab's disclosed demo badge. */
   intelligenceDemo: boolean;
+  /**
+   * The Creator Analytics tab's payload (spec art_UccVWZpj): the creator-side
+   * derivation over the same Don store door as the Analytics and Intelligence
+   * reads, derived for every window (7d / 30d / 90d / all) so the tab's
+   * window filter re-renders from store-derived payloads without a refetch.
+   * Store-read only.
+   */
+  creatorAnalytics: SectionData<CreatorAnalyticsWindows>;
+  /** True exactly when the demo door is open — gates the Creator Analytics tab's disclosed demo badge. */
+  creatorAnalyticsDemo: boolean;
 }
 
-/** The ten console tabs, in operator order. */
+/** The eleven console tabs, in operator order. */
 export const CONSOLE_TABS = [
   'Overview',
   'Creators',
@@ -199,6 +228,7 @@ export const CONSOLE_TABS = [
   'Control Board',
   'Analytics',
   'Intelligence',
+  'Creator Analytics',
   'Allowlists',
 ] as const;
 

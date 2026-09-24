@@ -61,8 +61,13 @@ vi.mock('@/lib/admin/allowlists', () => ({
 import { mintAdminSessionToken } from '@/lib/admin/gate';
 import { CONSOLE_TABS } from '@/components/admin/types';
 
+// The page module is imported at FILE scope: the compile lands in vitest's
+// collect phase instead of the first test's body, where the default 5s
+// per-test timeout was racing this sandbox's module-graph boot (the test
+// measures the render, not the compile).
+const AdminPage = (await import('../page')).default;
+
 async function renderAdminPage(): Promise<string> {
-  const AdminPage = (await import('../page')).default;
   return renderToStaticMarkup(await AdminPage());
 }
 

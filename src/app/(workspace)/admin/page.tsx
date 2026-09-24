@@ -50,6 +50,7 @@ import type {
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
 import { companyAnalytics } from '@/lib/admin/companyAnalytics';
+import { creatorAnalytics } from '@/lib/admin/creatorAnalytics';
 import { entityIntelligence, type EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
@@ -249,6 +250,42 @@ async function safeIntelligenceRead(): Promise<AdminConsoleData['intelligence']>
   }
 }
 
+/**
+ * The Creator Analytics tab's payload (spec art_UccVWZpj): the creator-side
+ * derivation for EVERY registered window (7 / 30 / 90 / all — the module's
+ * own `CreatorWindowDays`, `null` for ALL) over the same Don store door as
+ * the Analytics and Intelligence reads — one pass, so the tab's window
+ * filter picks among pre-derived windows and never re-fetches. One failing
+ * store read must never take the console down: both the store resolution
+ * and the derivations degrade to the section's honest unavailable state
+ * (the derivation itself degrades to null on a failed scan — same code).
+ */
+async function safeCreatorAnalyticsRead(): Promise<AdminConsoleData['creatorAnalytics']> {
+  try {
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    const [d7, d30, d90, dAll] = await Promise.all([
+      creatorAnalytics(donStore, 7),
+      creatorAnalytics(donStore, 30),
+      creatorAnalytics(donStore, 90),
+      creatorAnalytics(donStore, null),
+    ]);
+    if (d7 === null || d30 === null || d90 === null || dAll === null) {
+      return {
+        kind: 'unavailable',
+        code: 'creator_analytics_store_failed',
+        message: 'Creator analytics store read failed.',
+      };
+    }
+    return { kind: 'ready', value: { '7d': d7, '30d': d30, '90d': d90, all: dAll } };
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'creator_analytics_store_failed',
+      message: 'Creator analytics store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -266,7 +303,7 @@ export default async function AdminPage() {
   await seedAdminDemoDataIfEmpty();
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics, intelligence] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics, intelligence, creatorAnalyticsFlows] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -287,6 +324,7 @@ export default async function AdminPage() {
     safeRevenueStreamsRead(),
     safeCompanyAnalyticsRead(),
     safeIntelligenceRead(),
+    safeCreatorAnalyticsRead(),
   ]);
 
   const data: AdminConsoleData = {
@@ -309,6 +347,8 @@ export default async function AdminPage() {
     analyticsDemo: isDemoDoorOpen(),
     intelligence,
     intelligenceDemo: isDemoDoorOpen(),
+    creatorAnalytics: creatorAnalyticsFlows,
+    creatorAnalyticsDemo: isDemoDoorOpen(),
   };
 
   return <AdminConsole data={data} />;

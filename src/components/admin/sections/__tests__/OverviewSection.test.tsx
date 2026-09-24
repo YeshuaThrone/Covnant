@@ -79,6 +79,12 @@ beforeAll(async () => {
       message: 'Intelligence store read failed.',
     },
     intelligenceDemo: true,
+    creatorAnalytics: {
+      kind: 'unavailable',
+      code: 'creator_analytics_store_failed',
+      message: 'Creator analytics store read failed.',
+    },
+    creatorAnalyticsDemo: true,
   };
 });
 
