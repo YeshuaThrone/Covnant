@@ -29,6 +29,8 @@ import {
   scatterPositions,
   shareLabel,
   Sparkline,
+  sparklinePointGeometry,
+  sparklinePointTitles,
   sparklinePoints,
 } from '../primitives';
 
@@ -287,6 +289,43 @@ describe('Sparkline', () => {
     expect(sparklinePoints([1n, 2n, 4n, 3n], 96, 28).split(' ')).toHaveLength(4);
   });
 
+  it('carries NO <title> elements by default — the tooltip opt-in stays off', () => {
+    const html = render(
+      <Sparkline values={[1n, 2n, 4n, 3n]} ariaLabel="Cleared history" emptyLabel="No history" />,
+    );
+    expect(html).not.toContain('<title');
+    expect(html).not.toContain('chart-sparkline-point');
+  });
+
+  it('renders per-point native <title> tooltips when opted in — the label and the exact value', () => {
+    const html = render(
+      <Sparkline
+        values={[1_00n, 250_00n, 0n]}
+        pointLabels={['2026-09-21', '2026-09-22', '2026-09-23']}
+        ariaLabel="Cleared history"
+        emptyLabel="No history"
+      />,
+    );
+    expect(html).toContain('<title>2026-09-21 — $1.00</title>');
+    expect(html).toContain('<title>2026-09-22 — $250.00</title>');
+    expect(html).toContain('<title>2026-09-23 — $0.00</title>'); // an honest zero point titles as zero
+    expect(html.match(/<title>/g)?.length).toBe(3);
+    expect(html.match(/data-testid="chart-sparkline-point"/g)?.length).toBe(3);
+  });
+
+  it('titles only the points that carry labels — never a guessed date', () => {
+    const html = render(
+      <Sparkline
+        values={[1_00n, 250_00n, 0n, 5_00n]}
+        pointLabels={['2026-09-21']}
+        ariaLabel="Cleared history"
+        emptyLabel="No history"
+      />,
+    );
+    expect(html.match(/<title>/g)?.length).toBe(1);
+    expect(html).toContain('<title>2026-09-21 — $1.00</title>');
+  });
+
   it('renders the honest empty copy in place of the line', () => {
     const html = render(
       <Sparkline values={[]} ariaLabel="Cleared history" emptyLabel="No cleared history yet." />,
@@ -294,6 +333,21 @@ describe('Sparkline', () => {
     expect(html).toContain('data-testid="chart-sparkline-empty"');
     expect(html).toContain('No cleared history yet.');
     expect(html).not.toContain('<svg');
+  });
+});
+
+describe('sparklinePointTitles', () => {
+  it("pairs the polyline's own vertex geometry with the composed title text", () => {
+    const titles = sparklinePointTitles([4n, 1n], ['Sep 1', 'Sep 2'], 96, 28);
+    expect(titles).toHaveLength(2);
+    expect(titles[0].title).toBe('Sep 1 — $0.04');
+    expect(titles[1].title).toBe('Sep 2 — $0.01');
+    // The transparent hover targets sit on the polyline's own vertices.
+    const geometry = sparklinePointGeometry([4n, 1n], 96, 28);
+    expect(titles[0].x).toBe(geometry[0].x);
+    expect(titles[0].y).toBe(geometry[0].y);
+    expect(titles[1].x).toBe(geometry[1].x);
+    expect(titles[1].y).toBe(geometry[1].y);
   });
 });
 

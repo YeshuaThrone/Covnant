@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * CreatorAnalyticsSection — the Creator Analytics tab's suite (spec
  * art_UccVWZpj), mirroring the AnalyticsSection suite's shape:
  *
@@ -19,16 +21,24 @@
  *    with exact totals and the reconciling Total row, ALL THIRTEEN
  *    platform sources of record in the module's descending order (THIS is
  *    the sanctioned brand surface — the Analytics tab's brand-exclusion
- *    pin is untouched by this file), the 124-row game log newest first,
- *    and the window switch changing every value.
+ *    pin is untouched by this file), the paginated 124-row game log
+ *    newest first, and the window switch changing every value.
+ * 4. The game log's pagination and filter mechanics — client-side, pinned
+ *    through the pure helpers AND a jsdom interaction harness (the
+ *    virtual-card page test's convention: createRoot + act, no
+ *    testing-library in this repo): 25 rows per page, bound-aware
+ *    Prev/Next, the count line's filtered arithmetic, AND-semantics
+ *    filters, and the page reset on filter change.
  *
- * renderToStaticMarkup under the node environment — the house convention.
  * Store-read figures only; nothing invented.
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSeededStore } from '@/lib/server/devSeed';
+import { formatCentsBigint } from '@/lib/money/format';
 import {
   creatorAnalytics,
   type CreatorAnalyticsFlows,
@@ -39,8 +49,17 @@ import {
 import {
   CreatorAnalyticsSection,
   CreatorAnalyticsView,
+  GAME_LOG_PAGE_SIZE,
+  clampedPage,
+  entityCodeOf,
+  entityCodeOptions,
+  gameLogCountLine,
+  gameLogRowMatches,
   heatShare,
   payeeDisplayName,
+  payeeFilterOptions,
+  sourceFilterOptions,
+  splitSourceRows,
 } from '../CreatorAnalyticsSection';
 import type { CreatorAnalyticsWindows } from '../../types';
 
@@ -110,6 +129,48 @@ function renderView(flows: CreatorAnalyticsFlows, demo = true): string {
   return renderToStaticMarkup(<CreatorAnalyticsView flows={flows} demo={demo} onWindowChange={() => {}} />);
 }
 
+/* ── jsdom interaction harness (no testing-library in this repo) ── */
+
+const mounted: { root: Root; container: HTMLElement }[] = [];
+
+function mountView(flows: CreatorAnalyticsFlows): HTMLElement {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(<CreatorAnalyticsView flows={flows} demo={true} onWindowChange={() => {}} />);
+  });
+  mounted.push({ root, container });
+  return container;
+}
+
+function clickButton(element: Element) {
+  act(() => {
+    (element as HTMLElement).click();
+  });
+}
+
+/** React-controlled select change — the native value setter plus a bubbling change event. */
+function setSelectValue(select: HTMLSelectElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+function queryTestId(container: HTMLElement, testId: string): HTMLElement {
+  const element = container.querySelector(`[data-testid="${testId}"]`);
+  if (element === null) throw new Error(`missing [data-testid="${testId}"]`);
+  return element as HTMLElement;
+}
+
+afterEach(() => {
+  for (const { root, container } of mounted.splice(0)) {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -130,6 +191,72 @@ describe('creator analytics presentation helpers', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Game log pagination and filter helpers — the pure mechanics
+// ---------------------------------------------------------------------------
+
+describe('game log pagination and filter helpers', () => {
+  it('cuts the entity code as the TPL family prefix — a row without an entity carries no code', () => {
+    expect(entityCodeOf('TPL-MUS-001')).toBe('TPL-MUS');
+    expect(entityCodeOf('TPL-AUD-012')).toBe('TPL-AUD');
+    expect(entityCodeOf(null)).toBe(null);
+    expect(entityCodeOf('legacy-id')).toBe('legacy-id'); // a non-template id is its own code
+  });
+
+  it('ANDs the filter arms — an arm the row cannot carry never matches', () => {
+    const none = { payeeId: null, entityCode: null, source: null };
+    const row = gameLogRow({ day: '2026-09-23', payeeId: 'rh_one' });
+    expect(gameLogRowMatches(row, none)).toBe(true);
+    expect(gameLogRowMatches(row, { ...none, payeeId: 'rh_one' })).toBe(true);
+    expect(gameLogRowMatches(row, { ...none, payeeId: 'rh_other' })).toBe(false);
+    expect(gameLogRowMatches(row, { ...none, entityCode: 'TPL-MUS' })).toBe(true);
+    expect(gameLogRowMatches(row, { ...none, entityCode: 'TPL-AUD' })).toBe(false);
+    expect(gameLogRowMatches(row, { ...none, source: 'Spotify' })).toBe(true);
+    expect(gameLogRowMatches(row, { ...none, source: 'TikTok' })).toBe(false);
+    // A dash row (no source of record) never matches a source arm — never force-fitted.
+    const dashed = gameLogRow({ day: '2026-09-23', payeeId: 'rh_one', source: null });
+    expect(gameLogRowMatches(dashed, { ...none, source: 'Spotify' })).toBe(false);
+  });
+
+  it('clamps the page into 1..pageCount', () => {
+    expect(clampedPage(0, 5)).toBe(1);
+    expect(clampedPage(3, 5)).toBe(3);
+    expect(clampedPage(9, 5)).toBe(5);
+    expect(clampedPage(2, 0)).toBe(1);
+  });
+
+  it('voices the count line verbatim — singular included', () => {
+    expect(gameLogCountLine(1, 25, 124)).toBe('Showing 1–25 of 124 transactions');
+    expect(gameLogCountLine(26, 50, 124)).toBe('Showing 26–50 of 124 transactions');
+    expect(gameLogCountLine(101, 124, 124)).toBe('Showing 101–124 of 124 transactions');
+    expect(gameLogCountLine(1, 1, 1)).toBe('Showing 1–1 of 1 transaction');
+  });
+
+  it('splits the source bars by the deterministic 1/100 cut — exact bigint math', () => {
+    const rows = [
+      { label: 'Spotify', valueCents: 4_000_000_000n },
+      { label: 'TikTok', valueCents: 1_000_000n },
+      { label: 'At the boundary', valueCents: 40_000_000n }, // exactly 1/100 of the top — primary
+      { label: 'Below the line', valueCents: 39_999_999n }, // sub-1/100 — tail
+    ];
+    const { primary, tail } = splitSourceRows(rows);
+    expect(primary.map((row) => row.label)).toEqual(['Spotify', 'At the boundary']);
+    expect(tail.map((row) => row.label)).toEqual(['TikTok', 'Below the line']);
+  });
+
+  it('derives the filter options from the payload — leaderboard payees plus log-only fields', () => {
+    const leaders = [leaderRow({ payeeId: 'rh_b', rank: 2 }), leaderRow({ payeeId: 'rh_a', rank: 1 })];
+    const rows = [
+      gameLogRow({ day: '2026-09-23', payeeId: 'rh_a' }),
+      gameLogRow({ day: '2026-09-22', payeeId: 'rh_c', entityId: 'TPL-MUS-001', source: 'TikTok' }),
+      gameLogRow({ day: '2026-09-21', payeeId: 'rh_c', entityId: null, source: null }),
+    ];
+    expect(payeeFilterOptions(leaders, rows)).toEqual(['rh_a', 'rh_b', 'rh_c']);
+    expect(entityCodeOptions(rows)).toEqual(['TPL-MUS']);
+    expect(sourceFilterOptions(rows)).toEqual(['Spotify', 'TikTok']); // the fixture's default source rides along
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fixture renders — the pure view
 // ---------------------------------------------------------------------------
 
@@ -141,6 +268,13 @@ describe('CreatorAnalyticsView — fixture renders', () => {
     expect(html).toContain('35%'); // integer bigint percent of the $1,000.00 gross
     expect(html).toContain('data-testid="creator-analytics-kpi-payees"');
     expect(html).toContain('data-testid="creator-analytics-kpi-runs"');
+    // The d256957 treatment — full values, tracking-tighter, no truncate class.
+    const kpiBlock = html.slice(
+      html.indexOf('data-testid="creator-analytics-kpis"'),
+      html.indexOf('data-testid="creator-analytics-trend"'),
+    );
+    expect(kpiBlock).toContain('tracking-tighter');
+    expect(kpiBlock).not.toContain('truncate');
   });
 
   it('floors a sub-1% share to the honest <1% — never a float ratio of money', () => {
@@ -199,6 +333,14 @@ describe('CreatorAnalyticsView — fixture renders', () => {
     expect(gameLog).not.toContain('TPL-MUS-001');
     expect(gameLog).not.toContain('Midnight Clear');
     expect(gameLog).toContain('—'); // the dash states the absent field
+  });
+
+  it('renders the single source list exactly as before when there is no tail — no sub-labels', () => {
+    const single = payload({ sourceSplits: [{ source: 'Spotify', creatorCents: 350_00n, runs: 1 }] });
+    const html = renderView(single);
+    expect(html).not.toContain('Primary DSPs');
+    expect(html).not.toContain('Tail distribution');
+    expect(html.match(/data-testid="chart-hbar-row"/g)?.length).toBe(1);
   });
 
   it('renders an empty window as zeros and copy — never a blank block', () => {
@@ -275,6 +417,9 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(kpiBlock).toContain('100%'); // integer-safe share: the holder credits ARE the gross (zero dust)
     expect(kpiBlock).toContain('2'); // active payees
     expect(kpiBlock).toContain('119'); // runs paying creators
+    // The d256957 treatment — the full $8,445,103,733.36 renders un-truncated.
+    expect(kpiBlock).toContain('tracking-tighter');
+    expect(kpiBlock).not.toContain('truncate');
   });
 
   it('floors the 7D share honestly and pins the week exactly', () => {
@@ -319,6 +464,15 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(totalBlock).toContain('$8,445,103,733.36'); // Σ leaders === creatorPaidCents (the module invariant)
     expect(html.match(/data-testid="chart-sparkline"/g)?.length).toBe(2); // per-row momentum sparklines
     expect(html.match(/data-testid="chart-heat-cell"/g)?.length).toBeGreaterThan(0);
+    // The opted-in native tooltips — per-point <title> elements carrying the
+    // trend's day of record and the exact formatted value (2 leaders × every
+    // trend day, the series' own alignment contract).
+    const sparklineTitles = html.match(/<title>[\s\S]*?<\/title>/g) ?? [];
+    expect(sparklineTitles.length).toBe(2 * allPayload.trend.length);
+    const lastDay = allPayload.trend[allPayload.trend.length - 1].day;
+    const firstLeader = allPayload.leaders[0];
+    const expectedTitle = `<title>${lastDay} — ${formatCentsBigint(firstLeader.series[firstLeader.series.length - 1])}</title>`;
+    expect(sparklineTitles).toContain(expectedTitle);
   });
 
   it('renders ALL THIRTEEN platform sources of record HERE, in the module order', () => {
@@ -354,16 +508,61 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(html.match(/data-testid="chart-hbar-row"/g)?.length).toBe(13);
   });
 
-  it('renders the 124-row game log in the module order — newest first', () => {
+  it('splits the thirteen sources into Primary DSPs and Tail distribution — each group scaled to its own max', () => {
     const html = renderView(allPayload);
-    expect(html.match(/data-testid="creator-analytics-gamelog-row"/g)?.length).toBe(124);
+    const sources = html.slice(
+      html.indexOf('data-testid="creator-analytics-sources"'),
+      html.indexOf('data-testid="creator-analytics-leaders"'),
+    );
+    // The two mono-eyebrow group labels render.
+    expect(sources).toContain('Primary DSPs');
+    expect(sources).toContain('Tail distribution');
+    // The deterministic 1/100 cut over the window's top source — four
+    // primary sources and nine tail sources on this seed.
+    const top = allPayload.sourceSplits[0]?.creatorCents ?? 0n;
+    const expectedPrimary = allPayload.sourceSplits.filter((row) => row.creatorCents * 100n >= top);
+    const expectedTail = allPayload.sourceSplits.filter((row) => row.creatorCents * 100n < top);
+    expect(expectedPrimary.map((row) => row.source)).toEqual([
+      'Spotify',
+      'Amazon Music',
+      'YouTube Music',
+      'Bandcamp',
+    ]);
+    expect(expectedTail.length).toBe(9);
+    const primaryBlock = sources.slice(sources.indexOf('Primary DSPs'), sources.indexOf('Tail distribution'));
+    const tailBlock = sources.slice(sources.indexOf('Tail distribution'));
+    expect(primaryBlock.match(/data-testid="chart-hbar-row"/g)?.length).toBe(expectedPrimary.length);
+    expect(tailBlock.match(/data-testid="chart-hbar-row"/g)?.length).toBe(expectedTail.length);
+    // Spotify lands in the primary group; the TikTok/Twitch-scale tail lands in its own.
+    expect(primaryBlock).toContain('Spotify');
+    expect(tailBlock).toContain('TikTok');
+    expect(tailBlock).toContain('Twitch');
+    // Values keep rendering in full at the bar ends — no log scale, no rounding.
+    for (const row of allPayload.sourceSplits) {
+      expect(sources).toContain(formatCentsBigint(row.creatorCents));
+    }
+  });
+
+  it('renders the game log paginated — page one of the 124-row log, newest first', () => {
+    const html = renderView(allPayload);
+    // The pagination contract — 25 rows per page, the count line reflecting
+    // the unfiltered total. The 124-row log no longer renders all at once.
+    expect(html.match(/data-testid="creator-analytics-gamelog-row"/g)?.length).toBe(GAME_LOG_PAGE_SIZE);
+    expect(html).toContain(gameLogCountLine(1, GAME_LOG_PAGE_SIZE, 124)); // Showing 1–25 of 124 transactions
     const gameLog = html.slice(html.indexOf('data-testid="creator-analytics-gamelog"'));
-    // The payeeId of record is the primary label in the drilldown.
+    // The payeeId of record is the primary label in the drilldown; page one
+    // carries the label payee's newest rows.
     expect(gameLog).toContain('rh_thrones_label_don');
-    expect(gameLog).toContain('rh_yeshua_throne_don');
-    // Newest first: the seed's newest clearing day renders before the persona's last music day.
-    expect(gameLog.indexOf('2026-09-23')).toBeLessThan(gameLog.indexOf('2026-09-07'));
+    // Newest first: page one opens on the seed's newest clearing day; the
+    // persona's older music days (2026-09-07) sit on the log's last page.
+    expect(gameLog.indexOf('2026-09-23')).toBeGreaterThan(-1);
+    expect(gameLog).not.toContain('2026-09-07');
     expect(gameLog).toMatch(/TPL-/); // the unanimous entity of record
+    // Bound-aware pager: Prev disabled on page one, Next armed. The regex
+    // pins the disabled ATTRIBUTE (`disabled=""`), not Tailwind's
+    // `disabled:` utility classes that ride every button's className.
+    expect(/data-testid="creator-analytics-gamelog-prev"[^>]*disabled=""/.test(html)).toBe(true);
+    expect(/data-testid="creator-analytics-gamelog-next"[^>]*disabled=""/.test(html)).toBe(false);
   });
 
   it('switches the window and the values change with it', () => {
@@ -385,5 +584,87 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(html).toContain('demo-data-badge');
     expect(html).toContain('$8,445,103,733.36'); // the ALL window renders by default
     expect(html).toContain('Creator Analytics');
+  });
+
+  // ---------------------------------------------------------------------
+  // The game log's pager and filters — jsdom interaction (createRoot + act).
+  // ---------------------------------------------------------------------
+  describe('the game log pager and filters — interaction', () => {
+    it('paginates: bound-aware Prev/Next with the count line following the page', () => {
+      const container = mountView(allPayload);
+      const countOf = () => queryTestId(container, 'creator-analytics-gamelog-count').textContent ?? '';
+      const rowsOf = () => container.querySelectorAll('[data-testid="creator-analytics-gamelog-row"]').length;
+      const prev = () => queryTestId(container, 'creator-analytics-gamelog-prev') as HTMLButtonElement;
+      const next = () => queryTestId(container, 'creator-analytics-gamelog-next') as HTMLButtonElement;
+
+      expect(rowsOf()).toBe(GAME_LOG_PAGE_SIZE);
+      expect(countOf()).toBe(gameLogCountLine(1, GAME_LOG_PAGE_SIZE, 124));
+      expect(prev().disabled).toBe(true); // the page-one bound
+      expect(next().disabled).toBe(false);
+
+      clickButton(next());
+      expect(countOf()).toBe(gameLogCountLine(26, 50, 124));
+      expect(prev().disabled).toBe(false);
+
+      clickButton(next());
+      clickButton(next());
+      clickButton(next());
+      expect(countOf()).toBe(gameLogCountLine(101, 124, 124)); // the last page
+      expect(next().disabled).toBe(true); // the last-page bound
+      expect(rowsOf()).toBe(124 - 4 * GAME_LOG_PAGE_SIZE);
+      // Newest-first holds across pages: the persona's rows — reachable on
+      // the last pages of the unfiltered sort — are pinned via the payee
+      // filter below; here the last page pins only the bounds.
+
+      clickButton(prev());
+      expect(countOf()).toBe(gameLogCountLine(76, 100, 124));
+    });
+
+    it('narrows the count line per filter arm (AND semantics) with the honest empty at zero', () => {
+      const container = mountView(allPayload);
+      const countOf = () => queryTestId(container, 'creator-analytics-gamelog-count').textContent ?? '';
+      const payeeSelect = () => queryTestId(container, 'creator-analytics-gamelog-filter-payee') as unknown as HTMLSelectElement;
+      const sourceSelect = () => queryTestId(container, 'creator-analytics-gamelog-filter-source') as unknown as HTMLSelectElement;
+
+      // The payee arm narrows the count line to the payload's own count —
+      // and the filter change resets the page to one.
+      setSelectValue(payeeSelect(), 'rh_yeshua_throne_don');
+      expect(countOf()).toBe(gameLogCountLine(1, 5, 5)); // probe-pinned: the persona's 5 rows
+
+      // The source arm ANDs with the payee arm — Amazon Music rows only.
+      setSelectValue(sourceSelect(), 'Amazon Music');
+      const amazonForYeshua = allPayload.gameLog.filter(
+        (row) => row.payeeId === 'rh_yeshua_throne_don' && row.source === 'Amazon Music',
+      ).length;
+      expect(amazonForYeshua).toBeGreaterThan(0);
+      expect(countOf()).toBe(gameLogCountLine(1, Math.min(GAME_LOG_PAGE_SIZE, amazonForYeshua), amazonForYeshua));
+
+      // A combination the payload cannot satisfy renders the honest empty
+      // line — never fake rows, and no count line over zero rows.
+      setSelectValue(sourceSelect(), 'Apple Podcasts'); // probe-pinned: absent for this payee
+      expect(queryTestId(container, 'creator-analytics-gamelog-filter-empty')).not.toBeNull();
+      expect(container.querySelectorAll('[data-testid="creator-analytics-gamelog-row"]').length).toBe(0);
+      expect(container.querySelector('[data-testid="creator-analytics-gamelog-count"]')).toBeNull();
+
+      // Clearing the source arm restores the payee's rows honestly.
+      setSelectValue(sourceSelect(), '');
+      expect(countOf()).toBe(gameLogCountLine(1, 5, 5));
+    });
+
+    it('resets the page when a filter changes after paging deep', () => {
+      const container = mountView(allPayload);
+      const countOf = () => queryTestId(container, 'creator-analytics-gamelog-count').textContent ?? '';
+      const payeeSelect = () => queryTestId(container, 'creator-analytics-gamelog-filter-payee') as unknown as HTMLSelectElement;
+      const next = () => queryTestId(container, 'creator-analytics-gamelog-next');
+
+      clickButton(next());
+      clickButton(next()); // page three
+      expect(countOf()).toBe(gameLogCountLine(51, 75, 124));
+
+      // 119 rows outlast one page — a bare clamp could not fake this reset:
+      // the count line's start bound must return to 1.
+      setSelectValue(payeeSelect(), 'rh_thrones_label_don');
+      expect(countOf()).toBe(gameLogCountLine(1, GAME_LOG_PAGE_SIZE, 119));
+    });
   });
 });

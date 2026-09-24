@@ -23,7 +23,7 @@
  * stay brand-free and its exclusion pin is untouched by this file.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type {
   CreatorAnalyticsFlows,
@@ -84,6 +84,105 @@ export function heatShare(cents: bigint, peakCents: bigint): number {
   return Number((cents * 100n) / peakCents) / 100;
 }
 
+/** The game log's page size — the pagination contract, 25 rows per page. */
+export const GAME_LOG_PAGE_SIZE = 25;
+
+/** One game-log row's filter arms — `null` is that arm's honest "no filter". */
+export interface GameLogFilters {
+  readonly payeeId: string | null;
+  readonly entityCode: string | null;
+  readonly source: string | null;
+}
+
+/**
+ * The game log's entity code — the entity id's `TPL-XXX` family prefix
+ * (TPL-MUS-001 filters under TPL-MUS). A row carrying no entity id has no
+ * code (it matches only by the other arms); a non-template id is its own
+ * code. Never invented — the id of record is cut, not renamed.
+ */
+export function entityCodeOf(entityId: string | null): string | null {
+  if (entityId === null) return null;
+  const match = /^TPL-[A-Z0-9]+/.exec(entityId);
+  return match === null ? entityId : match[0];
+}
+
+/**
+ * The game log's AND predicate — every set arm must match the row, and an
+ * arm the row cannot carry (no entity code, no source) never matches.
+ * Rows the filters cannot attribute are excluded honestly, never
+ * force-fitted into a bucket.
+ */
+export function gameLogRowMatches(row: CreatorGameLogRow, filters: GameLogFilters): boolean {
+  if (filters.payeeId !== null && row.payeeId !== filters.payeeId) return false;
+  if (filters.entityCode !== null && entityCodeOf(row.entityId) !== filters.entityCode) return false;
+  if (filters.source !== null && (row.source === null || row.source !== filters.source)) return false;
+  return true;
+}
+
+/** Payee options — the payload's leaderboard payees plus any payee the log itself lists, sorted. */
+export function payeeFilterOptions(
+  leaders: readonly CreatorPayoutRow[],
+  rows: readonly CreatorGameLogRow[],
+): readonly string[] {
+  const ids = new Set<string>();
+  for (const leader of leaders) ids.add(leader.payeeId);
+  for (const row of rows) ids.add(row.payeeId);
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+/** Entity-code options — the TPL-XXX families present in the log's own rows, sorted. */
+export function entityCodeOptions(rows: readonly CreatorGameLogRow[]): readonly string[] {
+  const codes = new Set<string>();
+  for (const row of rows) {
+    const code = entityCodeOf(row.entityId);
+    if (code !== null) codes.add(code);
+  }
+  return [...codes].sort((a, b) => a.localeCompare(b));
+}
+
+/** Source options — the run sources present in the log's own rows, sorted. */
+export function sourceFilterOptions(rows: readonly CreatorGameLogRow[]): readonly string[] {
+  const sources = new Set<string>();
+  for (const row of rows) {
+    if (row.source !== null) sources.add(row.source);
+  }
+  return [...sources].sort((a, b) => a.localeCompare(b));
+}
+
+/** The page clamp — 1..pageCount, a stale page never renders out of bounds. */
+export function clampedPage(page: number, pageCount: number): number {
+  return Math.min(Math.max(1, page), Math.max(1, pageCount));
+}
+
+/**
+ * The pager's count line — the filtered totals' own arithmetic, verbatim:
+ * `Showing 1–25 of 124 transactions`.
+ */
+export function gameLogCountLine(start: number, end: number, total: number): string {
+  return `Showing ${start}–${end} of ${total} transaction${total === 1 ? '' : 's'}`;
+}
+
+/** The source bars' deterministic cut — the primary group and the tail. */
+export interface SourceSplitGroups<T> {
+  readonly primary: readonly T[];
+  readonly tail: readonly T[];
+}
+
+/**
+ * The source bars' deterministic cut — a source is PRIMARY when its value
+ * is at least 1/100 of the window's top source (bigint math:
+ * `valueCents × 100 ≥ top`, exact — no float, no floor), the rest are the
+ * TAIL. Both groups keep the module's descending order; an empty tail is
+ * the caller's signal to render the single list exactly as before.
+ */
+export function splitSourceRows<T extends { valueCents: bigint }>(
+  rows: readonly T[],
+): SourceSplitGroups<T> {
+  const top = rows.reduce((peak, row) => (row.valueCents > peak ? row.valueCents : peak), 0n);
+  const primary = rows.filter((row) => row.valueCents * 100n >= top);
+  return { primary, tail: rows.filter((row) => row.valueCents * 100n < top) };
+}
+
 // ---------------------------------------------------------------------------
 // Presentation
 // ---------------------------------------------------------------------------
@@ -95,7 +194,7 @@ function KpiCard({ testid, label, value, note }: { testid: string; label: string
       className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-4"
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">{label}</p>
-      <p className="mt-2 truncate font-mono text-base text-gold-champagne" title={value}>
+      <p className="mt-2 font-mono text-base tracking-tighter text-gold-champagne" title={value}>
         {value}
       </p>
       <p className="mt-1 font-mono text-[10px] text-white/30">{note}</p>
@@ -140,6 +239,241 @@ function DemoBadge() {
   );
 }
 
+/** The pager buttons' voice — the window filter's own pill treatment, bound-aware. */
+const PAGER_BUTTON_CLASS =
+  'rounded-full border border-slate-600/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-white/60 transition hover:text-white/90 disabled:cursor-not-allowed disabled:opacity-40';
+
+/** The log filters' select treatment — the IntelligenceSection selector's own classes. */
+const FILTER_SELECT_CLASS =
+  'mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-gold';
+
+/** One filter arm's options — the operator's active selection always stays selectable, even when the window's data no longer carries it. */
+function withActiveOption(options: readonly string[], active: string): readonly string[] {
+  if (active === '' || options.includes(active)) return options;
+  return [...options, active].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * The game log's sticky filter sub-header — three AND-ed arms (payee of
+ * record, the entity's TPL-XXX family code, the run's source of record)
+ * in the established select treatment. It sticks inside the log's card so
+ * the arms stay in reach while the log scrolls; empty arms state their
+ * honest "all" rather than hiding.
+ */
+function GameLogFilterBar({
+  payeeOptions,
+  entityOptions,
+  sourceOptions,
+  payeeValue,
+  entityValue,
+  sourceValue,
+  onPayeeChange,
+  onEntityChange,
+  onSourceChange,
+}: {
+  payeeOptions: readonly string[];
+  entityOptions: readonly string[];
+  sourceOptions: readonly string[];
+  payeeValue: string;
+  entityValue: string;
+  sourceValue: string;
+  onPayeeChange: (value: string) => void;
+  onEntityChange: (value: string) => void;
+  onSourceChange: (value: string) => void;
+}) {
+  return (
+    <div
+      data-testid="creator-analytics-gamelog-filters"
+      className="sticky top-0 z-10 -mx-5 -mt-5 mb-4 rounded-t-2xl border-b border-slate-600/50 bg-obsidian-950/95 px-5 pb-4 pt-4 backdrop-blur-sm"
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Payee</span>
+          <select
+            data-testid="creator-analytics-gamelog-filter-payee"
+            aria-label="Filter the game log by payee"
+            value={payeeValue}
+            onChange={(event) => onPayeeChange(event.target.value)}
+            className={FILTER_SELECT_CLASS}
+          >
+            <option value="">All payees</option>
+            {withActiveOption(payeeOptions, payeeValue).map((payeeId) => (
+              <option key={payeeId} value={payeeId}>
+                {payeeId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Entity</span>
+          <select
+            data-testid="creator-analytics-gamelog-filter-entity"
+            aria-label="Filter the game log by entity code"
+            value={entityValue}
+            onChange={(event) => onEntityChange(event.target.value)}
+            className={FILTER_SELECT_CLASS}
+          >
+            <option value="">All entities</option>
+            {withActiveOption(entityOptions, entityValue).map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Source</span>
+          <select
+            data-testid="creator-analytics-gamelog-filter-source"
+            aria-label="Filter the game log by source"
+            value={sourceValue}
+            onChange={(event) => onSourceChange(event.target.value)}
+            className={FILTER_SELECT_CLASS}
+          >
+            <option value="">All sources</option>
+            {withActiveOption(sourceOptions, sourceValue).map((source) => (
+              <option key={source} value={source}>
+                {source}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The game log's client-side pagination and filters — the 124-row seed log
+ * scales without redesigning the table: the module's newest-first rows,
+ * AND-filtered by the three arms, 25 per page with the count line and the
+ * bound-aware Prev/Next pair beneath. The page resets to 1 whenever the
+ * filters or the window's rows change; a zero-row filter result renders
+ * the honest empty line, never fake rows, and dash-when-null rows still
+ * render their dashes. Filter state is the panel's own — the rows stay
+ * the module's order, never re-sorted here.
+ */
+function GameLogPanel({
+  rows,
+  peakCents,
+  payeeOptions,
+  entityOptions,
+  sourceOptions,
+}: {
+  rows: readonly CreatorGameLogRow[];
+  peakCents: bigint;
+  payeeOptions: readonly string[];
+  entityOptions: readonly string[];
+  sourceOptions: readonly string[];
+}) {
+  const [payeeFilter, setPayeeFilter] = useState('');
+  const [entityFilter, setEntityFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [page, setPage] = useState(1);
+
+  const filteredRows = rows.filter((row) =>
+    gameLogRowMatches(row, {
+      payeeId: payeeFilter === '' ? null : payeeFilter,
+      entityCode: entityFilter === '' ? null : entityFilter,
+      source: sourceFilter === '' ? null : sourceFilter,
+    }),
+  );
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / GAME_LOG_PAGE_SIZE));
+  const safePage = clampedPage(page, pageCount);
+  const pageStart = (safePage - 1) * GAME_LOG_PAGE_SIZE;
+  const pageRows = filteredRows.slice(pageStart, pageStart + GAME_LOG_PAGE_SIZE);
+
+  // The page is window dressing over the rows — any change to the filters
+  // or the window's own rows resets it to the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [payeeFilter, entityFilter, sourceFilter, rows]);
+
+  const filterBar = (
+    <GameLogFilterBar
+      payeeOptions={payeeOptions}
+      entityOptions={entityOptions}
+      sourceOptions={sourceOptions}
+      payeeValue={payeeFilter}
+      entityValue={entityFilter}
+      sourceValue={sourceFilter}
+      onPayeeChange={setPayeeFilter}
+      onEntityChange={setEntityFilter}
+      onSourceChange={setSourceFilter}
+    />
+  );
+
+  if (filteredRows.length === 0) {
+    return (
+      <div className="mt-3 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
+        {filterBar}
+        <p data-testid="creator-analytics-gamelog-filter-empty" className="py-2 text-sm text-white/40">
+          No transactions match the filters — clear a filter to widen the log.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
+      {filterBar}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-collapse text-left" aria-label="Creator payout game log">
+          <thead>
+            <tr className="border-b border-slate-600/50">
+              <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Day</th>
+              <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Payee</th>
+              <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Entity</th>
+              <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Work</th>
+              <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Source</th>
+              <th scope="col" className="py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Creator paid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row, index) => (
+              <tr key={`${row.day}-${row.payeeId}-${index}`} data-testid="creator-analytics-gamelog-row" className="border-b border-slate-600/30">
+                <td className="py-2 pr-3 font-mono text-sm text-slate-300">{row.day}</td>
+                <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.payeeId}</td>
+                <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? '—'}</td>
+                <td className="py-2 pr-3 text-sm text-slate-300">{row.workTitle ?? '—'}</td>
+                <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? '—'}</td>
+                <HeatCell heat={heatShare(row.creatorCents, peakCents)}>
+                  <span className="font-mono text-sm text-gold-champagne">{formatCentsBigint(row.creatorCents)}</span>
+                </HeatCell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3" data-testid="creator-analytics-gamelog-pager">
+        <p data-testid="creator-analytics-gamelog-count" className="font-mono text-[11px] text-white/40">
+          {gameLogCountLine(pageStart + 1, pageStart + pageRows.length, filteredRows.length)}
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="creator-analytics-gamelog-prev"
+            onClick={() => setPage((current) => clampedPage(current - 1, pageCount))}
+            disabled={safePage === 1}
+            className={PAGER_BUTTON_CLASS}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            data-testid="creator-analytics-gamelog-next"
+            onClick={() => setPage((current) => clampedPage(current + 1, pageCount))}
+            disabled={safePage === pageCount}
+            className={PAGER_BUTTON_CLASS}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The pure creator page — every figure arrives in props. `flows` is the
  * payload of the SELECTED window (its own `windowDays` field lights the
@@ -164,6 +498,13 @@ export function CreatorAnalyticsView({
   const peakLogCents = gameLogRows.reduce((peak, row) => (row.creatorCents > peak ? row.creatorCents : peak), 0n);
   const totalRuns = leaders.reduce((sum, row) => sum + row.runs, 0);
   const totalCredits = leaders.reduce((sum, row) => sum + row.creditsCents, 0n);
+  // The sparklines' tooltip labels — the trend's days of record, index-aligned
+  // with every leader row's series (the derivation's alignment contract).
+  const trendDays = flows.trend.map((point) => point.day);
+  // The source bars' deterministic primary/tail cut — mapped to the bar rows
+  // first, so the groups carry exactly what HBar draws.
+  const sourceBarRows = sourceRows.map((split) => ({ label: split.source, valueCents: split.creatorCents }));
+  const { primary: primarySources, tail: tailSources } = splitSourceRows(sourceBarRows);
 
   return (
     <div aria-label="Creator Analytics">
@@ -246,13 +587,35 @@ export function CreatorAnalyticsView({
         <BlockHeader label="Where creator money comes from" copy="Creator credits by the split runs' own platform sources of record — the sanctioned surface for these names. A run whose record is gone attributes to no source; its money stays in the totals above." />
         {sourceRows.length === 0 ? (
           <EmptyLine testid="creator-analytics-sources-empty">{EMPTY_WINDOW_COPY}</EmptyLine>
-        ) : (
+        ) : tailSources.length === 0 ? (
+          // No tail — the single list renders exactly as before, no sub-labels.
           <div className="mt-3 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
             <HBar
-              rows={flows.sourceSplits.map((split) => ({ label: split.source, valueCents: split.creatorCents }))}
+              rows={sourceBarRows}
               ariaLabel="Creator credits by platform source"
               emptyLabel={EMPTY_WINDOW_COPY}
             />
+          </div>
+        ) : (
+          // Primary and tail, each scaled to its own max — the tail's
+          // TikTok-scale bars stay readable without a dishonest log scale.
+          <div className="mt-3 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
+            <div data-testid="creator-analytics-sources-primary">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Primary DSPs</p>
+              <HBar
+                rows={primarySources}
+                ariaLabel="Creator credits by primary platform source"
+                emptyLabel={EMPTY_WINDOW_COPY}
+              />
+            </div>
+            <div data-testid="creator-analytics-sources-tail" className="mt-6">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Tail distribution</p>
+              <HBar
+                rows={tailSources}
+                ariaLabel="Creator credits by tail platform sources"
+                emptyLabel={EMPTY_WINDOW_COPY}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -288,7 +651,12 @@ export function CreatorAnalyticsView({
                       <span className="font-mono text-sm text-gold-champagne">{formatCentsBigint(row.creditsCents)}</span>
                     </HeatCell>
                     <td className="py-2">
-                      <Sparkline values={row.series} ariaLabel={`${payeeDisplayName(row.label, row.payeeId)} credit history`} emptyLabel="No credit history yet" />
+                      <Sparkline
+                        values={row.series}
+                        pointLabels={trendDays}
+                        ariaLabel={`${payeeDisplayName(row.label, row.payeeId)} credit history`}
+                        emptyLabel="No credit history yet"
+                      />
                     </td>
                   </tr>
                 ))}
@@ -313,34 +681,13 @@ export function CreatorAnalyticsView({
         {gameLogRows.length === 0 ? (
           <EmptyLine testid="creator-analytics-gamelog-empty">{EMPTY_WINDOW_COPY}</EmptyLine>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
-            <table className="w-full min-w-[760px] border-collapse text-left" aria-label="Creator payout game log">
-              <thead>
-                <tr className="border-b border-slate-600/50">
-                  <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Day</th>
-                  <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Payee</th>
-                  <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Entity</th>
-                  <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Work</th>
-                  <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Source</th>
-                  <th scope="col" className="py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Creator paid</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gameLogRows.map((row, index) => (
-                  <tr key={`${row.day}-${row.payeeId}-${index}`} data-testid="creator-analytics-gamelog-row" className="border-b border-slate-600/30">
-                    <td className="py-2 pr-3 font-mono text-sm text-slate-300">{row.day}</td>
-                    <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.payeeId}</td>
-                    <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? '—'}</td>
-                    <td className="py-2 pr-3 text-sm text-slate-300">{row.workTitle ?? '—'}</td>
-                    <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? '—'}</td>
-                    <HeatCell heat={heatShare(row.creatorCents, peakLogCents)}>
-                      <span className="font-mono text-sm text-gold-champagne">{formatCentsBigint(row.creatorCents)}</span>
-                    </HeatCell>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <GameLogPanel
+            rows={gameLogRows}
+            peakCents={peakLogCents}
+            payeeOptions={payeeFilterOptions(leaders, gameLogRows)}
+            entityOptions={entityCodeOptions(gameLogRows)}
+            sourceOptions={sourceFilterOptions(gameLogRows)}
+          />
         )}
       </div>
     </div>

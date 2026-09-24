@@ -131,12 +131,57 @@ export function polylinePoints(
     .join(' ');
 }
 
+/** The sparkline's own point coordinates — 1px inset so strokes stay inside. */
+export function sparklinePointGeometry(
+  values: readonly bigint[],
+  width: number,
+  height: number,
+): readonly AreaPointGeometry[] {
+  const inset = 1;
+  return areaSeriesPoints(values, Math.max(0, width - inset * 2), Math.max(0, height - inset * 2)).map(
+    (p) => ({ x: p.x + inset, y: p.y + inset }),
+  );
+}
+
 /** Polyline "x,y x,y" points for the sparkline (1px inset so strokes stay inside). */
 export function sparklinePoints(values: readonly bigint[], width: number, height: number): string {
-  const inset = 1;
-  return areaSeriesPoints(values, Math.max(0, width - inset * 2), Math.max(0, height - inset * 2))
-    .map((p) => `${snap(p.x + inset)},${snap(p.y + inset)}`)
+  return sparklinePointGeometry(values, width, height)
+    .map((p) => `${snap(p.x)},${snap(p.y)}`)
     .join(' ');
+}
+
+/** One sparkline point's native-tooltip payload — position plus the composed title text. */
+export interface SparklinePointTitle {
+  readonly index: number;
+  readonly x: number;
+  readonly y: number;
+  readonly title: string;
+}
+
+/**
+ * The opted-in sparkline's per-point titles — the point's own geometry
+ * (identical math to the polyline) paired with `${label} — ${formatted
+ * value}`. Zips values with labels positionally and stops at the shorter
+ * list: an unlabeled point carries no title, never a guessed date.
+ */
+export function sparklinePointTitles(
+  values: readonly bigint[],
+  labels: readonly string[],
+  width: number,
+  height: number,
+): readonly SparklinePointTitle[] {
+  const geometry = sparklinePointGeometry(values, width, height);
+  const count = Math.min(geometry.length, labels.length);
+  const titles: SparklinePointTitle[] = [];
+  for (let i = 0; i < count; i += 1) {
+    titles.push({
+      index: i,
+      x: geometry[i].x,
+      y: geometry[i].y,
+      title: `${labels[i]} — ${formatCentsBigint(values[i])}`,
+    });
+  }
+  return titles;
 }
 
 // ─── AreaChart ───────────────────────────────────────────────────────────────
@@ -344,6 +389,13 @@ export function AreaChart({
 /**
  * The leaderboard's per-entity history — a tiny gold polyline. An empty
  * history renders the honest copy, never a blank cell.
+ *
+ * Native tooltips are OPT-IN (`pointLabels`, default off): when handed
+ * the per-point labels (dates of record), each point renders a
+ * transparent hover target carrying a native <title> with the label and
+ * the formatted value — no visual mark, no portal, no shared hover
+ * machinery. Default-off is DOM-provable: zero <title> elements. An
+ * unlabeled point (labels shorter than values) carries no title.
  */
 export function Sparkline({
   values,
@@ -351,12 +403,15 @@ export function Sparkline({
   emptyLabel,
   width = 96,
   height = 28,
+  pointLabels,
 }: {
   values: readonly bigint[];
   ariaLabel: string;
   emptyLabel: string;
   width?: number;
   height?: number;
+  /** Opt-in per-point labels (the dates of record) for native <title> tooltips. Default off. */
+  pointLabels?: readonly string[];
 }) {
   if (values.length === 0) {
     return (
@@ -365,6 +420,7 @@ export function Sparkline({
       </span>
     );
   }
+  const titles = pointLabels === undefined ? [] : sparklinePointTitles(values, pointLabels, width, height);
   return (
     <svg
       data-testid="chart-sparkline"
@@ -382,6 +438,18 @@ export function Sparkline({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
+      {titles.map((point) => (
+        <circle
+          key={point.index}
+          data-testid="chart-sparkline-point"
+          cx={snap(point.x)}
+          cy={snap(point.y)}
+          r={4}
+          fill="transparent"
+        >
+          <title>{point.title}</title>
+        </circle>
+      ))}
     </svg>
   );
 }
