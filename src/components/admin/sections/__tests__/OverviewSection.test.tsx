@@ -90,6 +90,12 @@ beforeAll(async () => {
       code: 'catalog_growth_store_failed',
       message: 'Catalog growth store read failed.',
     },
+    operations: {
+      kind: 'unavailable',
+      code: 'operations_store_failed',
+      message: 'Operations store read failed.',
+    },
+    operationsDemo: true,
   };
 });
 

@@ -6,6 +6,7 @@
  */
 
 import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
+import type { OperationsFlows } from '@/lib/admin/operations';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { AnalyticsWindow, CompanyAnalytics } from '@/lib/admin/companyAnalytics';
 import type { CreatorAnalyticsFlows } from '@/lib/admin/creatorAnalytics';
@@ -234,9 +235,19 @@ export interface AdminConsoleData {
    * Store-read only.
    */
   catalogGrowth: SectionData<CatalogGrowthWindows>;
+  /**
+   * The Operations tab's payload (spec art_Eis55ifL): the back-office
+   * derivation's five views over the Don store door — escrow &
+   * settlements, runs & pipeline health, the verification-exception
+   * queue, the payee/creator registry, and the operator audit log — one
+   * safe payload, honest empty states throughout. Store-read only.
+   */
+  operations: SectionData<OperationsFlows>;
+  /** True exactly when the demo door is open — gates the Operations tab's disclosed demo badge. */
+  operationsDemo: boolean;
 }
 
-/** The eleven console tabs, in operator order. */
+/** The twelve console tabs, in operator order. */
 export const CONSOLE_TABS = [
   'Overview',
   'Creators',
@@ -249,6 +260,7 @@ export const CONSOLE_TABS = [
   'Intelligence',
   'Creator Analytics',
   'Allowlists',
+  'Operations',
 ] as const;
 
 export type ConsoleTab = (typeof CONSOLE_TABS)[number];

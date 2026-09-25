@@ -22,12 +22,19 @@ import { cookies } from 'next/headers';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { isDemoDoorOpen, seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
-import { buildContractRegistrySection, buildLedgerFinancesSection, buildTaxSection } from '@/lib/admin/sectionPayloads';
+import {
+  buildContractRegistrySection,
+  buildLedgerFinancesSection,
+  buildOperationsSection,
+  buildTaxSection,
+  type ListAssetsResult,
+  type ListLedgerResult,
+} from '@/lib/admin/sectionPayloads';
 import { listContracts, type StoredContract } from '@/lib/contracts/store';
 import { listCreators } from '@/lib/admin/creators';
 import { listAllowlists } from '@/lib/admin/allowlists';
 import { supabaseFromEnv } from '@/lib/supabase';
-import type { AdminStoreResult } from '@/lib/admin/types';
+import type { AdminStoreResult, AdminCreatorProfile } from '@/lib/admin/types';
 import { registrySummary, ledgerSummary } from '@/lib/admin/overview';
 import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { adminPageView } from '@/lib/admin/console';
@@ -324,6 +331,33 @@ async function safeCatalogGrowthRead(): Promise<AdminConsoleData['catalogGrowth'
   }
 }
 
+/**
+ * The Operations tab's payload (spec art_Eis55ifL): the back-office
+ * derivation's five views over the same Don store door as the Analytics and
+ * Intelligence reads, fed the SAME ledger rows, assets, contracts, and
+ * creator profiles the other sections read (one truth — never re-read).
+ * One failing store read must never take the console down: both the store
+ * resolution and the derivation degrade to the section's honest
+ * unavailable state (the derivation itself degrades to null — same code).
+ */
+async function safeOperationsRead(
+  ledgerRows: ListLedgerResult,
+  assets: ListAssetsResult,
+  contracts: AdminConsoleData['contracts'],
+  creatorProfiles: readonly AdminCreatorProfile[] | null,
+): Promise<AdminConsoleData['operations']> {
+  try {
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    return await buildOperationsSection({ store: donStore, ledgerRows, assets, contracts, creatorProfiles });
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'operations_store_failed',
+      message: 'Operations store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -389,6 +423,13 @@ export default async function AdminPage() {
     creatorAnalytics: creatorAnalyticsFlows,
     creatorAnalyticsDemo: isDemoDoorOpen(),
     catalogGrowth,
+    operations: await safeOperationsRead(
+      ledgerRows,
+      assets,
+      toSectionData(contracts),
+      creators && creators.ok ? creators.value : null,
+    ),
+    operationsDemo: isDemoDoorOpen(),
   };
 
   return <AdminConsole data={data} />;

@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * AdminConsole — the gated operator console shell. Renders the eleven
+ * AdminConsole — the gated operator console shell. Renders the twelve
  * sections as tabs (Overview, Creators, Registry, Ledger, Contracts,
- * Control Board, Allowlists, Analytics, Intelligence, Creator Analytics)
- * in the established obsidian/deep-gold language.
+ * Control Board, Allowlists, Analytics, Intelligence, Creator Analytics,
+ * Operations) in the established obsidian/deep-gold language.
  *
  * Mutation results are lifted here (updated creator profile / allowlist
  * row from the mutation response) so a section stays consistent when the
@@ -25,6 +25,7 @@ import { ControlBoardSection } from './sections/ControlBoardSection';
 import { AnalyticsSection } from './sections/AnalyticsSection';
 import { IntelligenceSection } from './sections/IntelligenceSection';
 import { CreatorAnalyticsSection } from './sections/CreatorAnalyticsSection';
+import { OperationsSection } from './sections/OperationsSection';
 
 export type AdminTab =
   | 'overview'
@@ -37,7 +38,8 @@ export type AdminTab =
   | 'analytics'
   | 'intelligence'
   | 'creator-analytics'
-  | 'allowlists';
+  | 'allowlists'
+  | 'operations';
 
 const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -51,6 +53,7 @@ const TABS: readonly { id: AdminTab; label: string }[] = [
   { id: 'intelligence', label: 'Intelligence' },
   { id: 'creator-analytics', label: 'Creator Analytics' },
   { id: 'allowlists', label: 'Allowlists' },
+  { id: 'operations', label: 'Operations' },
 ];
 
 function replaceById<T extends { id: string }>(rows: T[], next: T): T[] {
@@ -149,6 +152,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
             }
           />
         )}
+        {tab === 'operations' && <OperationsSection operations={data.operations} demo={data.operationsDemo} />}
       </main>
     </div>
   );

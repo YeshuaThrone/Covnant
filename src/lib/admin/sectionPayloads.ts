@@ -13,6 +13,9 @@
 
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
+import { operationsFlows, type OperationsFlows } from '@/lib/admin/operations';
+import type { Store } from '@/lib/server/store';
+import type { AdminCreatorProfile } from '@/lib/admin/types';
 import { attachRegistryPills } from '@/lib/ledger/finances';
 import { cvtDisplayCode } from '@/lib/splits/codes';
 import { isDemoDoorOpen, listDemoLaneExecutions } from '@/lib/admin/demoSeeds';
@@ -41,8 +44,34 @@ import type {
 } from '@/components/admin/types';
 
 /** The page's real store reads — the composers accept exactly what the page passes. */
-type ListAssetsResult = Awaited<ReturnType<typeof listAssets>>;
-type ListLedgerResult = Awaited<ReturnType<typeof listLedger>>;
+export type ListAssetsResult = Awaited<ReturnType<typeof listAssets>>;
+export type ListLedgerResult = Awaited<ReturnType<typeof listLedger>>;
+
+/**
+ * The Operations tab's payload (spec art_Eis55ifL) — `operationsFlows`' five
+ * back-office views over the Don store door and the SAME ledger rows and
+ * join context the Tax tab reads (one truth, never re-derived). The
+ * derivation degrades to null on a failed store read; that becomes the
+ * section's honest unavailable state — never an empty lie.
+ */
+export async function buildOperationsSection(inputs: {
+  store: Store;
+  ledgerRows: ListLedgerResult;
+  assets: ListAssetsResult;
+  contracts: SectionData<ContractRow[]>;
+  creatorProfiles: readonly AdminCreatorProfile[] | null;
+}): Promise<SectionData<OperationsFlows>> {
+  const flows = await operationsFlows({
+    store: inputs.store,
+    ledgerRows: inputs.ledgerRows,
+    assets: inputs.assets,
+    taxJoinContext: buildAdminTaxJoinContext(inputs.assets, inputs.contracts),
+    creatorProfiles: inputs.creatorProfiles,
+  });
+  return flows === null
+    ? { kind: 'unavailable', code: 'operations_store_failed', message: 'Operations store read failed.' }
+    : { kind: 'ready', value: flows };
+}
 
 /**
  * The Ledger section's FINANCES payload — the settlement rows hydrated

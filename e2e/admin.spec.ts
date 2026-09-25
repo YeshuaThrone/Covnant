@@ -137,10 +137,10 @@ test('an anonymous visitor gets the gate — wrong password states it plainly, n
   }
 });
 
-test('the operator console opens with all eight sections under the seeded preview', async ({ page }) => {
+test('the operator console opens with all nine sections under the seeded preview', async ({ page }) => {
   await openConsole(page);
 
-  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Tax', 'Control Board', 'Allowlists']) {
+  for (const section of ['Overview', 'Creators', 'UCT Registry', 'Ledger', 'Contracts', 'Tax', 'Control Board', 'Allowlists', 'Operations']) {
     await page.getByRole('button', { name: section, exact: true }).click();
     await expect(page.locator(`[aria-label="${section}"]`)).toBeVisible();
   }
@@ -153,7 +153,7 @@ test('the Control Board tab renders the master board; Ledger is the finances; Co
   // tabs, isolated entity pills, the 50/35/15 badges, all store-backed.
   await page.getByRole('button', { name: 'Control Board', exact: true }).click();
   await expect(page.locator('[aria-label="Control Board"]')).toBeVisible();
-  await expect(page.locator('[data-testid="vertical-tab"]')).toHaveCount(6);
+  await expect(page.locator('[data-testid="vertical-tab"]')).toHaveCount(7);
   await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
   await expect(page.getByText('US-S1Z-26-00001')).toBeVisible();
   await expect(page.getByText('Ownership reserve 50%').first()).toBeVisible();
