@@ -30,5 +30,13 @@ export function ingestBaasWebhook(
   input: BaasWebhookInput,
   now: Date = new Date(),
 ) {
-  return ingestBaasWebhookCanonical(store, input, now);
+  return ingestBaasWebhookCanonical(
+    store,
+    {
+      event: input.event,
+      transfer_id: input.transfer_id,
+      event_id: input.event_id,
+    },
+    now,
+  );
 }
