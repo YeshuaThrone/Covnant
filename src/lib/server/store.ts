@@ -71,6 +71,7 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   createAdminClient as createSupabaseAdminClient,
   readSupabaseEnv,
@@ -430,6 +431,29 @@ export interface Store {
    * (created_at ASC, transaction_id ASC).
    */
   listTerritorySettlements(): Promise<TerritorySettlementRecord[]>;
+
+  // --- Operations back-office seam (spec art_Eis55ifL, the Operations tab) ---
+
+  /**
+   * The statement-ingest provenance list — the read half of the
+   * statement_ingests surface (migration 0007; the write/get pair above).
+   * Each ingested file's row verbatim: format, source, file_name, content,
+   * parsed|failed status, event_count, error. Newest first (created_at
+   * DESC, insertion order as tiebreak), bounded by limit.
+   */
+  listStatementIngests(limit?: number): Promise<StatementIngestRecord[]>;
+
+  /**
+   * The operator audit trail — the append-only admin_action_log read
+   * (migration 0005): who (actor), what (action + target), and the
+   * field-level before/after (changes: { field: { from, to } }). The table
+   * is RLS service-role-only, and this store's production client is the
+   * service role. Newest first (created_at DESC); the table defines no
+   * tiebreak key, so rows sharing a timestamp carry no guaranteed relative
+   * order. Local mirrors have no such table — they read honestly empty,
+   * never fabricated rows.
+   */
+  listAdminActions(limit?: number): Promise<AdminActionRecord[]>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

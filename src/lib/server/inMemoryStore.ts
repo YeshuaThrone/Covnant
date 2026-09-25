@@ -69,6 +69,7 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
   territorySettlementOfRow,
@@ -879,6 +880,32 @@ export class InMemoryStore implements Store {
   async insertUniversalRoyaltyLedgerRow(row: UniversalRoyaltyLedgerRow): Promise<UniversalRoyaltyLedgerRow> {
     this.universalRoyaltyLedger.push(row);
     return row;
+  }
+
+  // --- Operations back-office seam (spec art_Eis55ifL) ---
+
+  /**
+   * The statement-ingest provenance list — newest first with the
+   * insertion-order tiebreak (sortByTime keeps tied rows in the list's own
+   * direction: the latest insertion leads), bounded by limit.
+   */
+  async listStatementIngests(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<StatementIngestRecord[]> {
+    return sortByTime([...this.statementIngests.values()], (row) => row.created_at, 'desc').slice(
+      0,
+      limit,
+    );
+  }
+
+  /**
+   * admin_action_log is a Supabase-production surface (migration 0005, RLS
+   * service-role-only); the in-memory backend carries no mirror and the
+   * Store adds no write path — the honest read is empty, never fabricated
+   * rows.
+   */
+  async listAdminActions(): Promise<AdminActionRecord[]> {
+    return [];
   }
 }
 

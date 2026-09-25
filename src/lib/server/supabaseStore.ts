@@ -66,6 +66,7 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   SDK_SETTLEMENT_TRANSACTION_TYPE,
   territorySettlementOfRow,
@@ -113,6 +114,10 @@ const TABLES = {
   matchQueue: 'match_queue',
   statementIngests: 'statement_ingests',
   universalRoyaltyLedger: 'universal_royalty_ledger',
+  // Migration 0005 — the append-only operator audit trail. RLS grants no
+  // anon/authenticated access: the service-role client this store holds is
+  // the only reader, which is exactly what the audit read requires.
+  adminActionLog: 'admin_action_log',
   // Migration 0008 — the SyncMarketplaceRegistry amendment. The sync
   // catalog columns live ON cbt_assets (no new catalog table); purchases
   // get the lane's own write-back table.
@@ -1317,6 +1322,46 @@ export class SupabaseStore implements Store {
     }
     return ((data ?? []) as Record<string, unknown>[]).map((row) =>
       territorySettlementOfRow(row as unknown as UniversalRoyaltyLedgerRow),
+    );
+  }
+
+  // --- Operations back-office seam (spec art_Eis55ifL) ---
+
+  /**
+   * The statement-ingest provenance list — newest first with the
+   * insertion-order tiebreak (the match-queue list's exact discipline),
+   * bounded by limit.
+   */
+  async listStatementIngests(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<StatementIngestRecord[]> {
+    return this.many<StatementIngestRecord>(
+      this.client
+        .from(TABLES.statementIngests)
+        .select()
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listStatementIngests',
+    );
+  }
+
+  /**
+   * The operator audit trail — the append-only admin_action_log read
+   * (migration 0005). The service-role client is the only reader the
+   * table's RLS admits. Rows return newest first; the table defines no
+   * tiebreak key, so rows sharing a timestamp carry no guaranteed relative
+   * order. `changes` arrives as the jsonb the client already decoded into
+   * the write path's { field: { from, to } } shape.
+   */
+  async listAdminActions(limit: number = DEFAULT_LIST_SHOWS_LIMIT): Promise<AdminActionRecord[]> {
+    return this.many<AdminActionRecord>(
+      this.client
+        .from(TABLES.adminActionLog)
+        .select()
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      'listAdminActions',
     );
   }
 }
