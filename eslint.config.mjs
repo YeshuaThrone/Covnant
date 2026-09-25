@@ -38,6 +38,8 @@ const PRESERVED_TOKENS = new Set([
   "covenant_fee", // live universal_royalty_ledger column
   "covenant_init", // init migration filename
   "covenant-royalty-tracking", // Increase idempotency-key namespace (persisted)
+  "covenant-sdk", // vendored EmeraldVal tree path (integration spec D1: byte-identical landing; code always uses full paths)
+  "covenantregistry", // landed registry module/export name (src/lib/server/covenantRegistry.ts, D1)
 ]);
 
 const COVENANT_TOKEN = /covenant[a-z0-9_-]*/gi;
