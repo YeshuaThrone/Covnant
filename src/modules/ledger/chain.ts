@@ -8,7 +8,8 @@
 
 import { createHash } from "node:crypto";
 import type { GlLegInput } from "./journal";
-import type { GlEntryRecord } from "@/modules/don/records";
+import type { GlEntryRecord, GlJournalRecord } from "@/modules/don/records";
+import { GL_GENESIS_HASH } from "@/modules/don/constants";
 
 // Everything that participates in the hash — the journal's financial content
 // plus its position in the chain.
@@ -64,4 +65,77 @@ export function hashEntry(
     prev_hash: prevHash,
   });
   return createHash("sha256").update(payload).digest("hex");
+}
+
+// --- Chain verification (Cursor's Batch 2 drop, landed with the Covenant
+// API integration for the MCP ledger_log / ledger_audit tools). Adapted to
+// the canonical hash: the drop's verifyHashChain hashed a single-payload
+// object; this body recomputes through this module's hashJournal(journal,
+// sequence, prevHash) so verification matches exactly what postJournal
+// posted. Journals arrive sequence-ASC (Store ordering contract).
+
+export type ChainVerification = {
+  valid: boolean;
+  journal_count: number;
+  genesis: string;
+  broken_at: number | null;
+};
+
+export function verifyHashChain(
+  journals: ReadonlyArray<GlJournalRecord>,
+  legsByJournal: ReadonlyMap<string, GlLegInput[]>,
+): ChainVerification {
+  if (journals.length === 0) {
+    return {
+      valid: true,
+      journal_count: 0,
+      genesis: GL_GENESIS_HASH,
+      broken_at: null,
+    };
+  }
+  let previous = GL_GENESIS_HASH;
+  for (const journal of journals) {
+    if (journal.entry_hash === "" || journal.state !== "posted") {
+      return {
+        valid: false,
+        journal_count: journals.length,
+        genesis: GL_GENESIS_HASH,
+        broken_at: journal.sequence,
+      };
+    }
+    if (journal.prev_hash !== previous) {
+      return {
+        valid: false,
+        journal_count: journals.length,
+        genesis: GL_GENESIS_HASH,
+        broken_at: journal.sequence,
+      };
+    }
+    const expected = hashJournal(
+      {
+        kind: journal.kind,
+        ref_type: journal.ref_type,
+        ref_id: journal.ref_id,
+        created_at: journal.created_at,
+        legs: legsByJournal.get(journal.id) ?? [],
+      },
+      journal.sequence,
+      journal.prev_hash,
+    );
+    if (expected !== journal.entry_hash) {
+      return {
+        valid: false,
+        journal_count: journals.length,
+        genesis: GL_GENESIS_HASH,
+        broken_at: journal.sequence,
+      };
+    }
+    previous = journal.entry_hash;
+  }
+  return {
+    valid: true,
+    journal_count: journals.length,
+    genesis: GL_GENESIS_HASH,
+    broken_at: null,
+  };
 }

@@ -75,3 +75,80 @@ export function fboDebit(amountCents: number): GlLegInput {
 export function fboCredit(amountCents: number): GlLegInput {
   return { account: GL_ACCOUNT_FBO_CASH, debit_cents: 0, credit_cents: amountCents };
 }
+
+// --- Audit-surveillance helpers (Cursor's Batch 2 drop, landed with the
+// Covenant API integration: the MCP ledger tools consume them). Pure
+// double-entry math over the GlLegInput shape — no Store, no I/O.
+
+export function sumDebits(legs: readonly GlLegInput[]): number {
+  return legs.reduce((total, leg) => total + leg.debit_cents, 0);
+}
+
+export function sumCredits(legs: readonly GlLegInput[]): number {
+  return legs.reduce((total, leg) => total + leg.credit_cents, 0);
+}
+
+export function journalIsBalanced(legs: readonly GlLegInput[]): boolean {
+  return sumDebits(legs) === sumCredits(legs);
+}
+
+export function compactLegs(legs: readonly GlLegInput[]): GlLegInput[] {
+  return legs.filter((leg) => leg.debit_cents !== 0 || leg.credit_cents !== 0);
+}
+
+export function netDebit(legs: readonly GlLegInput[], account: string): number {
+  return legs.reduce((total, leg) => {
+    if (leg.account !== account) {
+      return total;
+    }
+    return total + leg.debit_cents - leg.credit_cents;
+  }, 0);
+}
+
+export function isVaultAccount(account: string): boolean {
+  return account.startsWith("vault:");
+}
+
+export type DebitCreditPair = {
+  debit_account: string;
+  credit_account: string;
+  amount_cents: number;
+};
+
+/**
+ * Expand a balanced multi-leg journal into explicit debit/credit pairs
+ * (one FBO debit may fund many vault credits).
+ */
+export function expandDebitCreditPairs(
+  legs: readonly GlLegInput[],
+): DebitCreditPair[] {
+  const debits = compactLegs(legs)
+    .filter((leg) => leg.debit_cents > 0)
+    .map((leg) => ({ account: leg.account, remaining: leg.debit_cents }));
+  const credits = compactLegs(legs)
+    .filter((leg) => leg.credit_cents > 0)
+    .map((leg) => ({ account: leg.account, remaining: leg.credit_cents }));
+  const pairs: DebitCreditPair[] = [];
+  let di = 0;
+  let ci = 0;
+  while (di < debits.length && ci < credits.length) {
+    const debit = debits[di]!;
+    const credit = credits[ci]!;
+    const amount = Math.min(debit.remaining, credit.remaining);
+    pairs.push({
+      debit_account: debit.account,
+      credit_account: credit.account,
+      amount_cents: amount,
+    });
+    debit.remaining -= amount;
+    credit.remaining -= amount;
+    if (debit.remaining === 0) {
+      di += 1;
+    }
+    if (credit.remaining === 0) {
+      ci += 1;
+    }
+  }
+  return pairs;
+}
+

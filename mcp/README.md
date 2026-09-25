@@ -1,5 +1,10 @@
 # Covenant MCP Harness
 
+> **Superseded:** this 9-tool harness is superseded by the 26-tool server at
+> `src/mcp/` (`npm run mcp` / `npm run covenant-mcp`) — the Covenant API
+> integration. Deletion is deferred to the founder's call.
+
+
 A Model Context Protocol server that exposes the vendored **CovenantMasterSDK
 v2.0.0** (`src/engine/covenant-master-sdk.ts`) as MCP tools over stdio.
 
