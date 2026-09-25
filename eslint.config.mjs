@@ -136,6 +136,24 @@ const eslintConfig = [
     ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "e2e/**/*.tsx"],
     "repo",
   ),
+  // Byte-identical vendor drop (EmeraldVal PR #41 head c754bb4, integration
+  // spec D1): the Covenant SDK tree, sweep queue, and registry are locked to
+  // the drop's own "Covenant" vocabulary and import paths, so the brand
+  // guard and unused-import hygiene cannot apply to their bytes — the same
+  // reason src/engine/** is fully ignored above. Scope stays minimal: every
+  // other rule keeps applying to these files, and repo-owned adaptations of
+  // the drop (e.g. src/modules/webhooks) remain fully guarded.
+  {
+    files: [
+      "src/covenant-sdk/**/*.ts",
+      "src/queues/sweepQueue.ts",
+      "src/lib/server/covenantRegistry.ts",
+    ],
+    rules: {
+      "covnant-spelling/no-covenant-spelling": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
 ];
 
 export default eslintConfig;
