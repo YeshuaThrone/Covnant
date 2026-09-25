@@ -140,3 +140,37 @@ h2 {
   color: #08080a;
   border: none;
 }
+
+/* Audit statement print path (spec art_qNu4T32F, module 4) — the browser's
+   print dialog IS the PDF path; there is no PDF dependency. The statement
+   block is isolated and forced black-on-white for legibility: dark-theme
+   gold text would not survive a printer. Print chrome and the print
+   button itself are suppressed. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  [data-print-statement],
+  [data-print-statement] * {
+    visibility: visible;
+  }
+
+  [data-print-statement] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    width: 100%;
+    background: #ffffff !important;
+  }
+
+  [data-print-statement] * {
+    color: #111827 !important;
+    background: transparent !important;
+    border-color: #d1d5db !important;
+  }
+
+  [data-print-statement] [data-no-print] {
+    display: none !important;
+  }
+}

@@ -51,6 +51,7 @@ import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { platformRevenueStreams } from '@/lib/admin/revenueStreams';
 import { companyAnalytics } from '@/lib/admin/companyAnalytics';
 import { creatorAnalytics } from '@/lib/admin/creatorAnalytics';
+import { catalogGrowthFlows } from '@/lib/admin/catalogGrowth';
 import { entityIntelligence, type EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
@@ -286,6 +287,43 @@ async function safeCreatorAnalyticsRead(): Promise<AdminConsoleData['creatorAnal
   }
 }
 
+/**
+ * The Creator Analytics tab's Catalog Growth OS payload (spec art_qNu4T32F):
+ * the catalog-growth derivation for EVERY registered window (7 / 30 / 90 /
+ * all — the module's own `CreatorWindowDays`, `null` for ALL) over the same
+ * Don store door as the creator read beside it — one pass, so the tab's
+ * window filter picks among pre-derived payloads and never re-fetches. One
+ * failing store read must never take the console down: both the store
+ * resolution and the derivation degrade to the section's honest
+ * unavailable state (the derivation itself degrades to null on a failed
+ * scan — same code).
+ */
+async function safeCatalogGrowthRead(): Promise<AdminConsoleData['catalogGrowth']> {
+  try {
+    const donStore: Store = isDevSeedMode() ? await getSeededStore() : getStore();
+    const [d7, d30, d90, dAll] = await Promise.all([
+      catalogGrowthFlows(donStore, 7),
+      catalogGrowthFlows(donStore, 30),
+      catalogGrowthFlows(donStore, 90),
+      catalogGrowthFlows(donStore, null),
+    ]);
+    if (d7 === null || d30 === null || d90 === null || dAll === null) {
+      return {
+        kind: 'unavailable',
+        code: 'catalog_growth_store_failed',
+        message: 'Catalog growth store read failed.',
+      };
+    }
+    return { kind: 'ready', value: { '7d': d7, '30d': d30, '90d': d90, all: dAll } };
+  } catch {
+    return {
+      kind: 'unavailable',
+      code: 'catalog_growth_store_failed',
+      message: 'Catalog growth store read failed.',
+    };
+  }
+}
+
 export default async function AdminPage() {
   const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value ?? null;
   const view = adminPageView(verifyAdminSession(token));
@@ -303,7 +341,7 @@ export default async function AdminPage() {
   await seedAdminDemoDataIfEmpty();
 
   const db = supabaseFromEnv();
-  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics, intelligence, creatorAnalyticsFlows] = await Promise.all([
+  const [ledgerRows, assets, contracts, creators, allowlists, master, masterTemplates, atomicRegistry, revenueStreams, analytics, intelligence, creatorAnalyticsFlows, catalogGrowth] = await Promise.all([
     listLedger(),
     listAssets(),
     safeContractsRead(),
@@ -325,6 +363,7 @@ export default async function AdminPage() {
     safeCompanyAnalyticsRead(),
     safeIntelligenceRead(),
     safeCreatorAnalyticsRead(),
+    safeCatalogGrowthRead(),
   ]);
 
   const data: AdminConsoleData = {
@@ -349,6 +388,7 @@ export default async function AdminPage() {
     intelligenceDemo: isDemoDoorOpen(),
     creatorAnalytics: creatorAnalyticsFlows,
     creatorAnalyticsDemo: isDemoDoorOpen(),
+    catalogGrowth,
   };
 
   return <AdminConsole data={data} />;

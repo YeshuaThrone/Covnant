@@ -133,6 +133,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
         {tab === 'creator-analytics' && (
           <CreatorAnalyticsSection
             creatorAnalytics={data.creatorAnalytics}
+            catalogGrowth={data.catalogGrowth}
             demo={data.creatorAnalyticsDemo}
           />
         )}

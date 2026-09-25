@@ -9,6 +9,7 @@ import type { AdminAllowlistRow } from '@/lib/admin/allowlists';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import type { AnalyticsWindow, CompanyAnalytics } from '@/lib/admin/companyAnalytics';
 import type { CreatorAnalyticsFlows } from '@/lib/admin/creatorAnalytics';
+import type { CatalogGrowthFlows } from '@/lib/admin/catalogGrowth';
 import type { EntityIntelligence } from '@/lib/admin/entityIntelligence';
 import type { LedgerSummary, RegistrySummary } from '@/lib/admin/overview';
 import type { ControlBoardState } from '@/lib/master/controlBoard';
@@ -63,6 +64,16 @@ export type CreatorAnalyticsWindowId = '7d' | '30d' | '90d' | 'all';
  * derived from the store before first paint.
  */
 export type CreatorAnalyticsWindows = Record<CreatorAnalyticsWindowId, CreatorAnalyticsFlows>;
+
+/**
+ * The Creator Analytics tab's Catalog Growth OS layer (spec art_qNu4T32F) —
+ * the catalog-growth derivation's read for EVERY registered window, derived
+ * server-side by `catalogGrowthFlows` over the same store door as its
+ * siblings. The section's window filter picks among these pre-derived
+ * payloads exactly as it does the creator windows; the recoupment and Top
+ * Markets folds are standing (unwindowed), the signals are per-window.
+ */
+export type CatalogGrowthWindows = Record<CreatorAnalyticsWindowId, CatalogGrowthFlows>;
 
 /** One read-only contract row — the console shows the record, not the document. */
 export interface ContractRow {
@@ -215,6 +226,14 @@ export interface AdminConsoleData {
   creatorAnalytics: SectionData<CreatorAnalyticsWindows>;
   /** True exactly when the demo door is open — gates the Creator Analytics tab's disclosed demo badge. */
   creatorAnalyticsDemo: boolean;
+  /**
+   * The Creator Analytics tab's Catalog Growth OS layer (spec art_qNu4T32F):
+   * the catalog-growth derivation over the same Don store door — the
+   * recoupment-by-catalog engine state, the Top Markets territory fold,
+   * and the per-window action signals — one safe payload per window.
+   * Store-read only.
+   */
+  catalogGrowth: SectionData<CatalogGrowthWindows>;
 }
 
 /** The eleven console tabs, in operator order. */

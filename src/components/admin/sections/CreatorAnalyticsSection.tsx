@@ -42,7 +42,17 @@ import {
   shareLabel,
 } from '../analytics/primitives';
 import { SectionEyebrow, SectionUnavailable } from '../shared';
-import type { CreatorAnalyticsWindowId, CreatorAnalyticsWindows, SectionData } from '../types';
+import type {
+  CatalogGrowthWindows,
+  CreatorAnalyticsWindowId,
+  CreatorAnalyticsWindows,
+  SectionData,
+} from '../types';
+import type {
+  ActionSignal,
+  CatalogGrowthFlows,
+  CatalogRecoupmentRow,
+} from '@/lib/admin/catalogGrowth';
 
 /** The window-filter options — the page's pre-derived creator windows, in display order. */
 const WINDOW_OPTIONS: readonly {
@@ -186,6 +196,241 @@ export function splitSourceRows<T extends { valueCents: bigint }>(
 // ---------------------------------------------------------------------------
 // Presentation
 // ---------------------------------------------------------------------------
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog Growth OS — pure presentation helpers. The payload's measured
+// facts (bigint cents, integer bps, engine flags) are the record; these
+// format them for the modules. No money arithmetic happens here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The window filter's id for a derivation window of record — the view's
+ * index into the page's pre-derived windows and the statement link's
+ * window parameter. Exhaustive over the derivation's window arms.
+ */
+export function windowIdOf(windowDays: CreatorWindowDays): CreatorAnalyticsWindowId {
+  switch (windowDays) {
+    case 7:
+      return '7d';
+    case 30:
+      return '30d';
+    case 90:
+      return '90d';
+    case null:
+      return 'all';
+    default: {
+      const unregistered: never = windowDays;
+      throw new Error(`CreatorAnalyticsSection: no window id for ${String(unregistered)}`);
+    }
+  }
+}
+
+/** The audit statement route — per-payee, window-aware, under /admin. */
+export function auditStatementHref(payeeId: string, windowId: CreatorAnalyticsWindowId): string {
+  const params = new URLSearchParams({ payee: payeeId, window: windowId });
+  return `/admin/audit-statement?${params.toString()}`;
+}
+
+/**
+ * The recoupment bar's fill share, 0–100 — integer bigint math, floored,
+ * capped at 100 (a bar never overflows its track). A non-positive target
+ * (no measurable threshold) fills nothing.
+ */
+export function recoupmentShare(appliedCents: bigint, targetCents: bigint): number {
+  if (targetCents <= 0n || appliedCents <= 0n) return 0;
+  const share = Number((appliedCents * 100n) / targetCents);
+  return share > 100 ? 100 : share;
+}
+
+/**
+ * The delta chip's label — the payload's own integer basis points voiced
+ * as a signed percent. The sign is never dropped: a negative delta reads
+ * negative, honestly. Zero is exactly '0%' — neither gain nor loss.
+ */
+export function deltaChipLabel(basisPoints: number): string {
+  if (basisPoints === 0) return '0%';
+  const sign = basisPoints < 0 ? '-' : '+';
+  const abs = Math.abs(basisPoints);
+  const whole = Math.floor(abs / 100);
+  const hundredths = abs % 100;
+  const decimals = hundredths === 0 ? 0 : hundredths % 10 === 0 ? 1 : 2;
+  return `${sign}${(whole + hundredths / 100).toFixed(decimals)}%`;
+}
+
+/**
+ * The action signals banner — the tab's top strip. Measured statements
+ * only, rendered verbatim; a null basisPoints renders NO chip (the ALL
+ * window never shows one); empty signals render NOTHING — no placeholder
+ * strip, no filler.
+ */
+function SignalsBanner({ signals }: { signals: readonly ActionSignal[] }) {
+  if (signals.length === 0) return null;
+  return (
+    <div
+      className="mt-6 rounded-2xl border border-gold-champagne/30 bg-gold-champagne/[0.06] p-4"
+      data-testid="creator-analytics-signals"
+    >
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-gold-champagne/80">Action signals</p>
+      <ul className="mt-2 space-y-2">
+        {signals.map((signal, index) => (
+          <li
+            key={`${signal.kind}-${signal.subjectLabel}-${index}`}
+            data-testid="creator-analytics-signal"
+            data-signal-kind={signal.kind}
+            className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
+          >
+            <span className="text-sm text-slate-100">{signal.headline}</span>
+            {signal.basisPoints === null ? null : (
+              <span
+                data-testid="creator-analytics-signal-bps"
+                className={`font-mono text-xs ${signal.basisPoints < 0 ? 'text-red-300' : 'text-emerald-300'}`}
+              >
+                {deltaChipLabel(signal.basisPoints)}
+              </span>
+            )}
+            <span className="font-mono text-[11px] text-white/40">{signal.subjectLabel}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The recoupment bar — the engine's applied-vs-threshold share of record. */
+function RecoupmentBar({ appliedCents, targetCents }: { appliedCents: bigint; targetCents: bigint }) {
+  const share = recoupmentShare(appliedCents, targetCents);
+  return (
+    <span
+      className="block h-1.5 w-full overflow-hidden rounded-full bg-slate-600/40"
+      data-testid="creator-analytics-recoupment-bar"
+      data-share={share}
+      role="presentation"
+    >
+      <span
+        className="block h-full rounded-full bg-gradient-to-r from-gold-champagne/80 to-gold/60"
+        style={{ width: `${share}%` }}
+      />
+    </span>
+  );
+}
+
+/**
+ * Recoupment by Catalog — per advance-carrying payee, the engine's own
+ * state of record: applied against the break-even threshold, the
+ * unrecouped balance, the fully-recouped verdict. Payees the window
+ * credited without an advance render the honest line — never a
+ * zero-balance imitation.
+ */
+function RecoupmentPanel({
+  rows,
+  withoutAdvanceIds,
+}: {
+  rows: readonly CatalogRecoupmentRow[];
+  withoutAdvanceIds: readonly string[];
+}) {
+  return (
+    <div className="mt-10" data-testid="creator-analytics-recoupment">
+      <BlockHeader
+        label="Recoupment by catalog"
+        copy="Each advance-carrying payee against the recoupment engine's own sweep state — net earnings applied toward the break-even threshold of record. A payee without an advance on file says so; no zero-balance imitation."
+      />
+      {rows.length === 0 && withoutAdvanceIds.length === 0 ? (
+        <EmptyLine testid="creator-analytics-recoupment-empty">{EMPTY_WINDOW_COPY}</EmptyLine>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {rows.map((row) => (
+            <div
+              key={row.payeeId}
+              data-testid="creator-analytics-recoupment-row"
+              data-fully-recouped={row.fullyRecouped ? 'true' : 'false'}
+              className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-4"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-mono text-sm text-slate-200">{payeeDisplayName(row.label, row.payeeId)}</span>
+                {row.fullyRecouped ? (
+                  <span
+                    data-testid="creator-analytics-recoupment-state"
+                    className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300"
+                  >
+                    Fully recouped
+                  </span>
+                ) : (
+                  <span data-testid="creator-analytics-recoupment-state" className="font-mono text-xs text-white/50">
+                    {formatCentsBigint(row.unrecoupedCents)} unrecouped
+                  </span>
+                )}
+              </div>
+              <div className="mt-3">
+                <RecoupmentBar appliedCents={row.appliedCents} targetCents={row.advanceTargetCents} />
+              </div>
+              <p className="mt-2 font-mono text-[11px] text-white/40">
+                {formatCentsBigint(row.appliedCents)} applied of {formatCentsBigint(row.advanceTargetCents)} break-even
+                · last sweep {row.lastSweepDay ?? '—'}
+              </p>
+            </div>
+          ))}
+          {withoutAdvanceIds.map((payeeId) => (
+            <p
+              key={payeeId}
+              data-testid="creator-analytics-recoupment-no-advance"
+              className="rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-4 font-mono text-sm text-white/50"
+            >
+              {payeeId}: No advance on file
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Top Markets — the territory fold over SDK-settled events ONLY, under
+ * the standing coverage label. The three honest states: no SDK-settled
+ * events at all; events that carry no territory stamps; and the ranked
+ * markets with the unattributed money never silently dropped.
+ */
+function TopMarketsPanel({ markets }: { markets: CatalogGrowthFlows['topMarkets'] }) {
+  const { markets: rows, unattributedCents, settlementsConsidered } = markets;
+  const barRows: readonly { label: string; valueCents: bigint }[] = rows.map((market) => ({
+    label: market.territory,
+    valueCents: market.creatorCents,
+  }));
+  return (
+    <div className="mt-10" data-testid="creator-analytics-top-markets">
+      <BlockHeader
+        label="Top markets"
+        copy="Creator credits per market across the SDK-settled events' own territory stamps of record. Markets absent from that data are absent here, honestly — the chart never implies complete geographic coverage."
+      />
+      <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40" data-testid="creator-analytics-markets-coverage">
+        SDK-settled events only · {settlementsConsidered} settlement{settlementsConsidered === 1 ? '' : 's'} considered
+      </p>
+      {rows.length === 0 ? (
+        settlementsConsidered === 0 ? (
+          <EmptyLine testid="creator-analytics-markets-empty">
+            No SDK-settled events in this window — no market data exists to chart.
+          </EmptyLine>
+        ) : (
+          <EmptyLine testid="creator-analytics-markets-unstamped">
+            {unattributedCents > 0n
+              ? `${settlementsConsidered} SDK-settled event${settlementsConsidered === 1 ? '' : 's'} carr${settlementsConsidered === 1 ? 'ies' : 'y'} no territory stamps — no market data exists to chart.`
+              : 'No market data exists to chart.'}
+          </EmptyLine>
+        )
+      ) : (
+        <div className="mt-3 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5">
+          <HBar rows={barRows} ariaLabel="Creator credits by market" emptyLabel="No SDK-settled market data" />
+        </div>
+      )}
+      {unattributedCents > 0n ? (
+        <p className="mt-3 font-mono text-[11px] text-white/40" data-testid="creator-analytics-markets-unattributed">
+          {formatCentsBigint(unattributedCents)} of SDK-settled creator credits carry no territory stamp and chart
+          under no market.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function KpiCard({ testid, label, value, note }: { testid: string; label: string; value: string; note: string }) {
   return (
@@ -482,10 +727,12 @@ function GameLogPanel({
  */
 export function CreatorAnalyticsView({
   flows,
+  growth,
   demo,
   onWindowChange,
 }: {
   flows: CreatorAnalyticsFlows;
+  growth: CatalogGrowthFlows;
   demo: boolean;
   onWindowChange: (window: CreatorAnalyticsWindowId) => void;
 }) {
@@ -505,6 +752,8 @@ export function CreatorAnalyticsView({
   // first, so the groups carry exactly what HBar draws.
   const sourceBarRows = sourceRows.map((split) => ({ label: split.source, valueCents: split.creatorCents }));
   const { primary: primarySources, tail: tailSources } = splitSourceRows(sourceBarRows);
+  // The window filter's id of record — the statement links' window parameter.
+  const windowId = windowIdOf(flows.windowDays);
 
   return (
     <div aria-label="Creator Analytics">
@@ -537,6 +786,9 @@ export function CreatorAnalyticsView({
         vault account&apos;s payee of record; the label is the store-carried name, else the payee id — never invented.
       </p>
 
+      {/* Action signals — the tab's top strip; renders nothing when the window has no signals. */}
+      <SignalsBanner signals={growth.actionSignals} />
+
       {/* Four KPI cards — a zero window renders zeros, not blanks. */}
       <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="creator-analytics-kpis">
         <KpiCard
@@ -564,6 +816,12 @@ export function CreatorAnalyticsView({
           note="Split runs settled with holder credits"
         />
       </div>
+
+      {/* Recoupment by Catalog — the engine's own advance state per payee. */}
+      <RecoupmentPanel rows={growth.recoupmentByCatalog} withoutAdvanceIds={growth.payeesWithoutAdvanceIds} />
+
+      {/* Top Markets — the territory fold over SDK-settled events only. */}
+      <TopMarketsPanel markets={growth.topMarkets} />
 
       {/* Creator payout trend — the daily holder-credit area. */}
       <div className="mt-10" data-testid="creator-analytics-trend">
@@ -636,6 +894,7 @@ export function CreatorAnalyticsView({
                   <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Last clearing</th>
                   <th scope="col" className="py-2 pr-3 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Creator paid</th>
                   <th scope="col" className="py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Trend</th>
+                  <th scope="col" className="py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">Export</th>
                 </tr>
               </thead>
               <tbody>
@@ -658,6 +917,16 @@ export function CreatorAnalyticsView({
                         emptyLabel="No credit history yet"
                       />
                     </td>
+                    <td className="py-2">
+                      <a
+                        data-testid="creator-analytics-export-link"
+                        data-payee={row.payeeId}
+                        href={auditStatementHref(row.payeeId, windowId)}
+                        className="font-mono text-xs text-gold-champagne underline decoration-gold-champagne/40 underline-offset-4 transition hover:decoration-gold-champagne"
+                      >
+                        Export
+                      </a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -667,6 +936,7 @@ export function CreatorAnalyticsView({
                   <td className="py-2 pr-3 font-mono text-sm text-slate-100">{totalRuns}</td>
                   <td className="py-2 pr-3" />
                   <td className="py-2 pr-3 font-mono text-sm text-gold-champagne">{formatCentsBigint(totalCredits)}</td>
+                  <td className="py-2" />
                   <td className="py-2" />
                 </tr>
               </tfoot>
@@ -701,9 +971,11 @@ export function CreatorAnalyticsView({
  */
 export function CreatorAnalyticsSection({
   creatorAnalytics,
+  catalogGrowth,
   demo,
 }: {
   creatorAnalytics: SectionData<CreatorAnalyticsWindows>;
+  catalogGrowth: SectionData<CatalogGrowthWindows>;
   demo: boolean;
 }) {
   const [windowId, setWindowId] = useState<CreatorAnalyticsWindowId>('all');
@@ -722,9 +994,26 @@ export function CreatorAnalyticsSection({
     );
   }
 
+  // The growth layer's own fail-closed state — the same honest wrapper,
+  // carrying the growth read's code and message of record.
+  if (catalogGrowth.kind === 'unavailable') {
+    return (
+      <div aria-label="Creator Analytics">
+        <div className="flex items-center justify-between gap-3">
+          <SectionEyebrow>Creator Analytics</SectionEyebrow>
+          {demo ? <DemoBadge /> : null}
+        </div>
+        <div className="mt-8" data-testid="creator-analytics-unavailable">
+          <SectionUnavailable code={catalogGrowth.code} message={catalogGrowth.message} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <CreatorAnalyticsView
       flows={creatorAnalytics.value[windowId]}
+      growth={catalogGrowth.value[windowId]}
       demo={demo}
       onWindowChange={setWindowId}
     />

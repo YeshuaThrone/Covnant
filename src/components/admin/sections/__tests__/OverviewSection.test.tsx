@@ -85,6 +85,11 @@ beforeAll(async () => {
       message: 'Creator analytics store read failed.',
     },
     creatorAnalyticsDemo: true,
+    catalogGrowth: {
+      kind: 'unavailable',
+      code: 'catalog_growth_store_failed',
+      message: 'Catalog growth store read failed.',
+    },
   };
 });
 

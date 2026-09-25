@@ -45,12 +45,15 @@ import {
   type CreatorGameLogRow,
   type CreatorPayoutRow,
 } from '@/lib/admin/creatorAnalytics';
+import { catalogGrowthFlows, type CatalogGrowthFlows } from '@/lib/admin/catalogGrowth';
 
 import {
   CreatorAnalyticsSection,
   CreatorAnalyticsView,
   GAME_LOG_PAGE_SIZE,
+  auditStatementHref,
   clampedPage,
+  deltaChipLabel,
   entityCodeOf,
   entityCodeOptions,
   gameLogCountLine,
@@ -58,10 +61,12 @@ import {
   heatShare,
   payeeDisplayName,
   payeeFilterOptions,
+  recoupmentShare,
   sourceFilterOptions,
   splitSourceRows,
+  windowIdOf,
 } from '../CreatorAnalyticsSection';
-import type { CreatorAnalyticsWindows } from '../../types';
+import type { CatalogGrowthWindows, CreatorAnalyticsWindows, SectionData } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Fixtures — the real payload shapes, small and honest.
@@ -125,20 +130,43 @@ function windowsRecord(all: CreatorAnalyticsFlows, seven: CreatorAnalyticsFlows)
   return { '7d': seven, '30d': all, '90d': all, all };
 }
 
-function renderView(flows: CreatorAnalyticsFlows, demo = true): string {
-  return renderToStaticMarkup(<CreatorAnalyticsView flows={flows} demo={demo} onWindowChange={() => {}} />);
+/** The growth payload shape, empty by default — every module off, honestly. */
+function growth(overrides: Partial<CatalogGrowthFlows> = {}): CatalogGrowthFlows {
+  return {
+    windowDays: null,
+    recoupmentByCatalog: [],
+    payeesWithoutAdvanceIds: [],
+    topMarkets: { markets: [], unattributedCents: 0n, settlementsConsidered: 0 },
+    actionSignals: [],
+    ...overrides,
+  };
+}
+
+function growthWindowsRecord(all: CatalogGrowthFlows, seven: CatalogGrowthFlows): CatalogGrowthWindows {
+  return { '7d': seven, '30d': all, '90d': all, all };
+}
+
+/** The section-level growth data — a ready record of the empty shape. */
+function growthSectionData(overrides?: Partial<CatalogGrowthFlows>): SectionData<CatalogGrowthWindows> {
+  return { kind: 'ready', value: growthWindowsRecord(growth(overrides), growth(overrides)) };
+}
+
+function renderView(flows: CreatorAnalyticsFlows, demo = true, growthPayload: CatalogGrowthFlows = growth()): string {
+  return renderToStaticMarkup(
+    <CreatorAnalyticsView flows={flows} growth={growthPayload} demo={demo} onWindowChange={() => {}} />,
+  );
 }
 
 /* ── jsdom interaction harness (no testing-library in this repo) ── */
 
 const mounted: { root: Root; container: HTMLElement }[] = [];
 
-function mountView(flows: CreatorAnalyticsFlows): HTMLElement {
+function mountView(flows: CreatorAnalyticsFlows, growthPayload: CatalogGrowthFlows = growth()): HTMLElement {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
-    root.render(<CreatorAnalyticsView flows={flows} demo={true} onWindowChange={() => {}} />);
+    root.render(<CreatorAnalyticsView flows={flows} growth={growthPayload} demo={true} onWindowChange={() => {}} />);
   });
   mounted.push({ root, container });
   return container;
@@ -362,6 +390,7 @@ describe('CreatorAnalyticsView — fixture renders', () => {
     const section = renderToStaticMarkup(
       <CreatorAnalyticsSection
         creatorAnalytics={{ kind: 'ready', value: windowsRecord(allPayload, seven) }}
+        catalogGrowth={growthSectionData()}
         demo={true}
       />,
     );
@@ -374,6 +403,7 @@ describe('CreatorAnalyticsView — fixture renders', () => {
           code: 'creator_analytics_store_failed',
           message: 'Creator analytics store read failed.',
         }}
+        catalogGrowth={growthSectionData()}
         demo={true}
       />,
     );
@@ -578,6 +608,7 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     const html = renderToStaticMarkup(
       <CreatorAnalyticsSection
         creatorAnalytics={{ kind: 'ready', value: windowsRecord(allPayload, sevenPayload) }}
+        catalogGrowth={growthSectionData()}
         demo={true}
       />,
     );
@@ -668,3 +699,234 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The Catalog Growth OS modules (spec art_qNu4T32F) — the four founder
+// additions rendered from the catalogGrowthFlows payload: the action
+// signals banner, Recoupment by Catalog, Top Markets, and the per-row
+// Export control. Honesty law throughout: no filler states, no delta
+// chips without a prior window, no invented labels.
+// ---------------------------------------------------------------------------
+describe('CreatorAnalyticsSection — the Catalog Growth OS modules', () => {
+  const signal = {
+    kind: 'source-delta' as const,
+    headline: 'Amazon Music -37.29% vs prior period',
+    subjectLabel: 'Amazon Music',
+    basisPoints: -3_729,
+  };
+
+  it('renders the signals banner at the top with the headline, the store-carried subject, and the signed chip', () => {
+    const html = renderView(payload(), true, growth({ actionSignals: [signal] }));
+    const bannerStart = html.indexOf('data-testid="creator-analytics-signals"');
+    expect(bannerStart).toBeGreaterThan(-1);
+    // At the top: the banner sits before the KPI row in document order.
+    const kpiStart = html.indexOf('data-testid="creator-analytics-kpis"');
+    expect(bannerStart).toBeLessThan(kpiStart);
+    // Headline and subject verbatim — store-carried labels only.
+    expect(html).toContain('Amazon Music -37.29% vs prior period');
+    expect(html).toContain('data-signal-kind="source-delta"');
+    expect(html).toContain('data-testid="creator-analytics-signal-bps"');
+    expect(html).toContain('-37.29%'); // negative renders as negative, honestly
+  });
+
+  it('renders a milestone signal without a delta chip — only source deltas carry basis points', () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({
+        actionSignals: [
+          { kind: 'recoupment-milestone', headline: 'Catalog fully recouped', subjectLabel: 'Payee A', basisPoints: null },
+        ],
+      }),
+    );
+    expect(html).toContain('data-testid="creator-analytics-signals"');
+    expect(html).toContain('Catalog fully recouped');
+    expect(html).toContain('data-signal-kind="recoupment-milestone"');
+    expect(html).not.toContain('data-testid="creator-analytics-signal-bps"');
+  });
+
+  it('renders NOTHING when the window has no signals — no placeholder strip', () => {
+    const html = renderView(payload(), true, growth());
+    expect(html).not.toContain('data-testid="creator-analytics-signals"');
+  });
+
+  it('renders each advance row with the bar share, the unrecouped balance, and the label fallback to payeeId', () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({
+        recoupmentByCatalog: [
+          {
+            payeeId: 'rh_one',
+            label: 'Thrones Label DON',
+            advanceTargetCents: 1_000_000n,
+            appliedCents: 400_000n,
+            unrecoupedCents: 600_000n,
+            fullyRecouped: false,
+            lastSweepDay: '2026-09-21',
+          },
+          {
+            payeeId: 'rh_two',
+            label: null,
+            advanceTargetCents: 500_000n,
+            appliedCents: 500_000n,
+            unrecoupedCents: 0n,
+            fullyRecouped: true,
+            lastSweepDay: null,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain('$4,000.00 applied of $10,000.00 break-even');
+    expect(html).toContain('last sweep 2026-09-21'); // the engine's keyed trail day
+    // The fully-recouped state replaces the balance — the engine's flag of record.
+    expect(html).toContain('data-testid="creator-analytics-recoupment-row" data-fully-recouped="true"');
+    expect(html).toContain('Fully recouped');
+    // A null label renders the payeeId — never an invented name.
+    expect(html).toContain('rh_two');
+    // The not-recouped row carries the honest balance.
+    expect(html).toContain('$6,000.00 unrecouped');
+    expect(html).toContain('data-testid="creator-analytics-recoupment-row" data-fully-recouped="false"');
+  });
+
+  it("renders the literal 'No advance on file' line for credited payees without an advance — never a zero-balance bar", () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({ payeesWithoutAdvanceIds: ['rh_ghost', 'rh_hollow'] }),
+    );
+    expect(html).toContain('rh_ghost: No advance on file');
+    expect(html).toContain('rh_hollow: No advance on file');
+    // No imitation bars: zero recoupment rows means zero bars.
+    expect(html).not.toContain('data-testid="creator-analytics-recoupment-bar"');
+  });
+
+  it('renders the recoupment empty state when the window credited no one', () => {
+    const html = renderView(payload(), true, growth());
+    expect(html).toContain('data-testid="creator-analytics-recoupment-empty"');
+    expect(html).toContain('No creator payouts cleared in this window');
+  });
+
+  it('renders ranked markets with the standing SDK-settled-only coverage label and never drops unattributed money', () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({
+        topMarkets: {
+          markets: [
+            { territory: 'US', creatorCents: 600_00n },
+            { territory: 'GB', creatorCents: 200_00n },
+          ],
+          unattributedCents: 50_00n,
+          settlementsConsidered: 12,
+        },
+      }),
+    );
+    expect(html).toContain('data-testid="creator-analytics-top-markets"');
+    expect(html).toContain('SDK-settled events only'); // the standing coverage label
+    expect(html).toContain('12 settlements considered');
+    expect(html).toContain('US');
+    expect(html).toContain('GB');
+    expect(html).toContain('$50.00 of SDK-settled creator credits'); // carried, never silently dropped
+  });
+
+  it('renders the honest no-SDK-settled-events empty state — the current seed state, correct not broken', () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({ topMarkets: { markets: [], unattributedCents: 0n, settlementsConsidered: 0 } }),
+    );
+    expect(html).toContain('data-testid="creator-analytics-markets-empty"');
+    expect(html).toContain('No SDK-settled events in this window');
+  });
+
+  it('renders the unstamped-money state when settled events carry no territory — never silent', () => {
+    const html = renderView(
+      payload(),
+      true,
+      growth({
+        topMarkets: { markets: [], unattributedCents: 120_00n, settlementsConsidered: 3 },
+      }),
+    );
+    expect(html).toContain('data-testid="creator-analytics-markets-unstamped"');
+    expect(html).toContain('3 SDK-settled events carry no territory stamps');
+    expect(html).toContain('$120.00 of SDK-settled creator credits');
+  });
+
+  it('adds an Export link per leaderboard row carrying the payee and the window of record', () => {
+    const html = renderView(payload()); // the ALL window is the payload's default
+    expect(html).toContain('data-testid="creator-analytics-export-link"');
+    expect(html).toContain('Export');
+    expect(html).toContain('href="/admin/audit-statement?payee=rh_one&amp;window=all"');
+  });
+
+  it('pins the pure helpers: window ids, hrefs, bar shares, and chip labels', () => {
+    expect(windowIdOf(7)).toBe('7d');
+    expect(windowIdOf(30)).toBe('30d');
+    expect(windowIdOf(90)).toBe('90d');
+    expect(windowIdOf(null)).toBe('all');
+    expect(auditStatementHref('rh_one', '7d')).toBe('/admin/audit-statement?payee=rh_one&window=7d');
+    expect(auditStatementHref('rh one', 'all')).toBe('/admin/audit-statement?payee=rh+one&window=all');
+    // The bar share — guarded divide-by-zero and capped at 100.
+    expect(recoupmentShare(400_000n, 1_000_000n)).toBe(40);
+    expect(recoupmentShare(0n, 1_000_000n)).toBe(0);
+    expect(recoupmentShare(1_000_000n, 0n)).toBe(0); // a zero target divides honestly
+    expect(recoupmentShare(2_000_000n, 1_000_000n)).toBe(100);
+    // The signed chip — integer bps, one decimal, negatives negative.
+    expect(deltaChipLabel(240)).toBe('+2.4%');
+    expect(deltaChipLabel(-3_729)).toBe('-37.29%');
+    expect(deltaChipLabel(100)).toBe('+1%');
+    expect(deltaChipLabel(-100)).toBe('-1%');
+    expect(deltaChipLabel(0)).toBe('0%');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The live dev-seed render of the growth modules — REAL catalogGrowthFlows
+// payloads over createSeededStore (the derivation suite's own fixture
+// truth, commit ce2b113): the seed carries no advances and no SDK-settled
+// territory, so the honest states ARE the live states — the no-advance
+// lines, the empty Top Markets, and the ALL window's lone top-source
+// signal without a delta chip. The 7-day window carries real measured
+// deltas and therefore real chips.
+// ---------------------------------------------------------------------------
+describe('CreatorAnalyticsSection — the growth modules over the live dev-seed', () => {
+  let seeded: Awaited<ReturnType<typeof createSeededStore>>;
+
+  beforeAll(async () => {
+    seeded = await createSeededStore();
+  });
+
+  it('pins the ALL window: no-advance lines, the honest empty Top Markets, and no delta chip anywhere', async () => {
+    const growthPayload = await catalogGrowthFlows(seeded, null);
+    expect(growthPayload).not.toBeNull();
+    if (growthPayload === null) throw new Error('catalogGrowthFlows degraded to null over the seed');
+    const html = renderView(payload(), true, growthPayload);
+    // Both credited payees named as having no advance on file — never
+    // imitated as zero-balance bars.
+    expect(html).toContain('rh_thrones_label_don: No advance on file');
+    expect(html).toContain('rh_yeshua_throne_don: No advance on file');
+    expect(html).not.toContain('data-testid="creator-analytics-recoupment-bar"');
+    // Top Markets: the seed has no SDK-settled events — the honest empty
+    // state renders, not an invented chart.
+    expect(html).toContain('data-testid="creator-analytics-markets-empty"');
+    expect(html).toContain('No SDK-settled events in this window');
+    // The ALL window renders the lone top-source signal with NO delta chip.
+    expect(html).toContain('Top source: Spotify');
+    expect(html).not.toContain('data-testid="creator-analytics-signal-bps"');
+  });
+
+  it('pins the 7-day window: real measured deltas render signed chips', async () => {
+    const growthPayload = await catalogGrowthFlows(seeded, 7);
+    expect(growthPayload).not.toBeNull();
+    if (growthPayload === null) throw new Error('catalogGrowthFlows degraded to null over the seed');
+    const html = renderView(payload({ windowDays: 7 }), true, growthPayload);
+    // The 7-day window has a real prior window — measured chips render.
+    expect(html).toContain('data-testid="creator-analytics-signal-bps"');
+    expect(html).toContain('Meridian Cinemas -37.29% vs prior period');
+    // Recoupment stays honest in a window that credits payees without advances.
+    expect(html).toContain('No advance on file');
+  });
+});
+
