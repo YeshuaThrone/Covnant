@@ -70,6 +70,12 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import {
+  SDK_SETTLEMENT_TRANSACTION_TYPE,
+  territorySettlementOfRow,
+  type TerritorySettlementRecord,
+  type UniversalRoyaltyLedgerRow,
+} from '@/lib/server/territorySettlement';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shows (
@@ -442,6 +448,23 @@ CREATE TABLE IF NOT EXISTS sync_license_purchases (
   cbt_settlement_stamp TEXT NOT NULL UNIQUE,
   split_run_id TEXT NOT NULL,
   metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+-- The tier-universe royalty ledger (universal_royalty_ledger) — read-side
+-- seam for the SDK-settled territory data (spec art_qNu4T32F). The wire
+-- (covnant-sdk/src/engine/wire.ts settleEvent) writes these credits in
+-- production over PostgreSQL; this mirror carries the write shape for
+-- reads and fixtures. amount_cents stays TEXT — the wire's text-cents
+-- discipline, bigint-safe beyond Number's integer range.
+CREATE TABLE IF NOT EXISTS universal_royalty_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  transaction_id TEXT NOT NULL UNIQUE,
+  rights_holder_id TEXT,
+  amount_cents TEXT NOT NULL,
+  transaction_type TEXT,
+  reference_id TEXT,
+  metadata TEXT,
   created_at TEXT NOT NULL
 );
 `;
@@ -1733,6 +1756,55 @@ export class SqliteStore implements Store {
       ...row,
       metadata: JSON.parse(row.metadata) as Record<string, unknown>,
     });
+  }
+
+  // --- Territory settlement seam (spec art_qNu4T32F) ---
+
+  /**
+   * The SDK-settled tier credits' territory projection — SDK-settled ONLY
+   * (the transaction_type gate is in the query), oldest first with the
+   * transaction_id tiebreak the other backends order by.
+   */
+  async listTerritorySettlements(): Promise<TerritorySettlementRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT transaction_id, rights_holder_id, amount_cents, transaction_type, metadata, created_at
+         FROM universal_royalty_ledger
+         WHERE transaction_type = ?
+         ORDER BY created_at ASC, transaction_id ASC`,
+      )
+      .all(SDK_SETTLEMENT_TRANSACTION_TYPE) as UniversalRoyaltyLedgerRow[];
+    return Promise.resolve(rows.map(territorySettlementOfRow));
+  }
+
+  /**
+   * Fixture affordance for the tier ledger — the local mirror of the wire's
+   * raw-SQL INSERT (covnant-sdk/src/engine/wire.ts settleEvent). NOT on the
+   * Store contract: production writes go through the wire, and this method
+   * exists so tests can seat rows exactly as the wire writes them without
+   * PostgreSQL. amount_cents is stored as text (the wire's discipline).
+   */
+  async insertUniversalRoyaltyLedgerRow(row: UniversalRoyaltyLedgerRow): Promise<UniversalRoyaltyLedgerRow> {
+    this.db
+      .prepare(
+        `INSERT INTO universal_royalty_ledger
+           (transaction_id, rights_holder_id, amount_cents, transaction_type, reference_id, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.transaction_id,
+        row.rights_holder_id,
+        String(row.amount_cents),
+        row.transaction_type,
+        row.reference_id,
+        row.metadata === null
+          ? null
+          : typeof row.metadata === 'string'
+            ? row.metadata // pre-serialized — never double-encoded
+            : JSON.stringify(row.metadata),
+        row.created_at,
+      );
+    return Promise.resolve(row);
   }
 }
 

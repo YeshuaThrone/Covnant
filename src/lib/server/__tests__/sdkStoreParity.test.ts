@@ -27,6 +27,10 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import {
+  SDK_SETTLEMENT_TRANSACTION_TYPE,
+  type UniversalRoyaltyLedgerRow,
+} from '@/lib/server/territorySettlement';
 
 // ---------------------------------------------------------------------------
 // The behavioral PostgREST fake — chainable builder resolved at await.
@@ -250,6 +254,13 @@ interface BackendSpec {
    * registry rows (Supabase, through the fake client).
    */
   seedIdentity: (store: Store) => Promise<void>;
+  /**
+   * Seats tier-ledger credits (universal_royalty_ledger) exactly as the
+   * settlement wire writes them — NOT a Store write: production credits go
+   * through the wire's raw SQL, so the local stores expose a fixture
+   * affordance and the Supabase backend inserts through the fake client.
+   */
+  seedTerritory: (store: Store, rows: UniversalRoyaltyLedgerRow[]) => Promise<void>;
 }
 
 /** The Supabase backend's fake client, captured by make() for registry seeding. */
@@ -270,6 +281,11 @@ const BACKENDS: BackendSpec[] = [
         isni: IDENTITY_ISNI,
       });
     },
+    seedTerritory: async (store, rows) => {
+      for (const row of rows) {
+        await (store as InMemoryStore).insertUniversalRoyaltyLedgerRow(row);
+      }
+    },
   },
   {
     name: 'SqliteStore',
@@ -280,6 +296,11 @@ const BACKENDS: BackendSpec[] = [
         uctNumber: IDENTITY_UCT,
         isni: IDENTITY_ISNI,
       });
+    },
+    seedTerritory: async (store, rows) => {
+      for (const row of rows) {
+        await (store as SqliteStore).insertUniversalRoyaltyLedgerRow(row);
+      }
     },
   },
   {
@@ -302,6 +323,13 @@ const BACKENDS: BackendSpec[] = [
       });
       // creator_profiles.isni keyed by the NORMALIZED email.
       await client.from('creator_profiles').insert({ email: 'creator@example.com', isni: IDENTITY_ISNI });
+    },
+    seedTerritory: async (_store, rows) => {
+      const client = lastFakeClient;
+      if (client === undefined) throw new Error('fake client not initialized');
+      for (const row of rows) {
+        await client.from('universal_royalty_ledger').insert({ ...row });
+      }
     },
   },
 ];
@@ -659,5 +687,83 @@ describe.each(BACKENDS)('SDK store parity — $name', ({ make, seedIdentity }) =
       const existing = await store.getSyncLicensePurchaseByStamp('CBT-SETTLE-0123456789AB');
       expect(existing?.split_run_id).toBe('run_1');
     });
+  });
+});
+
+describe.each(BACKENDS)('Territory settlement seam parity — $name', ({ make, seedTerritory }) => {
+  beforeEach(() => {
+    store = make();
+  });
+
+  it('reads [] from a fresh store — no SDK-settled credits, no invented markets', async () => {
+    await expect(store.listTerritorySettlements()).resolves.toEqual([]);
+  });
+
+  it('projects SDK-settled credits only — territory verbatim, join key, bigint cents, honest nulls', async () => {
+    await seedTerritory(store, [
+      {
+        transaction_id: 'ul_us_001',
+        rights_holder_id: 'rh_creator_don',
+        amount_cents: '1234567',
+        transaction_type: SDK_SETTLEMENT_TRANSACTION_TYPE,
+        reference_id: 'ref_sdk_evt_us',
+        metadata: { sdk: { split_run_id: 'run_us', territory: 'US' } },
+        created_at: '2026-09-01T00:00:00Z',
+      },
+      {
+        transaction_id: 'ul_gb_002',
+        rights_holder_id: 'rh_thrones_label_don',
+        amount_cents: '900000000000000',
+        transaction_type: SDK_SETTLEMENT_TRANSACTION_TYPE,
+        reference_id: 'ref_sdk_evt_gb',
+        metadata: '{"sdk":{"split_run_id":"run_gb","territory":"GB"}}',
+        created_at: '2026-09-02T00:00:00Z',
+      },
+      // A non-SDK tier credit — its territory stamp belongs to another
+      // transaction universe and must never surface in the read.
+      {
+        transaction_id: 'ul_nonsdk',
+        rights_holder_id: 'rh_creator_don',
+        amount_cents: '999',
+        transaction_type: 'increase',
+        reference_id: 'ref_nonsdk',
+        metadata: { sdk: { split_run_id: 'run_x', territory: 'FR' } },
+        created_at: '2026-09-03T00:00:00Z',
+      },
+      // An SDK credit with no stamp — honest nulls, amount still carried.
+      {
+        transaction_id: 'ul_nostamp',
+        rights_holder_id: 'rh_creator_don',
+        amount_cents: '42',
+        transaction_type: SDK_SETTLEMENT_TRANSACTION_TYPE,
+        reference_id: 'ref_nostamp',
+        metadata: null,
+        created_at: '2026-09-04T00:00:00Z',
+      },
+    ]);
+
+    await expect(store.listTerritorySettlements()).resolves.toEqual([
+      {
+        split_run_id: 'run_us',
+        territory: 'US',
+        rights_holder_id: 'rh_creator_don',
+        amount_cents: 1234567n,
+        created_at: '2026-09-01T00:00:00Z',
+      },
+      {
+        split_run_id: 'run_gb',
+        territory: 'GB',
+        rights_holder_id: 'rh_thrones_label_don',
+        amount_cents: 900000000000000n,
+        created_at: '2026-09-02T00:00:00Z',
+      },
+      {
+        split_run_id: null,
+        territory: null,
+        rights_holder_id: 'rh_creator_don',
+        amount_cents: 42n,
+        created_at: '2026-09-04T00:00:00Z',
+      },
+    ]);
   });
 });

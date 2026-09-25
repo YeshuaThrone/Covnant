@@ -41,6 +41,14 @@ import { describe, it, expect } from 'vitest';
  *
  *   TOTAL: 15 ledger-write call expressions across 8 wired write paths.
  *
+ *   READ SEAM (spec art_qNu4T32F — Creator Analytics Top Markets) ..... 0 writes
+ *     - lib/server/{store,territorySettlement,supabaseStore,
+ *       inMemoryStore,sqliteStore}.ts: the territory-settlement read
+ *       seam (listTerritorySettlements) — select-only projections over
+ *       the wire's metadata.sdk territory stamps, plus local-dev
+ *       fixture affordances. Production writes remain the wire's; the
+ *       15-expression write total above is unchanged.
+ *
  * The file-set pin below is the silent-add guard: ANY new non-test src
  * file that mentions the table (even in a comment) breaks this test and
  * forces the inventory to be updated in the same change.
@@ -98,6 +106,16 @@ const INVENTORIED_FILES: Record<string, string> = {
   'lib/ledger/cbt-settlement.ts': 'HELPER — stamp derivation docs (Gen 8/9)',
   'lib/ledger/engine-stamp.ts': 'ENGINE — Gen 9 bounded metadata-only enrichment executor',
   'lib/ledger/store.ts': 'SUPABASE_JS ×2 — Gen 9 stamped rememberSettlement upsert (1 wired site)',
+  'lib/server/inMemoryStore.ts':
+    'READ + FIXTURE — territory-settlement read seam (spec art_qNu4T32F); in-memory tier rows for tests, no SQL, no production writes',
+  'lib/server/sqliteStore.ts':
+    'READ + LOCAL FIXTURE — territory-settlement read seam (spec art_qNu4T32F); local-dev mirror table with a fixture INSERT — SqliteStore is not shipped, the wire remains the production writer',
+  'lib/server/store.ts':
+    'READ — territory-settlement seam signature on the Store contract (spec art_qNu4T32F), zero writes',
+  'lib/server/supabaseStore.ts':
+    'READ — SDK-settled territory projection (select-only, PGRST204 → honest empty), zero writes',
+  'lib/server/territorySettlement.ts':
+    'READ — pure metadata.sdk territory projection core (spec art_qNu4T32F), zero writes',
 };
 
 describe('T1 extended — the universal_royalty_ledger write inventory is pinned', () => {

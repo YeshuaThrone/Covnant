@@ -66,6 +66,12 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import {
+  SDK_SETTLEMENT_TRANSACTION_TYPE,
+  territorySettlementOfRow,
+  type TerritorySettlementRecord,
+  type UniversalRoyaltyLedgerRow,
+} from '@/lib/server/territorySettlement';
 
 /** Drops the store-internal ordering column; the DB row is otherwise the record. */
 function toRecord<T>(row: Record<string, unknown>): T {
@@ -106,6 +112,7 @@ const TABLES = {
   mulClearanceTransitions: 'mul_clearance_transitions',
   matchQueue: 'match_queue',
   statementIngests: 'statement_ingests',
+  universalRoyaltyLedger: 'universal_royalty_ledger',
   // Migration 0008 — the SyncMarketplaceRegistry amendment. The sync
   // catalog columns live ON cbt_assets (no new catalog table); purchases
   // get the lane's own write-back table.
@@ -1282,6 +1289,34 @@ export class SupabaseStore implements Store {
         .eq('cbt_settlement_stamp', stamp)
         .maybeSingle(),
       'getSyncLicensePurchaseByStamp',
+    );
+  }
+
+  // --- Territory settlement seam (spec art_qNu4T32F) ---
+
+  /**
+   * The SDK-settled tier credits' territory projection — SDK-settled ONLY
+   * (the transaction_type gate is in the query itself), oldest first.
+   * Degrades to the honest empty read when the tier ledger predates the
+   * wire's additive columns (PGRST204, the supabase-js face of the wire's
+   * 42703 discipline: no stamp columns → no stamps exist → no territory);
+   * every other failure propagates.
+   */
+  async listTerritorySettlements(): Promise<TerritorySettlementRecord[]> {
+    const { data, error } = await this.client
+      .from(TABLES.universalRoyaltyLedger)
+      .select(
+        'transaction_id, rights_holder_id, amount_cents, transaction_type, metadata, created_at',
+      )
+      .eq('transaction_type', SDK_SETTLEMENT_TRANSACTION_TYPE)
+      .order('created_at', { ascending: true })
+      .order('transaction_id', { ascending: true });
+    if (error !== null) {
+      if (error.code === 'PGRST204') return [];
+      throw new Error(`listTerritorySettlements: ${error.message} (code ${error.code})`);
+    }
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      territorySettlementOfRow(row as unknown as UniversalRoyaltyLedgerRow),
     );
   }
 }

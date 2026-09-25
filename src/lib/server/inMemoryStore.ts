@@ -69,6 +69,12 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import {
+  isSdkSettlementTransactionType,
+  territorySettlementOfRow,
+  type TerritorySettlementRecord,
+  type UniversalRoyaltyLedgerRow,
+} from '@/lib/server/territorySettlement';
 
 /**
  * Index-stable time sort. Ties keep insertion order in the list's own
@@ -128,6 +134,14 @@ export class InMemoryStore implements Store {
   private creatorUcts = new Map<string, CreatorUctRecord>();
   private syncCatalog = new Map<string, SyncCatalogItemRecord>();
   private syncPurchases = new Map<string, SyncLicensePurchaseRecord>();
+
+  /**
+   * The tier-universe royalty ledger (universal_royalty_ledger) — read-side
+   * seam only (spec art_qNu4T32F). Production credits are written exclusively
+   * by the settlement wire; rows reach this stand-in through the fixture
+   * affordance below, never through the Store contract.
+   */
+  private universalRoyaltyLedger: UniversalRoyaltyLedgerRow[] = [];
 
   // --- Legacy show / ping / artist surface ---
 
@@ -840,4 +854,39 @@ export class InMemoryStore implements Store {
   async getSyncLicensePurchaseByStamp(stamp: string): Promise<SyncLicensePurchaseRecord | undefined> {
     return this.syncPurchases.get(stamp);
   }
+
+  // --- Territory settlement seam (spec art_qNu4T32F) ---
+
+  /**
+   * The SDK-settled tier credits' territory projection — SDK-settled ONLY
+   * (the transaction_type gate runs before projection), oldest first with
+   * the transaction_id tiebreak the other backends order by.
+   */
+  async listTerritorySettlements(): Promise<TerritorySettlementRecord[]> {
+    return this.universalRoyaltyLedger
+      .filter((row) => isSdkSettlementTransactionType(row.transaction_type))
+      .sort(compareTierCreditRows)
+      .map(territorySettlementOfRow);
+  }
+
+  /**
+   * Fixture affordance for the tier ledger — the in-memory stand-in for the
+   * wire's raw-SQL INSERT (covnant-sdk/src/engine/wire.ts settleEvent).
+   * NOT on the Store contract: production writes go through the wire, and
+   * this method exists so tests can seat rows exactly as the wire writes
+   * them without a database. Verbatim row — no id minting, no mutation.
+   */
+  async insertUniversalRoyaltyLedgerRow(row: UniversalRoyaltyLedgerRow): Promise<UniversalRoyaltyLedgerRow> {
+    this.universalRoyaltyLedger.push(row);
+    return row;
+  }
+}
+
+/** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
+function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  if (a.transaction_id !== b.transaction_id) {
+    return a.transaction_id < b.transaction_id ? -1 : 1;
+  }
+  return 0;
 }

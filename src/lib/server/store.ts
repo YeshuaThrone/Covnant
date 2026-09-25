@@ -34,6 +34,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import type { TerritorySettlementRecord } from '@/lib/server/territorySettlement';
 import type {
   BaasTransferRecord,
   KycVerificationRecord,
@@ -414,6 +415,21 @@ export interface Store {
     row: Omit<SyncLicensePurchaseRecord, 'id' | 'created_at'>,
   ): Promise<SyncLicensePurchaseRecord>;
   getSyncLicensePurchaseByStamp(stamp: string): Promise<SyncLicensePurchaseRecord | undefined>;
+
+  // --- Territory settlement seam (spec art_qNu4T32F, Top Markets) ---
+
+  /**
+   * READ-ONLY over the tier-universe royalty ledger (universal_royalty_ledger)
+   * — the one table that carries territory, stamped by the settlement wire's
+   * metadata. Returns the SDK-settled credits ONLY
+   * (transaction_type 'SDK_ROYALTY_SETTLEMENT'), each projected to its
+   * metadata.sdk.territory / metadata.sdk.split_run_id join key, bigint
+   * cents. Production credits are written exclusively by the wire
+   * (covnant-sdk/src/engine/wire.ts settleEvent, raw SQL) — this contract
+   * adds the read seam, never a write path. Oldest first
+   * (created_at ASC, transaction_id ASC).
+   */
+  listTerritorySettlements(): Promise<TerritorySettlementRecord[]>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
