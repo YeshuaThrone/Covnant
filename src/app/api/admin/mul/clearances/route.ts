@@ -24,18 +24,27 @@
  * 409 invalid_transition (the asset's current state is the conflict — a
  * replayed or out-of-order transition is a caller bug, not a no-op), an
  * invalid field reads 422 with the SDK's stable code and field name.
+ *
+ * LOGGED like every console mutation: each effective transition writes
+ * exactly ONE admin_action_log row with the field-level before/after
+ * (the transitionClearanceWithAudit discipline), and a failed audit insert
+ * compensates — the prior clearance row is restored best-effort and the
+ * route answers 502 admin_action_log_failed. With no Supabase audit
+ * destination the mutation is refused outright (503): a clearance change
+ * never stands unlogged.
  */
 
 import { checkAdminGate } from '@/lib/admin/gate';
+import { transitionClearanceWithAudit } from '@/lib/admin/mulClearances';
 import { jsonError } from '@/lib/server/http';
 import { ADMIN_API_RATE_LIMIT, checkRateLimit } from '@/lib/server/rateLimit';
 import { getStore } from '@/lib/server/store';
+import { supabaseFromEnv } from '@/lib/supabase';
 import {
   CLEARANCE_STATES,
   ClearanceTransitionError,
   MulClearanceValidationError,
   getClearance,
-  transitionClearance,
   transitionFromRecord,
   type ClearanceState,
 } from '../../../../../../covnant-sdk/src/mul/clearance';
@@ -114,10 +123,19 @@ export async function POST(request: Request): Promise<Response> {
   const configured = storeOr503();
   if ('response' in configured) return configured.response;
 
+  // Fail closed BEFORE the mutation: with no audit destination a transition
+  // could never be logged, and a clearance change never stands unlogged.
+  const auditDb = supabaseFromEnv();
+  if (!auditDb) {
+    return jsonError(503, 'supabase_not_configured', 'Supabase credentials are not configured.');
+  }
+
   // Field validation belongs to the SDK module — the wire forwards the raw
-  // optional fields and maps each typed refusal to its status below.
+  // optional fields and maps each typed refusal to its status below. The
+  // audited wrapper owns read-before/audit/compensate; SDK typed refusals
+  // still throw for the mapping here.
   try {
-    const clearance = await transitionClearance(configured.store, {
+    const result = await transitionClearanceWithAudit(configured.store, auditDb, {
       assetCbtCode,
       to: to as ClearanceState,
       licensee: payload.licensee as string | null | undefined,
@@ -126,8 +144,9 @@ export async function POST(request: Request): Promise<Response> {
       termEnd: payload.termEnd as string | null | undefined,
       note: payload.note as string | null | undefined,
     });
+    if (!result.ok) return jsonError(result.status, result.code, result.message);
     return Response.json(
-      { ok: true, clearance },
+      { ok: true, clearance: result.value.clearance, action: result.value.action },
       { headers: { 'cache-control': 'no-store' } },
     );
   } catch (error) {

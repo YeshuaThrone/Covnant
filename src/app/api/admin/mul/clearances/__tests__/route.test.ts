@@ -30,6 +30,49 @@ vi.mock('@/lib/server/rateLimit', () => ({
   ADMIN_API_RATE_LIMIT: { limit: 30, windowMs: 60_000 },
 }));
 
+const supabaseMock = vi.hoisted(() => ({
+  supabaseFromEnv: vi.fn(),
+}));
+
+vi.mock('@/lib/supabase', () => ({
+  supabaseFromEnv: supabaseMock.supabaseFromEnv,
+}));
+
+interface AuditDbOptions {
+  logInsertError?: { message: string } | null;
+}
+
+/**
+ * A fake Supabase client that records admin_action_log inserts — the
+ * allowlist suite's shape. The route's mutations ride the REAL store
+ * (InMemoryStore via setStore); only the audit destination is faked.
+ */
+function auditDb(options: AuditDbOptions = {}) {
+  const ops = { logInserts: [] as Record<string, unknown>[] };
+  return {
+    ops,
+    from: vi.fn((table: string) => {
+      if (table === 'admin_action_log') {
+        return {
+          insert: vi.fn((values: Record<string, unknown>) => {
+            ops.logInserts.push(values);
+            return {
+              select: () => ({
+                single: vi.fn(async () =>
+                  options.logInsertError
+                    ? { data: null, error: options.logInsertError }
+                    : { data: { id: `log-mul-${ops.logInserts.length}` }, error: null },
+                ),
+              }),
+            };
+          }),
+        };
+      }
+      throw new Error(`unexpected table in audit mock: ${table}`);
+    }),
+  };
+}
+
 function authedCookie(): string {
   const token = mintAdminSessionToken();
   // mintAdminSessionToken returns null only when the secret is unset; the
@@ -60,6 +103,7 @@ beforeEach(() => {
   process.env.ADMIN_DASHBOARD_PASSWORD = PASSWORD;
   setStore(new InMemoryStore());
   rateMock.checkRateLimit.mockReturnValue({ ok: true });
+  supabaseMock.supabaseFromEnv.mockReturnValue(auditDb());
 });
 
 afterEach(() => {
@@ -246,5 +290,115 @@ describe('GET /api/admin/mul/clearances — reads and audit history', () => {
   it('enforces the admin gate on reads too', async () => {
     const response = await GET(getRequest(`?asset_cbt_code=${ASSET}`));
     expect(response.status).toBe(401);
+  });
+});
+
+describe('POST /api/admin/mul/clearances — the audit trail (a change never stands unlogged)', () => {
+  it('logs exactly ONE admin_action_log row for a first transition, diffing from null', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    const response = await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+
+    expect(response.status).toBe(200);
+    expect(audit.ops.logInserts).toHaveLength(1);
+    expect(audit.ops.logInserts[0]).toMatchObject({
+      actor: 'admin',
+      action: 'mul.clearance.transition',
+      target_table: 'mul_clearances',
+      target_row_id: ASSET,
+      changes: { state: { from: null, to: 'draft' } },
+    });
+    expect((await response.json()).action).toMatchObject({
+      id: 'log-mul-1',
+      action: 'mul.clearance.transition',
+    });
+  });
+
+  it('logs the full field-level diff when a transition changes state, licensee, territory, and terms', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+    const response = await POST(
+      postRequest(
+        {
+          assetCbtCode: ASSET,
+          to: 'requested',
+          licensee: 'Merlin Events LLC',
+          territory: 'US',
+          termStart: '2026-09-01T00:00:00Z',
+          termEnd: '2027-08-31T23:59:59.999Z',
+        },
+        authedCookie(),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(audit.ops.logInserts).toHaveLength(2);
+    expect(audit.ops.logInserts[1]).toMatchObject({
+      action: 'mul.clearance.transition',
+      changes: {
+        state: { from: 'draft', to: 'requested' },
+        licensee: { from: null, to: 'Merlin Events LLC' },
+        territory: { from: null, to: 'US' },
+        termStart: { from: null, to: '2026-09-01T00:00:00.000Z' },
+        termEnd: { from: null, to: '2027-08-31T23:59:59.999Z' },
+      },
+    });
+  });
+
+  it('logs NOTHING for a refused transition — no mutation, no audit row', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    const grant = await POST(postRequest({ assetCbtCode: ASSET, to: 'cleared' }, authedCookie()));
+
+    expect(grant.status).toBe(409);
+    expect(audit.ops.logInserts).toHaveLength(0);
+  });
+
+  it('answers 503 supabase_not_configured and performs NO transition when the audit client is absent', async () => {
+    supabaseMock.supabaseFromEnv.mockReturnValue(undefined);
+    const response = await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, reason: 'supabase_not_configured' });
+    // The store holds no clearance — the mutation never ran.
+    const read = await GET(getRequest(`?asset_cbt_code=${ASSET}`, authedCookie()));
+    expect(await read.json()).toEqual({ ok: true, found: false });
+  });
+
+  it('compensates — restores the prior clearance row — when the audit insert fails', async () => {
+    const okAudit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(okAudit as never);
+    await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+
+    const failing = auditDb({ logInsertError: { message: 'insert failed' } });
+    supabaseMock.supabaseFromEnv.mockReturnValue(failing as never);
+    const response = await POST(
+      postRequest(
+        { assetCbtCode: ASSET, to: 'requested', licensee: 'Merlin Events LLC', territory: 'US' },
+        authedCookie(),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, reason: 'admin_action_log_failed' });
+    expect(failing.ops.logInserts).toHaveLength(1);
+    // The compensating upsert restored the PRIOR current row (state draft).
+    const read = await GET(getRequest(`?asset_cbt_code=${ASSET}`, authedCookie()));
+    const body = await read.json();
+    expect(body.clearance).toMatchObject({ state: 'draft', licensee: null, territory: null });
+  });
+
+  it('reports the sanitized failure when a FIRST transition cannot be reverted (no prior row, no seam delete)', async () => {
+    const failing = auditDb({ logInsertError: { message: 'insert failed' } });
+    supabaseMock.supabaseFromEnv.mockReturnValue(failing as never);
+    const response = await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, reason: 'admin_action_log_failed' });
+    // The un-creatable first row remains (the seam has no delete) — the
+    // console.error states that honestly; the route never reports success.
+    const read = await GET(getRequest(`?asset_cbt_code=${ASSET}`, authedCookie()));
+    expect((await read.json()).clearance).toMatchObject({ state: 'draft' });
   });
 });

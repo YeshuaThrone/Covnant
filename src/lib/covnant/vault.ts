@@ -125,6 +125,16 @@ const VAULT_IDENTIFIER_KEYS: Record<VaultExternalIdentifierKind, string> = {
 };
 
 /**
+ * The persisted JSONB key for one kind — the admin audit surface's field
+ * identity for its `mapped_identifiers.<key>` diffs and its compensation
+ * target. One lookup so this adapter stays the only place the kind→key
+ * mapping lives.
+ */
+export function vaultIdentifierStorageKey(kind: VaultExternalIdentifierKind): string {
+  return VAULT_IDENTIFIER_KEYS[kind];
+}
+
+/**
  * How the lookup boundary compares the stored JSONB value — the canonical
  * forms' case/separator fold, applied to BOTH sides in SQL so stored
  * legacy variants (registration wrote mapped_identifiers free-form) stay

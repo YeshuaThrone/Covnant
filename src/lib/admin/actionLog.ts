@@ -21,6 +21,8 @@ export const ADMIN_ACTOR = 'admin';
 
 export const CREATOR_COMPLIANCE_UPDATE_ACTION = 'creator.compliance.update';
 export const ALLOWLIST_STATUS_FLIP_ACTION = 'allowlist.status_flip';
+export const MUL_CLEARANCE_TRANSITION_ACTION = 'mul.clearance.transition';
+export const VAULT_IDENTIFIER_ATTACH_ACTION = 'vault.identifier.attach';
 
 export interface AdminActionEntry {
   actor: string;

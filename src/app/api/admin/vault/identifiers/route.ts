@@ -23,15 +23,24 @@
  *
  * Idempotency on the wire: a replayed attach reads 200 attached:false —
  * never an error, never a duplicate.
+ *
+ * LOGGED like every console mutation: each EFFECTIVE attach writes exactly
+ * ONE admin_action_log row with the field-level mapped_identifiers diff
+ * (the attachVaultIdentifierWithAudit discipline); the no-op replay logs
+ * nothing. A failed audit insert compensates — the prior mapped_identifiers
+ * value for the kind is restored best-effort and the route answers 502
+ * admin_action_log_failed. With no Supabase audit destination the mutation
+ * is refused outright (503): an attach never stands unlogged.
  */
 
 import { checkAdminGate } from '@/lib/admin/gate';
+import { attachVaultIdentifierWithAudit } from '@/lib/admin/vaultIdentifiers';
 import { getDb } from '@/lib/db';
 import { jsonError } from '@/lib/server/http';
 import { ADMIN_API_RATE_LIMIT, checkRateLimit } from '@/lib/server/rateLimit';
+import { supabaseFromEnv } from '@/lib/supabase';
 import {
   VAULT_EXTERNAL_IDENTIFIER_KINDS,
-  attachExternalIdentifier,
   findByIdentifier,
   type VaultExternalIdentifierKind,
 } from '@/lib/covnant/vault';
@@ -101,8 +110,22 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(503, 'db_not_configured', 'Database is not configured (DATABASE_URL).');
   }
 
-  const result = await attachExternalIdentifier(db, assetRef.trim(), { kind, value });
+  // Fail closed BEFORE the mutation: with no audit destination an attach
+  // could never be logged, and an attach never stands unlogged.
+  const auditDb = supabaseFromEnv();
+  if (!auditDb) {
+    return jsonError(503, 'supabase_not_configured', 'Supabase credentials are not configured.');
+  }
+
+  const result = await attachVaultIdentifierWithAudit(db, auditDb, assetRef.trim(), { kind, value });
   if (!result.ok) {
+    if (result.reason === 'AUDIT_LOG_FAILED') {
+      return jsonError(
+        502,
+        'admin_action_log_failed',
+        'Vault identifier attach was not recorded in the audit log; the change was reverted. Retry.',
+      );
+    }
     return result.reason === 'INVALID_IDENTIFIER'
       ? jsonError(
           422,
@@ -113,7 +136,13 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return Response.json(
-    { ok: true, attached: result.attached, cvtCode: result.cvtCode, cbtCode: result.cbtCode },
+    {
+      ok: true,
+      attached: result.value.attached,
+      cvtCode: result.value.cvtCode,
+      cbtCode: result.value.cbtCode,
+      action: result.value.action,
+    },
     { headers: { 'cache-control': 'no-store' } },
   );
 }

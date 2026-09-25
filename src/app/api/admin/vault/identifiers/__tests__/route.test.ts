@@ -33,6 +33,49 @@ vi.mock('@/lib/db', () => ({
   getDb: dbMock.getDb,
 }));
 
+const supabaseMock = vi.hoisted(() => ({
+  supabaseFromEnv: vi.fn(),
+}));
+
+vi.mock('@/lib/supabase', () => ({
+  supabaseFromEnv: supabaseMock.supabaseFromEnv,
+}));
+
+interface AuditDbOptions {
+  logInsertError?: { message: string } | null;
+}
+
+/**
+ * A fake Supabase client that records admin_action_log inserts — the
+ * allowlist suite's shape. The attach itself runs the REAL vault adapter
+ * over the DB stub; only the audit destination is faked.
+ */
+function auditDb(options: AuditDbOptions = {}) {
+  const ops = { logInserts: [] as Record<string, unknown>[] };
+  return {
+    ops,
+    from: vi.fn((table: string) => {
+      if (table === 'admin_action_log') {
+        return {
+          insert: vi.fn((values: Record<string, unknown>) => {
+            ops.logInserts.push(values);
+            return {
+              select: () => ({
+                single: vi.fn(async () =>
+                  options.logInsertError
+                    ? { data: null, error: options.logInsertError }
+                    : { data: { id: `log-vault-${ops.logInserts.length}` }, error: null },
+                ),
+              }),
+            };
+          }),
+        };
+      }
+      throw new Error(`unexpected table in audit mock: ${table}`);
+    }),
+  };
+}
+
 interface QueryCall {
   sql: string;
   params: unknown[] | undefined;
@@ -111,6 +154,7 @@ beforeEach(() => {
   process.env.ADMIN_DASHBOARD_PASSWORD = PASSWORD;
   rateMock.checkRateLimit.mockReturnValue({ ok: true });
   dbMock.getDb.mockReturnValue(dbStub(assetRow()).db);
+  supabaseMock.supabaseFromEnv.mockReturnValue(auditDb());
 });
 
 afterEach(() => {
@@ -265,6 +309,11 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
       attached: true,
       cvtCode: 'CVT-9F3A7C21-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
+      action: {
+        id: 'log-vault-1',
+        action: 'vault.identifier.attach',
+        changes: { 'mapped_identifiers.iswc': { from: null, to: 'T-123456789-1' } },
+      },
     });
     // The adapter ran: the asset row was read under FOR UPDATE inside the
     // transaction, then the additive JSONB merge wrote the canonical value.
@@ -291,6 +340,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
       attached: false,
       cvtCode: 'CVT-9F3A7C21-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
+      action: null,
     });
     expect(txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'))).toHaveLength(0);
   });
@@ -308,7 +358,17 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     );
 
     expect(status).toBe(200);
-    expect(body).toEqual({ ok: true, attached: true, cvtCode: 'CVT-9F3A7C21-2026', cbtCode: 'CBT-TRK-1234567890AB' });
+    expect(body).toEqual({
+      ok: true,
+      attached: true,
+      cvtCode: 'CVT-9F3A7C21-2026',
+      cbtCode: 'CBT-TRK-1234567890AB',
+      action: {
+        id: 'log-vault-1',
+        action: 'vault.identifier.attach',
+        changes: { 'mapped_identifiers.eidrCanonical': { from: null, to: '10.5240/ABCD-EFGH-JKLM-NOPQ-RSTU-V' } },
+      },
+    });
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
     expect(updates[0]?.params).toEqual([
       'eidrCanonical',
@@ -374,5 +434,112 @@ describe('GET /api/admin/vault/identifiers — authenticated lookup (the second 
       reason: 'invalid_kind',
       error: 'kind must be one of: ISRC, ISWC, ISAN, EIDR, DOI, UPC, EAN, ISMN, GRID, ISBN, ISSN, GTIN, MLC_WORK_ID, HFA_SONG_ID, TUNE_CODE, EPC_RFID.',
     });
+  });
+});
+
+describe('POST /api/admin/vault/identifiers — the audit trail (an attach never stands unlogged)', () => {
+  it('logs exactly ONE admin_action_log row for an effective attach, keyed by the persisted JSONB field', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    const { status, body } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+    );
+
+    expect(status).toBe(200);
+    expect(body.action).toMatchObject({ id: 'log-vault-1', action: 'vault.identifier.attach' });
+    expect(audit.ops.logInserts).toHaveLength(1);
+    expect(audit.ops.logInserts[0]).toMatchObject({
+      actor: 'admin',
+      action: 'vault.identifier.attach',
+      target_table: 'cbt_assets',
+      target_row_id: 'CVT-9F3A7C21-2026',
+      changes: { 'mapped_identifiers.iswc': { from: null, to: 'T-123456789-1' } },
+    });
+  });
+
+  it('the idempotent replay logs NOTHING — a no-op performs no write and no audit', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    dbMock.getDb.mockReturnValue(dbStub(assetRow({ mapped_identifiers: { iswc: 'T-123456789-1' } })).db);
+
+    const { status, body } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+    );
+
+    expect(status).toBe(200);
+    expect(body.attached).toBe(false);
+    expect(body.action).toBeNull();
+    expect(audit.ops.logInserts).toHaveLength(0);
+  });
+
+  it('diffs from the REPLACED prior value when the kind already held a different code', async () => {
+    const audit = auditDb();
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+    dbMock.getDb.mockReturnValue(dbStub(assetRow({ mapped_identifiers: { iswc: 'T-999999999-9' } })).db);
+
+    const { status } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+    );
+
+    expect(status).toBe(200);
+    expect(audit.ops.logInserts[0]).toMatchObject({
+      changes: { 'mapped_identifiers.iswc': { from: 'T-999999999-9', to: 'T-123456789-1' } },
+    });
+  });
+
+  it('compensates — removes the attached key — when the audit insert fails with no prior value', async () => {
+    const { db, poolQueries } = dbStub(assetRow());
+    dbMock.getDb.mockReturnValue(db);
+    const audit = auditDb({ logInsertError: { message: 'insert failed' } });
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+
+    const { status, body } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+    );
+
+    expect(status).toBe(502);
+    expect(body).toMatchObject({ ok: false, reason: 'admin_action_log_failed' });
+    // The compensating UPDATE removes the kind's key (no prior value existed).
+    const restores = poolQueries.filter((q) => (q.sql as string).includes('- $1'));
+    expect(restores).toHaveLength(1);
+    expect(restores[0].params).toEqual(['isrc', 'CVT-9F3A7C21-2026']);
+  });
+
+  it('compensates — restores the REPLACED prior value — when the audit insert fails over an existing kind', async () => {
+    const { db, poolQueries } = dbStub(assetRow({ mapped_identifiers: { iswc: 'T-999999999-9' } }));
+    dbMock.getDb.mockReturnValue(db);
+    const audit = auditDb({ logInsertError: { message: 'insert failed' } });
+    supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
+
+    const { status } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+    );
+
+    expect(status).toBe(502);
+    const restores = poolQueries.filter((q) => (q.sql as string).includes('jsonb_build_object'));
+    expect(restores).toHaveLength(1);
+    expect(restores[0].params).toEqual(['iswc', 'T-999999999-9', 'CVT-9F3A7C21-2026']);
+  });
+
+  it('answers 503 supabase_not_configured and attaches NOTHING when the audit client is absent', async () => {
+    supabaseMock.supabaseFromEnv.mockReturnValue(undefined);
+    const { db, poolQueries, txQueries } = dbStub(assetRow());
+    dbMock.getDb.mockReturnValue(db);
+
+    const { status, body } = await call(
+      POST,
+      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+    );
+
+    expect(status).toBe(503);
+    expect(body).toMatchObject({ ok: false, reason: 'supabase_not_configured' });
+    // No query ran at all — the attach was refused before the adapter.
+    expect(poolQueries).toHaveLength(0);
+    expect(txQueries).toHaveLength(0);
   });
 });
