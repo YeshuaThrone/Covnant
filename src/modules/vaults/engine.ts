@@ -72,13 +72,26 @@ export async function creditVault(
   target: VaultCreditTarget,
   now: Date = new Date(),
 ): Promise<SovereignVaultRecord> {
-  const current = await store.getVault(payeeId);
-  const balances = creditBalances(
-    current ?? emptyVaultBalances(),
-    amountCents,
-    target,
-  );
-  return persistVault(store, payeeId, payeeName, balances, now);
+  // Atomic credit (migration 0009, H1): the delta is applied additively in
+  // one guarded statement — no read-modify-write window, so concurrent
+  // credits can no longer last-write-wins over each other.
+  const delta = emptyVaultBalances();
+  delta[`${target}_balance`] += amountCents;
+  const result = await store.applyVaultDelta({
+    payee_id: payeeId,
+    payee_name: payeeName,
+    delta,
+    create_if_missing: true,
+    updated_at: now.toISOString(),
+  });
+  if (result.outcome !== "applied") {
+    // Unreachable by contract: a non-negative delta mints or adds with no
+    // floors set. Surface it loudly rather than inventing a balance.
+    throw new Error(
+      `creditVault: the store refused a ${amountCents}-cent credit to ${payeeId} (${result.outcome}).`,
+    );
+  }
+  return result.vault;
 }
 
 export async function releaseVaultPending(
@@ -200,7 +213,30 @@ export async function settleVaultPayout(
       message: "pending_balance cannot cover that settled payout.",
     };
   }
-  const updated = await persistVault(store, vault.payee_id, vault.payee_name, cleared.balances, now);
+  // Atomic settle (migration 0009, H1): the pending debit is guarded in the
+  // same statement that moves the money — two concurrent settles of
+  // different payouts can no longer last-write-wins over each other.
+  const applied = await store.applyVaultDelta({
+    payee_id: vault.payee_id,
+    payee_name: vault.payee_name,
+    delta: {
+      available_balance: 0,
+      pending_balance: -hold.amount_cents,
+      reserve_balance: 0,
+    },
+    min_balances: { pending_balance: 0 },
+    create_if_missing: false,
+    updated_at: now.toISOString(),
+  });
+  if (applied.outcome !== "applied") {
+    return {
+      ok: false,
+      status: 422,
+      code: "insufficient_pending",
+      message: "pending_balance cannot cover that settled payout.",
+    };
+  }
+  const updated = applied.vault;
   await store.updatePayoutHoldStatus(transferId, "settled");
   await store.updateBaasTransferStatus(transferId, "settled");
   if (transfer.ledger_transaction_id) {
@@ -278,16 +314,40 @@ export async function reverseVaultPayout(
 
   const hold = await store.getPayoutHold(transferId);
   const amount = hold?.amount_cents ?? transfer.amount_cents;
-  let nextBalances: VaultBalances = {
-    available_balance: vault.available_balance,
-    pending_balance: vault.pending_balance,
-    reserve_balance: vault.reserve_balance,
-  };
+
+  // Insert-as-lock (migration 0009, H4): the reversal row is written BEFORE
+  // any money moves and payout_reversals.transfer_id is UNIQUE, so a
+  // replayed or concurrent webhook loses the insert race and gets the
+  // winner's row back instead of double-crediting the vault. The journal
+  // and ledger ids are back-filled after posting — they do not exist yet.
+  let lock: PayoutReversalRecord;
+  try {
+    lock = await store.insertPayoutReversal({
+      transfer_id: transferId,
+      payee_id: vault.payee_id,
+      amount_cents: amount,
+      reason,
+      ledger_transaction_id: null,
+      journal_id: null,
+      created_at: now.toISOString(),
+    });
+  } catch (insertError) {
+    const winner = await store.getPayoutReversalByTransfer(transferId);
+    if (winner === undefined) {
+      throw insertError; // not a duplicate-transfer failure — surface it
+    }
+    return { ok: true, vault, reversal: winner, transfer, idempotent: true };
+  }
+
   const legs: GlLegInput[] = [];
+  let delta: VaultBalances;
+  let failureCode: string;
 
   if (hold?.status === "in_flight") {
     const reversed = reversePayoutHold(vault, amount);
     if (!reversed.ok) {
+      // Money never moved — drop the lock so a retry can re-attempt.
+      await store.deletePayoutReversal(lock.id);
       return {
         ok: false,
         status: 422,
@@ -295,20 +355,48 @@ export async function reverseVaultPayout(
         message: "pending_balance cannot cover that payout reversal.",
       };
     }
-    nextBalances = reversed.balances;
+    delta = {
+      available_balance: amount,
+      pending_balance: -amount,
+      reserve_balance: 0,
+    };
+    failureCode = "insufficient_pending";
     legs.push(vaultDebit(vault.payee_id, "pending", amount));
     legs.push(vaultCredit(vault.payee_id, "available", amount));
-    await store.updatePayoutHoldStatus(transferId, "reversed");
   } else {
-    nextBalances = creditBalances(nextBalances, amount, "available");
+    delta = {
+      available_balance: amount,
+      pending_balance: 0,
+      reserve_balance: 0,
+    };
+    failureCode = "insufficient_available";
     legs.push(fboDebit(amount));
     legs.push(vaultCredit(vault.payee_id, "available", amount));
-    if (hold?.status === "settled") {
-      await store.updatePayoutHoldStatus(transferId, "reversed");
-    }
   }
 
-  const updated = await persistVault(store, vault.payee_id, vault.payee_name, nextBalances, now);
+  // Atomic reversal move (migration 0009, H1): the sufficiency floors are
+  // enforced in the same statement that moves the money.
+  const applied = await store.applyVaultDelta({
+    payee_id: vault.payee_id,
+    payee_name: vault.payee_name,
+    delta,
+    min_balances: { available_balance: 0, pending_balance: 0 },
+    create_if_missing: false,
+    updated_at: now.toISOString(),
+  });
+  if (applied.outcome !== "applied") {
+    await store.deletePayoutReversal(lock.id);
+    return {
+      ok: false,
+      status: 422,
+      code: failureCode,
+      message: "The vault balances cannot cover that payout reversal.",
+    };
+  }
+  const updated = applied.vault;
+  if (hold !== undefined && (hold.status === "in_flight" || hold.status === "settled")) {
+    await store.updatePayoutHoldStatus(transferId, "reversed");
+  }
   const transferStatus = reason === "payout.returned" ? "returned" : "failed";
   await store.updateBaasTransferStatus(transferId, transferStatus);
 
@@ -358,15 +446,18 @@ export async function reverseVaultPayout(
     };
   }
 
-  const reversal = await store.insertPayoutReversal({
-    transfer_id: transferId,
-    payee_id: vault.payee_id,
-    amount_cents: amount,
-    reason,
-    ledger_transaction_id: reversalLedger.id,
+  // Finalize the lock row (migration 0009, H4): the reversal row was
+  // inserted as the guard before the money moved; now it becomes financial
+  // history with the posted journal and ledger ids attached.
+  const reversal = await store.updatePayoutReversal(lock.id, {
     journal_id: posted.journal.id,
-    created_at: now.toISOString(),
+    ledger_transaction_id: reversalLedger.id,
   });
+  if (reversal === undefined) {
+    throw new Error(
+      `reverseVaultPayout: reversal lock row ${lock.id} vanished before finalization.`,
+    );
+  }
 
   return {
     ok: true,
@@ -451,7 +542,30 @@ export async function payoutFromVault(
       message: "available_balance is insufficient for that payout.",
     };
   }
-  await persistVault(store, current.payee_id, current.payee_name, held.balances, now);
+  // Atomic hold (migration 0009, H1): available→pending moves in one
+  // statement guarded by the available floor, so two concurrent payouts
+  // cannot both spend the same available money.
+  const applied = await store.applyVaultDelta({
+    payee_id: current.payee_id,
+    payee_name: current.payee_name,
+    delta: {
+      available_balance: -input.amount_cents,
+      pending_balance: input.amount_cents,
+      reserve_balance: 0,
+    },
+    min_balances: { available_balance: 0, pending_balance: 0 },
+    create_if_missing: false,
+    updated_at: now.toISOString(),
+  });
+  if (applied.outcome !== "applied") {
+    return {
+      ok: false,
+      status: 422,
+      code: "insufficient_available",
+      message: "available_balance is insufficient for that payout.",
+    };
+  }
+  const vault = applied.vault;
   const ledger = await insertPayoutLedger(
     store,
     {
@@ -475,7 +589,28 @@ export async function payoutFromVault(
       ? await adapter.createRtpPayment(request)
       : await adapter.createAchTransfer(request);
   if (!result.ok) {
-    await persistVault(store, current.payee_id, current.payee_name, current, now);
+    // Roll the hold back with the inverse, guarded delta (migration 0009,
+    // H1) — a full-row overwrite of the stale pre-hold vault would clobber
+    // concurrent mutations.
+    const rolledBack = await store.applyVaultDelta({
+      payee_id: current.payee_id,
+      payee_name: current.payee_name,
+      delta: {
+        available_balance: input.amount_cents,
+        pending_balance: -input.amount_cents,
+        reserve_balance: 0,
+      },
+      min_balances: { available_balance: 0, pending_balance: 0 },
+      create_if_missing: false,
+      updated_at: now.toISOString(),
+    });
+    if (rolledBack.outcome !== "applied") {
+      // The hold just added this pending balance, so the inverse refusing is
+      // a data-integrity alarm — surface it instead of the adapter error.
+      throw new Error(
+        `payoutFromVault: could not roll back the payout hold for ${current.payee_id} after a failed BaaS call.`,
+      );
+    }
     await store.updateLedgerSettlement(ledger.id, {
       status: "failed",
       rail: input.rail,
@@ -511,12 +646,8 @@ export async function payoutFromVault(
 
   return {
     ok: true,
-    vault: {
-      payee_id: current.payee_id,
-      payee_name: current.payee_name,
-      ...held.balances,
-      updated_at: now.toISOString(),
-    },
+    vault,
     transfer: result.transfer,
   };
 }
+

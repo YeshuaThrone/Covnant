@@ -207,6 +207,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // cbt_assets + sync_license_purchases; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0008_sync_library.sql',
+      // DB concurrency guards (audit art_GG1emERn, hardening gen 12): unique
+      // ledger sequence + reversal transfer_id, split-run idempotency key,
+      // and the apply_vault_delta RPC; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0009_concurrency_guards.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

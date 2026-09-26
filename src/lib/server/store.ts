@@ -161,6 +161,39 @@ export interface CreatorUctRecord {
 }
 
 /**
+ * A signed, integer-cents move over the three vault buckets. Deltas are
+ * applied additively by the store (`balance = balance + delta`), never
+ * overwritten.
+ */
+export type VaultBucketDelta = {
+  available_balance: number;
+  pending_balance: number;
+  reserve_balance: number;
+};
+
+/** Input for Store.applyVaultDelta — the atomic vault mutation (0009). */
+export type VaultDeltaInput = {
+  payee_id: string;
+  payee_name: string;
+  delta: VaultBucketDelta;
+  /**
+   * Post-update floors per bucket; null/omitted = unguarded. A floor rejects
+   * the whole move (nothing is written) — the sufficiency check lives in the
+   * same statement that moves the money.
+   */
+  min_balances?: Partial<VaultBucketDelta>;
+  /** Credits may mint the vault; debits and holds may not. */
+  create_if_missing: boolean;
+  updated_at: string;
+};
+
+/** Outcome of Store.applyVaultDelta — see the interface doc. */
+export type ApplyVaultDeltaResult =
+  | { outcome: 'applied'; vault: SovereignVaultRecord }
+  | { outcome: 'guard_failed' }
+  | { outcome: 'not_found' };
+
+/**
  * The Don Engine persistence contract — Cursor's canonical 72-method
  * `Store`, Promise-wrapped (see header, deviation 1). Ordering guarantees
  * canonical to the SQLite store carry over: "newest first" is created_at
@@ -226,9 +259,13 @@ export interface Store {
 
   // --- Split runs + line items ---
   insertSplitRun(
-    row: Omit<SplitRunRecord, 'id' | 'status'> & { status?: SplitRunRecord['status'] },
+    row: Omit<SplitRunRecord, 'id' | 'status' | 'idempotency_key'> & {
+      idempotency_key?: string | null;
+    },
   ): Promise<SplitRunRecord>;
   getSplitRun(id: string): Promise<SplitRunRecord | undefined>;
+  /** The saga replay lookup (migration 0009): split_runs.idempotency_key is unique when present. */
+  getSplitRunByIdempotencyKey(key: string): Promise<SplitRunRecord | undefined>;
   updateSplitRunStatus(
     id: string,
     status: SplitRunRecord['status'],
@@ -286,6 +323,25 @@ export interface Store {
   getVault(payeeId: string): Promise<SovereignVaultRecord | undefined>;
   listVaults(): Promise<SovereignVaultRecord[]>;
   upsertVault(row: SovereignVaultRecord): Promise<SovereignVaultRecord>;
+  /**
+   * The atomic vault mutation (migration 0009, audit H1): applies signed
+   * bucket deltas in ONE conditional statement, with per-bucket floors the
+   * database enforces — the sufficiency check moves out of the
+   * read-modify-write window, so concurrent mutations can never
+   * last-write-wins over each other and an over-spend is refused by the DB.
+   *
+   *   - `applied`      — the move happened; `vault` is the row after it.
+   *   - `guard_failed` — the vault exists and a floor rejected the move
+   *     (insufficient funds for the requested direction). Nothing changed.
+   *   - `not_found`    — no vault exists and `create_if_missing` is false
+   *     (or minting is impossible for the requested delta). Nothing changed.
+   *
+   * `create_if_missing` is the credit path: it mints the vault from zero at
+   * the delta values (credits only — negative deltas with no vault to debit
+   * are `not_found`), and the on-conflict arm still floor-guards adds to an
+   * existing vault.
+   */
+  applyVaultDelta(input: VaultDeltaInput): Promise<ApplyVaultDeltaResult>;
   getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined>;
   upsertVaultDispute(row: VaultDisputeRecord): Promise<VaultDisputeRecord>;
   getCatalogDispute(workId: string): Promise<CatalogDisputeRecord | undefined>;
@@ -314,6 +370,16 @@ export interface Store {
   getPayoutReversalByTransfer(
     transferId: string,
   ): Promise<PayoutReversalRecord | undefined>;
+  /**
+   * Finalizes the reversal lock row (migration 0009, H4) with the posted
+   * journal and ledger ids; undefined when the row is gone.
+   */
+  updatePayoutReversal(
+    id: string,
+    patch: Pick<PayoutReversalRecord, 'journal_id' | 'ledger_transaction_id'>,
+  ): Promise<PayoutReversalRecord | undefined>;
+  /** Drops a reversal lock row whose money move was refused (retryable). */
+  deletePayoutReversal(id: string): Promise<void>;
 
   // --- Webhook event ledgers (idempotent by unique event_id) ---
   getWebhookEvent(eventId: string): Promise<BaasWebhookEventRecord | undefined>;

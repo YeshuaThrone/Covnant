@@ -563,7 +563,7 @@ describe('payout holds', () => {
 });
 
 describe('payout reversals', () => {
-  it('returns the latest reversal per transfer', async () => {
+  it('returns the reversal per transfer and rejects a duplicate transfer_id', async () => {
     await store.insertPayoutReversal({
       transfer_id: 't-1',
       payee_id: 'creator_1',
@@ -574,7 +574,7 @@ describe('payout reversals', () => {
       created_at: '2026-09-01T00:00:00Z',
     });
     await store.insertPayoutReversal({
-      transfer_id: 't-1',
+      transfer_id: 't-2',
       payee_id: 'creator_1',
       amount_cents: 100,
       reason: 'payout.failed',
@@ -583,8 +583,23 @@ describe('payout reversals', () => {
       created_at: '2026-09-02T00:00:00Z',
     });
 
-    expect((await store.getPayoutReversalByTransfer('t-1'))?.reason).toBe('payout.failed');
+    expect((await store.getPayoutReversalByTransfer('t-1'))?.reason).toBe('payout.returned');
+    expect((await store.getPayoutReversalByTransfer('t-2'))?.reason).toBe('payout.failed');
     expect((await store.getPayoutReversalByTransfer('missing')) ?? null).toBeNull();
+
+    // Migration 0009 (H4): payout_reversals.transfer_id is unique — a
+    // replayed reversal insert is rejected instead of double-crediting.
+    await expect(
+      store.insertPayoutReversal({
+        transfer_id: 't-1',
+        payee_id: 'creator_1',
+        amount_cents: 100,
+        reason: 'payout.failed',
+        ledger_transaction_id: null,
+        journal_id: 'j-3',
+        created_at: '2026-09-03T00:00:00Z',
+      }),
+    ).rejects.toThrow();
   });
 });
 

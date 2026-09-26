@@ -84,15 +84,52 @@ export async function calculateUdrSplits(
   }
 
   const createdAt = now.toISOString();
-  const splitRun = await store.insertSplitRun({
-    source: input.source,
-    period: input.period,
-    currency: input.currency,
-    gross_cents: allocated.grossCents,
-    line_item_count: allocated.items.length,
-    variance_account_cents: allocated.varianceAccountCents,
-    created_at: createdAt,
-  });
+  // Saga idempotency (migration 0009, H3): with a key supplied, a retried
+  // calculate must not re-run the multi-write saga. Posted runs cannot be
+  // faithfully reconstructed as an original response (withholding and
+  // recoupment are computed from live tables, not stored per run), so a
+  // replay is refused with the existing run id instead of a fabricated
+  // success shape. UNIQUE(split_runs.idempotency_key) arbitrates the race.
+  const idempotencyKey = input.idempotency_key || null;
+  if (idempotencyKey !== null) {
+    const existing = await store.getSplitRunByIdempotencyKey(idempotencyKey);
+    if (existing !== undefined) {
+      return {
+        ok: false,
+        status: 409,
+        code: "split_run_already_exists",
+        message: `A split run for idempotency key "${idempotencyKey}" already exists (${existing.id}).`,
+      };
+    }
+  }
+  let splitRun: SplitRunRecord;
+  try {
+    splitRun = await store.insertSplitRun({
+      source: input.source,
+      period: input.period,
+      currency: input.currency,
+      gross_cents: allocated.grossCents,
+      line_item_count: allocated.items.length,
+      variance_account_cents: allocated.varianceAccountCents,
+      idempotency_key: idempotencyKey,
+      created_at: createdAt,
+    });
+  } catch (insertError) {
+    // Two concurrent calculates with the same key: the unique index picks a
+    // winner and the loser reports it rather than double-running the saga.
+    if (idempotencyKey !== null) {
+      const winner = await store.getSplitRunByIdempotencyKey(idempotencyKey);
+      if (winner !== undefined) {
+        return {
+          ok: false,
+          status: 409,
+          code: "split_run_already_exists",
+          message: `A split run for idempotency key "${idempotencyKey}" already exists (${winner.id}).`,
+        };
+      }
+    }
+    throw insertError;
+  }
 
   const lineItems: Array<AllocatedLineItem & { id: string }> = [];
   const ledger: LedgerTransactionRecord[] = [];

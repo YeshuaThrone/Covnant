@@ -20,7 +20,6 @@ import type {
   VaultDisputeRecord,
 } from "@/modules/don/records";
 import type { DisputeLockPayload } from "@/lib/don/validation";
-import { creditBalances, debitBalances } from "./balances";
 
 // A locked payee (vault dispute) or locked work (catalog dispute) freezes
 // incoming credits — routed to reserve upstream.
@@ -99,16 +98,29 @@ export async function applyDisputeLock(
             "Reserve balance is insufficient to release the dispute freeze.",
         };
       }
-      const fromReserve = debitBalances(vault, frozenTotal, "reserve");
-      const thawed = creditBalances(
-        creditBalances(fromReserve, frozenAvailable, "available"),
-        frozenPending,
-        "pending",
-      );
-      await store.upsertVault({
-        ...thawed,
+      // Atomic thaw (migration 0009, H1): reserve is debited and the frozen
+      // buckets restored in one guarded statement.
+      const applied = await store.applyVaultDelta({
+        payee_id: vault.payee_id,
+        payee_name: vault.payee_name,
+        delta: {
+          available_balance: frozenAvailable,
+          pending_balance: frozenPending,
+          reserve_balance: -frozenTotal,
+        },
+        min_balances: { reserve_balance: 0 },
+        create_if_missing: false,
         updated_at: now.toISOString(),
       });
+      if (applied.outcome !== "applied") {
+        return {
+          ok: false,
+          status: 422,
+          code: "insufficient_reserve",
+          message:
+            "Reserve balance is insufficient to release the dispute freeze.",
+        };
+      }
     }
     const dispute = await store.upsertVaultDispute({
       payee_id: vault.payee_id,
@@ -143,13 +155,30 @@ export async function applyDisputeLock(
         "available_balance + pending_balance cannot cover the dispute freeze.",
     };
   }
-  const debitedAvailable = debitBalances(vault, frozenFromAvailable, "available");
-  const debitedPending = debitBalances(debitedAvailable, frozenFromPending, "pending");
-  const frozenBalances = creditBalances(debitedPending, amount, "reserve");
-  await store.upsertVault({
-    ...frozenBalances,
+  // Atomic freeze (migration 0009, H1): available and pending are debited
+  // and the total moved to reserve in one statement guarded by the bucket
+  // floors — a concurrent payout cannot spend money that is being frozen.
+  const applied = await store.applyVaultDelta({
+    payee_id: vault.payee_id,
+    payee_name: vault.payee_name,
+    delta: {
+      available_balance: -frozenFromAvailable,
+      pending_balance: -frozenFromPending,
+      reserve_balance: amount,
+    },
+    min_balances: { available_balance: 0, pending_balance: 0 },
+    create_if_missing: false,
     updated_at: now.toISOString(),
   });
+  if (applied.outcome !== "applied") {
+    return {
+      ok: false,
+      status: 422,
+      code: "insufficient_funds",
+      message:
+        "available_balance + pending_balance cannot cover the dispute freeze.",
+    };
+  }
   const dispute = await store.upsertVaultDispute({
     payee_id: vault.payee_id,
     locked: 1,

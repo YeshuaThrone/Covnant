@@ -98,7 +98,12 @@ export type PayoutReversalRecord = {
   amount_cents: number;
   reason: "payout.returned" | "payout.failed";
   ledger_transaction_id: string | null;
-  journal_id: string;
+  /**
+   * Nullable (migration 0009): the reversal row is the engine's
+   * insert-as-lock guard for one-transfer-one-reversal (audit H4), inserted
+   * before the GL journal exists; the engine back-fills it after posting.
+   */
+  journal_id: string | null;
   created_at: string;
 };
 

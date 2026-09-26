@@ -66,7 +66,8 @@ export type DonValidationErrorCode =
   | "invalid_recoupment"
   | "invalid_locked"
   | "missing_dispute_target"
-  | "missing_split_run_id";
+  | "missing_split_run_id"
+  | "invalid_idempotency_key";
 
 export type DonValidationSuccess<T> = { ok: true; value: T };
 export type DonValidationFailure = {
@@ -115,6 +116,8 @@ const ERROR_MESSAGES: Record<DonValidationErrorCode, string> = {
   invalid_locked: "locked must be a boolean.",
   missing_dispute_target: "payee_id or work_id is required.",
   missing_split_run_id: "split_run_id is required.",
+  invalid_idempotency_key:
+    "idempotency_key must be a non-empty string of at most 255 characters.",
 };
 
 function fail<T>(code: DonValidationErrorCode): DonValidationResult<T> {
@@ -457,6 +460,18 @@ export function validateSplitCalculatePayload(
   if (input.period !== undefined && input.period !== null && input.period !== "" && period === null) {
     return fail("malformed_body");
   }
+  // Optional saga replay key (migration 0009): absent/empty = unkeyed run;
+  // otherwise a bounded non-empty string. The trim keeps key identity exact.
+  let idempotencyKey: string | null = null;
+  if (input.idempotency_key !== undefined && input.idempotency_key !== null) {
+    if (typeof input.idempotency_key !== "string") {
+      return fail("invalid_idempotency_key");
+    }
+    idempotencyKey = input.idempotency_key.trim();
+    if (idempotencyKey === "" || idempotencyKey.length > 255) {
+      return fail("invalid_idempotency_key");
+    }
+  }
   return {
     ok: true,
     value: {
@@ -466,6 +481,7 @@ export function validateSplitCalculatePayload(
       settle: input.settle === true,
       rail: railRaw as SettlementRail,
       line_items: lineItems,
+      idempotency_key: idempotencyKey,
     },
   };
 }
