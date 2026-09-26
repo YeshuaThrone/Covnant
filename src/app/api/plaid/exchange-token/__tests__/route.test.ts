@@ -76,7 +76,18 @@ describe('POST /api/plaid/exchange-token', () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.error).toContain('accountId');
-    expect(body.error).toContain('rightsHolderId');
+  });
+
+  it('requires a holder identity when rightsHolderId is absent (hardening gen 12)', async () => {
+    // rightsHolderId is no longer a REQUIRED FIELD: a signed-in creator's
+    // holder id is derived from the session, and the operator names it
+    // explicitly. The stubbed operator supplies neither, so the route still
+    // refuses with its own 400 — the payout destination is never unscoped.
+    const res = await POST(postRequest({ publicToken: 'tok', accountId: 'acc_1' }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('rightsHolderId is required.');
   });
 
   it('returns 503 when Plaid credentials are absent', async () => {

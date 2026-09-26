@@ -32,7 +32,10 @@ import type { CreatorTaxProfile } from "@/modules/don/records";
  * are pinned in src/lib/server/__tests__/authz-gates.test.ts.
  */
 vi.mock("@/lib/server/apiAccess", () => ({
-  requireOperator: async () => ({ ok: true, role: "operator" as const }),
+  // requireOperator is SYNCHRONOUS in apiAccess.ts — a route reads `.ok` off
+  // its return value directly; an async stub would hand every handler a
+  // Promise and collapse every verdict into a 200 with an empty body.
+  requireOperator: () => ({ ok: true, role: "operator" as const }),
   requireHolderAccess: async (
     _request: unknown,
     requested: string | null | undefined,
