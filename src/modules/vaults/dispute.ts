@@ -98,16 +98,29 @@ export async function applyDisputeLock(
             "Reserve balance is insufficient to release the dispute freeze.",
         };
       }
-      const fromReserve = debitBalances(vault, frozenTotal, "reserve");
-      const thawed = creditBalances(
-        creditBalances(fromReserve, frozenAvailable, "available"),
-        frozenPending,
-        "pending",
-      );
-      await store.upsertVault({
-        ...thawed,
+      // Atomic thaw (migration 0009, H1): reserve is debited and the frozen
+      // buckets restored in one guarded statement.
+      const applied = await store.applyVaultDelta({
+        payee_id: vault.payee_id,
+        payee_name: vault.payee_name,
+        delta: {
+          available_balance: frozenAvailable,
+          pending_balance: frozenPending,
+          reserve_balance: -frozenTotal,
+        },
+        min_balances: { reserve_balance: 0 },
+        create_if_missing: false,
         updated_at: now.toISOString(),
       });
+      if (applied.outcome !== "applied") {
+        return {
+          ok: false,
+          status: 422,
+          code: "insufficient_reserve",
+          message:
+            "Reserve balance is insufficient to release the dispute freeze.",
+        };
+      }
     }
     const dispute = await store.upsertVaultDispute({
       payee_id: vault.payee_id,

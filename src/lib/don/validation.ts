@@ -66,7 +66,8 @@ export type DonValidationErrorCode =
   | "invalid_recoupment"
   | "invalid_locked"
   | "missing_dispute_target"
-  | "missing_split_run_id";
+  | "missing_split_run_id"
+  | "invalid_idempotency_key";
 
 export type DonValidationSuccess<T> = { ok: true; value: T };
 export type DonValidationFailure = {
@@ -115,6 +116,8 @@ const ERROR_MESSAGES: Record<DonValidationErrorCode, string> = {
   invalid_locked: "locked must be a boolean.",
   missing_dispute_target: "payee_id or work_id is required.",
   missing_split_run_id: "split_run_id is required.",
+  invalid_idempotency_key:
+    "idempotency_key must be a non-empty string of at most 255 characters.",
 };
 
 function fail<T>(code: DonValidationErrorCode): DonValidationResult<T> {

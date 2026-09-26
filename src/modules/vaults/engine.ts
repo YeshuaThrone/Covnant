@@ -360,7 +360,7 @@ export async function reverseVaultPayout(
       pending_balance: -amount,
       reserve_balance: 0,
     };
-    failureCode = reversed.code;
+    failureCode = "insufficient_pending";
     legs.push(vaultDebit(vault.payee_id, "pending", amount));
     legs.push(vaultCredit(vault.payee_id, "available", amount));
   } else {
@@ -542,7 +542,30 @@ export async function payoutFromVault(
       message: "available_balance is insufficient for that payout.",
     };
   }
-  await persistVault(store, current.payee_id, current.payee_name, held.balances, now);
+  // Atomic hold (migration 0009, H1): available→pending moves in one
+  // statement guarded by the available floor, so two concurrent payouts
+  // cannot both spend the same available money.
+  const applied = await store.applyVaultDelta({
+    payee_id: current.payee_id,
+    payee_name: current.payee_name,
+    delta: {
+      available_balance: -input.amount_cents,
+      pending_balance: input.amount_cents,
+      reserve_balance: 0,
+    },
+    min_balances: { available_balance: 0, pending_balance: 0 },
+    create_if_missing: false,
+    updated_at: now.toISOString(),
+  });
+  if (applied.outcome !== "applied") {
+    return {
+      ok: false,
+      status: 422,
+      code: "insufficient_available",
+      message: "available_balance is insufficient for that payout.",
+    };
+  }
+  const vault = applied.vault;
   const ledger = await insertPayoutLedger(
     store,
     {
