@@ -457,6 +457,18 @@ export function validateSplitCalculatePayload(
   if (input.period !== undefined && input.period !== null && input.period !== "" && period === null) {
     return fail("malformed_body");
   }
+  // Optional saga replay key (migration 0009): absent/empty = unkeyed run;
+  // otherwise a bounded non-empty string. The trim keeps key identity exact.
+  let idempotencyKey: string | null = null;
+  if (input.idempotency_key !== undefined && input.idempotency_key !== null) {
+    if (typeof input.idempotency_key !== "string") {
+      return fail("invalid_idempotency_key");
+    }
+    idempotencyKey = input.idempotency_key.trim();
+    if (idempotencyKey === "" || idempotencyKey.length > 255) {
+      return fail("invalid_idempotency_key");
+    }
+  }
   return {
     ok: true,
     value: {
@@ -466,6 +478,7 @@ export function validateSplitCalculatePayload(
       settle: input.settle === true,
       rail: railRaw as SettlementRail,
       line_items: lineItems,
+      idempotency_key: idempotencyKey,
     },
   };
 }

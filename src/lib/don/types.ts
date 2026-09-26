@@ -114,6 +114,12 @@ export type SplitCalculateInput = {
   settle: boolean;
   rail: SettlementRail;
   line_items: RoyaltyLineItemInput[];
+  /**
+   * Optional saga replay key (audit H3): a retried calculate presenting a key
+   * that already produced a split run is refused with 409 instead of
+   * double-running the multi-write saga. Absent = unkeyed (null).
+   */
+  idempotency_key?: string | null;
 };
 
 export type AllocatedSplit = SplitPartyInput & { amount_cents: number };
@@ -136,6 +142,14 @@ export type SplitRunRecord = {
   variance_account_cents: number;
   created_at: string;
   status: "posted" | "reversed";
+  /**
+   * The saga idempotency key (migration 0009) — unique when present. The
+   * split_runs insert is the split-calculation saga's first write, so this
+   * key is the replay lock: a retried calculate with a used key is rejected
+   * before any line item, ledger row, or vault credit exists. Null for
+   * unkeyed runs (today's semantics).
+   */
+  idempotency_key: string | null;
 };
 
 export type RoyaltyLineItemRecord = {
