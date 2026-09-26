@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as calculatePost } from "@/app/api/v1/splits/calculate/route";
 import { POST as reversePost } from "@/app/api/v1/splits/reverse/route";
@@ -36,6 +37,37 @@ function post(path: string, body: unknown, ip = "10.0.0.1"): NextRequest {
     method: "POST",
     body: JSON.stringify(body),
     headers: { "content-type": "application/json", "x-forwarded-for": ip },
+  });
+}
+
+// Webhook deliveries must now clear the Standard Webhooks HMAC gate
+// (audit art_GG1emERn C2), so the battery signs every webhook body the way
+// the providers would. Both Don providers share this test secret via their
+// per-provider env vars, stubbed in beforeEach.
+const WEBHOOK_SECRET_RAW = "test-don-webhook-secret";
+const WEBHOOK_SECRET_WHSEC = `whsec_${Buffer.from(WEBHOOK_SECRET_RAW).toString("base64")}`;
+const WEBHOOK_SECRET_BYTES = Buffer.from(WEBHOOK_SECRET_RAW, "utf8");
+
+function signedWebhookPost(path: string, body: unknown, ip = "10.0.0.1"): NextRequest {
+  const rawBody = JSON.stringify(body);
+  const webhookId =
+    typeof body === "object" && body !== null && "event_id" in body
+      ? String((body as { event_id: unknown }).event_id)
+      : "evt_routes_battery";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = `v1,${createHmac("sha256", WEBHOOK_SECRET_BYTES)
+    .update(`${webhookId}.${timestamp}.${rawBody}`)
+    .digest("base64")}`;
+  return new NextRequest(`http://localhost${path}`, {
+    method: "POST",
+    body: rawBody,
+    headers: {
+      "content-type": "application/json",
+      "x-forwarded-for": ip,
+      "webhook-id": webhookId,
+      "webhook-timestamp": String(timestamp),
+      "webhook-signature": signature,
+    },
   });
 }
 
@@ -81,10 +113,13 @@ let store: InMemoryStore;
 beforeEach(() => {
   store = new InMemoryStore();
   setStore(store);
+  vi.stubEnv("COLUMN_WEBHOOK_SECRET", WEBHOOK_SECRET_WHSEC);
+  vi.stubEnv("DSP_WEBHOOK_SECRET", WEBHOOK_SECRET_WHSEC);
 });
 
 afterEach(() => {
   delete process.env.BAAS_MODE;
+  vi.unstubAllEnvs();
   setStore(null);
 });
 
@@ -153,9 +188,9 @@ describe("POST /api/v1/webhooks/dsp", () => {
       event_id: "evt_dsp_route_1",
       ...royaltyPayload,
     };
-    const first = await dspWebhookPost(post("/api/v1/webhooks/dsp", payload));
+    const first = await dspWebhookPost(signedWebhookPost("/api/v1/webhooks/dsp", payload));
     expect(first.ok).toBe(true);
-    const replay = await dspWebhookPost(post("/api/v1/webhooks/dsp", payload));
+    const replay = await dspWebhookPost(signedWebhookPost("/api/v1/webhooks/dsp", payload));
     expect(replay.ok).toBe(true);
     const firstBody = await first.json();
     const replayBody = await replay.json();
@@ -169,7 +204,7 @@ describe("POST /api/v1/webhooks/dsp", () => {
   it("422s an unknown DSP event", async () => {
     await seed(store);
     const response = await dspWebhookPost(
-      post("/api/v1/webhooks/dsp", { event: "royalty.exploded" }),
+      signedWebhookPost("/api/v1/webhooks/dsp", { event: "royalty.exploded" }),
     );
     expect(response.status).toBe(422);
     const body = await response.json();
@@ -195,7 +230,7 @@ describe("POST /api/v1/webhooks/baas", () => {
     await seedPayoutHold(store, transfer.id, "creator_1", 1_000, "in_flight");
 
     const response = await baasWebhookPost(
-      post("/api/v1/webhooks/baas", {
+      signedWebhookPost("/api/v1/webhooks/baas", {
         event: "payout.settled",
         transfer_id: transfer.id,
         event_id: "evt_baas_route_1",
