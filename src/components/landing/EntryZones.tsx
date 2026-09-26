@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import {
+  buildSealedEntryRecord,
   buildSignupPayload,
+  isSealedEntryRecord,
   mapSignupResponse,
   networkFailureState,
   type ProvisioningStatus,
   type SealRequestState,
+  type SealedEntryRecord,
 } from '@/components/landing/signupRequest';
 
 /*
@@ -30,37 +33,20 @@ type SealedEntryValues = {
   coreIndustryTitle: string;
 };
 
-type SealedEntry = { sealed: true; values: SealedEntryValues };
-
-const isSealedEntry = (value: unknown): value is SealedEntry => {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as { sealed?: unknown; values?: unknown };
-  if (candidate.sealed !== true || typeof candidate.values !== 'object' || candidate.values === null) {
-    return false;
-  }
-  const values = candidate.values as Record<string, unknown>;
-  // Every CURRENT value key must be present — a legacy seal missing any of
-  // them (e.g. a pre-Phone-Number seal) fails the guard and is treated as
-  // absent: the composition starts unsealed rather than half-restoring.
-  return (
-    typeof values.stageName === 'string' &&
-    typeof values.legalName === 'string' &&
-    typeof values.email === 'string' &&
-    typeof values.phoneNumber === 'string' &&
-    typeof values.password === 'string' &&
-    typeof values.coreIndustryTitle === 'string'
-  );
-};
-
-/* Reads the persisted seal state. Corrupt or tampered local storage is
- * treated as unsealed on purpose — the landing page must never break because
- * of local data. */
-function readSealedEntry(): SealedEntry | null {
+/* Reads the persisted seal state. A record that fails the persisted-seal
+ * guard is DESTROYED, not just ignored — LEGACY seals persisted the signup
+ * password, and leaving one in localStorage keeps the leak alive after this
+ * fix ships. Corrupt or tampered local storage is treated as unsealed on
+ * purpose — the landing page must never break because of local data. */
+function readSealedEntry(): SealedEntryRecord | null {
   try {
     const raw = window.localStorage.getItem(SEALED_ENTRY_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isSealedEntry(parsed) ? parsed : null;
+    if (isSealedEntryRecord(parsed)) return parsed;
+    // Rejected (a legacy or tampered record) — destroy it, show unsealed.
+    window.localStorage.removeItem(SEALED_ENTRY_KEY);
+    return null;
   } catch {
     // Invalid JSON — same policy: show the unsealed composition.
     return null;
@@ -109,24 +95,15 @@ export function EntryZones() {
   useEffect(() => {
     const entry = readSealedEntry();
     if (!entry) return;
-    const saved = [
-      entry.values.stageName,
-      entry.values.legalName,
-      entry.values.email,
-      entry.values.phoneNumber,
-      entry.values.password,
-      entry.values.coreIndustryTitle,
+    // Only the persisted echo fields are restored — the stripped captures
+    // (legal name, phone, password) start at their DOM defaults.
+    const restored: Array<[RefObject<HTMLInputElement | null>, string]> = [
+      [stageNameRef, entry.echo.stage_name],
+      [emailRef, entry.echo.email],
+      [coreIndustryTitleRef, entry.echo.core_industry],
     ];
-    const refs = [
-      stageNameRef,
-      legalNameRef,
-      emailRef,
-      phoneNumberRef,
-      passwordRef,
-      coreIndustryTitleRef,
-    ];
-    refs.forEach((ref, index) => {
-      if (ref.current) ref.current.value = saved[index];
+    restored.forEach(([ref, value]) => {
+      if (ref.current) ref.current.value = value;
     });
     setSealed(true);
   }, []);
@@ -159,27 +136,33 @@ export function EntryZones() {
     }
   };
 
-  /* Seal: persist the six entries locally and freeze the fields, then
-   * submit the same values to the signup API — the local record is written
-   * FIRST, so the offline/fallback record exists even when the network
-   * fails. Idempotent — a second click on an already-sealed composition
-   * changes nothing (the retry path is the unseal escape hatch, then
-   * Submit again). */
+  /* Seal: persist the non-secret echo of the signup body locally and freeze
+   * the fields, then submit the full captured values to the signup API —
+   * the local record is written FIRST, so the offline/fallback record
+   * exists even when the network fails. The password, legal name, and
+   * captured phone never touch localStorage. Idempotent — a second click on
+   * an already-sealed composition changes nothing (the retry path is the
+   * unseal escape hatch, then Submit again). */
   const sealWorld = () => {
     if (sealed) return;
-    const entry: SealedEntry = {
-      sealed: true,
-      values: {
-        stageName: stageNameRef.current?.value ?? '',
-        legalName: legalNameRef.current?.value ?? '',
-        email: emailRef.current?.value ?? '',
-        phoneNumber: phoneNumberRef.current?.value ?? '',
-        password: passwordRef.current?.value ?? '',
-        coreIndustryTitle: coreIndustryTitleRef.current?.value ?? '',
-      },
+    const values: SealedEntryValues = {
+      stageName: stageNameRef.current?.value ?? '',
+      legalName: legalNameRef.current?.value ?? '',
+      email: emailRef.current?.value ?? '',
+      phoneNumber: phoneNumberRef.current?.value ?? '',
+      password: passwordRef.current?.value ?? '',
+      coreIndustryTitle: coreIndustryTitleRef.current?.value ?? '',
     };
     try {
-      window.localStorage.setItem(SEALED_ENTRY_KEY, JSON.stringify(entry));
+      // Persist ONLY the non-secret echo of the signup body — the password,
+      // legal name, and captured phone never touch localStorage (an XSS or
+      // a shared-machine read of the record learns nothing secret). The
+      // record is built FROM the POST body, so the echo cannot drift from
+      // what was submitted.
+      window.localStorage.setItem(
+        SEALED_ENTRY_KEY,
+        JSON.stringify(buildSealedEntryRecord(buildSignupPayload(values))),
+      );
     } catch (error) {
       // Blocked or full storage: refuse to half-seal (values would not
       // survive a refresh) — surface the reason and stay editable.
@@ -188,7 +171,7 @@ export function EntryZones() {
     }
     setSealed(true);
     sealedRef.current = true;
-    void submitSignup(entry.values);
+    void submitSignup(values);
   };
 
   const inputClass = sealed ? SEALED_INPUT_CLASS : UNSEALED_INPUT_CLASS;
@@ -369,8 +352,10 @@ export function EntryZones() {
           no box, no hairline (the label brightens on hover so it reads as
           pressable; focus-visible gold outline for keyboard access).
           Clicking seals EVERYTHING the visitor
-          wrote: all six entries are captured to localStorage and frozen
-          readOnly with the jade styling kept and the caret suppressed; the
+          wrote: all six entries are captured and frozen readOnly with the
+          jade styling kept and the caret suppressed — only the NON-SECRET
+          echo of the signup body is persisted to localStorage (the
+          password, legal name, and captured phone never are); the
           button reads SEALED while it dims slightly (with a native
           'Double-click to unseal' tooltip) and ONE hint line — the exact
           statement voice (mono, uppercase, 0.3em tracking, champagne) —

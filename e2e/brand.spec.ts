@@ -1122,23 +1122,33 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
     .evaluate((el) => getComputedStyle(el).color);
   expect(sealedColor).toBe(subtitleColor);
 
-  // The six values plus the sealed flag persist locally under one key.
+  // Only the NON-SECRET echo of the signup body persists locally under one
+  // key: the password, legal name, and captured phone never touch
+  // localStorage. The POST payload still carries all six (pinned by the
+  // landing-seal request-body test).
   const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
   expect(JSON.parse(stored ?? 'null')).toEqual({
     sealed: true,
-    values: {
-      stageName: 'Nova Reign',
-      legalName: 'Nova Reign',
+    echo: {
+      stage_name: 'Nova Reign',
       email: 'nova@example.com',
-      phoneNumber: '+1 555 010 2030',
-      password: 'Nova Reign Studio',
-      coreIndustryTitle: 'Producer',
+      core_industry: 'Producer',
+      title: 'Producer',
+      udr_terms_accepted: true,
     },
   });
+  // The stripped captures are gone from the stored bytes — key AND value
+  // (the legal-name VALUE collides with the persisted stage name, so the
+  // shape assertion above carries that half).
+  expect(stored).not.toContain('Nova Reign Studio');
+  expect(stored).not.toContain('+1 555 010 2030');
+  expect(stored).not.toContain('password');
+  expect(stored).not.toContain('legalName');
+  expect(stored).not.toContain('phoneNumber');
 
   // The checkbox persists nothing: still unchecked after sealing (it is not
   // part of the seal payload — the stored shape above carries ONLY sealed
-  // plus the six values).
+  // plus the non-secret echo).
   await expect(consentCheckbox).not.toBeChecked();
 
   // The button enters the sealed state: label reads SEALED (amendment 11.1
@@ -1171,12 +1181,31 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
     expect(sealedLabelColor).not.toBe(statementColor);
   }).toPass({ timeout: 2000 });
 
-  // A refresh rehydrates the sealed composition: values restored, fields
-  // still readOnly, button still sealed.
+  // A refresh rehydrates the sealed composition: the persisted echo fields
+  // are restored (stage name, email, core industry), the stripped captures
+  // start at their defaults (legal name and phone empty; the password at
+  // its delegated 'Covenant' seed — they are no longer persisted), and
+  // every field is still readOnly with the button still sealed.
   await page.reload();
-  for (const entry of sealedEntries) {
-    const input = page.getByRole('textbox', { name: entry.label });
-    await expect(input).toHaveValue(entry.value);
+  const rehydrated: Array<[string, string]> = [
+    ['Stage Name', 'Nova Reign'],
+    ['Email', 'nova@example.com'],
+    ['Core Industry & Title', 'Producer'],
+  ];
+  for (const [label, value] of rehydrated) {
+    const input = page.getByRole('textbox', { name: label });
+    await expect(input).toHaveValue(value);
+    await expect(input).toHaveAttribute('readonly', '');
+    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
+  }
+  const strippedAtDefaults: Array<[string, string]> = [
+    ['Legal Name', ''],
+    ['Phone Number', ''],
+    ['Password', 'Covenant'],
+  ];
+  for (const [label, value] of strippedAtDefaults) {
+    const input = page.getByRole('textbox', { name: label });
+    await expect(input).toHaveValue(value);
     await expect(input).toHaveAttribute('readonly', '');
     expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
   }
