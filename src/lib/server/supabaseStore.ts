@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
@@ -29,6 +30,7 @@ import {
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
+  type VaultDeltaInput,
 } from '@/lib/server/store';
 import type {
   BaasTransferRecord,
@@ -144,6 +146,12 @@ type DbResult = PromiseLike<{
   data: unknown;
   error: { message: string; code: string } | null;
 }>;
+
+/** The apply_vault_delta() outcome envelope (migration 0009, H1 guard). */
+type VaultDeltaRpcEnvelope =
+  | { outcome: 'applied'; vault: unknown }
+  | { outcome: 'guard_failed' }
+  | { outcome: 'not_found' };
 
 export class SupabaseStore implements Store {
   constructor(private readonly client: SupabaseClient) {}
@@ -390,12 +398,20 @@ export class SupabaseStore implements Store {
   // --- Split runs + line items ---
 
   async insertSplitRun(
-    row: Omit<SplitRunRecord, 'id' | 'status'> & { status?: SplitRunRecord['status'] },
+    row: Omit<SplitRunRecord, 'id' | 'status' | 'idempotency_key'> & {
+      status?: SplitRunRecord['status'];
+      idempotency_key?: string | null;
+    },
   ): Promise<SplitRunRecord> {
     return this.oneStrict<SplitRunRecord>(
       this.client
         .from(TABLES.splitRuns)
-        .insert({ ...row, status: row.status ?? 'posted', id: crypto.randomUUID() })
+        .insert({
+          ...row,
+          status: row.status ?? 'posted',
+          idempotency_key: row.idempotency_key ?? null,
+          id: crypto.randomUUID(),
+        })
         .select()
         .maybeSingle(),
       'insertSplitRun',
@@ -406,6 +422,17 @@ export class SupabaseStore implements Store {
     return this.one<SplitRunRecord>(
       this.client.from(TABLES.splitRuns).select().eq('id', id).maybeSingle(),
       'getSplitRun',
+    );
+  }
+
+  async getSplitRunByIdempotencyKey(key: string): Promise<SplitRunRecord | undefined> {
+    return this.one<SplitRunRecord>(
+      this.client
+        .from(TABLES.splitRuns)
+        .select()
+        .eq('idempotency_key', key)
+        .maybeSingle(),
+      'getSplitRunByIdempotencyKey',
     );
   }
 
@@ -692,6 +719,41 @@ export class SupabaseStore implements Store {
     );
   }
 
+  async applyVaultDelta(input: VaultDeltaInput): Promise<ApplyVaultDeltaResult> {
+    const min = input.min_balances ?? {};
+    const result = await this.one<VaultDeltaRpcEnvelope>(
+      this.client.rpc('apply_vault_delta', {
+        p_payee_id: input.payee_id,
+        p_payee_name: input.payee_name,
+        p_available_delta: input.delta.available_balance,
+        p_pending_delta: input.delta.pending_balance,
+        p_reserve_delta: input.delta.reserve_balance,
+        p_min_available: min.available_balance ?? null,
+        p_min_pending: min.pending_balance ?? null,
+        p_min_reserve: min.reserve_balance ?? null,
+        p_create_if_missing: input.create_if_missing,
+        p_updated_at: input.updated_at,
+      }),
+      'applyVaultDelta',
+    );
+    if (result === undefined) {
+      // The function's contract is to always return an outcome envelope;
+      // jsonb null would be a broken function deployment, not a legal result.
+      throw new Error('applyVaultDelta: expected an outcome envelope from apply_vault_delta, got none.');
+    }
+    if (result.outcome !== 'applied') {
+      return { outcome: result.outcome };
+    }
+    return {
+      outcome: 'applied',
+      // sovereign_vaults carries no insertion_order column (0006), so the
+      // jsonb row is the record verbatim; toRecord is a no-op projection.
+      vault: toRecord<SovereignVaultRecord>(
+        result.vault as Record<string, unknown>,
+      ),
+    };
+  }
+
   async getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined> {
     return this.one<VaultDisputeRecord>(
       this.client
@@ -870,6 +932,31 @@ export class SupabaseStore implements Store {
         .maybeSingle(),
       'getPayoutReversalByTransfer',
     );
+  }
+
+  async updatePayoutReversal(
+    id: string,
+    patch: Pick<PayoutReversalRecord, 'journal_id' | 'ledger_transaction_id'>,
+  ): Promise<PayoutReversalRecord | undefined> {
+    return this.one<PayoutReversalRecord>(
+      this.client
+        .from(TABLES.payoutReversals)
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'updatePayoutReversal',
+    );
+  }
+
+  async deletePayoutReversal(id: string): Promise<void> {
+    const { error } = await this.client
+      .from(TABLES.payoutReversals)
+      .delete()
+      .eq('id', id);
+    if (error) {
+      throw new Error(`deletePayoutReversal: ${error.message} (code ${error.code})`);
+    }
   }
 
   // --- Webhook event ledgers ---

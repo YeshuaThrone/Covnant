@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
@@ -32,6 +33,7 @@ import {
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
+  type VaultDeltaInput,
 } from '@/lib/server/store';
 import type {
   BaasTransferRecord,
@@ -315,11 +317,24 @@ export class InMemoryStore implements Store {
   // --- Split runs + line items ---
 
   async insertSplitRun(
-    row: Omit<SplitRunRecord, 'id' | 'status'> & { status?: SplitRunRecord['status'] },
+    row: Omit<SplitRunRecord, 'id' | 'status' | 'idempotency_key'> & {
+      status?: SplitRunRecord['status'];
+      idempotency_key?: string | null;
+    },
   ): Promise<SplitRunRecord> {
+    const idempotencyKey = row.idempotency_key ?? null;
+    // Migration 0009: split_runs.idempotency_key is unique when present —
+    // the saga replay lock. NULL keys never conflict.
+    if (
+      idempotencyKey !== null &&
+      [...this.splitRuns.values()].some((run) => run.idempotency_key === idempotencyKey)
+    ) {
+      uniqueViolation('split_runs.idempotency_key');
+    }
     const record: SplitRunRecord = {
       ...row,
       status: row.status ?? 'posted',
+      idempotency_key: idempotencyKey,
       id: randomUUID(),
     };
     this.splitRuns.set(record.id, record);
@@ -328,6 +343,10 @@ export class InMemoryStore implements Store {
 
   async getSplitRun(id: string): Promise<SplitRunRecord | undefined> {
     return this.splitRuns.get(id);
+  }
+
+  async getSplitRunByIdempotencyKey(key: string): Promise<SplitRunRecord | undefined> {
+    return [...this.splitRuns.values()].find((run) => run.idempotency_key === key);
   }
 
   async updateSplitRunStatus(
@@ -509,6 +528,71 @@ export class InMemoryStore implements Store {
     return row;
   }
 
+  /**
+   * The atomic vault mutation (migration 0009, H1) — the memory-store mirror
+   * of the apply_vault_delta RPC. There is no await between the read and the
+   * write here (the method body is synchronous), so a concurrent second call
+   * observes the first call's balances — the same no-lost-update guarantee
+   * the database enforces with its conditional statement.
+   */
+  async applyVaultDelta(input: VaultDeltaInput): Promise<ApplyVaultDeltaResult> {
+    const delta = input.delta;
+    const min = input.min_balances ?? {};
+    const minAvailable = min.available_balance ?? null;
+    const minPending = min.pending_balance ?? null;
+    const minReserve = min.reserve_balance ?? null;
+    const current = this.vaults.get(input.payee_id);
+
+    if (current === undefined) {
+      if (!input.create_if_missing) {
+        return { outcome: 'not_found' };
+      }
+      // Minting is credits-only: a negative delta with no vault to debit is
+      // the caller's not_found, and a floor the minted balances cannot
+      // satisfy is guard_failed — both before anything is written.
+      if (delta.available_balance < 0 || delta.pending_balance < 0 || delta.reserve_balance < 0) {
+        return { outcome: 'not_found' };
+      }
+      if (
+        (minAvailable !== null && delta.available_balance < minAvailable) ||
+        (minPending !== null && delta.pending_balance < minPending) ||
+        (minReserve !== null && delta.reserve_balance < minReserve)
+      ) {
+        return { outcome: 'guard_failed' };
+      }
+      const minted: SovereignVaultRecord = {
+        payee_id: input.payee_id,
+        payee_name: input.payee_name,
+        available_balance: delta.available_balance,
+        pending_balance: delta.pending_balance,
+        reserve_balance: delta.reserve_balance,
+        updated_at: input.updated_at,
+      };
+      this.vaults.set(minted.payee_id, minted);
+      return { outcome: 'applied', vault: minted };
+    }
+
+    const nextAvailable = current.available_balance + delta.available_balance;
+    const nextPending = current.pending_balance + delta.pending_balance;
+    const nextReserve = current.reserve_balance + delta.reserve_balance;
+    if (
+      (minAvailable !== null && nextAvailable < minAvailable) ||
+      (minPending !== null && nextPending < minPending) ||
+      (minReserve !== null && nextReserve < minReserve)
+    ) {
+      return { outcome: 'guard_failed' };
+    }
+    const updated: SovereignVaultRecord = {
+      ...current,
+      available_balance: nextAvailable,
+      pending_balance: nextPending,
+      reserve_balance: nextReserve,
+      updated_at: input.updated_at,
+    };
+    this.vaults.set(updated.payee_id, updated);
+    return { outcome: 'applied', vault: updated };
+  }
+
   async getVaultDispute(payeeId: string): Promise<VaultDisputeRecord | undefined> {
     return this.vaultDisputes.get(payeeId);
   }
@@ -610,6 +694,21 @@ export class InMemoryStore implements Store {
       (row) => row.created_at,
       'desc',
     )[0];
+  }
+
+  async updatePayoutReversal(
+    id: string,
+    patch: Pick<PayoutReversalRecord, 'journal_id' | 'ledger_transaction_id'>,
+  ): Promise<PayoutReversalRecord | undefined> {
+    const row = this.payoutReversals.get(id);
+    if (row === undefined) return undefined;
+    const updated: PayoutReversalRecord = { ...row, ...patch };
+    this.payoutReversals.set(id, updated);
+    return updated;
+  }
+
+  async deletePayoutReversal(id: string): Promise<void> {
+    this.payoutReversals.delete(id);
   }
 
   // --- Webhook event ledgers ---
@@ -910,6 +1009,14 @@ export class InMemoryStore implements Store {
 }
 
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
+function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  if (a.transaction_id !== b.transaction_id) {
+    return a.transaction_id < b.transaction_id ? -1 : 1;
+  }
+  return 0;
+}
+ SQL backends' BINARY collation). */
 function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
   if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
   if (a.transaction_id !== b.transaction_id) {
