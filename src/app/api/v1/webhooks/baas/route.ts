@@ -5,6 +5,7 @@ import { getStore } from "@/lib/server/store";
 import { clientIdentity } from "@/modules/don/http";
 import { validateBaasWebhookPayload } from "@/lib/don/validation";
 import { ingestBaasWebhook } from "@/lib/server/webhooks";
+import { authenticateStandardWebhook } from "@/modules/don/webhookSignature";
 
 export async function POST(request: NextRequest) {
   const identity = clientIdentity(request);
@@ -17,9 +18,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Signature gate (Standard Webhooks HMAC): unsigned, stale, or mismatched
+  // bodies are rejected here — BEFORE the body is parsed, validated, or the
+  // store is read — so no forged delivery can settle/fail/reverse a payout.
+  // Unset secret fails closed with a 401 not-configured error.
+  const auth = await authenticateStandardWebhook(request, "COLUMN_WEBHOOK_SECRET");
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(auth.rawBody);
   } catch {
     return donJsonError(
       400,
