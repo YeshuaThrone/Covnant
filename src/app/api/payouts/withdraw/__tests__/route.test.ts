@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { POST } from '../route';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 import { supabaseFromEnv } from '@/lib/supabase';
 
 /**
@@ -88,10 +89,10 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function postRequest(body: unknown): Request {
+function postRequest(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('http://localhost/api/payouts/withdraw', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -135,6 +136,9 @@ function stubFetch(sequence: Response[]) {
 }
 
 beforeEach(() => {
+  // The route's shared limiter (5/min) is module state; every test starts
+  // with a fresh window.
+  resetRateLimits();
   vi.stubEnv('PLAID_CLIENT_ID', 'test-client-id');
   vi.stubEnv('PLAID_SECRET', 'test-secret');
 });
@@ -152,8 +156,12 @@ describe('POST /api/payouts/withdraw', () => {
   });
 
   it('returns 400 for invalid amounts (non-string, non-numeric, zero, negative)', async () => {
-    for (const amount of [1_000_000_00, 'abc', '0', '-100000000', '1e9', undefined]) {
-      const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount }));
+    for (const [i, amount] of [1_000_000_00, 'abc', '0', '-100000000', '1e9', undefined].entries()) {
+      // Each attempt is its own client: a unique address per iteration keeps
+      // the route's 5/min limiter from gating the validation battery.
+      const res = await POST(
+        postRequest({ rightsHolderId: 'rh_1', amount }, { 'x-forwarded-for': `198.51.100.${i}` }),
+      );
       expect(res.status).toBe(400);
     }
   });

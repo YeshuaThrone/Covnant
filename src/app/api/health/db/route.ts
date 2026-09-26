@@ -27,6 +27,9 @@
 import { resolveDataSourceMode } from '@/lib/data-source';
 import { supabaseFromEnv } from '@/lib/supabase';
 
+import { checkSharedRateLimit, PUBLIC_READ_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
+
 export const dynamic = 'force-dynamic';
 
 interface ProbeResult {
@@ -107,7 +110,20 @@ interface TableHealth {
   error: string | null;
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
+  // Shared limiter first (audit M5): this diagnostic is unauthenticated by
+  // locked spec, so the per-address window is its only flood guard.
+  const limit = await checkSharedRateLimit(
+    `health-db:${clientAddress(request)}`,
+    PUBLIC_READ_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return Response.json(
+      { ok: false, error: `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.` },
+      { status: 429, headers: { 'cache-control': 'no-store' } },
+    );
+  }
+
   const mode = resolveDataSourceMode();
 
   if (mode !== 'supabase') {

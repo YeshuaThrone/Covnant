@@ -1,4 +1,6 @@
 import { supabaseFromEnv } from '@/lib/supabase';
+import { checkSharedRateLimit, MONEY_INITIATION_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 import { requireHolderAccess } from '@/lib/server/apiAccess';
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +48,17 @@ function jsonError(error: string, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Shared limiter first (audit M5): the money-initiation window (5/min) burns
+  // before the session round-trips or the Plaid call, so a flood never
+  // reaches either.
+  const limit = await checkSharedRateLimit(
+    `plaid-exchange:${clientAddress(request)}`,
+    MONEY_INITIATION_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(`Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`, 429);
+  }
+
   let body: ExchangeTokenBody;
   try {
     body = (await request.json()) as ExchangeTokenBody;

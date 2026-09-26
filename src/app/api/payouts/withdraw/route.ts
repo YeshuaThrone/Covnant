@@ -33,6 +33,8 @@ import {
   UNVERIFIED_FALLBACK_TAX_PROFILE,
   withholdingUnitsOn,
 } from '@/lib/escrow/balance';
+import { checkSharedRateLimit, MONEY_INITIATION_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +58,16 @@ function parseAmount(raw: unknown): bigint | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Shared limiter first (audit M5): the money-initiation window (5/min) burns
+  // before the session round-trips, so a flood never reaches Supabase Auth.
+  const limit = await checkSharedRateLimit(
+    `payouts-withdraw:${clientAddress(request)}`,
+    MONEY_INITIATION_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(`Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`, 429);
+  }
+
   let body: WithdrawBody;
   try {
     body = (await request.json()) as WithdrawBody;

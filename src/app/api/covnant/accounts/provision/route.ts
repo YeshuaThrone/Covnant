@@ -59,6 +59,8 @@
  */
 
 import { getDb } from '@/lib/db';
+import { checkSharedRateLimit, MONEY_INITIATION_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 import { requireHolderAccess } from '@/lib/server/apiAccess';
 import {
   provisionRightsHolderVirtualAccount,
@@ -109,6 +111,17 @@ function provisionResponse(outcome: ProvisioningOutcome): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Shared limiter first (audit M5): provisioning discloses bank-account
+  // data, so the money-initiation window (5/min) burns before the session
+  // round-trips, the row lock, or the Increase call.
+  const limit = await checkSharedRateLimit(
+    `accounts-provision:${clientAddress(request)}`,
+    MONEY_INITIATION_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(`Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`, 429);
+  }
+
   let body: ProvisionRequestBody;
   try {
     body = (await request.json()) as ProvisionRequestBody;

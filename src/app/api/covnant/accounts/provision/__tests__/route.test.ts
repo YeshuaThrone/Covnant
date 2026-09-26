@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '../route';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 import { getDb } from '@/lib/db';
 
 /**
@@ -124,6 +125,9 @@ function provisionRequest(body: unknown): Request {
 }
 
 beforeEach(() => {
+  // The route's shared limiter (5/min) is module state; every test starts
+  // with a fresh window.
+  resetRateLimits();
   vi.stubEnv('INCREASE_API_KEY', 'test-increase-key');
   vi.stubEnv('INCREASE_SOURCE_ACCOUNT_ID', 'account_in71c4amph0vgo2qllky');
 });

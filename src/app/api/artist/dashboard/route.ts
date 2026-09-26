@@ -27,6 +27,8 @@ import {
   findRightsHolder,
   UNVERIFIED_FALLBACK_TAX_PROFILE,
 } from '@/lib/escrow/balance';
+import { checkSharedRateLimit, PUBLIC_READ_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +37,16 @@ function jsonError(error: string, status: number): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // Shared limiter first (audit M5): the per-address window burns before the
+  // session round-trips, so a flood never reaches Supabase Auth.
+  const limit = await checkSharedRateLimit(
+    `artist-dashboard:${clientAddress(request)}`,
+    PUBLIC_READ_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(`Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`, 429);
+  }
+
   const access = await requireHolderAccess(
     request,
     new URL(request.url).searchParams.get('rightsHolderId'),

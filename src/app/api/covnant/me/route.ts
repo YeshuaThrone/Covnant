@@ -44,6 +44,8 @@ import {
   fetchEscrowBalance,
   findRightsHolder,
 } from '@/lib/escrow/balance';
+import { checkSharedRateLimit, PUBLIC_READ_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 import { storedVirtualAccount } from '@/lib/covnant/provisioning';
 import { normalizeEngine } from '@/lib/covnant/uct';
 import type { CreatorProfile, CovnantMeResponse } from '@/lib/covnant/types';
@@ -136,7 +138,18 @@ function holderIdentity(
   };
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request?: Request): Promise<Response> {
+  // Shared limiter first (audit M5): the per-address window burns before the
+  // session round-trips, so a flood never reaches Supabase Auth. The request
+  // is optional only for direct unit invocation; production always passes it.
+  const limit = await checkSharedRateLimit(
+    `covnant-me:${clientAddress(request)}`,
+    PUBLIC_READ_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(429, 'rate_limited', `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`);
+  }
+
   // Fail-closed environment checks first — sanitized named codes, zero reads.
   if (!readSupabasePublicEnv()) {
     return jsonError(503, 'supabase_not_configured', 'Supabase credentials are not configured.');
