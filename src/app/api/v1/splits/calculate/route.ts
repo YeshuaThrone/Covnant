@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
+import { requireOperator } from "@/lib/server/apiAccess";
 import { clientIdentity } from "@/modules/don/http";
 import { validateSplitCalculatePayload } from "@/lib/don/validation";
 import { calculateUdrSplits } from "@/lib/server/udrSplits";
@@ -15,6 +16,14 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): split-run calculation over any payee's ledger
+  // facts is an operator surface — the signed admin cookie is verified
+  // before any body is parsed.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;

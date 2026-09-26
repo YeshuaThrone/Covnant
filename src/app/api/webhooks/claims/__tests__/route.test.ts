@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { POST } from '../route';
 import { listLedger } from '@/lib/ledger/store';
 
 /**
  * PR 4 — claims webhook contract tests (memory mode).
+ *
+ * Hardening (gen 12) layers a shared-secret gate on this webhook, so every
+ * request below presents the configured secret; the gate's own refusals
+ * (401 unset, 401 mismatch, rate-limit burn) are pinned in
+ * src/lib/server/__tests__/authz-gates.test.ts.
  *
  * The vendored `processUniversalSocialWebhookAction` builds a FRESH SDK instance
  * per call with no DB client when Supabase env vars are unset, so every claim
@@ -13,6 +18,8 @@ import { listLedger } from '@/lib/ledger/store';
  * a silent 200), and no ledger writes on failure. DB-mode upsert behavior is
  * covered by the engine and the ledger store tests.
  */
+
+const WEBHOOK_SECRET = 'whsec_pr4-contract-tests';
 
 const validClaim = {
   platform: 'SPOTIFY',
@@ -30,14 +37,22 @@ function post(body: unknown): Promise<Response> {
   return POST(
     new Request('https://covnant.example/api/webhooks/claims', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-claims-webhook-secret': WEBHOOK_SECRET,
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     })
   );
 }
 
 beforeEach(() => {
+  process.env.CLAIMS_WEBHOOK_SECRET = WEBHOOK_SECRET;
   delete (globalThis as { __covnantLedgerIndex?: unknown }).__covnantLedgerIndex;
+});
+
+afterEach(() => {
+  delete process.env.CLAIMS_WEBHOOK_SECRET;
 });
 
 describe('POST /api/webhooks/claims', () => {

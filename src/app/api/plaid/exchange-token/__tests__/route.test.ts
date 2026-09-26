@@ -10,6 +10,22 @@ import { supabaseFromEnv } from '@/lib/supabase';
 
 vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: vi.fn() }));
 
+// Hardening (gen 12): the suite exercises the Plaid exchange flow as an
+// authorized OPERATOR — the gate's 401/403 refusals are pinned in
+// src/lib/server/__tests__/authz-gates.test.ts. Missing publicToken/accountId
+// still 400 before the gate; a missing rightsHolderId 400s at the route.
+vi.mock('@/lib/server/apiAccess', () => ({
+  requireHolderAccess: async (
+    _request: unknown,
+    requested: string | null | undefined,
+  ) => ({
+    ok: true as const,
+    role: 'operator' as const,
+    holderId:
+      typeof requested === 'string' && requested.trim() !== '' ? requested.trim() : null,
+  }),
+}));
+
 const mockSupabaseFromEnv = vi.mocked(supabaseFromEnv);
 
 type UpsertPayload = Record<string, unknown>;
@@ -60,7 +76,18 @@ describe('POST /api/plaid/exchange-token', () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.error).toContain('accountId');
-    expect(body.error).toContain('rightsHolderId');
+  });
+
+  it('requires a holder identity when rightsHolderId is absent (hardening gen 12)', async () => {
+    // rightsHolderId is no longer a REQUIRED FIELD: a signed-in creator's
+    // holder id is derived from the session, and the operator names it
+    // explicitly. The stubbed operator supplies neither, so the route still
+    // refuses with its own 400 — the payout destination is never unscoped.
+    const res = await POST(postRequest({ publicToken: 'tok', accountId: 'acc_1' }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('rightsHolderId is required.');
   });
 
   it('returns 503 when Plaid credentials are absent', async () => {

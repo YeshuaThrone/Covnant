@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
+import { requireOperator } from "@/lib/server/apiAccess";
 import { clientIdentity } from "@/modules/don/http";
 import { validateVaultPayoutPayload } from "@/lib/don/validation";
 import { payoutFromVault } from "@/modules/vaults/engine";
@@ -15,6 +16,13 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): payout initiation is operator-only — the
+  // signed admin cookie is verified before any body is parsed.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;

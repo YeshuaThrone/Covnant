@@ -12,10 +12,18 @@
  * Plaid boundary via smallestUnitsToPlaidAmount. Environment is read lazily
  * inside the handler (503 when unconfigured); Plaid failures return a
  * sanitized 502 that never echoes secrets or upstream payloads.
+ *
+ * GATED (hardening gen 12 — this route could move ANY holder's escrow to
+ * ANY connected bank account before): the holder identity is DERIVED from
+ * the verified creator session; a body rightsHolderId is only a claim to
+ * verify — a signed-in creator requesting another holder's withdrawal is
+ * refused 403 before any read runs. An operator (signed admin cookie) may
+ * initiate a withdrawal for a named holder.
  */
 
 import { randomUUID } from 'node:crypto';
 import { supabaseFromEnv } from '@/lib/supabase';
+import { requireHolderAccess } from '@/lib/server/apiAccess';
 import { formatMicro } from '@/lib/fixed-point';
 import { isMissingMetadataColumnError, METADATA_COLUMN_DDL_NOTE, stampSupabaseLedgerRow } from '@/lib/ledger/cbt-settlement';
 import {
@@ -54,10 +62,22 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return jsonError('Request body must be valid JSON with rightsHolderId and amount.', 400);
   }
-  const { rightsHolderId, amount } = body;
-  if (typeof rightsHolderId !== 'string' || rightsHolderId.trim() === '') {
+  const suppliedHolderId = typeof body.rightsHolderId === 'string' ? body.rightsHolderId : null;
+
+  // Identity before any holder data is touched: the session (or operator
+  // cookie) decides whose escrow may move; a mismatched client claim is
+  // refused before the balance, the payout account, or Plaid is reached.
+  const access = await requireHolderAccess(request, suppliedHolderId);
+  if (!access.ok) {
+    return jsonError(access.message, access.status);
+  }
+  const rightsHolderId = access.holderId;
+  if (!rightsHolderId) {
+    // Operator path with no holder named — a creator session always
+    // implies its own holder, so this is unreachable for owners.
     return jsonError('rightsHolderId is required.', 400);
   }
+  const amount = body.amount;
   const amountUnits = parseAmount(amount);
   if (amountUnits === null) {
     return jsonError('amount must be a positive BigInt string in smallest ledger units (e.g. "100000000").', 400);

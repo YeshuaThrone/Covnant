@@ -9,9 +9,18 @@
  * All money values are strings of BigInt smallest ledger units (1e-8 scale,
  * matching the ledger's numeric(20,8) columns). Tax uses the vendored
  * engine's effective rate for the holder's tax profile on US territory.
+ *
+ * GATED (hardening gen 12 — this route was an unauthenticated IDOR: any
+ * caller could read ANY holder's balances by naming their rightsHolderId).
+ * The holder identity is now DERIVED from the verified creator session and
+ * a client-supplied rightsHolderId is only a claim to verify — a signed-in
+ * creator requesting another holder's data is refused 403 before any read
+ * runs. Operators (the signed admin cookie) may still read any holder's
+ * summary, and must name the holder explicitly.
  */
 
 import { supabaseFromEnv } from '@/lib/supabase';
+import { requireHolderAccess } from '@/lib/server/apiAccess';
 import {
   EscrowLedgerReadError,
   fetchEscrowBalance,
@@ -26,8 +35,18 @@ function jsonError(error: string, status: number): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const rightsHolderId = new URL(request.url).searchParams.get('rightsHolderId');
-  if (!rightsHolderId || rightsHolderId.trim() === '') {
+  const access = await requireHolderAccess(
+    request,
+    new URL(request.url).searchParams.get('rightsHolderId'),
+  );
+  if (!access.ok) {
+    return jsonError(access.message, access.status);
+  }
+
+  // A creator session implies its OWN holder; an operator must name one.
+  const rightsHolderId =
+    access.role === 'owner' ? access.holderId : new URL(request.url).searchParams.get('rightsHolderId')?.trim() ?? '';
+  if (!rightsHolderId) {
     return jsonError('rightsHolderId query parameter is required.', 400);
   }
 

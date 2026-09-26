@@ -101,11 +101,20 @@ const SETTLED: SettlementResult = {
   reconciliationStatus: 'PASS',
 };
 
+const WEBHOOK_SECRET = 'whsec_gen9-tests';
+
 function post(body: unknown): Promise<Response> {
   return POST(
     new Request('https://covnant.example/api/webhooks/claims', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        // Hardening (gen 12): the webhook is shared-secret gated. Every suite
+        // request presents the configured secret so the tests below exercise
+        // the route's engine/ledger contract past the gate. The secret gate's
+        // own refusals are pinned in src/lib/server/__tests__/authz-gates.test.ts.
+        'x-claims-webhook-secret': WEBHOOK_SECRET,
+      },
       body: JSON.stringify(body),
     }),
   );
@@ -119,12 +128,14 @@ beforeEach(() => {
   ledgerDb.failUpdateWith = null;
   ledgerDb.failReadWith = null;
   enableDbMode();
+  process.env.CLAIMS_WEBHOOK_SECRET = WEBHOOK_SECRET;
   mockSupabaseFromEnv.mockReturnValue(fakeLedgerDb());
   mockAction.mockResolvedValue({ success: true, processedCount: 1, data: [SETTLED] });
 });
 
 afterEach(() => {
   disableDbMode();
+  delete process.env.CLAIMS_WEBHOOK_SECRET;
   vi.unstubAllGlobals();
 });
 

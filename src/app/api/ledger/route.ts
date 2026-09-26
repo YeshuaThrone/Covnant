@@ -14,17 +14,29 @@
  *   - Memory mode: with no credentials configured the store serves its
  *     in-memory index; nothing is persisted or exposed externally.
  *
- * No request authentication exists in v1 by locked spec decision; when auth
- * lands in v2 the store's read should switch to the caller's
- * anon-key/authenticated client so RLS row policies scope every response.
+ * GATED (hardening gen 12 — REVERSES the v1 locked public-dump decision,
+ * founder approval recorded in plan generation 12): a full royalty-ledger
+ * dump is no longer anonymous. The read requires a registered creator
+ * session OR the signed admin cookie; anonymous callers get 401 no_session,
+ * signed-in-but-unenrolled sessions get 403 not_registered. The response
+ * shape is unchanged for authorized callers — the workspace asset page's
+ * verification strip and the admin console degrade to their honest error
+ * states only when unauthenticated.
  */
 
 import { listLedger, totalsFrom } from '@/lib/ledger/store';
 import { resolveDataSourceMode } from '@/lib/data-source';
+import { requireRegisteredOrOperator } from '@/lib/server/apiAccess';
+import { jsonError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const access = await requireRegisteredOrOperator(request);
+  if (!access.ok) {
+    return jsonError(access.status, access.code, access.message);
+  }
+
   const mode = resolveDataSourceMode();
   const rows = await listLedger();
   const totals = totalsFrom(rows);

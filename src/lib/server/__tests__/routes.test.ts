@@ -25,6 +25,30 @@ import { COMPANY_VARIANCE_PAYEE_ID } from "@/modules/don/constants";
 import type { CreatorTaxProfile } from "@/modules/don/records";
 
 /**
+ * The battery exercises each Don route's VALIDATION and engine behavior as
+ * an authorized OPERATOR (the gate module is stubbed open so the handlers'
+ * full flows run without cookie fixtures). The gates themselves — real
+ * 401/403 refusals, cross-account refusals, real operator-cookie crypto —
+ * are pinned in src/lib/server/__tests__/authz-gates.test.ts.
+ */
+vi.mock("@/lib/server/apiAccess", () => ({
+  // requireOperator is SYNCHRONOUS in apiAccess.ts — a route reads `.ok` off
+  // its return value directly; an async stub would hand every handler a
+  // Promise and collapse every verdict into a 200 with an empty body.
+  requireOperator: () => ({ ok: true, role: "operator" as const }),
+  requireHolderAccess: async (
+    _request: unknown,
+    requested: string | null | undefined,
+  ) => ({
+    ok: true as const,
+    role: "operator" as const,
+    holderId:
+      typeof requested === "string" && requested.trim() !== "" ? requested.trim() : null,
+  }),
+  requireRegisteredOrOperator: async () => ({ ok: true, role: "operator" as const }),
+}));
+
+/**
  * Route battery: every Don endpoint through its Next.js handler with the
  * InMemoryStore swapped in via setStore() (spec criteria 1-9 at the HTTP
  * boundary: envelopes, status codes, rate limiting, sandbox rails).

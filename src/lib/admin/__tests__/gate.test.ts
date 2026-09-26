@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_COOKIE_NAME,
   ADMIN_SESSION_TTL_SECONDS,
@@ -161,6 +161,45 @@ describe('adminSessionCookie / checkAdminGate — the cookie the routes verify',
       expect(denied.status).toBe(401);
       expect(denied.code).toBe('admin_not_authenticated');
       expect(denied.message).not.toContain(PASSWORD);
+    }
+  });
+});
+
+describe('verifyAdminSession — the DON_DEV_SEED carve-out is dev-only (hardening gen 12)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    withEnv(undefined);
+    delete process.env.DON_DEV_SEED;
+  });
+
+  it('opens without a password under DON_DEV_SEED=1 in a non-production runtime', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(undefined);
+    expect(verifyAdminSession(null)).toEqual({ ok: true });
+  });
+
+  it('NEVER opens a production console on the seed flag — 503 admin_not_configured', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(undefined);
+    const verdict = verifyAdminSession(null);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.status).toBe(503);
+      expect(verdict.code).toBe('admin_not_configured');
+    }
+  });
+
+  it('a configured password still requires the cookie even with the seed flag set', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(PASSWORD);
+    const verdict = verifyAdminSession(null);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.status).toBe(401);
+      expect(verdict.code).toBe('admin_not_authenticated');
     }
   });
 });

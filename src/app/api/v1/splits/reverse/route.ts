@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
+import { requireOperator } from "@/lib/server/apiAccess";
 import { clientIdentity } from "@/modules/don/http";
 import { validateSplitReversePayload } from "@/lib/don/validation";
 import { reverseSplitRun } from "@/lib/server/splitReversal";
@@ -15,6 +16,14 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): reversing a split run rewrites settled money
+  // — strictly an operator action. The signed admin cookie is verified
+  // before any body is parsed.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;
