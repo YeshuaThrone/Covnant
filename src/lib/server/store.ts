@@ -370,6 +370,16 @@ export interface Store {
   getPayoutReversalByTransfer(
     transferId: string,
   ): Promise<PayoutReversalRecord | undefined>;
+  /**
+   * Finalizes the reversal lock row (migration 0009, H4) with the posted
+   * journal and ledger ids; undefined when the row is gone.
+   */
+  updatePayoutReversal(
+    id: string,
+    patch: Pick<PayoutReversalRecord, 'journal_id' | 'ledger_transaction_id'>,
+  ): Promise<PayoutReversalRecord | undefined>;
+  /** Drops a reversal lock row whose money move was refused (retryable). */
+  deletePayoutReversal(id: string): Promise<void>;
 
   // --- Webhook event ledgers (idempotent by unique event_id) ---
   getWebhookEvent(eventId: string): Promise<BaasWebhookEventRecord | undefined>;

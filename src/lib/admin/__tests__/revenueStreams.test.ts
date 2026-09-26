@@ -49,6 +49,7 @@ function run(id: string, source: string): SplitRunRecord {
     currency: 'USD',
     gross_cents: 0,
     line_item_count: 0,
+    idempotency_key: null,
     variance_account_cents: 0,
     created_at: '2026-09-22T00:00:00.000Z',
     status: 'posted',

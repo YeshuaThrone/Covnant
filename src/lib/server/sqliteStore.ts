@@ -25,6 +25,7 @@ import Database from 'better-sqlite3';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
@@ -33,6 +34,7 @@ import {
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
+  type VaultDeltaInput,
 } from '@/lib/server/store';
 import type {
   BaasTransferRecord,
@@ -306,9 +308,14 @@ CREATE TABLE IF NOT EXISTS payout_reversals (
   amount_cents INTEGER NOT NULL,
   reason TEXT NOT NULL,
   ledger_transaction_id TEXT,
-  journal_id TEXT NOT NULL,
+  journal_id TEXT,
   created_at TEXT NOT NULL
 );
+
+-- 0009 (H4): one reversal per BaaS transfer — the engine inserts this row
+-- as its replay lock before money moves.
+CREATE UNIQUE INDEX IF NOT EXISTS payout_reversals_transfer_id_unique
+  ON payout_reversals (transfer_id);
 
 CREATE TABLE IF NOT EXISTS gl_journals (
   id TEXT PRIMARY KEY,
@@ -321,6 +328,11 @@ CREATE TABLE IF NOT EXISTS gl_journals (
   entry_hash TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL DEFAULT 'posted'
 );
+
+-- 0009 (H2): one journal per chain sequence — a concurrent post that lost
+-- the race surfaces the same failure the database raises.
+CREATE UNIQUE INDEX IF NOT EXISTS gl_journals_sequence_unique
+  ON gl_journals (sequence);
 
 CREATE TABLE IF NOT EXISTS gl_entries (
   id TEXT PRIMARY KEY,
@@ -553,6 +565,39 @@ export class SqliteStore implements Store {
     if (!journalColumns.has('state')) {
       this.db.exec(`ALTER TABLE gl_journals ADD COLUMN state TEXT NOT NULL DEFAULT 'posted'`);
     }
+
+    // 0009 — settlement-core concurrency guards (pre-0009 databases).
+    const splitRunColumns0009 = columnsOf('split_runs');
+    if (!splitRunColumns0009.has('idempotency_key')) {
+      this.db.exec(`ALTER TABLE split_runs ADD COLUMN idempotency_key TEXT`);
+    }
+    // 0009 (H4): journal_id became nullable — the reversal row is inserted
+    // before the journal exists. SQLite cannot relax NOT NULL in place;
+    // rebuild the column through a rename/copy/drop.
+    const reversalInfo = this.db
+      .prepare(`PRAGMA table_info(payout_reversals)`)
+      .all() as Array<{ name: string; notnull: number }>;
+    const journalIdColumn = reversalInfo.find((column) => column.name === 'journal_id');
+    if (journalIdColumn && journalIdColumn.notnull === 1) {
+      this.db.exec(`
+        ALTER TABLE payout_reversals RENAME COLUMN journal_id TO journal_id_legacy;
+        ALTER TABLE payout_reversals ADD COLUMN journal_id TEXT;
+        UPDATE payout_reversals SET journal_id = journal_id_legacy;
+        ALTER TABLE payout_reversals DROP COLUMN journal_id_legacy;
+      `);
+    }
+    // 0009 (H2/H3/H4): the uniqueness constraints themselves. Loud failure
+    // on existing duplicates — a forked chain needs manual repair, exactly
+    // like migration 0009 against Postgres.
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS gl_journals_sequence_unique ON gl_journals (sequence)`,
+    );
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS payout_reversals_transfer_id_unique ON payout_reversals (transfer_id)`,
+    );
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS split_runs_idempotency_key_unique ON split_runs (idempotency_key)`,
+    );
   }
 
   async insertShow(show: ValidShowPayload): Promise<ShowRecord> {
@@ -780,16 +825,17 @@ export class SqliteStore implements Store {
     const record: SplitRunRecord = {
       ...row,
       status: row.status ?? 'posted',
+      idempotency_key: row.idempotency_key ?? null,
       id: randomUUID(),
     };
     this.db
       .prepare(
         `INSERT INTO split_runs (
            id, source, period, currency, gross_cents, line_item_count,
-           variance_account_cents, created_at, status
+           variance_account_cents, created_at, status, idempotency_key
          ) VALUES (
            @id, @source, @period, @currency, @gross_cents, @line_item_count,
-           @variance_account_cents, @created_at, @status
+           @variance_account_cents, @created_at, @status, @idempotency_key
          )`,
       )
       .run(record);
@@ -799,6 +845,14 @@ export class SqliteStore implements Store {
   async getSplitRun(id: string): Promise<SplitRunRecord | undefined> {
     return Promise.resolve(
       this.db.prepare(`SELECT * FROM split_runs WHERE id = ?`).get(id) as SplitRunRecord | undefined,
+    );
+  }
+
+  async getSplitRunByIdempotencyKey(key: string): Promise<SplitRunRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM split_runs WHERE idempotency_key = ?`)
+        .get(key) as SplitRunRecord | undefined,
     );
   }
 
@@ -1098,6 +1152,95 @@ export class SqliteStore implements Store {
     return Promise.resolve(row);
   }
 
+  async applyVaultDelta(input: VaultDeltaInput): Promise<ApplyVaultDeltaResult> {
+    // The atomic vault mutation (migration 0009, H1): SQLite's synchronous
+    // transaction makes the guarded UPDATE the same single-statement move
+    // the Supabase RPC performs, with identical outcome semantics.
+    const min = input.min_balances ?? {};
+    const minAvailable = min.available_balance ?? null;
+    const minPending = min.pending_balance ?? null;
+    const minReserve = min.reserve_balance ?? null;
+    const current = this.db
+      .prepare(`SELECT * FROM sovereign_vaults WHERE payee_id = ?`)
+      .get(input.payee_id) as SovereignVaultRecord | undefined;
+
+    if (current === undefined) {
+      if (!input.create_if_missing) {
+        return { outcome: 'not_found' };
+      }
+      // A vault can only be minted from nothing; every negative leg is a
+      // refused move, and floors apply to the minted balances as well.
+      if (
+        input.delta.available_balance < 0 ||
+        input.delta.pending_balance < 0 ||
+        input.delta.reserve_balance < 0 ||
+        (minAvailable !== null && input.delta.available_balance < minAvailable) ||
+        (minPending !== null && input.delta.pending_balance < minPending) ||
+        (minReserve !== null && input.delta.reserve_balance < minReserve)
+      ) {
+        return { outcome: 'guard_failed' };
+      }
+      const minted: SovereignVaultRecord = {
+        payee_id: input.payee_id,
+        payee_name: input.payee_name,
+        available_balance: input.delta.available_balance,
+        pending_balance: input.delta.pending_balance,
+        reserve_balance: input.delta.reserve_balance,
+        updated_at: input.updated_at,
+      };
+      this.db
+        .prepare(
+          `INSERT INTO sovereign_vaults (
+             payee_id, payee_name, available_balance, pending_balance,
+             reserve_balance, updated_at
+           ) VALUES (
+             @payee_id, @payee_name, @available_balance, @pending_balance,
+             @reserve_balance, @updated_at
+           )`,
+        )
+        .run(minted);
+      return { outcome: 'applied', vault: minted };
+    }
+
+    // Guarded UPDATE: the sufficiency floors live in the WHERE clause of the
+    // same statement that moves the money.
+    const result = this.db
+      .prepare(
+        `UPDATE sovereign_vaults SET
+           available_balance = available_balance + @available_delta,
+           pending_balance = pending_balance + @pending_delta,
+           reserve_balance = reserve_balance + @reserve_delta,
+           payee_name = @payee_name,
+           updated_at = @updated_at
+         WHERE payee_id = @payee_id
+           AND (@min_available IS NULL OR available_balance + @available_delta >= @min_available)
+           AND (@min_pending IS NULL OR pending_balance + @pending_delta >= @min_pending)
+           AND (@min_reserve IS NULL OR reserve_balance + @reserve_delta >= @min_reserve)`,
+      )
+      .run({
+        available_delta: input.delta.available_balance,
+        pending_delta: input.delta.pending_balance,
+        reserve_delta: input.delta.reserve_balance,
+        payee_name: input.payee_name,
+        updated_at: input.updated_at,
+        payee_id: input.payee_id,
+        min_available: minAvailable,
+        min_pending: minPending,
+        min_reserve: minReserve,
+      });
+    if ((result.changes ?? 0) === 0) {
+      // The row existed a moment ago (synchronous driver — no interleaving),
+      // so zero changes can only mean a floor refused the move.
+      return { outcome: 'guard_failed' };
+    }
+    return {
+      outcome: 'applied',
+      vault: this.db
+        .prepare(`SELECT * FROM sovereign_vaults WHERE payee_id = ?`)
+        .get(input.payee_id) as SovereignVaultRecord,
+    };
+  }
+
   async insertProcessorToken(
     row: Omit<PlaidProcessorTokenRecord, 'id'>,
   ): Promise<PlaidProcessorTokenRecord> {
@@ -1277,6 +1420,29 @@ export class SqliteStore implements Store {
         .prepare(`SELECT * FROM payout_reversals WHERE transfer_id = ?`)
         .get(transferId) as PayoutReversalRecord | undefined,
     );
+  }
+
+  async updatePayoutReversal(
+    id: string,
+    patch: Pick<PayoutReversalRecord, 'journal_id' | 'ledger_transaction_id'>,
+  ): Promise<PayoutReversalRecord | undefined> {
+    this.db
+      .prepare(
+        `UPDATE payout_reversals
+            SET journal_id = @journal_id, ledger_transaction_id = @ledger_transaction_id
+          WHERE id = @id`,
+      )
+      .run({ id, ...patch });
+    return Promise.resolve(
+      this.db.prepare(`SELECT * FROM payout_reversals WHERE id = ?`).get(id) as
+        | PayoutReversalRecord
+        | undefined,
+    );
+  }
+
+  async deletePayoutReversal(id: string): Promise<void> {
+    this.db.prepare(`DELETE FROM payout_reversals WHERE id = ?`).run(id);
+    return Promise.resolve();
   }
 
   async insertGlJournal(

@@ -680,6 +680,11 @@ export class InMemoryStore implements Store {
   async insertPayoutReversal(
     row: Omit<PayoutReversalRecord, 'id'>,
   ): Promise<PayoutReversalRecord> {
+    // Migration 0009 (H4): payout_reversals.transfer_id is unique — the
+    // insert-as-lock replay guard. One reversal row per transfer, ever.
+    if ([...this.payoutReversals.values()].some((row2) => row2.transfer_id === row.transfer_id)) {
+      uniqueViolation('payout_reversals.transfer_id');
+    }
     const record: PayoutReversalRecord = { ...row, id: randomUUID() };
     this.payoutReversals.set(record.id, record);
     return record;
@@ -763,6 +768,11 @@ export class InMemoryStore implements Store {
       state: row.state ?? 'posted',
       id: randomUUID(),
     };
+    // Migration 0009 (H2): gl_journals.sequence is unique — the chain cannot
+    // fork under concurrent posts.
+    if (this.glJournals.some((journal) => journal.sequence === record.sequence)) {
+      uniqueViolation('gl_journals.sequence');
+    }
     this.glJournals.push(record);
     return record;
   }
@@ -1009,14 +1019,6 @@ export class InMemoryStore implements Store {
 }
 
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
-function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
-  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
-  if (a.transaction_id !== b.transaction_id) {
-    return a.transaction_id < b.transaction_id ? -1 : 1;
-  }
-  return 0;
-}
- SQL backends' BINARY collation). */
 function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
   if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
   if (a.transaction_id !== b.transaction_id) {
