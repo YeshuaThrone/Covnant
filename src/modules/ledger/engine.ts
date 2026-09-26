@@ -43,32 +43,50 @@ export async function postJournal(
   }
 
   const created_at = now.toISOString();
-  const last = await store.getLatestGlJournal();
-  const sequence = (last?.sequence ?? 0) + 1;
-  const prev_hash = last?.entry_hash ?? GL_GENESIS_HASH;
-  const entry_hash = hashJournal(
-    {
-      kind: input.kind,
-      ref_type: input.ref_type,
-      ref_id: input.ref_id,
-      legs: input.legs,
-      created_at,
-    },
-    sequence,
-    prev_hash,
-  );
 
-  // The store allocates ids; the engine supplies the chain state.
-  const journal = await store.insertGlJournal({
-    kind: input.kind,
-    ref_type: input.ref_type,
-    ref_id: input.ref_id,
-    created_at,
-    sequence,
-    prev_hash,
-    entry_hash,
-    state: "posted",
-  });
+  // Migration 0009 (H2): gl_journals.sequence is UNIQUE, so the chain can no
+  // longer fork under concurrent posts. Two posters racing for the same next
+  // sequence now lose as a constraint violation; the loser rebuilds chain
+  // state from the winner and retries instead of forking or failing.
+  const MAX_SEQUENCE_ATTEMPTS = 5;
+  let journal: GlJournalRecord | undefined;
+  for (let attempt = 1; attempt <= MAX_SEQUENCE_ATTEMPTS; attempt += 1) {
+    const last = await store.getLatestGlJournal();
+    const sequence = (last?.sequence ?? 0) + 1;
+    const prev_hash = last?.entry_hash ?? GL_GENESIS_HASH;
+    const entry_hash = hashJournal(
+      {
+        kind: input.kind,
+        ref_type: input.ref_type,
+        ref_id: input.ref_id,
+        legs: input.legs,
+        created_at,
+      },
+      sequence,
+      prev_hash,
+    );
+    try {
+      // The store allocates ids; the engine supplies the chain state.
+      journal = await store.insertGlJournal({
+        kind: input.kind,
+        ref_type: input.ref_type,
+        ref_id: input.ref_id,
+        created_at,
+        sequence,
+        prev_hash,
+        entry_hash,
+        state: "posted",
+      });
+      break;
+    } catch (insertError) {
+      if (attempt === MAX_SEQUENCE_ATTEMPTS) {
+        throw insertError; // bounded retry exhausted — surface it
+      }
+    }
+  }
+  if (journal === undefined) {
+    throw new Error("postJournal: sequence retry loop exited without a journal.");
+  }
   for (const leg of input.legs) {
     await store.insertGlEntry({
       journal_id: journal.id,
