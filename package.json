@@ -36,6 +36,7 @@
     "better-sqlite3": "^12.11.1",
     "eslint": "^9",
     "eslint-config-next": "15.5.25",
+    "jsdom": "29.1.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5",
