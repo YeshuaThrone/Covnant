@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from '../route';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 import { supabaseFromEnv } from '@/lib/supabase';
 
 /**
@@ -59,6 +60,9 @@ function postRequest(body: unknown): Request {
 const validBody = { publicToken: 'public-sandbox-token', accountId: 'acc_1', rightsHolderId: 'rh_1' };
 
 beforeEach(() => {
+  // The route's shared limiter (5/min) is module state; every test starts
+  // with a fresh window.
+  resetRateLimits();
   vi.stubEnv('PLAID_CLIENT_ID', 'test-client-id');
   vi.stubEnv('PLAID_SECRET', 'test-secret');
 });

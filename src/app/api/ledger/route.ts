@@ -28,10 +28,23 @@ import { listLedger, totalsFrom } from '@/lib/ledger/store';
 import { resolveDataSourceMode } from '@/lib/data-source';
 import { requireRegisteredOrOperator } from '@/lib/server/apiAccess';
 import { jsonError } from '@/lib/server/http';
+import { checkSharedRateLimit, PUBLIC_READ_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
+
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  // Shared limiter first (audit M5): the per-address window burns before the
+  // session round-trips, so a flood never reaches Supabase Auth.
+  const limit = await checkSharedRateLimit(
+    `ledger:${clientAddress(request)}`,
+    PUBLIC_READ_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(429, 'rate_limited', `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`);
+  }
+
   const access = await requireRegisteredOrOperator(request);
   if (!access.ok) {
     return jsonError(access.status, access.code, access.message);

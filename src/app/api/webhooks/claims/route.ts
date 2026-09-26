@@ -25,16 +25,9 @@ import type { GlobalMatchClaimPayload } from '@/engine/covenant-master-sdk';
 import { resolveDataSourceMode } from '@/lib/data-source';
 import { stampEngineLedgerRowsCbt } from '@/lib/ledger/engine-stamp';
 import { rememberSettlement } from '@/lib/ledger/store';
-import { checkRateLimit, DON_API_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { checkSharedRateLimit, DON_API_RATE_LIMIT } from '@/lib/server/rateLimit';
 import { sharedSecretMatches } from '@/lib/server/sharedSecret';
-
-function clientAddress(request: Request): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    request.headers.get('x-real-ip') ??
-    'unknown'
-  );
-}
+import { clientAddress } from '@/lib/server/clientAddress';
 
 function isClaim(value: unknown): value is GlobalMatchClaimPayload {
   if (typeof value !== 'object' || value === null) return false;
@@ -56,8 +49,11 @@ function isClaim(value: unknown): value is GlobalMatchClaimPayload {
 
 export async function POST(request: Request) {
   // The limiter guards the secret check itself: a guessed header burns the
-  // client address's window just like a malformed body would.
-  const verdict = checkRateLimit(clientAddress(request), DON_API_RATE_LIMIT);
+  // client address's window just like a malformed body would. The shared
+  // (Postgres-backed when DATABASE_URL is set) limiter keeps this webhook's
+  // window durable across serverless isolates; the limit stays the Don
+  // surface's 30/min — reused, not stacked.
+  const verdict = await checkSharedRateLimit(clientAddress(request), DON_API_RATE_LIMIT);
   if (!verdict.ok) {
     return Response.json(
       { ok: false, error: `Rate limit exceeded. Retry after ${verdict.retryAfterSeconds}s.` },

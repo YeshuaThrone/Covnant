@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { POST } from '../route';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 import { supabaseFromEnv } from '@/lib/supabase';
 import { CBT_SETTLEMENT_CODE_PATTERN, generateCBTSettlementCode } from '@/lib/ledger/cbt-settlement';
 
@@ -155,6 +156,9 @@ function happyDb(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The route's shared limiter (5/min) is module state; every test starts
+  // with a fresh window.
+  resetRateLimits();
   vi.stubEnv('PLAID_CLIENT_ID', 'test-client-id');
   vi.stubEnv('PLAID_SECRET', 'test-secret');
 });
