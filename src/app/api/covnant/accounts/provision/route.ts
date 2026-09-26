@@ -50,11 +50,16 @@
  * coordinates to publish (unlike the pre-auth sign-up route, which returns
  * status fields only).
  *
- * Caller authentication: none, consistent with the locked v1 server-side
- * posture of the PR #23 / banking routes.
+ * Caller authentication (hardening gen 12 — this route hands out LIVE
+ * account/routing numbers and previously had none): the holder identity is
+ * DERIVED from the verified creator session (resolveSessionCreator); a body
+ * rightsHolderId is only a claim to verify — a signed-in creator
+ * provisioning for another holder is refused 403 before any read runs. An
+ * operator (signed admin cookie) may provision for a named holder.
  */
 
 import { getDb } from '@/lib/db';
+import { requireHolderAccess } from '@/lib/server/apiAccess';
 import {
   provisionRightsHolderVirtualAccount,
   type ProvisioningOutcome,
@@ -111,15 +116,27 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError('Request body must be valid JSON with assetId and rightsHolderId.', 400);
   }
   const assetId = body.assetId;
-  const rightsHolderId = body.rightsHolderId;
   if (!isNonEmptyString(assetId) || !UUID_PATTERN.test(assetId.trim())) {
     return jsonError('Invalid provisioning request: assetId must be a UUID.', 400);
   }
-  if (!isNonEmptyString(rightsHolderId) || rightsHolderId.trim().length > 200) {
+  const normalizedAssetId = assetId.trim();
+
+  // Identity before any lookup or external call: the session (or operator
+  // cookie) decides which holder may be provisioned; a mismatched client
+  // claim is refused before the row lock or the Increase call runs.
+  const access = await requireHolderAccess(
+    request,
+    isNonEmptyString(body.rightsHolderId) ? body.rightsHolderId : null,
+  );
+  if (!access.ok) {
+    return jsonError(access.message, access.status);
+  }
+  const normalizedHolderId = access.holderId;
+  if (!normalizedHolderId || normalizedHolderId.trim().length > 200) {
+    // Operator path with no holder named (a creator session always implies
+    // its own), or a nonsense operator-supplied id.
     return jsonError('Invalid provisioning request: rightsHolderId is required.', 400);
   }
-  const normalizedAssetId = assetId.trim();
-  const normalizedHolderId = rightsHolderId.trim();
 
   const increaseApiKey = process.env.INCREASE_API_KEY;
   const sourceAccountId = process.env.INCREASE_SOURCE_ACCOUNT_ID;

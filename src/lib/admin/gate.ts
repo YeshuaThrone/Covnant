@@ -115,10 +115,14 @@ export function verifyAdminSession(
 ): AdminGateVerdict {
   const password = readAdminPassword(env);
   // J1 preview carve-out: the demo preview runs with DON_DEV_SEED=1 and no
-  // operator secret, so the console opens without a sign-in form. A real
-  // deployment (password configured) stays fail-closed — this branch can
-  // never fire there.
-  if (!password && env.DON_DEV_SEED === '1') return { ok: true };
+  // operator secret, so the console opens without a sign-in form. Keyed to
+  // non-production (hardening gen 12): a production runtime can never open
+  // the console on the seed flag alone — a real deployment (password
+  // configured) stays fail-closed, and production without a configured
+  // secret still answers 503 admin_not_configured.
+  if (!password && env.DON_DEV_SEED === '1' && process.env.NODE_ENV !== 'production') {
+    return { ok: true };
+  }
   if (!password) return NOT_CONFIGURED;
   if (!token) return NOT_AUTHENTICATED;
 

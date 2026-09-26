@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
+import { requireOperator } from "@/lib/server/apiAccess";
 import { clientIdentity } from "@/modules/don/http";
 import { validateRecoupmentPayload } from "@/lib/don/validation";
 import { readAdvance, upsertAdvance } from "@/modules/recoupment/engine";
@@ -15,6 +16,14 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): upserting an advance retargets ANYONE's
+  // recoupment position — an operator action. The signed admin cookie is
+  // verified before any body is parsed.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;
@@ -46,6 +55,13 @@ export async function GET(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): the advance read resolves any creator_id —
+  // operator-only, same as the POST.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   const creatorId = request.nextUrl.searchParams.get("creator_id")?.trim() ?? "";

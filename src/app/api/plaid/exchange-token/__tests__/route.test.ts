@@ -10,6 +10,22 @@ import { supabaseFromEnv } from '@/lib/supabase';
 
 vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: vi.fn() }));
 
+// Hardening (gen 12): the suite exercises the Plaid exchange flow as an
+// authorized OPERATOR — the gate's 401/403 refusals are pinned in
+// src/lib/server/__tests__/authz-gates.test.ts. Missing publicToken/accountId
+// still 400 before the gate; a missing rightsHolderId 400s at the route.
+vi.mock('@/lib/server/apiAccess', () => ({
+  requireHolderAccess: async (
+    _request: unknown,
+    requested: string | null | undefined,
+  ) => ({
+    ok: true as const,
+    role: 'operator' as const,
+    holderId:
+      typeof requested === 'string' && requested.trim() !== '' ? requested.trim() : null,
+  }),
+}));
+
 const mockSupabaseFromEnv = vi.mocked(supabaseFromEnv);
 
 type UpsertPayload = Record<string, unknown>;

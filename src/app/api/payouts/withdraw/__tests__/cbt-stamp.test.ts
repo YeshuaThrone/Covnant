@@ -17,6 +17,21 @@ import { CBT_SETTLEMENT_CODE_PATTERN, generateCBTSettlementCode } from '@/lib/le
 
 vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: vi.fn() }));
 
+// Hardening (gen 12): the suite exercises the CBT STAMP contract as an
+// authorized OPERATOR — the gate's 401/403 refusals are pinned in
+// src/lib/server/__tests__/authz-gates.test.ts.
+vi.mock('@/lib/server/apiAccess', () => ({
+  requireHolderAccess: async (
+    _request: unknown,
+    requested: string | null | undefined,
+  ) => ({
+    ok: true as const,
+    role: 'operator' as const,
+    holderId:
+      typeof requested === 'string' && requested.trim() !== '' ? requested.trim() : null,
+  }),
+}));
+
 const mockSupabaseFromEnv = vi.mocked(supabaseFromEnv);
 
 function fakeDb(options: {

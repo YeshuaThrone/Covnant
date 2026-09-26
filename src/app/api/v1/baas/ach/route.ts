@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
+import { requireOperator } from "@/lib/server/apiAccess";
 import { clientIdentity } from "@/modules/don/http";
 import { validateBaasPayoutPayload } from "@/lib/don/validation";
 import { payoutFromVault } from "@/modules/vaults/engine";
@@ -15,6 +16,15 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (hardening gen 12): the BaaS payout rails initiate real money
+  // movement — operator-only. NOTE: an omitted amount_cents still defaults
+  // to the vault's ENTIRE available balance (behavior kept per the hardening
+  // brief); the operator gate is what keeps that default safe.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;

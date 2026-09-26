@@ -14,6 +14,22 @@ import { getDb } from '@/lib/db';
 
 vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
 
+// Hardening (gen 12): the suite exercises the provisioning flow as an
+// authorized OPERATOR — the gate's 401/403 refusals are pinned in
+// src/lib/server/__tests__/authz-gates.test.ts. With the operator stub,
+// missing/blank rightsHolderId still reaches the route's own 400.
+vi.mock('@/lib/server/apiAccess', () => ({
+  requireHolderAccess: async (
+    _request: unknown,
+    requested: string | null | undefined,
+  ) => ({
+    ok: true as const,
+    role: 'operator' as const,
+    holderId:
+      typeof requested === 'string' && requested.trim() !== '' ? requested.trim() : null,
+  }),
+}));
+
 const mockGetDb = vi.mocked(getDb);
 
 const ASSET_ID = 'a1b2c3d4-0000-4000-8000-000000000001';

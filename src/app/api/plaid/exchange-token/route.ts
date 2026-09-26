@@ -1,4 +1,5 @@
 import { supabaseFromEnv } from '@/lib/supabase';
+import { requireHolderAccess } from '@/lib/server/apiAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,13 @@ export const dynamic = 'force-dynamic';
  * - Env vars are read lazily INSIDE the handler so absence yields a clean 503
  *   at runtime, never a build-time throw.
  * - Only a last-4 account mask is persisted; the raw account number is dropped.
+ *
+ * GATED (hardening gen 12 — before this, ANY caller could attach a bank
+ * account to ANY rightsHolderId and redirect that holder's payouts): the
+ * holder identity is DERIVED from the verified creator session; a body
+ * rightsHolderId is only a claim to verify — a signed-in creator attaching
+ * an account to another holder is refused 403 before any Plaid call runs.
+ * An operator (signed admin cookie) may run the exchange for a named holder.
  */
 
 const PLAID_HOST = 'https://production.plaid.com';
@@ -23,7 +31,7 @@ interface ExchangeTokenBody {
   rightsHolderId?: unknown;
 }
 
-const REQUIRED_EXCHANGE_FIELDS = ['publicToken', 'accountId', 'rightsHolderId'] as const;
+const REQUIRED_EXCHANGE_FIELDS = ['publicToken', 'accountId'] as const;
 
 function missingFields(body: ExchangeTokenBody): string[] {
   // Required keys must be present AND hold non-blank string values.
@@ -48,11 +56,27 @@ export async function POST(request: Request): Promise<Response> {
   if (missing.length > 0) {
     return jsonError(`Missing required field(s): ${missing.join(', ')}.`, 400);
   }
-  const { publicToken, accountId, rightsHolderId } = body as {
+  const { publicToken, accountId } = body as {
     publicToken: string;
     accountId: string;
-    rightsHolderId: string;
   };
+
+  // Identity before any Plaid call or holder write: the session (or operator
+  // cookie) decides whose payout record may be written; a mismatched client
+  // claim is refused before the token exchange runs.
+  const access = await requireHolderAccess(
+    request,
+    typeof body.rightsHolderId === 'string' ? body.rightsHolderId : null,
+  );
+  if (!access.ok) {
+    return jsonError(access.message, access.status);
+  }
+  const rightsHolderId = access.holderId;
+  if (!rightsHolderId) {
+    // Operator path with no holder named — a creator session always
+    // implies its own holder, so this is unreachable for owners.
+    return jsonError('rightsHolderId is required.', 400);
+  }
 
   const clientId = process.env.PLAID_CLIENT_ID;
   const secret = process.env.PLAID_SECRET;
