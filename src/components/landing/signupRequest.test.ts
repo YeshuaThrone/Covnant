@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildSealedEntryRecord,
   buildSignupPayload,
+  isSealedEntryRecord,
   mapSignupResponse,
   networkFailureState,
   NETWORK_FAILED_MESSAGE,
@@ -12,8 +14,10 @@ import {
 
 /**
  * The seal's wire-contract unit gates — the combined-field ruling, the
- * unconditional terms flag, and a renderable branch for every response the
- * contract defines (plus the total-garbage path).
+ * unconditional terms flag, the SECRET-FREE local seal record (no password,
+ * legal name, or phone is ever persisted; the POST payload stays complete),
+ * and a renderable branch for every response the contract defines (plus the
+ * total-garbage path).
  */
 
 const VALUES: SealEntryValues = {
@@ -155,5 +159,86 @@ describe('mapSignupResponse', () => {
 describe('networkFailureState', () => {
   it('renders the transport recovery line', () => {
     expect(networkFailureState()).toEqual({ phase: 'failed', message: NETWORK_FAILED_MESSAGE });
+  });
+});
+
+describe('buildSealedEntryRecord', () => {
+  it('persists ONLY the non-secret echo — no password, legal name, or phone', () => {
+    expect(buildSealedEntryRecord(buildSignupPayload(VALUES))).toEqual({
+      sealed: true,
+      echo: {
+        stage_name: 'Nova Reign',
+        email: 'Nova@Example.com',
+        core_industry: 'Music — Recording',
+        title: 'Music — Recording',
+        udr_terms_accepted: true,
+      },
+    });
+  });
+
+  it('carries no secret key or value in the serialized record — the local surface is clean', () => {
+    const raw = JSON.stringify(buildSealedEntryRecord(buildSignupPayload(VALUES)));
+    // No captured secret VALUE survives...
+    expect(raw).not.toContain('correct-horse-battery');
+    expect(raw).not.toContain('Jordan A. Reyes');
+    expect(raw).not.toContain('+15125550123');
+    // ...and no secret KEY exists under any spelling.
+    expect(raw).not.toContain('password');
+    expect(raw).not.toContain('legal_name');
+    expect(raw).not.toContain('legalName');
+    expect(raw).not.toContain('phoneNumber');
+  });
+
+  it('echoes exactly the submitted body — the POST payload still carries everything', () => {
+    const body = buildSignupPayload(VALUES);
+    expect(buildSealedEntryRecord(body).echo).toEqual({
+      stage_name: body.stage_name,
+      email: body.email,
+      core_industry: body.core_industry,
+      title: body.title,
+      udr_terms_accepted: body.udr_terms_accepted,
+    });
+    // The stripped fields ride the POST untouched — the local record is the
+    // ONLY stripped surface.
+    expect(body.password).toBe('correct-horse-battery');
+    expect(body.legal_name).toBe('Jordan A. Reyes');
+    expect(body.phone).toBe('+15125550123');
+  });
+});
+
+describe('isSealedEntryRecord', () => {
+  it('accepts the record the new seal writes', () => {
+    expect(isSealedEntryRecord(buildSealedEntryRecord(buildSignupPayload(VALUES)))).toBe(true);
+  });
+
+  it('rejects a LEGACY seal record — the shape that persisted the password', () => {
+    const legacy = {
+      sealed: true,
+      values: {
+        stageName: 'Nova Reign',
+        legalName: 'Jordan A. Reyes',
+        email: 'Nova@Example.com',
+        phoneNumber: '+15125550123',
+        password: 'correct-horse-battery',
+        coreIndustryTitle: 'Music — Recording',
+      },
+    };
+    expect(isSealedEntryRecord(legacy)).toBe(false);
+  });
+
+  it('rejects a torn echo (a missing key) and non-object garbage', () => {
+    const record = buildSealedEntryRecord(buildSignupPayload(VALUES));
+    expect(
+      isSealedEntryRecord({ ...record, echo: { ...record.echo, title: undefined } }),
+    ).toBe(false);
+    expect(isSealedEntryRecord(null)).toBe(false);
+    expect(isSealedEntryRecord('sealed')).toBe(false);
+  });
+
+  it('rejects a tampered terms flag — the seal submit is the acceptance act', () => {
+    const record = buildSealedEntryRecord(buildSignupPayload(VALUES));
+    expect(
+      isSealedEntryRecord({ ...record, echo: { ...record.echo, udr_terms_accepted: false } }),
+    ).toBe(false);
   });
 });

@@ -204,19 +204,26 @@ test('seal → 503 UCT_MINT_FAILED renders the clean-retry line and keeps the of
   await expect(sealResponseLine(page, 'Nothing was registered — unseal and submit again')).toHaveCount(1);
 
   // The local seal record is the offline/fallback record — preserved even
-  // when the registry stage fails. The stored shape is unchanged.
+  // when the registry stage fails. Only the NON-SECRET echo persists: the
+  // password, legal name, and captured phone never touch localStorage.
   const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
   expect(JSON.parse(stored ?? 'null')).toEqual({
     sealed: true,
-    values: {
-      stageName: 'Nova Reign',
-      legalName: 'Jordan A. Reyes',
+    echo: {
+      stage_name: 'Nova Reign',
       email: 'artist@example.com',
-      phoneNumber: '+15125550123',
-      password: 'correct-horse-battery',
-      coreIndustryTitle: 'Music — Recording',
+      core_industry: 'Music — Recording',
+      title: 'Music — Recording',
+      udr_terms_accepted: true,
     },
   });
+  // The stripped captures are gone from the stored bytes — key AND value.
+  expect(stored).not.toContain('correct-horse-battery');
+  expect(stored).not.toContain('Jordan A. Reyes');
+  expect(stored).not.toContain('+15125550123');
+  expect(stored).not.toContain('password');
+  expect(stored).not.toContain('legalName');
+  expect(stored).not.toContain('phoneNumber');
 });
 
 test('a network failure renders the recovery line and the offline record persists', async ({
@@ -231,7 +238,7 @@ test('a network failure renders the recovery line and the offline record persist
   ).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^(Submit|SEALED)$/ })).toHaveText('SEALED');
   const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  expect(JSON.parse(stored ?? 'null')).toEqual({ sealed: true, values: expect.anything() });
+  expect(JSON.parse(stored ?? 'null')).toEqual({ sealed: true, echo: expect.anything() });
 });
 
 test('the request body carries the six values as captured: combined field unsplitted, terms true', async ({

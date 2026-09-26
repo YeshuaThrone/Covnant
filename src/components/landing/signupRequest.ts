@@ -57,6 +57,61 @@ export function buildSignupPayload(values: SealEntryValues): SignupRequestBody {
   };
 }
 
+/**
+ * The non-secret echo of the signup body — the ONLY seal data that persists
+ * locally. The password and legal name (and the captured phone) never touch
+ * localStorage: an XSS or a shared-machine read of the local seal record
+ * learns nothing secret, while the POST payload stays complete.
+ */
+export type SealedEntryEcho = {
+  stage_name: string;
+  email: string;
+  core_industry: string;
+  title: string;
+  udr_terms_accepted: boolean;
+};
+
+/** The localStorage record: the seal marker plus the non-secret echo. */
+export type SealedEntryRecord = { sealed: true; echo: SealedEntryEcho };
+
+/**
+ * The local seal record, built FROM the POST body — the persisted echo can
+ * never drift from what was actually submitted.
+ */
+export function buildSealedEntryRecord(body: SignupRequestBody): SealedEntryRecord {
+  return {
+    sealed: true,
+    echo: {
+      stage_name: body.stage_name,
+      email: body.email,
+      core_industry: body.core_industry,
+      title: body.title,
+      udr_terms_accepted: body.udr_terms_accepted,
+    },
+  };
+}
+
+/**
+ * The persisted-seal guard. Every CURRENT echo key must be present with its
+ * persisted type — a record missing any of them (a LEGACY seal, which
+ * persisted the password and legal name, or a torn write) fails the guard:
+ * the caller destroys the record and shows the unsealed composition rather
+ * than half-restoring.
+ */
+export function isSealedEntryRecord(value: unknown): value is SealedEntryRecord {
+  if (!isRecord(value)) return false;
+  const candidate = value as { sealed?: unknown; echo?: unknown };
+  if (candidate.sealed !== true || !isRecord(candidate.echo)) return false;
+  const echo = candidate.echo;
+  return (
+    typeof echo.stage_name === 'string' &&
+    typeof echo.email === 'string' &&
+    typeof echo.core_industry === 'string' &&
+    typeof echo.title === 'string' &&
+    echo.udr_terms_accepted === true
+  );
+}
+
 /** The route's provisioning status pair (contract-locked). */
 export type ProvisioningStatus = 'PENDING' | 'PROVISIONED';
 
