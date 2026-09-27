@@ -14,12 +14,12 @@
  * user with zero identities) that Supabase returns instead of an error.
  */
 
-import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type {
   CovnantSignupInput,
   CovnantSignupSuccess,
   CreatorProfile,
-} from '@/lib/covnant/types';
+} from "@/lib/covnant/types";
 
 export type CovnantSignupFailure = {
   ok: false;
@@ -29,8 +29,7 @@ export type CovnantSignupFailure = {
 };
 
 export type CovnantSignupResult =
-  | { ok: true; value: CovnantSignupSuccess }
-  | CovnantSignupFailure;
+  { ok: true; value: CovnantSignupSuccess } | CovnantSignupFailure;
 
 export type CovnantAuthClients = {
   auth: SupabaseClient;
@@ -41,8 +40,11 @@ function isDuplicateSignup(
   user: User | null,
   errorMessage: string | undefined,
 ): boolean {
-  const message = (errorMessage ?? '').toLowerCase();
-  if (message.includes('already registered') || message.includes('already exists')) {
+  const message = (errorMessage ?? "").toLowerCase();
+  if (
+    message.includes("already registered") ||
+    message.includes("already exists")
+  ) {
     return true;
   }
   if (user === null) {
@@ -56,20 +58,6 @@ function toAuthUser(user: User) {
     id: user.id,
     email: user.email ?? null,
     email_confirmed_at: user.email_confirmed_at ?? null,
-  };
-}
-
-function toSessionState(session: Session | null) {
-  if (session === null) {
-    return null;
-  }
-  return {
-    access_token: session.access_token,
-    refresh_token: session.refresh_token,
-    expires_in: session.expires_in,
-    expires_at: session.expires_at ?? null,
-    token_type: session.token_type,
-    user: toAuthUser(session.user),
   };
 }
 
@@ -96,17 +84,23 @@ export async function registerCovnantCreator(
   clients: CovnantAuthClients,
   now: () => Date = () => new Date(),
 ): Promise<CovnantSignupResult> {
-  const { data, error } = await clients.auth.auth.signUp({
+  // Provision through the SERVICE-ROLE admin API, not the public signUp:
+  // public signUp forces a confirmation-email send per registration, and the
+  // project's built-in SMTP quota (a few sends/hour) throttles both signup
+  // AND magic-link logins to a standstill. Admin creation mints the user
+  // directly (no email send, no shared-quota dependency); the email is
+  // marked confirmed at birth and verification happens at login time via
+  // the magic-link flow the app already uses.
+  const { data, error } = await clients.admin.auth.admin.createUser({
     email: payload.email,
     password: payload.password,
-    options: {
-      data: {
-        stage_name: payload.stage_name,
-        legal_name: payload.legal_name,
-        core_industry: payload.core_industry,
-        title: payload.title,
-        phone: payload.phone,
-      },
+    email_confirm: true,
+    user_metadata: {
+      stage_name: payload.stage_name,
+      legal_name: payload.legal_name,
+      core_industry: payload.core_industry,
+      title: payload.title,
+      phone: payload.phone,
     },
   });
 
@@ -116,8 +110,8 @@ export async function registerCovnantCreator(
     return {
       ok: false,
       status: 409,
-      code: 'duplicate_email',
-      message: 'An account with this email already exists.',
+      code: "duplicate_email",
+      message: "An account with this email already exists.",
     };
   }
 
@@ -125,8 +119,8 @@ export async function registerCovnantCreator(
     return {
       ok: false,
       status: 400,
-      code: 'auth_signup_failed',
-      message: error.message || 'Unable to create credentials.',
+      code: "auth_signup_failed",
+      message: error.message || "Unable to create credentials.",
     };
   }
 
@@ -134,8 +128,8 @@ export async function registerCovnantCreator(
     return {
       ok: false,
       status: 502,
-      code: 'auth_signup_failed',
-      message: 'Supabase Auth did not return a user.',
+      code: "auth_signup_failed",
+      message: "Supabase Auth did not return a user.",
     };
   }
 
@@ -143,21 +137,25 @@ export async function registerCovnantCreator(
   const row = profileRow(user.id, payload, acceptedAt);
 
   const inserted = await clients.admin
-    .from('creator_profiles')
+    .from("creator_profiles")
     .insert(row)
     .select(
-      'id, stage_name, legal_name, email, phone, phone_verified_at, core_industry, title, udr_terms_accepted_at',
+      "id, stage_name, legal_name, email, phone, phone_verified_at, core_industry, title, udr_terms_accepted_at",
     )
     .single();
 
   if (inserted.error || inserted.data === null) {
-    await compensateCovnantSignup(clients.admin, user.id, 'profile_insert_failed');
-    console.error('Failed to insert creator_profiles:', inserted.error);
+    await compensateCovnantSignup(
+      clients.admin,
+      user.id,
+      "profile_insert_failed",
+    );
+    console.error("Failed to insert creator_profiles:", inserted.error);
     return {
       ok: false,
       status: 500,
-      code: 'profile_insert_failed',
-      message: 'Failed to persist the creator profile.',
+      code: "profile_insert_failed",
+      message: "Failed to persist the creator profile.",
     };
   }
 
@@ -165,7 +163,10 @@ export async function registerCovnantCreator(
   return {
     ok: true,
     value: {
-      session: toSessionState(data?.session ?? null),
+      // Admin creation returns no session — the 201 envelope is sessionless
+      // by contract (the seal renders sessionless: true) and the creator
+      // establishes their session through the email-link login flow.
+      session: null,
       user: toAuthUser(user),
       profile: {
         ...profile,
@@ -189,9 +190,9 @@ export async function compensateCovnantSignup(
   cause: string,
 ): Promise<void> {
   const { error: profileError } = await admin
-    .from('creator_profiles')
+    .from("creator_profiles")
     .delete()
-    .eq('id', userId);
+    .eq("id", userId);
   if (profileError) {
     console.error(
       `Signup compensation (${cause}) failed to delete the creator_profiles row:`,
