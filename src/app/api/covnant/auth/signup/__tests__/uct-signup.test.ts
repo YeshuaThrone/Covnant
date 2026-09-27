@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST } from '../route';
-import { getDb } from '@/lib/db';
-import { buildUct, uctIssuanceYear, uctSerial } from '@/lib/covnant/uct';
-import { resetRateLimits } from '@/lib/server/rateLimit';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { POST } from "../route";
+import { getDb } from "@/lib/db";
+import { buildUct, uctIssuanceYear, uctSerial } from "@/lib/covnant/uct";
+import { resetRateLimits } from "@/lib/server/rateLimit";
 
 /**
  * POST /api/covnant/auth/signup — UCT (creator-root identity) acceptance
@@ -21,68 +21,79 @@ import { resetRateLimits } from '@/lib/server/rateLimit';
 
 const supabaseMock = vi.hoisted(() => ({
   readSupabaseEnv: vi.fn(),
-  signUp: vi.fn(),
+  createUser: vi.fn(),
   deleteUser: vi.fn(),
   profileInsertSingle: vi.fn(),
   profileDeleteEq: vi.fn(),
 }));
 
-vi.mock('@/lib/server/supabase', () => ({
+vi.mock("@/lib/server/supabase", () => ({
   readSupabaseEnv: supabaseMock.readSupabaseEnv,
-  createAuthClient: () => ({ auth: { signUp: supabaseMock.signUp } }),
+  createAuthClient: () => ({ auth: {} }),
   createAdminClient: () => ({
-    auth: { admin: { deleteUser: supabaseMock.deleteUser } },
+    auth: {
+      admin: {
+        createUser: supabaseMock.createUser,
+        deleteUser: supabaseMock.deleteUser,
+      },
+    },
     from: () => ({
-      insert: () => ({ select: () => ({ single: supabaseMock.profileInsertSingle }) }),
+      insert: () => ({
+        select: () => ({ single: supabaseMock.profileInsertSingle }),
+      }),
       delete: () => ({ eq: supabaseMock.profileDeleteEq }),
     }),
   }),
 }));
 
-const uctModule = vi.hoisted(() => ({ realUctSerial: undefined as (() => string) | undefined }));
-vi.mock('@/lib/covnant/uct', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/covnant/uct')>();
+const uctModule = vi.hoisted(() => ({
+  realUctSerial: undefined as (() => string) | undefined,
+}));
+vi.mock("@/lib/covnant/uct", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/covnant/uct")>();
   uctModule.realUctSerial = actual.uctSerial;
   return { ...actual, uctSerial: vi.fn(actual.uctSerial) };
 });
-vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
+vi.mock("@/lib/db", () => ({ getDb: vi.fn() }));
 
 const mockGetDb = vi.mocked(getDb);
 const mockUctSerial = vi.mocked(uctSerial);
 
-const EMAIL = 'creator@example.com';
-const REGISTRY_ASSET_ID = 'b2c3d4e5-0000-4000-8000-000000000002';
-const AUTH_USER = { id: 'auth_user_1', email: EMAIL, email_confirmed_at: null };
+const EMAIL = "creator@example.com";
+const REGISTRY_ASSET_ID = "b2c3d4e5-0000-4000-8000-000000000002";
+const AUTH_USER = { id: "auth_user_1", email: EMAIL, email_confirmed_at: null };
 const SUPABASE_ENV = {
-  url: 'https://test-project.supabase.co',
-  anonKey: 'test-anon-key',
-  serviceRoleKey: 'test-service-role-key',
+  url: "https://test-project.supabase.co",
+  anonKey: "test-anon-key",
+  serviceRoleKey: "test-service-role-key",
 };
 
 /** A valid full creator payload — every test overrides the one bad field. */
-function fullPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function fullPayload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
-    stage_name: 'Nova Reign',
-    legal_name: 'Jordan A. Reyes',
+    stage_name: "Nova Reign",
+    legal_name: "Jordan A. Reyes",
     email: EMAIL,
-    phone: '+15125550123',
-    core_industry: 'Music — Recording',
-    title: 'Recording Artist',
-    password: 'correct-horse-battery',
+    phone: "+15125550123",
+    core_industry: "Music — Recording",
+    title: "Recording Artist",
+    password: "correct-horse-battery",
     udr_terms_accepted: true,
     ...overrides,
   };
 }
 
 function profileRow(): Record<string, unknown> {
-  return { id: AUTH_USER.id, email: EMAIL, stage_name: 'Nova Reign' };
+  return { id: AUTH_USER.id, email: EMAIL, stage_name: "Nova Reign" };
 }
 
 function signupHolderEntry(): Record<string, unknown> {
   return {
-    rightsHolderId: 'rh_signup_existing',
+    rightsHolderId: "rh_signup_existing",
     name: EMAIL,
-    role: 'COMPOSER',
+    role: "COMPOSER",
     email: EMAIL,
     payoutRouting: {},
   };
@@ -101,15 +112,20 @@ interface QueryCall {
  * give the real table (a concurrent creator sees the committed row). The
  * top-level query surface models the ordering peek (read-only).
  */
-function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } } = {}) {
+function fakeDb(
+  options: { registry?: { id: string; rights_holders: unknown[] } } = {},
+) {
   let registry = options.registry
-    ? { ...options.registry, rights_holders: [...options.registry.rights_holders] }
+    ? {
+        ...options.registry,
+        rights_holders: [...options.registry.rights_holders],
+      }
     : null;
   const txQueries: QueryCall[] = [];
   const txQuery = vi.fn(async (sql: string, params?: unknown[]) => {
     txQueries.push({ sql, params });
-    if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
-    if (sql.includes('rh @>')) {
+    if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
+    if (sql.includes("rh @>")) {
       // The mint's uniqueness probe: rh @> '{"uct":"<candidate>"}'::jsonb
       const probe = JSON.parse(String(params?.[0])) as { uct?: unknown };
       const taken = (registry?.rights_holders ?? []).some(
@@ -117,34 +133,44 @@ function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } 
       );
       return taken ? { rows: [{ uct: probe.uct }] } : { rows: [] };
     }
-    if (sql.includes('jsonb_agg')) {
+    if (sql.includes("jsonb_agg")) {
       const holderId = params?.[1];
       const updated = JSON.parse(String(params?.[2]));
       if (registry) {
         registry.rights_holders = registry.rights_holders.map((holder) =>
-          (holder as { rightsHolderId?: unknown }).rightsHolderId === holderId ? updated : holder,
+          (holder as { rightsHolderId?: unknown }).rightsHolderId === holderId
+            ? updated
+            : holder,
         );
       }
       return { rows: [] };
     }
-    if (sql.includes('jsonb_array_elements')) {
+    if (sql.includes("jsonb_array_elements")) {
       const holderId = params?.[1];
       const holder =
         registry?.rights_holders.find(
-          (candidate) => (candidate as { rightsHolderId?: unknown }).rightsHolderId === holderId,
+          (candidate) =>
+            (candidate as { rightsHolderId?: unknown }).rightsHolderId ===
+            holderId,
         ) ?? null;
       return holder ? { rows: [{ holder }] } : { rows: [] };
     }
-    if (sql.includes('cbt_code = $1')) {
+    if (sql.includes("cbt_code = $1")) {
       return registry
-        ? { rows: [{ id: registry.id, rights_holders: registry.rights_holders }] }
+        ? {
+            rows: [
+              { id: registry.id, rights_holders: registry.rights_holders },
+            ],
+          }
         : { rows: [] };
     }
-    if (sql.includes('INSERT INTO cbt_assets')) {
+    if (sql.includes("INSERT INTO cbt_assets")) {
       if (!registry) registry = { id: REGISTRY_ASSET_ID, rights_holders: [] };
-      return { rows: [{ id: registry.id, rights_holders: registry.rights_holders }] };
+      return {
+        rows: [{ id: registry.id, rights_holders: registry.rights_holders }],
+      };
     }
-    if (sql.includes('|| $2::jsonb')) {
+    if (sql.includes("|| $2::jsonb")) {
       registry?.rights_holders.push(JSON.parse(String(params?.[1])));
       return { rows: [] };
     }
@@ -153,32 +179,44 @@ function fakeDb(options: { registry?: { id: string; rights_holders: unknown[] } 
   const tx = { query: txQuery };
   const db = {
     query: vi.fn(async (sql: string) => {
-      if (sql.includes('cbt_code = $1') && !sql.includes('FOR UPDATE')) {
+      if (sql.includes("cbt_code = $1") && !sql.includes("FOR UPDATE")) {
         return registry
-          ? { rows: [{ id: registry.id, rights_holders: registry.rights_holders }] }
+          ? {
+              rows: [
+                { id: registry.id, rights_holders: registry.rights_holders },
+              ],
+            }
           : { rows: [] };
       }
       return { rows: [] };
     }),
     transaction: vi.fn(
-      async <T>(work: (tx: { query: typeof txQuery }) => Promise<T>): Promise<T> => work(tx),
+      async <T>(
+        work: (tx: { query: typeof txQuery }) => Promise<T>,
+      ): Promise<T> => work(tx),
     ),
   };
   return { db, txQueries, getRegistry: () => registry };
 }
 
 function signupRequest(body: unknown): Request {
-  return new Request('http://localhost/api/covnant/auth/signup', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
+  return new Request("http://localhost/api/covnant/auth/signup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
 beforeEach(() => {
   supabaseMock.readSupabaseEnv.mockReturnValue(SUPABASE_ENV);
-  supabaseMock.signUp.mockResolvedValue({ data: { user: AUTH_USER, session: null }, error: null });
-  supabaseMock.profileInsertSingle.mockResolvedValue({ data: profileRow(), error: null });
+  supabaseMock.createUser.mockResolvedValue({
+    data: { user: AUTH_USER },
+    error: null,
+  });
+  supabaseMock.profileInsertSingle.mockResolvedValue({
+    data: profileRow(),
+    error: null,
+  });
   supabaseMock.deleteUser.mockResolvedValue({ error: null });
   supabaseMock.profileDeleteEq.mockResolvedValue({ error: null });
   resetRateLimits();
@@ -186,8 +224,8 @@ beforeEach(() => {
   // mockImplementationOnce queues on top of this.
   mockUctSerial.mockReset();
   mockUctSerial.mockImplementation(uctModule.realUctSerial!);
-  vi.stubEnv('INCREASE_API_KEY', '');
-  vi.stubEnv('INCREASE_SOURCE_ACCOUNT_ID', '');
+  vi.stubEnv("INCREASE_API_KEY", "");
+  vi.stubEnv("INCREASE_SOURCE_ACCOUNT_ID", "");
 });
 
 afterEach(() => {
@@ -211,24 +249,26 @@ interface SignupResponse {
   assetId?: string;
 }
 
-describe('S1 — creating signup mints and discloses the UCT', () => {
-  it('returns 201 { created: true, uct, uctCreatedAt, jurisdiction, engine } with PENDING while Increase is unconfigured', async () => {
+describe("S1 — creating signup mints and discloses the UCT", () => {
+  it("returns 201 { created: true, uct, uctCreatedAt, jurisdiction, engine } with PENDING while Increase is unconfigured", async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    const res = await POST(signupRequest(fullPayload({ engine: 'music_recording' })));
+    const res = await POST(
+      signupRequest(fullPayload({ engine: "music_recording" })),
+    );
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
     expect(body).toMatchObject({
       ok: true,
       created: true,
-      status: 'PENDING',
-      reason: 'INCREASE_NOT_CONFIGURED',
+      status: "PENDING",
+      reason: "INCREASE_NOT_CONFIGURED",
       alreadyRegistered: false,
-      jurisdiction: 'US',
-      engine: 'music_recording',
+      jurisdiction: "US",
+      engine: "music_recording",
     });
     expect(body.uct).toMatch(/^UCT-[A-Z]{2}-\d{4}-[0-9A-F]{8}-[0-9A-Z]{2}$/);
-    expect(Number.isNaN(Date.parse(body.uctCreatedAt ?? ''))).toBe(false);
+    expect(Number.isNaN(Date.parse(body.uctCreatedAt ?? ""))).toBe(false);
 
     // Issuance facts persist on the holder JSONB.
     const holders = getRegistry()?.rights_holders ?? [];
@@ -236,26 +276,29 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
     const entry = holders[0] as Record<string, unknown>;
     expect(entry.uct).toBe(body.uct);
     expect(entry.uctCreatedAt).toBe(body.uctCreatedAt);
-    expect(entry.uctJurisdiction).toBe('US');
-    expect(entry.engine).toBe('music_recording');
+    expect(entry.uctJurisdiction).toBe("US");
+    expect(entry.engine).toBe("music_recording");
   });
 
-  it('honors an explicit jurisdiction and embeds it immutably in the minted code', async () => {
+  it("honors an explicit jurisdiction and embeds it immutably in the minted code", async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest(fullPayload({ engine: 'publishing', jurisdiction: 'gb' })),
+      signupRequest(fullPayload({ engine: "publishing", jurisdiction: "gb" })),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
-    expect(body.jurisdiction).toBe('GB'); // normalized 2-char ISO 3166
+    expect(body.jurisdiction).toBe("GB"); // normalized 2-char ISO 3166
     expect(body.uct).toMatch(/^UCT-GB-\d{4}-/);
-    const entry = (getRegistry()?.rights_holders ?? [])[0] as Record<string, unknown>;
-    expect(entry.uctJurisdiction).toBe('GB');
-    expect(entry.engine).toBe('publishing');
+    const entry = (getRegistry()?.rights_holders ?? [])[0] as Record<
+      string,
+      unknown
+    >;
+    expect(entry.uctJurisdiction).toBe("GB");
+    expect(entry.engine).toBe("publishing");
   });
 
-  it('mints with NO fabricated engine when the payload omits engine', async () => {
+  it("mints with NO fabricated engine when the payload omits engine", async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(signupRequest(fullPayload()));
@@ -263,20 +306,31 @@ describe('S1 — creating signup mints and discloses the UCT', () => {
     const body = (await res.json()) as SignupResponse;
     expect(body.created).toBe(true);
     expect(body.uct).toMatch(/^UCT-[A-Z]{2}-\d{4}-[0-9A-F]{8}-[0-9A-Z]{2}$/);
-    expect('engine' in body).toBe(false); // never a fabricated vertical
-    const entry = (getRegistry()?.rights_holders ?? [])[0] as Record<string, unknown>;
-    expect('engine' in entry).toBe(false);
+    expect("engine" in body).toBe(false); // never a fabricated vertical
+    const entry = (getRegistry()?.rights_holders ?? [])[0] as Record<
+      string,
+      unknown
+    >;
+    expect("engine" in entry).toBe(false);
     expect(entry.uct).toBe(body.uct);
   });
 });
 
-describe('S2 — non-creating response is status-only (enumeration protection)', () => {
-  it('returns 200 alreadyRegistered with NO uct key of any shape', async () => {
-    const registry = { id: REGISTRY_ASSET_ID, rights_holders: [signupHolderEntry()] };
+describe("S2 — non-creating response is status-only (enumeration protection)", () => {
+  it("returns 200 alreadyRegistered with NO uct key of any shape", async () => {
+    const registry = {
+      id: REGISTRY_ASSET_ID,
+      rights_holders: [signupHolderEntry()],
+    };
     const { db, getRegistry } = fakeDb({ registry });
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest(fullPayload({ email: `  ${EMAIL.toUpperCase()}  `, engine: 'music_recording' })),
+      signupRequest(
+        fullPayload({
+          email: `  ${EMAIL.toUpperCase()}  `,
+          engine: "music_recording",
+        }),
+      ),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as SignupResponse & Record<string, unknown>;
@@ -284,65 +338,92 @@ describe('S2 — non-creating response is status-only (enumeration protection)',
       ok: true,
       created: false,
       alreadyRegistered: true,
-      status: 'PENDING',
+      status: "PENDING",
     });
     // Key ABSENCE, asserted — not by convention. uctCreatedAt would leak just
     // the same; neither key may appear on the repeat path. Neither may
     // credential material (session/user/profile) or the union extras.
-    for (const key of ['uct', 'uctCreatedAt', 'jurisdiction', 'engine', 'session', 'user', 'profile']) {
+    for (const key of [
+      "uct",
+      "uctCreatedAt",
+      "jurisdiction",
+      "engine",
+      "session",
+      "user",
+      "profile",
+    ]) {
       expect(key in body).toBe(false);
     }
     expect(JSON.stringify(body)).not.toContain('"uct"');
     // The pre-UCT holder is untouched — no re-mint, no backfill.
     expect(getRegistry()?.rights_holders).toHaveLength(1);
-    expect('uct' in (getRegistry()?.rights_holders[0] as Record<string, unknown>)).toBe(false);
+    expect(
+      "uct" in (getRegistry()?.rights_holders[0] as Record<string, unknown>),
+    ).toBe(false);
   });
 });
 
-describe('S3 — invalid engine/jurisdiction are sanitized 400s with no state change', () => {
+describe("S3 — invalid engine/jurisdiction are sanitized 400s with no state change", () => {
   it.each([
-    ['an unknown engine', { engine: 'film_licensing' }, 'film_licensing'],
-    ['a non-string engine', { engine: 42 }, '42'],
-    ['a 3-char jurisdiction', { engine: 'music_recording', jurisdiction: 'USA' }, 'USA'],
-    ['a 1-char jurisdiction', { jurisdiction: 'U' }, 'U'],
-  ])('rejects %s without echoing the input', async (_label, overrides, forbidden) => {
-    const { db, getRegistry } = fakeDb();
-    mockGetDb.mockReturnValue(db as never);
-    const res = await POST(signupRequest(fullPayload(overrides)));
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { ok: boolean; error: string };
-    expect(body.ok).toBe(false);
-    const text = JSON.stringify(body);
-    expect(text).not.toContain(forbidden); // no input echo
-    expect(getRegistry()).toBeNull(); // no registry row, no holder — zero state change
-  });
+    ["an unknown engine", { engine: "film_licensing" }, "film_licensing"],
+    ["a non-string engine", { engine: 42 }, "42"],
+    [
+      "a 3-char jurisdiction",
+      { engine: "music_recording", jurisdiction: "USA" },
+      "USA",
+    ],
+    ["a 1-char jurisdiction", { jurisdiction: "U" }, "U"],
+  ])(
+    "rejects %s without echoing the input",
+    async (_label, overrides, forbidden) => {
+      const { db, getRegistry } = fakeDb();
+      mockGetDb.mockReturnValue(db as never);
+      const res = await POST(signupRequest(fullPayload(overrides)));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: string };
+      expect(body.ok).toBe(false);
+      const text = JSON.stringify(body);
+      expect(text).not.toContain(forbidden); // no input echo
+      expect(getRegistry()).toBeNull(); // no registry row, no holder — zero state change
+    },
+  );
 
-  it('accepts a lowercase-typed 2-letter jurisdiction by normalizing it', async () => {
+  it("accepts a lowercase-typed 2-letter jurisdiction by normalizing it", async () => {
     const { db } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     const res = await POST(
-      signupRequest(fullPayload({ engine: 'music_recording', jurisdiction: 'de' })),
+      signupRequest(
+        fullPayload({ engine: "music_recording", jurisdiction: "de" }),
+      ),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as SignupResponse;
-    expect(body.jurisdiction).toBe('DE');
+    expect(body.jurisdiction).toBe("DE");
   });
 });
 
-describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
-  it('recovers a forced serial collision through the bounded retry and mints distinct UCTs', async () => {
+describe("S5 — race safety: distinct UCTs, no uniqueness violation", () => {
+  it("recovers a forced serial collision through the bounded retry and mints distinct UCTs", async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
     // Two registrations draw the SAME serial; the live-registry uniqueness
     // check (serialized by the advisory lock in production) forces the
     // second mint to redraw.
     mockUctSerial
-      .mockImplementationOnce(() => 'AAAAAAAA')
-      .mockImplementationOnce(() => 'AAAAAAAA')
-      .mockImplementationOnce(() => 'BBBBBBBB');
+      .mockImplementationOnce(() => "AAAAAAAA")
+      .mockImplementationOnce(() => "AAAAAAAA")
+      .mockImplementationOnce(() => "BBBBBBBB");
 
-    const first = await POST(signupRequest(fullPayload({ email: 'a@example.com', engine: 'music_recording' })));
-    const second = await POST(signupRequest(fullPayload({ email: 'b@example.com', engine: 'music_recording' })));
+    const first = await POST(
+      signupRequest(
+        fullPayload({ email: "a@example.com", engine: "music_recording" }),
+      ),
+    );
+    const second = await POST(
+      signupRequest(
+        fullPayload({ email: "b@example.com", engine: "music_recording" }),
+      ),
+    );
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     const firstBody = (await first.json()) as SignupResponse;
@@ -356,14 +437,24 @@ describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
     expect(new Set(ucts).size).toBe(2);
   });
 
-  it('keeps concurrent signups on one registry row with distinct UCTs and no violation', async () => {
+  it("keeps concurrent signups on one registry row with distinct UCTs and no violation", async () => {
     const { db, getRegistry } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    mockUctSerial.mockImplementationOnce(() => '11111111').mockImplementationOnce(() => '22222222');
+    mockUctSerial
+      .mockImplementationOnce(() => "11111111")
+      .mockImplementationOnce(() => "22222222");
 
     const [first, second] = await Promise.all([
-      POST(signupRequest(fullPayload({ email: 'a@example.com', engine: 'music_recording' }))),
-      POST(signupRequest(fullPayload({ email: 'b@example.com', engine: 'music_recording' }))),
+      POST(
+        signupRequest(
+          fullPayload({ email: "a@example.com", engine: "music_recording" }),
+        ),
+      ),
+      POST(
+        signupRequest(
+          fullPayload({ email: "b@example.com", engine: "music_recording" }),
+        ),
+      ),
     ]);
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
@@ -378,30 +469,34 @@ describe('S5 — race safety: distinct UCTs, no uniqueness violation', () => {
   });
 });
 
-describe('fail-closed mint', () => {
-  it('returns 503 UCT_MINT_FAILED, compensates the auth signup, and registers nothing when uniqueness is not achieved in bounds', async () => {
-    const colliding = buildUct('US', uctIssuanceYear(), 'AAAAAAAA');
+describe("fail-closed mint", () => {
+  it("returns 503 UCT_MINT_FAILED, compensates the auth signup, and registers nothing when uniqueness is not achieved in bounds", async () => {
+    const colliding = buildUct("US", uctIssuanceYear(), "AAAAAAAA");
     const registry = {
       id: REGISTRY_ASSET_ID,
       rights_holders: [
         {
           ...signupHolderEntry(),
-          email: 'seed@example.com',
+          email: "seed@example.com",
           uct: colliding,
           uctCreatedAt: new Date().toISOString(),
-          uctJurisdiction: 'US',
+          uctJurisdiction: "US",
         },
       ],
     };
     const { db, getRegistry, txQueries } = fakeDb({ registry });
     mockGetDb.mockReturnValue(db as never);
-    mockUctSerial.mockImplementation(() => 'AAAAAAAA'); // every draw collides
+    mockUctSerial.mockImplementation(() => "AAAAAAAA"); // every draw collides
 
-    const res = await POST(signupRequest(fullPayload({ email: 'new@example.com', engine: 'music_recording' })));
+    const res = await POST(
+      signupRequest(
+        fullPayload({ email: "new@example.com", engine: "music_recording" }),
+      ),
+    );
     expect(res.status).toBe(503);
     const body = (await res.json()) as SignupResponse;
     expect(body.ok).toBe(false);
-    expect(body.reason).toBe('UCT_MINT_FAILED');
+    expect(body.reason).toBe("UCT_MINT_FAILED");
     expect(body.uct).toBeUndefined();
     // Fail-closed: no holder registered, no partial state...
     expect(getRegistry()?.rights_holders).toHaveLength(1);
@@ -409,19 +504,19 @@ describe('fail-closed mint', () => {
     expect(supabaseMock.deleteUser).toHaveBeenCalledTimes(1);
     expect(supabaseMock.profileDeleteEq).toHaveBeenCalled();
     // Exactly the bounded number of uniqueness attempts ran.
-    const mintProbes = txQueries.filter((q) => q.sql.includes('rh @>'));
+    const mintProbes = txQueries.filter((q) => q.sql.includes("rh @>"));
     expect(mintProbes).toHaveLength(3);
   });
 });
 
-describe('schema hygiene for the UCT path', () => {
-  it('issues no money-movement queries when minting', async () => {
+describe("schema hygiene for the UCT path", () => {
+  it("issues no money-movement queries when minting", async () => {
     const { db, txQueries } = fakeDb();
     mockGetDb.mockReturnValue(db as never);
-    await POST(signupRequest(fullPayload({ engine: 'music_recording' })));
-    const allSql = txQueries.map((q) => q.sql).join('\n');
-    expect(allSql).not.toContain('universal_royalty_ledger');
-    expect(allSql).not.toContain('disbursements');
-    expect(allSql).not.toContain('UPDATE cbt_assets SET mapped_identifiers'); // no asset mutation
+    await POST(signupRequest(fullPayload({ engine: "music_recording" })));
+    const allSql = txQueries.map((q) => q.sql).join("\n");
+    expect(allSql).not.toContain("universal_royalty_ledger");
+    expect(allSql).not.toContain("disbursements");
+    expect(allSql).not.toContain("UPDATE cbt_assets SET mapped_identifiers"); // no asset mutation
   });
 });
