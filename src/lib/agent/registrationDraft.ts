@@ -200,6 +200,26 @@ export const agentRegistrationDraftSchema = z.object({
 
 export type AgentToolInput = z.infer<typeof agentToolInputSchema>;
 export type AgentRegistrationDraft = z.infer<typeof agentRegistrationDraftSchema>;
+
+/**
+ * The write path's `RegisterAssetPayload` on its own — the review screen's
+ * confirm gate. The creator-edited editor state must parse against THIS
+ * before the confirm button enables, so a draft the server would reject
+ * never leaves the client. Holders are the full `HolderDraft` mirror
+ * (client-assigned ids included); each pool re-checks the exact-100.0000%
+ * gate in the engine's unit space.
+ */
+export const registerAssetPayloadSchema = z.object({
+  ...draftBase,
+  pools: poolsSchema(reviewHolderSchema),
+});
+
+// Compile pin: the gate schema's output is assignable to the action's payload.
+type RegisterPayloadShape = z.infer<typeof registerAssetPayloadSchema>;
+export const REGISTER_PAYLOAD_MIRROR_PIN = true as RegisterPayloadShape extends RegisterAssetPayload
+  ? true
+  : never;
+
 export type AgentTemplateSuggestion = NonNullable<AgentRegistrationDraft['templateSuggestion']>;
 
 // ---------------------------------------------------------------------------
