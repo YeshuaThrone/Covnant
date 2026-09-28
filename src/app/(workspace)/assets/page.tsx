@@ -55,6 +55,12 @@ export default async function AssetsPage({
         <div className="flex shrink-0 items-center gap-2.5">
           <HeaderActions demo={demo} />
           <Link
+            href="/agent"
+            className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-gold/40 hover:text-gold"
+          >
+            ✦ Agent
+          </Link>
+          <Link
             href="/assets/new"
             className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-4 py-2 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20"
           >

@@ -133,6 +133,15 @@ export const PUBLIC_READ_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60
  */
 export const MONEY_INITIATION_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
 
+/**
+ * The registration agent's draft route: 10 requests per 10 minutes — a
+ * TIGHTER budget than the public surfaces because every allowed call spends
+ * Anthropic credits. Enforced twice on the route: once keyed by client
+ * address (burn floods before the session round-trip — the audit-M5 canon)
+ * and once keyed by the verified creator's payee id (the per-creator budget).
+ */
+export const AGENT_RATE_LIMIT: RateLimitConfig = { limit: 10, windowMs: 600_000 };
+
 /** Bound sweep cost: at most one expired-row DELETE per process per interval. */
 const SWEEP_INTERVAL_MS = 60_000;
 
