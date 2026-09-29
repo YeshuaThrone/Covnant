@@ -2,13 +2,15 @@
  * @vitest-environment jsdom
  *
  * EntryZones composition tests — the standard single-click submit flow that
- * replaced the double-click seal ritual. Pins: one fetch per submit, the
- * button's isSubmitting state (disabled + loading label while in flight),
- * immediate navigation to /agent on a successful signup response (201 or
- * 200), NO rendered E.164 block for real-world captures (the founder's two
- * formats ride the wire as canonical E.164), the human invalid-phone
- * message for genuinely impossible input, retryability after a failure, and
- * the retirement of every local-storage seal record.
+ * replaced the double-click seal ritual. Pins: one signup fetch per submit,
+ * the button's isSubmitting state (disabled + loading label while in
+ * flight), the 201-with-phone response landing on the verification step
+ * (the account exists first; the step can only enrich it), immediate
+ * navigation to /agent on a 200 repeat or a blank-phone 201, NO rendered
+ * E.164 block for real-world captures (the founder's two formats ride the
+ * wire as canonical E.164), the human invalid-phone message for genuinely
+ * impossible input, retryability after a failure, and the retirement of
+ * every local-storage seal record.
  */
 
 import { act } from 'react';
@@ -50,6 +52,22 @@ const CREATED_201 = {
 function jsonResponse(status: number, body: unknown) {
   return { status, json: async () => body };
 }
+
+/** A fetch mock routed by URL fragment — the signup call and the mounted
+ * OTP step's auto-request each get their scripted response. */
+function routedFetch(handlers: Record<string, { status: number; body: unknown }>) {
+  return vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    for (const [path, response] of Object.entries(handlers)) {
+      if (url.includes(path)) {
+        return Promise.resolve(jsonResponse(response.status, response.body));
+      }
+    }
+    return Promise.resolve(jsonResponse(500, { ok: false, error: 'unrouted' }));
+  });
+}
+
+const OTP_OK = { status: 200, body: { ok: true, delivered: true, deliveredVia: 'none' } };
 
 function mountEntryZones(): {
   container: HTMLElement;
@@ -119,17 +137,40 @@ describe('EntryZones single-click submit', () => {
     expect(container.textContent).not.toContain('SEALED');
   });
 
-  it('submits exactly once per click and navigates to /agent on the 201', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, CREATED_201));
+  it('submits exactly once per click and lands on the verification step on the 201', async () => {
+    const fetchMock = routedFetch({
+      'auth/signup': { status: 201, body: CREATED_201 },
+      'auth/phone/otp': OTP_OK,
+    });
     vi.stubGlobal('fetch', fetchMock);
     const { container, form } = mountEntryZones();
     fillComposition(container, '830-358-2306');
     submitForm(form);
     await flushSubmit();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signupCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes('auth/signup'),
+    );
+    expect(signupCalls).toHaveLength(1);
+    // The step mounts — the account exists, the funnel pauses on purpose.
+    expect(container.textContent).toContain('Verify your phone');
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it('a 201 with a blank phone navigates straight to /agent — nothing to verify', async () => {
+    const fetchMock = routedFetch({
+      'auth/signup': { status: 201, body: CREATED_201 },
+      'auth/phone/otp': OTP_OK,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { container, form } = mountEntryZones();
+    fillComposition(container, '');
+    submitForm(form);
+    await flushSubmit();
+
     expect(routerPush).toHaveBeenCalledTimes(1);
     expect(routerPush).toHaveBeenCalledWith('/agent');
+    expect(container.textContent).not.toContain('Verify your phone');
   });
 
   it('navigates to /agent on the status-only 200 claim/repeat response too', async () => {
@@ -178,7 +219,9 @@ describe('EntryZones single-click submit', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(routerPush).toHaveBeenCalledWith('/agent');
+    // The 201-with-phone swaps to the verification step instead of pushing —
+    // the duplicate-submit guard stays latched through the swap.
+    expect(routerPush).not.toHaveBeenCalled();
   });
 
   it('renders no E.164 block for the founder real-world formats — the wire carries canonical E.164', async () => {
@@ -190,7 +233,8 @@ describe('EntryZones single-click submit', () => {
       submitForm(form);
       await flushSubmit();
 
-      expect(routerPush).toHaveBeenCalledWith('/agent');
+      // The step mounts for a phone on file; the wire still carries E.164.
+      expect(container.textContent).toContain('Verify your phone');
       expect(container.textContent).not.toContain('E.164');
       const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
       expect(JSON.parse(String(init.body)).phone).toBe('+18303582306');
@@ -238,10 +282,13 @@ describe('EntryZones single-click submit', () => {
   });
 
   it('writes no localStorage seal record — the offline receipt ritual is gone', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, CREATED_201));
+    const fetchMock = routedFetch({
+      'auth/signup': { status: 201, body: CREATED_201 },
+      'auth/phone/otp': OTP_OK,
+    });
     vi.stubGlobal('fetch', fetchMock);
     const { container, form } = mountEntryZones();
-    fillComposition(container, '830-358-2306');
+    fillComposition(container, '');
     submitForm(form);
     await flushSubmit();
 

@@ -1,4 +1,5 @@
 import { AgentRegistrationStudio } from '@/components/agent/AgentRegistrationStudio';
+import { VerifyPhonePrompt } from '@/components/agent/VerifyPhonePrompt';
 
 export const metadata = {
   title: 'Registration Agent — Covnant',
@@ -23,6 +24,9 @@ export default function AgentPage() {
         It proposes; only your confirmation writes.
       </p>
       <div className="gold-rule my-8" />
+      {/* Verify-later offer — renders only for unverified phones; skipped
+          creators get exactly one implementation of verification here. */}
+      <VerifyPhonePrompt />
       <AgentRegistrationStudio />
     </main>
   );
