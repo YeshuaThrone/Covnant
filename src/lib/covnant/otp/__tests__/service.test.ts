@@ -9,12 +9,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   OTP_MAX_ATTEMPTS,
+  OTP_MESSAGE_TEMPLATES,
   OTP_RESEND_COOLDOWN_SECONDS,
   OTP_TTL_MINUTES,
   buildOtpMessage,
   generateOtp,
   hashOtp,
   otpMatches,
+  renderOtpMessage,
 } from '../service';
 
 const SECRET = 'test-otp-hash-secret';
@@ -82,11 +84,37 @@ describe('hashOtp / otpMatches', () => {
   });
 });
 
-describe('buildOtpMessage', () => {
+describe('buildOtpMessage — template rotation for deliverability', () => {
   it('carries the code and the expiry in plain language', () => {
     const message = buildOtpMessage('012345');
     expect(message).toContain('012345');
     expect(message).toContain('5 minutes');
+  });
+
+  it('rotates across the template set one request at a time, then wraps', () => {
+    const bodies = Array.from({ length: OTP_MESSAGE_TEMPLATES.length * 2 }, () =>
+      buildOtpMessage('012345'),
+    );
+    // Consecutive requests render different bodies until the set wraps.
+    const firstSet = bodies.slice(0, OTP_MESSAGE_TEMPLATES.length);
+    expect(new Set(firstSet).size).toBe(OTP_MESSAGE_TEMPLATES.length);
+    // And the cycle repeats exactly.
+    expect(bodies.slice(OTP_MESSAGE_TEMPLATES.length)).toEqual(firstSet);
+  });
+
+  it('renders the code in EVERY template — rotation never hides the code', () => {
+    for (let index = 0; index < OTP_MESSAGE_TEMPLATES.length; index += 1) {
+      const rendered = renderOtpMessage(index, '654321');
+      expect(rendered).toContain('654321');
+      expect(rendered).toContain('5 minutes');
+      // Compliant bodies — no spammy punctuation, no ALL-CAPS yelling.
+      expect(rendered).not.toMatch(/!{2,}|[A-Z]{5,}/);
+    }
+  });
+
+  it('wraps any index modulo the template count — rotation is total', () => {
+    const count = OTP_MESSAGE_TEMPLATES.length;
+    expect(renderOtpMessage(count + 2, '012345')).toBe(renderOtpMessage(2, '012345'));
   });
 });
 

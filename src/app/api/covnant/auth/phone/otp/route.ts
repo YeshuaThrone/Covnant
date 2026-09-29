@@ -59,9 +59,9 @@ interface LatestVerificationRow {
 }
 
 /** The generic no-enumeration success body — identical shape either way. */
-function genericSuccess(delivered: boolean): Response {
+function genericSuccess(delivered: boolean, deliveredVia: string | null): Response {
   return Response.json(
-    { ok: true, delivered },
+    { ok: true, delivered, deliveredVia },
     { status: 200, headers: { 'cache-control': 'no-store' } },
   );
 }
@@ -124,7 +124,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const profile = profileQuery.data;
   if (profile === null || profile.phone !== phone || profile.phone_verified_at !== null) {
-    return genericSuccess(false);
+    return genericSuccess(false, null);
   }
 
   // Server-enforced resend cooldown: 60s since the profile's latest row was
@@ -177,18 +177,21 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(500, 'otp_request_failed', 'Phone verification could not be requested.');
   }
 
-  // Best-effort delivery — fail-open by construction. A provider that
-  // throws (timeout, DNS, reset) degrades to delivered: false, never an
-  // error wall; the code stays safe to have stored because it is never in
-  // any response, and the none provider logs it server-side.
+  // Best-effort delivery — fail-open by construction, at every hop of the
+  // fallback chain (WhatsApp → Textbee → none). A provider that throws
+  // (timeout, DNS, reset) degrades to delivered: false, never an error
+  // wall; the code stays safe to have stored because it is never in any
+  // response, and the none provider logs it server-side.
   let delivered = false;
+  let deliveredVia: string | null = null;
   try {
     const provider = getSmsProvider();
-    const result = await provider.sendSms(phone, buildOtpMessage(code));
+    const result = await provider.sendSms(phone, { body: buildOtpMessage(code), code });
     delivered = result.ok;
+    deliveredVia = result.ok ? result.via ?? null : null;
   } catch (error) {
     console.error('Phone OTP SMS provider crashed — delivery degraded to skip path:', error);
   }
 
-  return genericSuccess(delivered);
+  return genericSuccess(delivered, deliveredVia);
 }

@@ -58,7 +58,40 @@ export function otpMatches(stored: string, computed: string): boolean {
   return timingSafeEqual(storedBytes, computedBytes);
 }
 
-/** The SMS body — the ONLY place the plaintext code is ever rendered. */
+/**
+ * The rotating OTP message set — deliverability engineering, full stop.
+ * Carriers and anti-spam pipelines are far more likely to throttle or junk
+ * filter a body that looks identical on every send; rotating a small set of
+ * compliant bodies (plain language, no spammy punctuation, same truthful
+ * expiry) keeps delivery healthy at Textbee/WhatsApp scale. Rotation changes
+ * NOTHING else: same code, same cooldown, same attempt semantics.
+ */
+export const OTP_MESSAGE_TEMPLATES: readonly string[] = [
+  'Covnant: your verification code is {code}. It expires in {minutes} minutes.',
+  'Your Covnant verification code is {code}. The code expires in {minutes} minutes.',
+  'Covnant verification: {code}. This code expires in {minutes} minutes.',
+] as const;
+
+/**
+ * Pure renderer for a template index — the deterministic core the rotation
+ * tests pin. Index wraps modulo the template count, so any non-negative
+ * index renders a valid body.
+ */
+export function renderOtpMessage(templateIndex: number, code: string): string {
+  const template = OTP_MESSAGE_TEMPLATES[templateIndex % OTP_MESSAGE_TEMPLATES.length] ?? '';
+  return template.replaceAll('{code}', code).replaceAll('{minutes}', String(OTP_TTL_MINUTES));
+}
+
+/** Module-level rotation cursor — advances once per rendered message. */
+let messageRotation = 0;
+
+export function nextOtpMessageIndex(): number {
+  const index = messageRotation % OTP_MESSAGE_TEMPLATES.length;
+  messageRotation += 1;
+  return index;
+}
+
+/** The SMS body for a request — the ONLY place the plaintext code is ever rendered. */
 export function buildOtpMessage(code: string): string {
-  return `Covnant: your verification code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes.`;
+  return renderOtpMessage(nextOtpMessageIndex(), code);
 }

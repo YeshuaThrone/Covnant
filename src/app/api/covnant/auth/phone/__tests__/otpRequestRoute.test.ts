@@ -41,10 +41,10 @@ const providerHolder = vi.hoisted(() => ({
 vi.mock('@/lib/covnant/otp/smsProvider', () => ({
   getSmsProvider: () => ({
     name: 'textbee',
-    sendSms: async (phone: string, body: string) => {
-      providerHolder.messages.push(`${phone}:${body}`);
+    sendSms: async (phone: string, message: { body: string }) => {
+      providerHolder.messages.push(`${phone}:${message.body}`);
       if (providerHolder.thrown !== null) throw providerHolder.thrown;
-      return providerHolder.result;
+      return { ...providerHolder.result, via: 'textbee' };
     },
   }),
 }));
@@ -89,7 +89,7 @@ describe('eligible request — the real send', () => {
     const response = await post(EMAIL, PHONE);
 
     expect(response.status).toBe(200);
-    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: true });
+    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: true, deliveredVia: 'textbee' });
 
     // Exactly one new row — hashed at rest, bound to the user, expiring in ~5 min.
     expect(harness!.calls.inserts).toHaveLength(1);
@@ -124,7 +124,7 @@ describe('eligible request — the real send', () => {
     const response = await post(EMAIL, '(830) 358-2306');
 
     expect(response.status).toBe(200);
-    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: true });
+    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: true, deliveredVia: 'textbee' });
     expect(providerHolder.messages[0].startsWith('+18303582306')).toBe(true);
   });
 });
@@ -141,7 +141,7 @@ describe('ineligible requests — the generic no-enumeration envelope', () => {
     const response = await post(email, phone);
 
     expect(response.status).toBe(200);
-    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false });
+    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false, deliveredVia: null });
     expect(harness!.calls.inserts).toHaveLength(0);
     expect(providerHolder.messages).toHaveLength(0);
   });
@@ -182,7 +182,7 @@ describe('fail-open delivery', () => {
     const response = await post(EMAIL, PHONE);
 
     expect(response.status).toBe(200);
-    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false });
+    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false, deliveredVia: null });
     expect(harness!.calls.inserts).toHaveLength(1);
   });
 
@@ -195,7 +195,7 @@ describe('fail-open delivery', () => {
     const response = await post(EMAIL, PHONE);
 
     expect(response.status).toBe(200);
-    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false });
+    await expect(bodyOf(response)).resolves.toEqual({ ok: true, delivered: false, deliveredVia: null });
   });
 });
 
