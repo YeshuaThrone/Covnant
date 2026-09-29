@@ -1,5 +1,5 @@
 /**
- * The seal's signup wire mapping — pure functions, unit-testable without a
+ * The signup wire mapping — pure functions, unit-testable without a
  * browser. The component (EntryZones.tsx) owns the fetch and the state;
  * this module owns the contract.
  *
@@ -67,61 +67,6 @@ export function buildSignupPayload(values: SealEntryValues): SignupRequestBody {
   };
 }
 
-/**
- * The non-secret echo of the signup body — the ONLY seal data that persists
- * locally. The password and legal name (and the captured phone) never touch
- * localStorage: an XSS or a shared-machine read of the local seal record
- * learns nothing secret, while the POST payload stays complete.
- */
-export type SealedEntryEcho = {
-  stage_name: string;
-  email: string;
-  core_industry: string;
-  title: string;
-  udr_terms_accepted: boolean;
-};
-
-/** The localStorage record: the seal marker plus the non-secret echo. */
-export type SealedEntryRecord = { sealed: true; echo: SealedEntryEcho };
-
-/**
- * The local seal record, built FROM the POST body — the persisted echo can
- * never drift from what was actually submitted.
- */
-export function buildSealedEntryRecord(body: SignupRequestBody): SealedEntryRecord {
-  return {
-    sealed: true,
-    echo: {
-      stage_name: body.stage_name,
-      email: body.email,
-      core_industry: body.core_industry,
-      title: body.title,
-      udr_terms_accepted: body.udr_terms_accepted,
-    },
-  };
-}
-
-/**
- * The persisted-seal guard. Every CURRENT echo key must be present with its
- * persisted type — a record missing any of them (a LEGACY seal, which
- * persisted the password and legal name, or a torn write) fails the guard:
- * the caller destroys the record and shows the unsealed composition rather
- * than half-restoring.
- */
-export function isSealedEntryRecord(value: unknown): value is SealedEntryRecord {
-  if (!isRecord(value)) return false;
-  const candidate = value as { sealed?: unknown; echo?: unknown };
-  if (candidate.sealed !== true || !isRecord(candidate.echo)) return false;
-  const echo = candidate.echo;
-  return (
-    typeof echo.stage_name === 'string' &&
-    typeof echo.email === 'string' &&
-    typeof echo.core_industry === 'string' &&
-    typeof echo.title === 'string' &&
-    echo.udr_terms_accepted === true
-  );
-}
-
 /** The route's provisioning status pair (contract-locked). */
 export type ProvisioningStatus = 'PENDING' | 'PROVISIONED';
 
@@ -131,7 +76,9 @@ export type ProvisioningStatus = 'PENDING' | 'PROVISIONED';
  * without a tag line); `repeat` is the status-only 200; `invalid` is a coded
  * 4xx validation failure rendering the API's sanitized message; `failed`
  * covers the fail-closed 5xx/network paths, whose messages point at the
- * unseal-and-resubmit recovery (nothing partial ever persists).
+ * resubmit recovery (nothing partial ever persists). The component advances
+ * to /agent on every success, so `created`/`repeat` live on as the tested
+ * contract mapping.
  */
 export type SealRequestState =
   | { phase: 'idle' }
@@ -150,17 +97,17 @@ export type SealRequestState =
 
 /** The UCT_MINT_FAILED recovery line — nothing registered, clean retry. */
 export const UCT_MINT_FAILED_MESSAGE =
-  'Nothing was registered — unseal and submit again';
+  'Nothing was registered — submit again';
 
 /** The network/transport failure line — the request never completed. */
 export const NETWORK_FAILED_MESSAGE =
-  'Your seal could not reach the registry — unseal and submit again';
+  'Your entry could not reach the registry — submit again';
 
 /** The generic fail-closed server line. */
 export const SERVER_FAILED_MESSAGE =
-  'Your seal could not be recorded — unseal and submit again';
+  'Your entry could not be recorded — submit again';
 
-const INVALID_FALLBACK_MESSAGE = 'Your entry could not be validated — unseal and correct it';
+const INVALID_FALLBACK_MESSAGE = 'Your entry could not be validated — correct it and submit again';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -173,7 +120,7 @@ function provisioningOf(body: Record<string, unknown>): ProvisioningStatus {
 
 /**
  * Map a signup response (status + parsed-or-null body) to the state the
- * seal composition renders. Total: any shape, including garbage, lands in a
+ * composition renders. Total: any shape, including garbage, lands in a
  * renderable branch.
  */
 export function mapSignupResponse(status: number, body: unknown): SealRequestState {
@@ -221,7 +168,7 @@ export function mapSignupResponse(status: number, body: unknown): SealRequestSta
 
 /**
  * The transport-failure state (fetch threw — offline, connection reset).
- * The local seal record already persists; this only renders the recovery.
+ * This only renders the recovery line; the composition stays editable.
  */
 export function networkFailureState(): SealRequestState {
   return { phase: 'failed', message: NETWORK_FAILED_MESSAGE };

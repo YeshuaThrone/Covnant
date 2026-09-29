@@ -964,7 +964,7 @@ test('the mirrored Password zone closes the entry column above the consent compo
   expect(prefilledStyles.caretColor).not.toBe(prefilledStyles.color);
 });
 
-test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the statement voice, a Submit button in the input slot, and a local-only seal that freezes all six entries', async ({
+test('the final Consent & Submit zone: an Accept UDR Terms checkbox in the statement voice, a Continue submit button in the input slot, and a standard single-click form', async ({
   page,
 }) => {
   await page.goto('/');
@@ -1015,7 +1015,7 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
       .getBoundingClientRect();
     const checkbox = document.querySelector('input[type="checkbox"]')!.getBoundingClientRect();
     const button = [...document.querySelectorAll('button')].find(
-      (b) => b.textContent?.trim() === 'Submit'
+      (b) => b.textContent?.trim() === 'Continue'
     )!
       .getBoundingClientRect();
     return {
@@ -1039,7 +1039,7 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   expect(Math.abs(geometry.buttonCenter - geometry.ruleCenter)).toBeLessThan(1);
 
   // Keyboard focus (Tab from the Password field) lands on the checkbox, and
-  // its focus-visible gold outline matches the Submit button's pattern.
+  // its focus-visible gold outline matches the Continue button's pattern.
   await page.getByRole('textbox', { name: 'Password' }).focus();
   await page.keyboard.press('Tab');
   const outlineOf = (el: Element) => {
@@ -1053,16 +1053,16 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   // The button transitions colors (incl. outline-color) over 200ms — poll
   // until the transition settles, then require the SAME outline pattern.
   await expect(async () => {
-    const buttonFocus = await page.getByRole('button', { name: 'Submit' }).evaluate(outlineOf);
+    const buttonFocus = await page.getByRole('button', { name: 'Continue' }).evaluate(outlineOf);
     expect(buttonFocus).toEqual(checkboxFocus);
   }).toPass({ timeout: 2000 });
 
   // Button treatment at rest: statement-voice label, NO box — a borderless
   // pressable label (transparent background, pointer cursor) whose label
   // brightens on hover so people know to press it.
-  const button = page.getByRole('button', { name: /^(Submit|SEALED)$/ });
+  const button = page.getByRole('button', { name: 'Continue' });
   await expect(button).toBeVisible();
-  expect(await button.getAttribute('type')).toBe('button');
+  expect(await button.getAttribute('type')).toBe('submit');
   const REST_BUTTON_CLASS =
     'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
   expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
@@ -1082,10 +1082,22 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   expect(restStyles.background).toBe('rgba(0, 0, 0, 0)');
   expect(restStyles.cursor).toBe('pointer');
   expect(restStyles.textTransform).toBe('uppercase');
-  const restLabelColor = await button.evaluate((el) => getComputedStyle(el).color);
-
-  // Seal flow: type into all six entries, then click Submit. The consent
-  // checkbox is deliberately left UNCHECKED — it does NOT gate the seal.
+  // Submit flow: type into all six entries, then click Continue once. The
+  // consent checkbox is deliberately left UNCHECKED — it does NOT gate the
+  // submit. The signup API is stubbed (a coded 422) so the composition
+  // stays on the page and the failure branch renders.
+  const SIGNUP_PATH = '**/api/covnant/auth/signup';
+  await page.route(SIGNUP_PATH, (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: false,
+        error: 'That entry could not be validated.',
+        reason: 'invalid_stage_name',
+      }),
+    }),
+  );
   await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
   await page.getByRole('textbox', { name: 'Legal Name' }).fill('Nova Reign');
   await page.getByRole('textbox', { name: 'Email' }).fill('nova@example.com');
@@ -1094,133 +1106,33 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   await page.getByRole('textbox', { name: 'Core Industry & Title' }).fill('Producer');
   await button.click();
 
-  // All six inputs are sealed: readOnly with values kept, jade styling kept,
-  // caret suppressed, cursor-default.
-  const sealedEntries = [
-    { label: 'Stage Name', value: 'Nova Reign' },
-    { label: 'Legal Name', value: 'Nova Reign' },
-    { label: 'Email', value: 'nova@example.com' },
-    { label: 'Phone Number', value: '+1 555 010 2030' },
-    { label: 'Password', value: 'Nova Reign Studio' },
-    { label: 'Core Industry & Title', value: 'Producer' },
-  ] as const;
-  const SEALED_INPUT_CLASS =
-    'h-10 w-64 cursor-default bg-transparent text-center text-lg text-emerald-300 caret-transparent outline-none';
-  for (const entry of sealedEntries) {
-    const input = page.getByRole('textbox', { name: entry.label });
-    await expect(input).toHaveValue(entry.value);
-    await expect(input).toHaveAttribute('readonly', '');
-    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
+  // The coded validation failure renders the API's message, and the
+  // composition stays fully interactive: no sealed state, no readOnly
+  // freezing, no double-click hint, and NOTHING persists locally — the
+  // offline seal record is retired (localStorage stays empty).
+  await expect(
+    page.locator('p.font-mono', { hasText: 'That entry could not be validated.' }),
+  ).toHaveCount(1);
+  for (const label of [
+    'Stage Name',
+    'Legal Name',
+    'Email',
+    'Phone Number',
+    'Password',
+    'Core Industry & Title',
+  ]) {
+    await expect(page.getByRole('textbox', { name: label })).not.toHaveAttribute('readonly', '');
   }
+  await expect(page.locator('p.font-mono', { hasText: 'Double-click to unseal' })).toHaveCount(0);
+  expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
 
-  // The jade typed styling is kept when sealed — matched against the hero
-  // subtitle.
-  const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });
-  const subtitleColor = await subtitle.evaluate((el) => getComputedStyle(el).color);
-  const sealedColor = await page
-    .getByRole('textbox', { name: 'Stage Name' })
-    .evaluate((el) => getComputedStyle(el).color);
-  expect(sealedColor).toBe(subtitleColor);
-
-  // Only the NON-SECRET echo of the signup body persists locally under one
-  // key: the password, legal name, and captured phone never touch
-  // localStorage. The POST payload still carries all six (pinned by the
-  // landing-seal request-body test).
-  const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  expect(JSON.parse(stored ?? 'null')).toEqual({
-    sealed: true,
-    echo: {
-      stage_name: 'Nova Reign',
-      email: 'nova@example.com',
-      core_industry: 'Producer',
-      title: 'Producer',
-      udr_terms_accepted: true,
-    },
-  });
-  // The stripped captures are gone from the stored bytes — key AND value
-  // (the legal-name VALUE collides with the persisted stage name, so the
-  // shape assertion above carries that half).
-  expect(stored).not.toContain('Nova Reign Studio');
-  expect(stored).not.toContain('+1 555 010 2030');
-  expect(stored).not.toContain('password');
-  expect(stored).not.toContain('legalName');
-  expect(stored).not.toContain('phoneNumber');
-
-  // The checkbox persists nothing: still unchecked after sealing (it is not
-  // part of the seal payload — the stored shape above carries ONLY sealed
-  // plus the non-secret echo).
+  // The checkbox persists nothing: still unchecked after the submit (it is
+  // not part of the payload and gates nothing).
   await expect(consentCheckbox).not.toBeChecked();
 
-  // The button enters the sealed state: label reads SEALED (amendment 11.1
-  // — the escape must be discoverable), borderless (no box to solidify),
-  // label dimmed slightly.
-  await expect(button).toHaveText('SEALED');
-
-  // The discoverability hint line sits directly beneath the sealed button:
-  // statement voice, exact text, present ONLY while sealed. It lives INSIDE
-  // the closing composition — the final ruler still closes the zone
-  // (fourteen golden rulers, unchanged by the seal — amendment 13.1).
-  const unsealHint = page.locator('p.font-mono', { hasText: 'Double-click to unseal' });
-  await expect(unsealHint).toHaveText('Double-click to unseal');
-  expect(await unsealHint.getAttribute('class')).toBe(
-    'mt-2 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne',
-  );
+  // The composition keeps its fourteen golden rulers — the standard form
+  // did not disturb the zone grammar (amendment 13.1).
   await expect(page.locator('.gold-rule')).toHaveCount(14);
-  const SEALED_BUTTON_CLASS =
-    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-default text-gold-champagne/50';
-  expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
-  expect(await button.getAttribute('class')).not.toContain('border');
-  // Label dimmed: after the 200ms color transition the sealed label differs
-  // from both the rest-state /90 label and the statement's full-strength
-  // gold — computed-color comparison, independent of Tailwind v4's oklab
-  // format.
-  await expect(async () => {
-    const sealedLabelColor = await button.evaluate((el) => getComputedStyle(el).color);
-    expect(sealedLabelColor).not.toBe(restLabelColor);
-    const statementColor = await consentLabel.evaluate((el) => getComputedStyle(el).color);
-    expect(sealedLabelColor).not.toBe(statementColor);
-  }).toPass({ timeout: 2000 });
-
-  // A refresh rehydrates the sealed composition: the persisted echo fields
-  // are restored (stage name, email, core industry), the stripped captures
-  // start at their defaults (legal name and phone empty; the password at
-  // its delegated 'Covenant' seed — they are no longer persisted), and
-  // every field is still readOnly with the button still sealed.
-  await page.reload();
-  const rehydrated: Array<[string, string]> = [
-    ['Stage Name', 'Nova Reign'],
-    ['Email', 'nova@example.com'],
-    ['Core Industry & Title', 'Producer'],
-  ];
-  for (const [label, value] of rehydrated) {
-    const input = page.getByRole('textbox', { name: label });
-    await expect(input).toHaveValue(value);
-    await expect(input).toHaveAttribute('readonly', '');
-    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
-  }
-  const strippedAtDefaults: Array<[string, string]> = [
-    ['Legal Name', ''],
-    ['Phone Number', ''],
-    ['Password', 'Covenant'],
-  ];
-  for (const [label, value] of strippedAtDefaults) {
-    const input = page.getByRole('textbox', { name: label });
-    await expect(input).toHaveValue(value);
-    await expect(input).toHaveAttribute('readonly', '');
-    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
-  }
-  await expect(button).toHaveText('SEALED');
-  expect(await button.getAttribute('class')).toBe(SEALED_BUTTON_CLASS);
-  await expect(consentCheckbox).not.toBeChecked();
-
-  // A second click is a no-op: the stored state is untouched and everything
-  // stays sealed.
-  const storedBefore = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  await button.click();
-  const storedAfter = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  expect(storedAfter).toBe(storedBefore);
-  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
-  await expect(button).toHaveText('SEALED');
 
   // The ENTERPRISE DIRECT bottom ruler (micro-edit 13, fourteenth overall
   // after amendment 13.1's top ruler) is the composition's last element:
@@ -1236,79 +1148,6 @@ test('the final Consent & Seal zone: an Accept UDR Terms checkbox in the stateme
   await expect(page.locator('section[class*="min-h-[300px]"]').locator('input')).toHaveCount(0);
 });
 
-test('the sealed composition UNSEALS on a double-click: fields turn editable again, the local key is cleared, and a refresh stays unsealed', async ({
-  page,
-}) => {
-  await page.goto('/');
-
-  // Seal first: type into all six entries, then click Submit once.
-  await page.getByRole('textbox', { name: 'Stage Name' }).fill('Nova Reign');
-  await page.getByRole('textbox', { name: 'Legal Name' }).fill('Nova Reign');
-  await page.getByRole('textbox', { name: 'Email' }).fill('nova@example.com');
-  await page.getByRole('textbox', { name: 'Phone Number' }).fill('+1 555 010 2030');
-  await page.getByRole('textbox', { name: 'Password' }).fill('Nova Reign Studio');
-  await page.getByRole('textbox', { name: 'Core Industry & Title' }).fill('Producer');
-  await page.getByRole('button', { name: 'Submit' }).click();
-  const SEALED_INPUT_CLASS =
-    'h-10 w-64 cursor-default bg-transparent text-center text-lg text-emerald-300 caret-transparent outline-none';
-  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Phone Number', 'Password', 'Core Industry & Title']) {
-    const input = page.getByRole('textbox', { name: label });
-    await expect(input).toHaveAttribute('readonly', '');
-    expect(await input.getAttribute('class')).toBe(SEALED_INPUT_CLASS);
-  }
-  const stored = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  expect(JSON.parse(stored ?? 'null')).toMatchObject({ sealed: true });
-
-  // The sealed button carries the discoverability tooltip ONLY while sealed,
-  // reads SEALED, and shows the unseal hint line (amendment 11.1).
-  const button = page.getByRole('button', { name: /^(Submit|SEALED)$/ });
-  expect(await button.getAttribute('title')).toBe('Double-click to unseal');
-  await expect(button).toHaveText('SEALED');
-  await expect(page.locator('p.font-mono', { hasText: 'Double-click to unseal' })).toBeVisible();
-
-  // Double-click unseals: the seal key is removed and every field turns
-  // editable again with the jade unsealed styling.
-  await button.dblclick();
-  const UNSEALED_INPUT_CLASS =
-    'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none';
-  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Phone Number', 'Password', 'Core Industry & Title']) {
-    const input = page.getByRole('textbox', { name: label });
-    await expect(input).not.toHaveAttribute('readonly', '');
-    expect(await input.getAttribute('class')).toBe(UNSEALED_INPUT_CLASS);
-  }
-  expect(await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'))).toBeNull();
-
-  // The unseal hint line is GONE from the DOM — it exists only while sealed.
-  await expect(page.locator('p.font-mono', { hasText: 'Double-click to unseal' })).toHaveCount(0);
-
-  // The button returns to the bright pressable rest state and loses the
-  // tooltip.
-  const REST_BUTTON_CLASS =
-    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
-  expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
-  expect(await button.getAttribute('title')).toBeNull();
-
-  // The fields kept their values through the unseal — they are editable, not
-  // wiped.
-  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveValue('Nova Reign');
-
-  // A refresh stays unsealed: no stored key, nothing rehydrates to readOnly.
-  await page.reload();
-  for (const label of ['Stage Name', 'Legal Name', 'Email', 'Phone Number', 'Password', 'Core Industry & Title']) {
-    await expect(page.getByRole('textbox', { name: label })).not.toHaveAttribute('readonly', '');
-  }
-  expect(await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'))).toBeNull();
-
-  // Re-seal with a single click — and the sealed single click is STILL a
-  // no-op (the regex locator resolves Submit unsealed and SEALED sealed).
-  await button.click();
-  await expect(page.getByRole('textbox', { name: 'Stage Name' })).toHaveAttribute('readonly', '');
-  const storedBefore = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  await button.click();
-  const storedAfter = await page.evaluate(() => window.localStorage.getItem('covnant.sealedEntry'));
-  expect(storedAfter).toBe(storedBefore);
-  expect(await button.getAttribute('title')).toBe('Double-click to unseal');
-});
 
 test('Bluesy artifacts and electric blues are absent repo-wide; vault and verification labels are present', async ({
   request,
