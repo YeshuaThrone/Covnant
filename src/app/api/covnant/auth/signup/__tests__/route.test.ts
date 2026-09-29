@@ -298,8 +298,8 @@ describe("POST /api/covnant/auth/signup", () => {
       ["a blank legal name", { legal_name: "   " }, "missing_legal_name"],
       ["an invalid email", { email: "not-an-email" }, "invalid_email"],
       [
-        "a phone without country code",
-        { phone: "5125550123" },
+        "a phone that cannot be a real number",
+        { phone: "830-358-2306 ext 5" },
         "invalid_phone",
       ],
       [

@@ -56,9 +56,25 @@ describe('buildSignupPayload', () => {
     expect('phone' in body).toBe(false);
   });
 
-  it('never normalizes the captured phone client-side — the API validates E.164', () => {
-    const body = buildSignupPayload({ ...VALUES, phoneNumber: '+1 555 010 2030' });
-    expect(body.phone).toBe('+1 555 010 2030');
+  it.each([
+    ['830-358-2306', '+18303582306'],
+    ['8303582306', '+18303582306'],
+    ['(830) 358-2306', '+18303582306'],
+    ['830.358.2306', '+18303582306'],
+    ['+1 830 358 2306', '+18303582306'],
+    ['1-830-358-2306', '+18303582306'],
+    ['+447700900123', '+447700900123'],
+  ])(
+    'normalizes the captured phone %s to canonical E.164 on the wire',
+    (captured, canonical) => {
+      const body = buildSignupPayload({ ...VALUES, phoneNumber: captured });
+      expect(body.phone).toBe(canonical);
+    },
+  );
+
+  it('sends unnormalizable phone input raw — the API rejects it with the human message, never a silent drop', () => {
+    const body = buildSignupPayload({ ...VALUES, phoneNumber: '830-358-2306 ext 5' });
+    expect(body.phone).toBe('830-358-2306 ext 5');
   });
 });
 
@@ -121,12 +137,12 @@ describe('mapSignupResponse', () => {
   it('maps a coded 422 to invalid carrying the API message', () => {
     const body = {
       ok: false,
-      error: 'phone must be an E.164 number (for example +15125550123).',
+      error: "That phone number doesn't look right — enter a real number, any format works.",
       reason: 'invalid_phone',
     };
     expect(mapSignupResponse(422, body)).toEqual({
       phase: 'invalid',
-      message: 'phone must be an E.164 number (for example +15125550123).',
+      message: "That phone number doesn't look right — enter a real number, any format works.",
     });
   });
 

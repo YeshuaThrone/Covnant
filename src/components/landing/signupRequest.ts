@@ -14,6 +14,8 @@
  * { ok: false, error, reason } (src/lib/server/http.ts).
  */
 
+import { normalizePhoneInput } from '@/lib/covnant/signupValidation';
+
 /** The six captured entry values — the seal's own payload shape. */
 export type SealEntryValues = {
   stageName: string;
@@ -28,7 +30,7 @@ export type SignupRequestBody = {
   stage_name: string;
   legal_name: string;
   email: string;
-  /** E.164 when captured non-empty; omitted when blank (stored as null). */
+  /** Canonical E.164 when captured non-empty; omitted when blank (stored as null). */
   phone?: string;
   core_industry: string;
   title: string;
@@ -42,14 +44,22 @@ export type SignupRequestBody = {
  * BOTH fields — core_industry stores the full string; title carries the
  * same captured value because the API requires it (the DB column is
  * nullable, the validator is not). No delimiter guessing, no splitting.
- * A blank phone is omitted entirely (the API stores null).
+ *
+ * The phone goes through the SHARED normalizer (signupValidation.ts — never
+ * a local copy of the rules): any real-world format rides the wire as
+ * canonical E.164, a blank capture is omitted entirely (the API stores
+ * null), and input that cannot be a real number rides RAW so the API
+ * rejects it with the human message — never silently dropped.
  */
 export function buildSignupPayload(values: SealEntryValues): SignupRequestBody {
+  const trimmedPhone = values.phoneNumber.trim();
   return {
     stage_name: values.stageName,
     legal_name: values.legalName,
     email: values.email,
-    ...(values.phoneNumber.trim() === '' ? {} : { phone: values.phoneNumber }),
+    ...(trimmedPhone === ''
+      ? {}
+      : { phone: normalizePhoneInput(trimmedPhone) ?? trimmedPhone }),
     core_industry: values.coreIndustryTitle,
     title: values.coreIndustryTitle,
     password: values.password,
