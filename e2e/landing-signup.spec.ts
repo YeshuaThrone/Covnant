@@ -17,6 +17,8 @@ import { expect, test, type Page } from '@playwright/test';
  */
 
 const SIGNUP_PATH = '**/api/covnant/auth/signup';
+const OTP_PATH = '**/api/covnant/auth/phone/otp';
+const VERIFY_PATH = '**/api/covnant/auth/phone/verify';
 
 const CREATED_201 = {
   ok: true,
@@ -55,27 +57,74 @@ function responseLine(page: Page, text: string) {
   return page.locator('p.font-mono', { hasText: text });
 }
 
+/** Default OTP stubs: the request route acknowledges the code request and
+ * the verify route accepts any six digits. Each test overrides the branch
+ * it probes. */
+async function stubOtpRoutes(
+  page: Page,
+  opts: { delivered?: boolean; verifyStatus?: number; verifyBody?: unknown } = {},
+) {
+  await page.route(OTP_PATH, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        delivered: opts.delivered ?? true,
+        deliveredVia: opts.delivered === false ? null : 'none',
+      }),
+    }),
+  );
+  await page.route(VERIFY_PATH, (route) =>
+    route.fulfill({
+      status: opts.verifyStatus ?? 200,
+      contentType: 'application/json',
+      body: JSON.stringify(opts.verifyBody ?? { ok: true, verified: true }),
+    }),
+  );
+}
+
+/** The 201 now lands on the verification step; Skip is the fail-open exit
+ * to /agent with the phone unverified. */
+async function skipVerification(page: Page) {
+  await expect(page.getByText('Verify your phone')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Skip for now — verify later' }).click();
+  await page.waitForURL('**/agent');
+}
+
 test('a single click submits once, shows the loading state, and advances to /agent on the 201', async ({
   page,
 }) => {
   let calls = 0;
   await page.route(SIGNUP_PATH, (route) => {
     calls += 1;
-    return route.fulfill({
-      status: 201,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ...CREATED_201,
-        session: {
-          access_token: 'access-token',
-          refresh_token: 'refresh-token',
-          expires_in: 3600,
-          expires_at: 9999999999,
-          token_type: 'bearer',
-        },
-      }),
+    // A short delay keeps the in-flight label observable — the instant stub
+    // resolves before Playwright's first poll can catch it.
+    return new Promise<void>((resolve) => {
+      setTimeout(
+        () =>
+          void route
+            .fulfill({
+              status: 201,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                ...CREATED_201,
+                session: {
+                  access_token: 'access-token',
+                  refresh_token: 'refresh-token',
+                  expires_in: 3600,
+                  expires_at: 9999999999,
+                  token_type: 'bearer',
+                },
+              }),
+            })
+            .then(() => resolve())
+            .catch(() => resolve()),
+        400,
+      );
     });
   });
+  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
@@ -84,9 +133,9 @@ test('a single click submits once, shows the loading state, and advances to /age
   const submitting = page.getByRole('button', { name: 'Submitting…' });
   await expect(submitting).toBeDisabled();
 
-  // The 201 advances straight to /agent — no response card, no sealed
-  // state, no local record.
-  await page.waitForURL('**/agent');
+  // The 201 lands on the verification step — the account exists first; the
+  // step can only enrich it. Skipping is the fail-open exit to /agent.
+  await skipVerification(page);
   await expect(page.getByRole('button', { name: /^(Continue|Submitting…)$/ })).toHaveCount(0);
   expect(calls).toBe(1);
   expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
@@ -96,10 +145,11 @@ test('the 201 session-less response also advances to /agent', async ({ page }) =
   await page.route(SIGNUP_PATH, (route) =>
     route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
   );
+  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
-  await page.waitForURL('**/agent');
+  await skipVerification(page);
 });
 
 test('the 200 repeat response advances to /agent too', async ({ page }) => {
@@ -233,9 +283,10 @@ test('the request body carries the six values as captured: combined field unspli
     captured = route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) });
   });
+  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
-  await page.waitForURL('**/agent');
+  await skipVerification(page);
 
   expect(captured).toMatchObject({
     stage_name: 'Nova Reign',
@@ -264,7 +315,8 @@ test('a real-world phone capture rides the wire as canonical E.164', async ({ pa
   // The founder's capture, exactly as typed into a real device.
   await page.getByRole('textbox', { name: 'Phone Number' }).fill('830-358-2306');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.waitForURL('**/agent');
+  // The 201 with a phone lands on the verification step; skip reaches /agent.
+  await skipVerification(page);
 
   expect(captured).toMatchObject({ phone: '+18303582306' });
 });
@@ -286,6 +338,8 @@ test('a blank phone capture omits the phone field entirely', async ({ page }) =>
 
   expect(captured).not.toBeNull();
   expect('phone' in (captured ?? {})).toBe(false);
+  // A blank phone means nothing to verify — the step never mounts.
+  await expect(page.getByText('Verify your phone')).toHaveCount(0);
 });
 
 test('a second click during flight cannot double-submit — the request fires exactly once', async ({
@@ -301,6 +355,7 @@ test('a second click during flight cannot double-submit — the request fires ex
       2000,
     ),
   );
+  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
@@ -309,5 +364,69 @@ test('a second click during flight cannot double-submit — the request fires ex
   const submitting = page.getByRole('button', { name: 'Submitting…' });
   await expect(submitting).toBeDisabled();
 
+  await skipVerification(page);
+});
+
+test('a correct code auto-advances to /agent with the phone verified', async ({ page }) => {
+  let verifyBody: Record<string, unknown> | null = null;
+  await page.route(SIGNUP_PATH, (route) =>
+    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
+  );
+  await stubOtpRoutes(page, {
+    verifyBody: { ok: true, verified: true },
+  });
+  await page.route(VERIFY_PATH, (route) => {
+    verifyBody = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, verified: true }),
+    });
+  });
+  await page.goto('/');
+  await fillAndSubmit(page);
+
+  await page.getByRole('textbox', { name: 'Verification code' }).fill('012345');
+  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  await page.waitForURL('**/agent');
+
+  expect(verifyBody).toMatchObject({ email: 'artist@example.com', code: '012345' });
+});
+
+test('a wrong code renders the route plain-language copy and stays on the step', async ({ page }) => {
+  await page.route(SIGNUP_PATH, (route) =>
+    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
+  );
+  await stubOtpRoutes(page, {
+    verifyStatus: 400,
+    verifyBody: {
+      ok: false,
+      error: 'invalid_code',
+      message: 'That code is incorrect. Check the six digits and try again.',
+    },
+  });
+  await page.goto('/');
+  await fillAndSubmit(page);
+
+  await page.getByRole('textbox', { name: 'Verification code' }).fill('999999');
+  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+
+  await expect(
+    page.getByText('That code is incorrect. Check the six digits and try again.'),
+  ).toHaveCount(1);
+  expect(page.url()).not.toContain('/agent');
+});
+
+test('an undelivered code renders the fail-open notice, never an error wall', async ({ page }) => {
+  await page.route(SIGNUP_PATH, (route) =>
+    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
+  );
+  await stubOtpRoutes(page, { delivered: false });
+  await page.goto('/');
+  await fillAndSubmit(page);
+
+  await expect(page.getByText('We could not reach a phone line just now', { exact: false })).toHaveCount(1);
+  // The funnel is intact: skip still reaches /agent with the phone unverified.
+  await page.getByRole('button', { name: 'Skip for now — verify later' }).click();
   await page.waitForURL('**/agent');
 });

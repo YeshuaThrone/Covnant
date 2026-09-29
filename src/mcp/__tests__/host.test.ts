@@ -1,6 +1,6 @@
 // Ported from EmeraldVal PR #41 src/mcp/host.test.ts (D2, async adaptation):
 // InMemoryStore injection per repo test patterns, every store/module call
-// awaited. Additions required by the D2 gate: exactly-26 canon tool list,
+// awaited. Additions required by the D2 gate: exactly-28 canon tool list,
 // splits_calculate / ledger_log round-trips against persisted async-store
 // rows, the registry-only round trip (register → sweep → query_audit_proof),
 // the fail-closed supabase_not_configured behavior, and a spawn-based stdio
@@ -16,6 +16,7 @@ import { MCP_HTTP_BINDINGS, COVENANT_MCP_HTTP, DON_MCP_HTTP } from "../catalog";
 import { DON_MCP_TOOLS } from "../don-tools";
 import { COVENANT_MCP_TOOLS } from "@/covenant-sdk/mcp-tools";
 import { EmeraldValMcpToolHost } from "../host";
+import { VERIFY_PHONE_MCP_TOOLS } from "../verify-phone-tools";
 
 const SPLIT_BODY = {
   source: "spotify",
@@ -70,7 +71,7 @@ const DSR = [
   "SU02\tBLOCK_01\t\t\t\t\t\t\tUS\tUSD\t10.00\t\tUNMATCHED_HOLD",
 ].join("\n");
 
-const CANON_26_TOOLS = [
+const CANON_28_TOOLS = [
   "plaid_kyc",
   "plaid_exchange",
   "splits_calculate",
@@ -97,6 +98,8 @@ const CANON_26_TOOLS = [
   "trigger_luminate_sweep",
   "query_audit_proof",
   "get_channel_unclaimed_metrics",
+  "send_phone_otp",
+  "verify_phone_otp",
 ];
 
 function host() {
@@ -156,13 +159,14 @@ describe("MCP catalog covers every /api/v1 route", () => {
 });
 
 describe("EmeraldValMcpToolHost", () => {
-  it("lists exactly the 26 canon tools (19 Don + 7 Covenant)", () => {
+  it("lists exactly the 28 canon tools (19 Don + 7 Covenant + 2 verify-phone)", () => {
     const listed = host().listTools().map((tool) => tool.name);
-    expect(listed).toHaveLength(26);
-    expect([...listed].sort()).toEqual([...CANON_26_TOOLS].sort());
+    expect(listed).toHaveLength(28);
+    expect([...listed].sort()).toEqual([...CANON_28_TOOLS].sort());
     expect(listed).toEqual([
       ...DON_MCP_TOOLS.map((tool) => tool.name),
       ...COVENANT_MCP_TOOLS.map((tool) => tool.name),
+      ...VERIFY_PHONE_MCP_TOOLS.map((tool) => tool.name),
     ]);
   });
 
@@ -397,7 +401,7 @@ describe("EmeraldValMcpToolHost", () => {
     try {
       const mcp = new EmeraldValMcpToolHost();
       // Boot is safe (lazy Don host) — listTools works without env.
-      expect(mcp.listTools()).toHaveLength(26);
+      expect(mcp.listTools()).toHaveLength(28);
       const result = await mcp.callTool("vaults_list", {});
       expect(result.isError).toBe(true);
       expect(result.payload).toEqual(
@@ -632,8 +636,8 @@ describe("npm run mcp — stdio boot smoke", () => {
         result?: { tools?: { name: string }[] };
       };
       const names = (listing.result?.tools ?? []).map((tool) => tool.name);
-      expect(names).toHaveLength(26);
-      expect([...names].sort()).toEqual([...CANON_26_TOOLS].sort());
+      expect(names).toHaveLength(28);
+      expect([...names].sort()).toEqual([...CANON_28_TOOLS].sort());
     } finally {
       child.kill();
     }

@@ -47,6 +47,22 @@ export const ADMIN_API_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_0
 
 export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
+/**
+ * Phone OTP request (POST /api/covnant/auth/phone/otp): 3 requests per
+ * client address per minute — one of the most rate-limited surfaces in the
+ * app because every allowed call can spend a real SMS. The per-phone
+ * half of the pair is the server-enforced 60-second resend cooldown
+ * (phone_verifications.latest row, the OTP route itself).
+ */
+export const PHONE_OTP_REQUEST_RATE_LIMIT: RateLimitConfig = { limit: 3, windowMs: 60_000 };
+
+/**
+ * Phone OTP verify (POST /api/covnant/auth/phone/verify): 5 attempts per
+ * client address per minute — the second bound on code guessing, on top of
+ * the 5-attempt cap that lives on each phone_verifications row.
+ */
+export const PHONE_OTP_VERIFY_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
+
 type Bucket = { count: number; windowStart: number };
 
 const buckets = new Map<string, Bucket>();

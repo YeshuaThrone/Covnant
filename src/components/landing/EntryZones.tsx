@@ -10,6 +10,7 @@ import {
   type SealRequestState,
   type SealEntryValues,
 } from '@/components/landing/signupRequest';
+import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 
 /*
  * Entry composition — the six mirrored entry zones and the Universal
@@ -46,6 +47,11 @@ export function EntryZones() {
   // primary button shows a visible loading state and is disabled while the
   // request is in flight, so duplicate submits are impossible.
   const [request, setRequest] = useState<SealRequestState>({ phase: 'idle' });
+  // The verification step: set the moment the signup 201 lands with a phone
+  // on file — the composition SWAPS to the OTP step instead of navigating
+  // (the spec's funnel: the account exists first; this step can only
+  // enrich it). A blank phone skips the step entirely — nothing to verify.
+  const [otpStep, setOtpStep] = useState<{ email: string; phone: string } | null>(null);
   const submittingRef = useRef(false);
   const stageNameRef = useRef<HTMLInputElement>(null);
   const legalNameRef = useRef<HTMLInputElement>(null);
@@ -69,7 +75,18 @@ export function EntryZones() {
         body: JSON.stringify(buildSignupPayload(values)),
         cache: 'no-store',
       });
-      if (response.status === 200 || response.status === 201) {
+      if (response.status === 201) {
+        const phone = values.phoneNumber.trim();
+        if (phone !== '') {
+          setOtpStep({ email: values.email.trim().toLowerCase(), phone });
+          return; // the submitting guard stays latched — same as navigation
+        }
+        router.push('/agent');
+        return;
+      }
+      if (response.status === 200) {
+        // A repeat claim: the account already existed — the verify-later
+        // prompt in the workspace covers any unverified phone.
         router.push('/agent');
         return;
       }
@@ -105,6 +122,18 @@ export function EntryZones() {
   };
 
   const isSubmitting = request.phase === 'submitting';
+
+  // The verification step replaces the entry composition outright — the
+  // signup has already succeeded (201), so this render is post-account.
+  if (otpStep !== null) {
+    return (
+      <PhoneOtpStep
+        email={otpStep.email}
+        phone={otpStep.phone}
+        onDone={() => router.push('/agent')}
+      />
+    );
+  }
 
   const buttonClass = [
     BUTTON_BASE_CLASS,
