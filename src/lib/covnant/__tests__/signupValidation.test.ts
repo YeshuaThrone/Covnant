@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeOptionalE164, normalizePhoneInput } from '../signupValidation';
+import { normalizeOptionalE164 } from '../signupValidation';
+import { normalizePhoneInput } from '../../phone';
 
 /**
  * The phone normalization gates — any real-world capture becomes canonical

@@ -14,7 +14,7 @@
  * { ok: false, error, reason } (src/lib/server/http.ts).
  */
 
-import { normalizePhoneInput } from '@/lib/covnant/signupValidation';
+import { normalizePhoneInput } from '@/lib/phone';
 
 /** The six captured entry values — the seal's own payload shape. */
 export type SealEntryValues = {
