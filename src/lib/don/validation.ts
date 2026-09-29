@@ -33,6 +33,7 @@ import {
   type VerifyIdentityInput,
 } from "./types";
 import { BPS_DENOMINATOR, percentToBps, sumBps } from "./splitEngine";
+import { normalizePhoneInput } from "@/lib/phone";
 
 export type DonValidationErrorCode =
   | "malformed_body"
@@ -89,7 +90,8 @@ const ERROR_MESSAGES: Record<DonValidationErrorCode, string> = {
   invalid_date_of_birth: "identity.date_of_birth must be YYYY-MM-DD.",
   underage: "identity.date_of_birth must be 18 years or older.",
   invalid_email: "identity.email must be a valid email address.",
-  invalid_phone: "identity.phone must be E.164 (e.g. +15125551234).",
+  invalid_phone:
+    "identity.phone doesn't look right — enter a real number, any format works.",
   invalid_ssn_last_4: "identity.ssn_last_4 must be exactly 4 digits.",
   invalid_address:
     "identity.address requires street, city, region, postal_code, and country.",
@@ -240,10 +242,17 @@ export function parseIdentity(
 
   let phone: string | null = null;
   if (value.phone !== undefined && value.phone !== null && value.phone !== "") {
-    if (typeof value.phone !== "string" || !E164_RE.test(value.phone.trim())) {
+    if (typeof value.phone !== "string") {
       return fail("invalid_phone");
     }
-    phone = value.phone.trim();
+    // Format-only normalization first (shared with signup); the existing
+    // E.164 rule still runs unchanged on the canonical value, so nothing
+    // here loosens the fail-closed guard.
+    const normalized = normalizePhoneInput(value.phone);
+    if (normalized === null || !E164_RE.test(normalized)) {
+      return fail("invalid_phone");
+    }
+    phone = normalized;
   }
 
   let ssnLast4: string | null = null;
