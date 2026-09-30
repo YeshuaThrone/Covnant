@@ -231,6 +231,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // still no DDL on universal_royalty_ledger — the referencing pin
       // below holds.
       '0013_distributor_credentials.sql',
+      // CVT Astra extraction agent (spec PR 6): broadens the
+      // distributor_connections source CHECK to the full 71-source adapter
+      // vocabulary; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0014_astra_traversal_vocabulary.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

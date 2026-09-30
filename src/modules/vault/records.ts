@@ -12,12 +12,139 @@
  * shape; the routes may serialize THAT and nothing else.
  */
 
-/** The distributor dashboards the Astra agent traverses (migration 0013's check constraint). */
+/**
+ * The twenty industry verticals the Astra agent traverses — the platform's
+ * "more than twenty industry verticals" breadth, one entry per vertical.
+ * Every vault source belongs to exactly one; the traversal records carry
+ * the vertical for audit grouping and the registry drift-guard pins total
+ * coverage (every vertical has at least one traversable dashboard).
+ */
+export const ASTRA_VERTICALS = [
+  'music',
+  'film',
+  'podcast',
+  'gaming',
+  'livestream',
+  'publishing',
+  'merchandise',
+  'ai_platforms',
+  'art_market',
+  'live_events',
+  'brand_licensing',
+  'nil_athletics',
+  'spatial',
+  'fitness',
+  'culinary',
+  'salon_hospitality',
+  'developer_tools',
+  'hardware_patents',
+  'energy',
+  'sports_ticketing',
+] as const;
+
+export type AstraVertical = (typeof ASTRA_VERTICALS)[number];
+
+/**
+ * The distributor dashboards the Astra agent traverses (migration 0014's
+ * check constraint — extended from 0013's four launch sources to the full
+ * twenty-vertical set, one entry per dashboard the build brief names).
+ * House lowercase slugs; a source joins only WITH a traversal adapter
+ * profile (src/workers/astra/profiles.ts) and its recorded fixtures — the
+ * registry drift-guard test enforces the pairing, so the vault never holds
+ * credentials for a dashboard the agent cannot traverse.
+ */
 export const DISTRIBUTOR_CREDENTIAL_SOURCES = [
+  // music
   'distrokid',
   'tunecore',
   'ascap',
   'bmi',
+  'mlc',
+  // film
+  'netflix',
+  'prime_video',
+  'film_theatrical',
+  'film_sales_agent',
+  // podcast
+  'megaphone',
+  'libsyn',
+  'spotify_podcasters',
+  'acast',
+  // gaming and AR/VR
+  'epic_games',
+  'unity_asset_store',
+  'roblox',
+  'steamworks',
+  'app_store_connect',
+  // livestream
+  'twitch',
+  'youtube',
+  'kick',
+  'tiktok_live',
+  'streamlabs',
+  'streamelements',
+  // publishing
+  'amazon_kdp',
+  'ingramspark',
+  'draft2digital',
+  'apple_books',
+  'kobo',
+  'substack',
+  'zinio',
+  'webtoon',
+  'tapas',
+  'kakaopage',
+  'patreon',
+  // merchandise
+  'shopify',
+  'printful',
+  'gelato',
+  'square_pos',
+  // AI platforms
+  'hugging_face',
+  'elevenlabs',
+  'weights_biases',
+  'openai',
+  // art market
+  'gallery_portal',
+  'auction_house',
+  'print_shop',
+  'museum_licensing',
+  // live events
+  'axs',
+  'ticketmaster',
+  'eventbrite',
+  'venuepos',
+  // brand licensing
+  'licensee_portal',
+  // NIL athletics
+  'nil_collective',
+  // spatial
+  'rfid_telemetry',
+  // fitness
+  'mindbody',
+  'peloton',
+  'ifit',
+  // culinary ghost kitchens
+  'doordash',
+  'ubereats',
+  'grubhub',
+  'toast_pos',
+  // salon, med-spa, and hospitality
+  'boulevard',
+  'zenoti',
+  // developer tools
+  'kong',
+  'aws_api_gateway',
+  'cloudflare_workers',
+  // hardware patents
+  'hardware_activation',
+  // energy and resources
+  'scada_meters',
+  // sports ticketing and athlete rights
+  'seatgeek',
+  'stubhub',
+  'vivid_seats',
 ] as const;
 
 export type DistributorConnectionSource = (typeof DISTRIBUTOR_CREDENTIAL_SOURCES)[number];
@@ -56,6 +183,32 @@ export interface DistributorConnectionRecord {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * The Astra traversal's provenance write (PR 6): a successful traversal
+ * verifies the dashboard (sets last_verified_at, clears last_error), a
+ * failed one records the honest reason (sets last_error) and never touches
+ * last_verified_at — only successful traversals verify. A traversal failure
+ * NEVER changes connection status; disconnect is the holder's explicit act
+ * (migration 0013's column comments).
+ */
+export type DistributorTraversalOutcome = { verifiedAt: string } | { error: string };
+
+/**
+ * One connection's decrypted credentials — the Astra agent's in-memory
+ * working set (PR 6). Exists for exactly one traversal: decrypted from the
+ * row's ciphertexts at traversal start, handed ONLY to the session's fill
+ * seam, never persisted, never logged, never serialized. The ciphertext
+ * fields ride along so the redaction gate can scrub a leaked ciphertext
+ * (a ciphertext plus the service-role key would be a decrypt oracle).
+ */
+export interface DecryptedDistributorCredentials {
+  distributor: DistributorConnectionSource;
+  username: string;
+  password: string;
+  encryptedUsername: string;
+  encryptedPassword: string;
 }
 
 /**

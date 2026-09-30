@@ -46,6 +46,7 @@ import type {
   DistributorConnectionInput,
   DistributorConnectionRecord,
   DistributorConnectionUpsert,
+  DistributorTraversalOutcome,
 } from '@/modules/vault/records';
 import type {
   BaasTransferRecord,
@@ -2234,6 +2235,38 @@ export class SqliteStore implements Store {
       )
       .run(now, id, holderId);
     return Promise.resolve(this.readDistributorConnection(id, holderId));
+  }
+
+  async listActiveDistributorConnections(): Promise<DistributorConnectionRecord[]> {
+    // Oldest insertion first — rowid ASC is this backend's insertion_order.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM distributor_connections WHERE status = 'connected' ORDER BY rowid ASC`,
+      )
+      .all() as DistributorConnectionRow[];
+    return Promise.resolve(rows.map((row) => ({ ...row })));
+  }
+
+  async markDistributorTraversal(
+    id: string,
+    outcome: DistributorTraversalOutcome,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const connection = this.readDistributorConnection(id);
+    if (connection === undefined) return Promise.resolve(undefined);
+    const now = new Date().toISOString();
+    // Success verifies (and clears the stale error); failure records the
+    // honest reason and never touches last_verified_at. Neither ever flips
+    // status — disconnect is the holder's explicit act.
+    this.db
+      .prepare(
+        `UPDATE distributor_connections
+         SET last_verified_at = COALESCE(?, last_verified_at),
+             last_error = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .run('verifiedAt' in outcome ? outcome.verifiedAt : null, 'error' in outcome ? outcome.error : null, now, id);
+    return Promise.resolve(this.readDistributorConnection(id));
   }
 
   /** Point lookup — holderId omitted only for the rotate path's own re-read. */

@@ -45,6 +45,7 @@ import type {
   DistributorConnectionInput,
   DistributorConnectionRecord,
   DistributorConnectionUpsert,
+  DistributorTraversalOutcome,
 } from '@/modules/vault/records';
 import type {
   BaasTransferRecord,
@@ -1112,6 +1113,34 @@ export class InMemoryStore implements Store {
       row.id === id ? disconnected : row,
     );
     return disconnected;
+  }
+
+  async listActiveDistributorConnections(): Promise<DistributorConnectionRecord[]> {
+    // Oldest insertion first — the sweep traverses in connect order. The
+    // array's push order IS insertion_order (see listDistributorConnections).
+    return this.distributorConnections.filter((row) => row.status === 'connected');
+  }
+
+  async markDistributorTraversal(
+    id: string,
+    outcome: DistributorTraversalOutcome,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const connection = this.distributorConnections.find((row) => row.id === id);
+    if (connection === undefined) return undefined;
+    const now = new Date().toISOString();
+    // Success verifies (and clears the stale error); failure records the
+    // honest reason and never touches last_verified_at. Neither ever flips
+    // status — disconnect is the holder's explicit act.
+    const marked: DistributorConnectionRecord = {
+      ...connection,
+      last_verified_at: 'verifiedAt' in outcome ? outcome.verifiedAt : connection.last_verified_at,
+      last_error: 'error' in outcome ? outcome.error : null,
+      updated_at: now,
+    };
+    this.distributorConnections = this.distributorConnections.map((row) =>
+      row.id === id ? marked : row,
+    );
+    return marked;
   }
 
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---

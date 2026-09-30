@@ -41,6 +41,7 @@ import type {
   DistributorConnectionInput,
   DistributorConnectionRecord,
   DistributorConnectionUpsert,
+  DistributorTraversalOutcome,
 } from '@/modules/vault/records';
 import type {
   BaasTransferRecord,
@@ -1497,6 +1498,42 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'disconnectDistributorConnection',
+    );
+  }
+
+  async listActiveDistributorConnections(): Promise<DistributorConnectionRecord[]> {
+    // Oldest insertion first — the sweep traverses in connect order
+    // (insertion_order ASC is the strict tiebreak when created_at ties).
+    return this.many<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .select()
+        .eq('status', 'connected')
+        .order('insertion_order', { ascending: true }),
+      'listActiveDistributorConnections',
+    );
+  }
+
+  async markDistributorTraversal(
+    id: string,
+    outcome: DistributorTraversalOutcome,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const now = new Date().toISOString();
+    // Success verifies (and clears the stale error); failure records the
+    // honest reason and never touches last_verified_at. Neither ever flips
+    // status — disconnect is the holder's explicit act.
+    const patch =
+      'verifiedAt' in outcome
+        ? { last_verified_at: outcome.verifiedAt, last_error: null, updated_at: now }
+        : { last_error: outcome.error, updated_at: now };
+    return this.one<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'markDistributorTraversal',
     );
   }
 
