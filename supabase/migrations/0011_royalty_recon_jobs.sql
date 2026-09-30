@@ -50,7 +50,7 @@ create table if not exists public.royalty_recon_jobs (
   status        text not null default 'pending'
                 check (status in ('pending', 'processing', 'completed', 'failed', 'cancelled')),
   source        text not null,
-  ingest_id     uuid references public.statement_ingests (id),
+  ingest_id     text references public.statement_ingests (id),
   requested_by  uuid,
   engine        text,
   attempts      int not null default 0,
