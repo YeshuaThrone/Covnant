@@ -221,6 +221,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // completion trigger; still no DDL on universal_royalty_ledger —
       // the referencing pin below holds.
       '0011_royalty_recon_jobs.sql',
+      // Universal identity registry (canon v10, addendum 29, founder DDL):
+      // universal_identity_map + global_identifier_cross_ref — entity-level
+      // identifier tables; still no DDL on universal_royalty_ledger —
+      // the referencing pin below holds.
+      '0012_universal_identity.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

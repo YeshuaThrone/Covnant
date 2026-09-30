@@ -485,6 +485,10 @@ CREATE TABLE IF NOT EXISTS match_queue (
   venue_gln TEXT,
   league_rights_code TEXT,
   turnstile_scan_hash TEXT,
+  resolved_chain TEXT,
+  resolved_identifiers TEXT,
+  unclaimed_identifier_hold BOOLEAN NOT NULL DEFAULT 0,
+  identifier_hold_reason TEXT,
   source TEXT NOT NULL,
   platform TEXT,
   territory TEXT,
@@ -610,6 +614,25 @@ function reconJobFromDbRow(row: ReconJobDbRow): RoyaltyReconJobRecord {
     }
   }
   return { ...row, result };
+}
+
+/**
+ * better-sqlite3 binds numbers, strings, bigints, buffers, and null only —
+ * boolean record fields ride as 0/1 on write and restore on read.
+ */
+type MatchQueueSqliteRow = Omit<MatchQueueRecord, 'unclaimed_identifier_hold'> & {
+  unclaimed_identifier_hold: 0 | 1;
+};
+
+function matchQueueToSqliteRow(record: MatchQueueRecord): MatchQueueSqliteRow {
+  return {
+    ...record,
+    unclaimed_identifier_hold: record.unclaimed_identifier_hold ? 1 : 0,
+  };
+}
+
+function matchQueueFromSqliteRow(row: MatchQueueSqliteRow): MatchQueueRecord {
+  return { ...row, unclaimed_identifier_hold: row.unclaimed_identifier_hold === 1 };
 }
 
 export class SqliteStore implements Store {
@@ -1839,6 +1862,8 @@ export class SqliteStore implements Store {
            device_imei_mac, parcel_id, well_meter_id,
            gpu_cluster_hash, nil_contract_id, athlete_glan,
            venue_gln, league_rights_code, turnstile_scan_hash,
+           resolved_chain, resolved_identifiers,
+           unclaimed_identifier_hold, identifier_hold_reason,
            source, platform, territory,
            period, currency, gross_micros, identifiers_json, raw_payload,
            matched_cbt_code, resolved_at, created_at
@@ -1865,20 +1890,23 @@ export class SqliteStore implements Store {
            @device_imei_mac, @parcel_id, @well_meter_id,
            @gpu_cluster_hash, @nil_contract_id, @athlete_glan,
            @venue_gln, @league_rights_code, @turnstile_scan_hash,
+           @resolved_chain, @resolved_identifiers,
+           @unclaimed_identifier_hold, @identifier_hold_reason,
            @source, @platform, @territory,
            @period, @currency, @gross_micros, @identifiers_json, @raw_payload,
            @matched_cbt_code, @resolved_at, @created_at
          )`,
       )
-      .run(record);
+      .run(matchQueueToSqliteRow(record));
     return Promise.resolve(record);
   }
 
   async getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM match_queue WHERE id = ?`)
+      .get(id) as MatchQueueSqliteRow | undefined;
     return Promise.resolve(
-      this.db
-        .prepare(`SELECT * FROM match_queue WHERE id = ?`)
-        .get(id) as MatchQueueRecord | undefined,
+      row === undefined ? undefined : matchQueueFromSqliteRow(row),
     );
   }
 
@@ -1902,7 +1930,8 @@ export class SqliteStore implements Store {
                ORDER BY created_at DESC, rowid DESC
                LIMIT ?`,
             )
-            .all(status, limit)) as MatchQueueRecord[],
+            .all(status, limit))
+        .map((row) => matchQueueFromSqliteRow(row as MatchQueueSqliteRow)),
     );
   }
 

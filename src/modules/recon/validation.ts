@@ -370,6 +370,71 @@ export const reconLeagueRightsCodeSchema = z.string().min(1).nullable();
 /** Optional turnstile scan telemetry hash for gate reconciliation. */
 export const reconTurnstileScanHashSchema = z.string().min(1).nullable();
 
+/**
+ * Universal identifier layer (V1 directive addendum 22, 2026-09-30,
+ * founder-specified; canons v2-v8 — addenda 23-27 — extend the chains to
+ * the twenty-one-family canon: music, sports, film, fine art, spatial,
+ * fitness/health, culinary, wellness, developer infrastructure, patent,
+ * energy, podcasting, gaming, livestream, fashion, AI data, theater, brand
+ * licensing, web comics, corporate (with settlement-counterparty codes
+ * BIC/SWIFT and EIN/VAT/Tax), and salon/beauty). Canon v9 (addendum 28)
+ * adds no schema — the validation regexes are engine-side constants for
+ * the PR 52 engine. resolved_chain names the matched
+ * resolution chain, resolved_identifiers carries the chain walk's resolved
+ * cross-code values as a JSON string (same record-surface convention as
+ * identifiers_json), and the UNCLAIMED_IDENTIFIER_HOLD marker + reason
+ * carry the escrow state queue-side for missing mandatory cross-links.
+ */
+export const reconResolvedChainSchema = z
+  .enum([
+    'music',
+    'sports',
+    'film',
+    'fine_art',
+    'spatial',
+    'fitness_health',
+    'culinary',
+    'wellness',
+    'dev_infra',
+    'patent',
+    'energy',
+    'podcasting',
+    'gaming',
+    'livestream',
+    'fashion',
+    'ai_data',
+    'theater',
+    'brand_licensing',
+    'web_comics',
+    'corporate',
+    'salon_beauty',
+  ])
+  .nullable();
+
+/** Optional JSON object of resolved cross-code values (JSON-string convention). */
+export const reconResolvedIdentifiersSchema = z.string().min(1).nullable();
+
+/** UNCLAIMED_IDENTIFIER_HOLD escrow marker; false by default. */
+export const reconUnclaimedIdentifierHoldSchema = z.boolean();
+
+/** Optional hold reason detail; null = not held. */
+export const reconIdentifierHoldReasonSchema = z.string().min(1).nullable();
+
+/**
+ * The six founder-verbatim identifier pattern families (ISRC, ISWC, EIDR,
+ * ISNI, ISBN-13, IMEI). The founder's exact regex strings arrive verbatim
+ * in the engine brief (PR 52) and must be carried unmodified — the slots
+ * below are reserved; no pattern is invented here.
+ */
+export const RECON_IDENTIFIER_PATTERN_FAMILIES = [
+  'ISRC',
+  'ISWC',
+  'EIDR',
+  'ISNI',
+  'ISBN-13',
+  'IMEI',
+] as const;
+
 /** The worker's outcome summary — schema-validated, never invented here. */
 const reconJobResultSchema = z.object({
   events_written: z.number().int().min(0),

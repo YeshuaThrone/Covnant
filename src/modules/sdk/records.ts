@@ -300,6 +300,14 @@ export interface MatchQueueRecord {
   league_rights_code: string | null;
   /** Turnstile scan telemetry hash for gate reconciliation; null = non-gate lines. */
   turnstile_scan_hash: string | null;
+  /** Which identifier resolution chain matched; null = unresolved. */
+  resolved_chain: string | null;
+  /** JSON object of resolved cross-code values from the chain walk; null = unresolved. */
+  resolved_identifiers: string | null;
+  /** UNCLAIMED_IDENTIFIER_HOLD escrow marker — set when mandatory cross-links are missing. */
+  unclaimed_identifier_hold: boolean;
+  /** Why the line is in UNCLAIMED_IDENTIFIER_HOLD; null = not held. */
+  identifier_hold_reason: string | null;
   /** The event's ingress source, verbatim from the canonical event. */
   source: MatchQueueSource;
   platform: string | null;

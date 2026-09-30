@@ -865,6 +865,127 @@ comment on column public.match_queue.league_rights_code is
   'League broadcasting and group-licensing rights code; null = non-league lines. Added by the V1 sports-ticketing directive (2026-09-30).';
 comment on column public.match_queue.turnstile_scan_hash is
   'Turnstile scan telemetry hash for gate reconciliation; null = non-gate lines. Added by the V1 sports-ticketing directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Universal identifier layer — addenda 22-27, extended by canon v10
+-- (addendum 29), V1 directive 2026-09-30. Resolution columns on match_queue plus a cross-code mapping
+-- table over the twenty-one-chain identifier canon. Canon v9 (addendum 28)
+-- adds no schema — the ~48 validation regexes are engine-side constants for
+-- the PR 52 validation engine. Code types are founder-specified verbatim.
+-- ---------------------------------------------------------------------------
+
+alter table public.match_queue
+  add column if not exists resolved_chain text
+  check (resolved_chain in ('music', 'sports', 'film', 'fine_art', 'spatial', 'fitness_health', 'culinary', 'wellness', 'dev_infra', 'patent', 'energy', 'podcasting', 'gaming', 'livestream', 'fashion', 'ai_data', 'theater', 'brand_licensing', 'web_comics', 'corporate', 'salon_beauty'));
+alter table public.match_queue
+  add column if not exists resolved_identifiers jsonb;
+alter table public.match_queue
+  add column if not exists unclaimed_identifier_hold boolean not null default false;
+alter table public.match_queue
+  add column if not exists identifier_hold_reason text;
+
+-- Holds surface oldest-first for the verification queue.
+create index if not exists idx_match_queue_unclaimed_identifier_hold
+  on public.match_queue (created_at)
+  where unclaimed_identifier_hold;
+
+comment on column public.match_queue.resolved_chain is
+  'Canonical chain the identifiers resolved to (music, sports, film, fine_art, spatial, fitness_health, culinary, wellness, dev_infra, patent, energy, podcasting, gaming, livestream, fashion, ai_data, theater, brand_licensing, web_comics, corporate, salon_beauty). Added by the V1 universal-identifier directive (2026-09-30).';
+comment on column public.match_queue.resolved_identifiers is
+  'Resolved identifier set: [{code_type, code_value, source}] spanning the identifier canon; null = unresolved. Added by the V1 universal-identifier directive (2026-09-30).';
+comment on column public.match_queue.unclaimed_identifier_hold is
+  'True when no canonical identifier claims the line — quarantined pending external registry verification, never auto-discarded. Added by the V1 universal-identifier directive (2026-09-30).';
+comment on column public.match_queue.identifier_hold_reason is
+  'Named hold reason (e.g. registry unreachable, ambiguous chain); null = no hold. Added by the V1 universal-identifier directive (2026-09-30).';
+
+create table if not exists public.identifier_cross_mappings (
+  id uuid primary key default gen_random_uuid(),
+  chain text not null check (chain in ('music', 'sports', 'film', 'fine_art', 'spatial', 'fitness_health', 'culinary', 'wellness', 'dev_infra', 'patent', 'energy', 'podcasting', 'gaming', 'livestream', 'fashion', 'ai_data', 'theater', 'brand_licensing', 'web_comics', 'corporate', 'salon_beauty')),
+  source_code_type text not null,
+  source_code_value text not null,
+  target_code_type text not null,
+  target_code_value text not null,
+  verified boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  insertion_order bigint
+);
+
+-- The founder directive names the chains and their member code types
+-- verbatim; the composite check enforces exactly these memberships.
+-- Named constraints have no IF NOT EXISTS — guard the re-apply so the
+-- migration stays idempotent.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'identifier_cross_mappings_chain_vocab'
+      and conrelid = 'public.identifier_cross_mappings'::regclass
+  ) then
+    alter table public.identifier_cross_mappings
+      add constraint identifier_cross_mappings_chain_vocab check (
+    (chain = 'music' and source_code_type in ('ISRC', 'ISWC', 'IPI', 'ISNI', 'MWLI')
+      and target_code_type in ('ISRC', 'ISWC', 'IPI', 'ISNI', 'MWLI')) or
+    (chain = 'sports' and source_code_type in ('NIL-ID', 'GLAN', 'PAID', 'NCAA ID', 'GLN', 'World Rugby Player ID', 'UCI Code', 'WDSF ID', 'FIDE ID', 'ESIC Player ID', 'Riot Player PUUID', 'SteamID64')
+      and target_code_type in ('NIL-ID', 'GLAN', 'PAID', 'NCAA ID', 'GLN', 'World Rugby Player ID', 'UCI Code', 'WDSF ID', 'FIDE ID', 'ESIC Player ID', 'Riot Player PUUID', 'SteamID64')) or
+    (chain = 'film' and source_code_type in ('EIDR', 'ISAN', 'Ad-ID', 'CAMA ID')
+      and target_code_type in ('EIDR', 'ISAN', 'Ad-ID', 'CAMA ID')) or
+    (chain = 'fine_art' and source_code_type in ('DARIA', 'OAI-PMH', 'LIDO', 'GND', 'ULAN', 'AAT', 'CRSA', 'ARK', 'Art Loss Register ID', 'Handle System Prefix', 'SICI', 'Museum ID', 'Accession Number', 'Object ID', 'VRA Core ID', 'CIDOC-CRM ID', 'CDWA ID', 'CITES Certificate ID', 'CONA ID', 'Spectrum Accession ID')
+      and target_code_type in ('DARIA', 'OAI-PMH', 'LIDO', 'GND', 'ULAN', 'AAT', 'CRSA', 'ARK', 'Art Loss Register ID', 'Handle System Prefix', 'SICI', 'Museum ID', 'Accession Number', 'Object ID', 'VRA Core ID', 'CIDOC-CRM ID', 'CDWA ID', 'CITES Certificate ID', 'CONA ID', 'Spectrum Accession ID')) or
+    (chain = 'spatial' and source_code_type in ('GIAI', 'GRAI', 'H3 Index', 'Geohash', 'EAN Spatial Hardware SKU', 'UPC Spatial Hardware SKU', 'ISO 19115 Metadata Code', 'OpenStreetMap Node', 'OpenStreetMap Way', 'OpenStreetMap Relation', 'UPRN')
+      and target_code_type in ('GIAI', 'GRAI', 'H3 Index', 'Geohash', 'EAN Spatial Hardware SKU', 'UPC Spatial Hardware SKU', 'ISO 19115 Metadata Code', 'OpenStreetMap Node', 'OpenStreetMap Way', 'OpenStreetMap Relation', 'UPRN')) or
+    (chain = 'fitness_health' and source_code_type in ('NPI', 'CPT', 'FIT-ID', 'IEEE 11073', 'DICOM Study Instance UID', 'HL7/FHIR Resource ID', 'LOINC Code')
+      and target_code_type in ('NPI', 'CPT', 'FIT-ID', 'IEEE 11073', 'DICOM Study Instance UID', 'HL7/FHIR Resource ID', 'LOINC Code')) or
+    (chain = 'culinary' and source_code_type in ('GTIN', 'GPC', 'PLU', 'GS1-128', 'SSCC', 'FDC ID', 'GSI Recipe Hash', 'GTIN-14/ITF-14', 'GS1 Digital Link URI', 'e-Bacchus ID', 'e-Ambrosia ID')
+      and target_code_type in ('GTIN', 'GPC', 'PLU', 'GS1-128', 'SSCC', 'FDC ID', 'GSI Recipe Hash', 'GTIN-14/ITF-14', 'GS1 Digital Link URI', 'e-Bacchus ID', 'e-Ambrosia ID')) or
+    (chain = 'wellness' and source_code_type in ('UPRN', 'GIAI-Wellness', 'CosIng')
+      and target_code_type in ('UPRN', 'GIAI-Wellness', 'CosIng')) or
+    (chain = 'dev_infra' and source_code_type in ('PURL', 'SWID', 'SPDX', 'CVE', 'DOIP')
+      and target_code_type in ('PURL', 'SWID', 'SPDX', 'CVE', 'DOIP')) or
+    (chain = 'patent' and source_code_type in ('DocDB', 'INPADOC', 'CPC', 'IPC', 'WIPO ST.3', '3GPP Specification ID', 'FCC ID', 'CE Mark Certification Code')
+      and target_code_type in ('DocDB', 'INPADOC', 'CPC', 'IPC', 'WIPO ST.3', '3GPP Specification ID', 'FCC ID', 'CE Mark Certification Code')) or
+    (chain = 'energy' and source_code_type in ('EIC', 'REC Serial', 'Carbon Credit Serial', 'GS1 GSRN', 'APN Land Sub-Parcel UUID', 'I-REC Code')
+      and target_code_type in ('EIC', 'REC Serial', 'Carbon Credit Serial', 'GS1 GSRN', 'APN Land Sub-Parcel UUID', 'I-REC Code')) or
+    (chain = 'podcasting' and source_code_type in ('GUID', 'IAB Podcast ID')
+      and target_code_type in ('GUID', 'IAB Podcast ID')) or
+    (chain = 'gaming' and source_code_type in ('Platform SKU', 'Title ID', 'Asset Store ID', 'glTF Hash', 'USD Hash')
+      and target_code_type in ('Platform SKU', 'Title ID', 'Asset Store ID', 'glTF Hash', 'USD Hash')) or
+    (chain = 'livestream' and source_code_type in ('Match UUID', 'Tournament UUID', 'Stream Key Hash')
+      and target_code_type in ('Match UUID', 'Tournament UUID', 'Stream Key Hash')) or
+    (chain = 'fashion' and source_code_type in ('SKU', 'EPC', 'RFID Tag')
+      and target_code_type in ('SKU', 'EPC', 'RFID Tag')) or
+    (chain = 'ai_data' and source_code_type in ('Dataset Hash', 'CID', 'Voice Model ID')
+      and target_code_type in ('Dataset Hash', 'CID', 'Voice Model ID')) or
+    (chain = 'theater' and source_code_type in ('AGBOR ID', 'Grand Rights ID')
+      and target_code_type in ('AGBOR ID', 'Grand Rights ID')) or
+    (chain = 'brand_licensing' and source_code_type in ('Style Guide SKU', 'Licensee Contract ID')
+      and target_code_type in ('Style Guide SKU', 'Licensee Contract ID')) or
+    (chain = 'web_comics' and source_code_type in ('Webtoon Story ID', 'Platform Story ID', 'Serialization Episode UUID')
+      and target_code_type in ('Webtoon Story ID', 'Platform Story ID', 'Serialization Episode UUID')) or
+    (chain = 'corporate' and source_code_type in ('DUNS', 'LEI', 'BIC/SWIFT Code', 'EIN', 'VAT ID', 'Tax ID')
+      and target_code_type in ('DUNS', 'LEI', 'BIC/SWIFT Code', 'EIN', 'VAT ID', 'Tax ID')) or
+    (chain = 'salon_beauty' and source_code_type in ('CAS Registry Number', 'FDA UNII', 'INCI Name/ID')
+      and target_code_type in ('CAS Registry Number', 'FDA UNII', 'INCI Name/ID'))
+      );
+  end if;
+end
+$$;
+
+-- One mapping per (chain, source, target-type, target-value) — the engine
+-- walks deterministically, so duplicates are forbidden.
+create unique index if not exists uq_identifier_cross_mappings_source_target
+  on public.identifier_cross_mappings
+  (chain, source_code_type, source_code_value, target_code_type, target_code_value);
+create index if not exists idx_identifier_cross_mappings_source
+  on public.identifier_cross_mappings (source_code_type, source_code_value);
+
+comment on table public.identifier_cross_mappings is
+  'Cross-code identifier mappings across the twenty-one-chain identifier canon (V1 universal-identifier directive 2026-09-30; canons v2-v10 extend the families: cultural property, esports,
+  -- case serialization, layered land rights, telecom SEP certification, fine art, spatial, fitness-health, culinary, wellness, developer-infrastructure, patent, energy, podcasting, gaming, livestream, fashion, AI-data, theater, brand-licensing, web-comics, salon-beauty, and corporate settlement counterparties).';
+
+alter table public.identifier_cross_mappings enable row level security;
+grant all on public.identifier_cross_mappings to service_role;
+
 -- ---------------------------------------------------------------------------
 -- The pg_net completion webhook — STRICT NO-OP while app.recon_webhook_url
 -- is unset (polling is the v1 completion path). Fires on the status UPDATE
