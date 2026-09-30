@@ -832,6 +832,39 @@ comment on column public.match_queue.well_meter_id is
   'Producing well or meter identifier; null = non-resource lines. Added by the V1 energy directive (2026-09-30).';
 comment on column public.match_queue.gpu_cluster_hash is
   'Compute cluster identifier for GPU-hosting lines; null = non-compute lines. Added by the V1 energy directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Sports ticketing vertical (V1 directive addendum 21, 2026-09-30,
+-- founder-specified). nil_contract_id ties lines to the endorsement;
+-- athlete_glan and venue_gln carry the GLN identifiers; league_rights_code
+-- keys league-broadcast and group-licensing rights; turnstile_scan_hash
+-- anchors gate-reconciliation to scan telemetry.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists nil_contract_id text;
+
+alter table public.match_queue
+  add column if not exists athlete_glan text;
+
+alter table public.match_queue
+  add column if not exists venue_gln text;
+
+alter table public.match_queue
+  add column if not exists league_rights_code text;
+
+alter table public.match_queue
+  add column if not exists turnstile_scan_hash text;
+
+comment on column public.match_queue.nil_contract_id is
+  'NIL endorsement contract reference; null = non-NIL lines. Added by the V1 sports-ticketing directive (2026-09-30).';
+comment on column public.match_queue.athlete_glan is
+  'Athlete Global Location Number; null = non-athlete lines. Added by the V1 sports-ticketing directive (2026-09-30).';
+comment on column public.match_queue.venue_gln is
+  'Venue Global Location Number; null = non-venue lines. Added by the V1 sports-ticketing directive (2026-09-30).';
+comment on column public.match_queue.league_rights_code is
+  'League broadcasting and group-licensing rights code; null = non-league lines. Added by the V1 sports-ticketing directive (2026-09-30).';
+comment on column public.match_queue.turnstile_scan_hash is
+  'Turnstile scan telemetry hash for gate reconciliation; null = non-gate lines. Added by the V1 sports-ticketing directive (2026-09-30).';
 -- ---------------------------------------------------------------------------
 -- The pg_net completion webhook — STRICT NO-OP while app.recon_webhook_url
 -- is unset (polling is the v1 completion path). Fires on the status UPDATE

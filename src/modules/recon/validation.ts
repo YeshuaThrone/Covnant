@@ -349,6 +349,27 @@ export const reconWellMeterIdSchema = z.string().min(1).nullable();
 /** Optional compute cluster identifier for GPU-hosting lines. */
 export const reconGpuClusterHashSchema = z.string().min(1).nullable();
 
+/**
+ * Sports ticketing (V1 directive addendum 21, 2026-09-30,
+ * founder-specified). nil_contract_id ties lines to the endorsement,
+ * athlete_glan and venue_gln carry the GLN identifiers, league_rights_code
+ * keys league-broadcast and group-licensing rights, and
+ * turnstile_scan_hash anchors gate-reconciliation to scan telemetry.
+ */
+export const reconNilContractIdSchema = z.string().min(1).nullable();
+
+/** Optional athlete Global Location Number. */
+export const reconAthleteGlanSchema = z.string().min(1).nullable();
+
+/** Optional venue Global Location Number. */
+export const reconVenueGlnSchema = z.string().min(1).nullable();
+
+/** Optional league broadcasting and group-licensing rights code. */
+export const reconLeagueRightsCodeSchema = z.string().min(1).nullable();
+
+/** Optional turnstile scan telemetry hash for gate reconciliation. */
+export const reconTurnstileScanHashSchema = z.string().min(1).nullable();
+
 /** The worker's outcome summary — schema-validated, never invented here. */
 const reconJobResultSchema = z.object({
   events_written: z.number().int().min(0),

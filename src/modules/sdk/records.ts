@@ -290,6 +290,16 @@ export interface MatchQueueRecord {
   well_meter_id: string | null;
   /** Compute cluster identifier for GPU-hosting lines. */
   gpu_cluster_hash: string | null;
+  /** NIL endorsement contract reference; null = non-NIL lines. */
+  nil_contract_id: string | null;
+  /** Athlete Global Location Number; null = non-athlete lines. */
+  athlete_glan: string | null;
+  /** Venue Global Location Number; null = non-venue lines. */
+  venue_gln: string | null;
+  /** League broadcasting and group-licensing rights code; null = non-league lines. */
+  league_rights_code: string | null;
+  /** Turnstile scan telemetry hash for gate reconciliation; null = non-gate lines. */
+  turnstile_scan_hash: string | null;
   /** The event's ingress source, verbatim from the canonical event. */
   source: MatchQueueSource;
   platform: string | null;
