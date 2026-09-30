@@ -166,7 +166,10 @@ jobs:
             "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='royalty_recon_jobs'")
           [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on royalty_recon_jobs"; exit 1; }
           echo "OK: royalty_recon_jobs RLS enabled"
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into royalty_recon_jobs (id, status, source) values (gen_random_uuid(), 'engine_running', 'statement')" >/dev/null 2>&1
+          # The check constraint MUST reject this insert — psql exits non-zero
+          # by design. `|| true` keeps the step alive under the workflow's
+          # `bash -eo pipefail` (the rejection is the expectation, not an error).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into royalty_recon_jobs (id, status, source) values (gen_random_uuid(), 'engine_running', 'statement')" >/dev/null 2>&1 || true
           bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from royalty_recon_jobs where status = 'engine_running'")
           [ "$bad_status" = "0" ] || { echo "BAD STATUS ACCEPTED by the check constraint"; exit 1; }
           echo "OK: royalty_recon_jobs status check constraint rejects bad values"
