@@ -443,6 +443,35 @@ export class InMemoryStore implements Store {
     return row;
   }
 
+  // --- Unclaimed royalty holding (PR 7) ---
+
+  async listUnclaimedHoldingCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'unclaimed_holding' && row.status === 'unclaimed_holding',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleUnclaimedHolding(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'unclaimed_holding') return undefined;
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
   // --- BaaS transfers ---
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {

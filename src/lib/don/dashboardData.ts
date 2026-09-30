@@ -141,6 +141,8 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   dispute_unlock: 'Dispute hold lifted',
   royalty_reversal: 'Royalty reversed',
   funding_received: 'Funding received',
+  unclaimed_holding_post: 'Unclaimed royalty holding',
+  unclaimed_holding_release: 'Unclaimed royalty released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
@@ -157,6 +159,10 @@ const INFLOW_KINDS: ReadonlySet<JournalKind> = new Set<JournalKind>([
   'pending_release',
   'payout_failed_reversal',
   'dispute_unlock',
+  // Unclaimed royalty release (PR 7): the holder-facing leg is the vault
+  // CREDIT the verified allocation lands in. The post kind faces no vault —
+  // its credit side is the platform holding account — so it stays out.
+  'unclaimed_holding_release',
 ]);
 
 /** The entry_hash short form — the leading hash characters, display-safe. */

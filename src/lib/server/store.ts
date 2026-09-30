@@ -315,6 +315,37 @@ export interface Store {
     >,
   ): Promise<LedgerTransactionRecord | undefined>;
 
+  // --- Unclaimed royalty holding (PR 7) ---
+  // Held funds are ledger rows with kind 'unclaimed_holding' whose status is
+  // 'unclaimed_holding' — money identified as unallocated (recon) that stays
+  // OUT of every payee vault until identity and splits are fully verified.
+  // No migration: ledger_transactions.status/kind are free text (0006 has no
+  // check constraint on either), so this state extends the existing ledger
+  // contract in place.
+
+  /**
+   * The held credits, newest first (created_at DESC, insertion order as
+   * tiebreak), bounded by limit. Released credits (status 'settled') are
+   * history, not holdings — they never appear here.
+   */
+  listUnclaimedHoldingCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * The release CAS — the settlement concurrency canon (0009) applied to a
+   * held credit: flips ONE row from status 'unclaimed_holding' to 'settled'
+   * (settled_at = the passed instant) in a single conditional statement.
+   * Returns the row only when THIS call won the transition; undefined when
+   * the id is unknown OR the credit is no longer held — the concurrent
+   * release loser reads exactly that and refuses. The flip happens BEFORE
+   * any vault credit (insert-as-lock, the payout-reversal precedent), so a
+   * crash mid-release fails toward "nothing moved twice": the settled row
+   * with no unclaimed_holding_release journal is the visible alarm.
+   */
+  settleUnclaimedHolding(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
   getBaasTransfer(id: string): Promise<BaasTransferRecord | undefined>;
