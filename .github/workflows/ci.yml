@@ -102,6 +102,11 @@ jobs:
           # prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
+          # The Astra traversal vocabulary (PR 6): the twenty-vertical
+          # distributor check constraint — applied twice like 0011-0013 to
+          # prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
 
       - name: Assert the engine's exact columns exist
         env:

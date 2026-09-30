@@ -81,6 +81,7 @@ import type {
   DistributorConnectionInput,
   DistributorConnectionRecord,
   DistributorConnectionUpsert,
+  DistributorTraversalOutcome,
 } from '@/modules/vault/records';
 import {
   createAdminClient as createSupabaseAdminClient,
@@ -662,6 +663,27 @@ export interface Store {
     holderId: string,
     id: string,
   ): Promise<DistributorConnectionRecord | undefined>;
+
+  /**
+   * The Astra worker lane's enumeration (PR 6): every ACTIVE connection
+   * across ALL holders, oldest insertion first — a sweep traverses each
+   * holder's dashboards in the order they were connected. Carries
+   * ciphertexts (the traversal decrypts them in memory); the route layer
+   * never touches this method.
+   */
+  listActiveDistributorConnections(): Promise<DistributorConnectionRecord[]>;
+
+  /**
+   * The traversal's provenance write (PR 6). A verified outcome stamps
+   * last_verified_at and clears last_error; an error outcome records the
+   * reason and leaves last_verified_at (only successful traversals verify).
+   * Neither ever changes connection status — disconnect is the holder's
+   * explicit act. undefined for an unknown id.
+   */
+  markDistributorTraversal(
+    id: string,
+    outcome: DistributorTraversalOutcome,
+  ): Promise<DistributorConnectionRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
@@ -714,12 +736,14 @@ export type {
   RoyaltyReconJobStatus,
 } from '@/modules/recon/records';
 export type {
+  AstraVertical,
   ConnectionPublicStatus,
   DistributorConnectionInput,
   DistributorConnectionRecord,
   DistributorConnectionSource,
   DistributorConnectionState,
   DistributorConnectionUpsert,
+  DistributorTraversalOutcome,
 } from '@/modules/vault/records';
 export { toConnectionStatus } from '@/modules/vault/records';
 
