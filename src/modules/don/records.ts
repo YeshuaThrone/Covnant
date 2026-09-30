@@ -45,11 +45,18 @@ export type SovereignVaultRecord = {
   updated_at: string;
 };
 
+/**
+ * The Plaid processor vocabulary — distinct from the BaaS payout-provider
+ * union: Lithic is a payout rail, never a Plaid processor.
+ */
+export const PLAID_PROCESSORS = ["column", "unit"] as const;
+export type PlaidProcessor = (typeof PLAID_PROCESSORS)[number];
+
 export type PlaidProcessorTokenRecord = {
   id: string;
   creator_id: string;
   public_token: string;
-  processor: "column" | "unit";
+  processor: PlaidProcessor;
   processor_token: string;
   account_id: string;
   created_at: string;

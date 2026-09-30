@@ -87,10 +87,14 @@ export const LEDGER_KINDS = [
   "royalty",
   "payout",
   "payout_failed_reversal",
+  // Banking-rails funding (PR 4): verified Stripe webhook receipts post the
+  // money-IN leg. Never written by charge creation — only the signed
+  // payment_intent.succeeded webhook posts it.
+  "funding_received",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
-export const BAAS_PROVIDERS = ["column", "unit"] as const;
+export const BAAS_PROVIDERS = ["column", "unit", "lithic"] as const;
 export type BaasProvider = (typeof BAAS_PROVIDERS)[number];
 
 export type SplitPartyInput = {

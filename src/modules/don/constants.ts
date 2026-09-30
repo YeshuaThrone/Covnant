@@ -33,6 +33,9 @@ export const JOURNAL_KINDS = [
   "dispute_lock",
   "dispute_unlock",
   "royalty_reversal",
+  // Banking rails funding (PR 4): money arrives from Stripe into the Gold
+  // Board — the inbound mirror of payout_settled. Additive only.
+  "funding_received",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

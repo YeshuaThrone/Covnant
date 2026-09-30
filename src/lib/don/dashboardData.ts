@@ -140,6 +140,7 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   dispute_lock: 'Dispute hold placed',
   dispute_unlock: 'Dispute hold lifted',
   royalty_reversal: 'Royalty reversed',
+  funding_received: 'Funding received',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

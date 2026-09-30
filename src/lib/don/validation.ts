@@ -34,6 +34,7 @@ import {
 } from "./types";
 import { BPS_DENOMINATOR, percentToBps, sumBps } from "./splitEngine";
 import { normalizePhoneInput } from "@/lib/phone";
+import { PLAID_PROCESSORS, type PlaidProcessor } from "@/modules/don/records";
 
 export type DonValidationErrorCode =
   | "malformed_body"
@@ -601,7 +602,7 @@ export function validateWithholdingPayload(
 export type PlaidExchangePayload = {
   creator_id: string;
   public_token: string;
-  processor: BaasProvider | null;
+  processor: PlaidProcessor | null;
 };
 
 export function validatePlaidExchangePayload(
@@ -616,15 +617,15 @@ export function validatePlaidExchangePayload(
   if (!isNonEmptyString(input.public_token)) {
     return fail("missing_public_token");
   }
-  let processor: BaasProvider | null = null;
+  let processor: PlaidProcessor | null = null;
   if (input.processor !== undefined && input.processor !== null && input.processor !== "") {
     if (
       typeof input.processor !== "string" ||
-      !(BAAS_PROVIDERS as readonly string[]).includes(input.processor)
+      !(PLAID_PROCESSORS as readonly string[]).includes(input.processor)
     ) {
       return fail("invalid_provider");
     }
-    processor = input.processor as BaasProvider;
+    processor = input.processor as PlaidProcessor;
   }
   return {
     ok: true,
