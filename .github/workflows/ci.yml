@@ -82,6 +82,16 @@ jobs:
           # the migration is idempotent.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
+          # SDK collection surfaces + Sync Library + concurrency guards +
+          # phone verification (0007-0010), then the Deep Royalties recon
+          # queue (spec art_7M0snhxc): 0011 applied twice — the second apply
+          # must be a clean no-op, proving idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0007_sdk_collection.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0008_sync_library.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0009_concurrency_guards.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0010_phone_verifications.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -146,6 +156,28 @@ jobs:
             "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid where n.nspname = 'public' and p.proname = 'record_checkout_purchase'")
           [ "$rpc_exists" = "1" ] || { echo "MISSING RPC record_checkout_purchase"; exit 1; }
           echo "OK: record_checkout_purchase RPC exists"
+
+          # Deep Royalties recon queue (migration 0011, spec art_7M0snhxc):
+          # the orchestration table's inventory, the claim RPC, the pg_net
+          # completion trigger, and the check-constrained status — a bad
+          # status value must be REJECTED, never silently stored.
+          assert_cols royalty_recon_jobs id status source ingest_id requested_by engine attempts error result claimed_at started_at completed_at created_at updated_at insertion_order
+          rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='royalty_recon_jobs'")
+          [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on royalty_recon_jobs"; exit 1; }
+          echo "OK: royalty_recon_jobs RLS enabled"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into royalty_recon_jobs (id, status, source) values (gen_random_uuid(), 'engine_running', 'statement')" >/dev/null 2>&1
+          bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from royalty_recon_jobs where status = 'engine_running'")
+          [ "$bad_status" = "0" ] || { echo "BAD STATUS ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: royalty_recon_jobs status check constraint rejects bad values"
+          claim_rpc=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid where n.nspname = 'public' and p.proname = 'claim_royalty_recon_job'")
+          [ "$claim_rpc" = "1" ] || { echo "MISSING RPC claim_royalty_recon_job"; exit 1; }
+          echo "OK: claim_royalty_recon_job RPC exists"
+          trigger_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_trigger where tgrelid = 'public.royalty_recon_jobs'::regclass and tgisinternal = false")
+          [ "$trigger_exists" -ge "1" ] || { echo "MISSING recon completion trigger"; exit 1; }
+          echo "OK: recon completion trigger exists"
 
   e2e:
     runs-on: ubuntu-latest

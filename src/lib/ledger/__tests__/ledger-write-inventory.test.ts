@@ -216,6 +216,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // phone_verifications table for the signup OTP step; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0010_phone_verifications.sql',
+      // Deep Royalties recon queue (spec art_7M0snhxc): the
+      // royalty_recon_jobs orchestration table + claim RPC + pg_net
+      // completion trigger; still no DDL on universal_royalty_ledger —
+      // the referencing pin below holds.
+      '0011_royalty_recon_jobs.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
