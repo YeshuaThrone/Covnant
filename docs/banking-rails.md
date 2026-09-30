@@ -102,6 +102,7 @@ that state exists, every payout refuses — the default source returns unknown.
 | `software` | `api_uptime_sla_verified` AND `software_security_audit_cleared` |
 | `hardware` | `frand_rate_court_determination_cleared` AND `sep_essentiality_audit_verified` |
 | `resource` | `environmental_compliance_cleared` AND `title_ownership_verification_passed` |
+| `sports` | `event_completion_telemetry_verified` AND `promoter_insurance_clearance`; collegiate NIL waterfall disbursements additionally require `nil_compliance_audit_cleared` |
 
 ## Money movement — through the Don ledger contract, never around it
 
@@ -155,7 +156,7 @@ recon job completion.**
   not-configured envelopes with zero outbound calls, provider error
   propagation, Plaid account-number redaction.
 - `src/modules/compliance/__tests__/payoutGate.test.ts` — every refusal path
-  (settlement, KYC, vertical unknown) and the nineteen vertical families,
+  (settlement, KYC, vertical unknown) and the twenty vertical families,
   including the NIL cap holdback and spatial zoning/audit cases.
 - `src/app/api/v1/lithic/ach/dispatch/__tests__/route.test.ts` — operator
   gate, validation, the fail-closed gate order (compliance before capability

@@ -117,6 +117,19 @@ const ALL_SATISFIED: Record<string, VerticalComplianceState> = {
     environmental_compliance_cleared: true,
     title_ownership_verification_passed: true,
   },
+  sports: {
+    vertical: "sports",
+    event_completion_telemetry_verified: true,
+    promoter_insurance_clearance: true,
+    is_collegiate_nil_waterfall: false,
+  },
+  sportsCollegiateNil: {
+    vertical: "sports",
+    event_completion_telemetry_verified: true,
+    promoter_insurance_clearance: true,
+    is_collegiate_nil_waterfall: true,
+    nil_compliance_audit_cleared: true,
+  },
 };
 
 describe("payoutGate — common conditions", () => {
@@ -162,7 +175,7 @@ describe("payoutGate — common conditions", () => {
     expect(state).toBeNull();
   });
 
-  it("covers exactly the nineteen founder-directed verticals", () => {
+  it("covers exactly the twenty founder-directed verticals", () => {
     expect(ASSET_VERTICALS).toEqual([
       "music",
       "film",
@@ -183,6 +196,7 @@ describe("payoutGate — common conditions", () => {
       "software",
       "hardware",
       "resource",
+      "sports",
     ]);
   });
 });
@@ -235,6 +249,10 @@ const REFUSAL_CASES: { vertical: string; state: VerticalComplianceState; code: s
   { vertical: "hardware", state: { vertical: "hardware", frand_rate_court_determination_cleared: true, sep_essentiality_audit_verified: false }, code: "hardware_essentiality_unverified" },
   { vertical: "resource", state: { vertical: "resource", environmental_compliance_cleared: false, title_ownership_verification_passed: true }, code: "resource_environmental_not_cleared" },
   { vertical: "resource", state: { vertical: "resource", environmental_compliance_cleared: true, title_ownership_verification_passed: false }, code: "resource_title_unverified" },
+  { vertical: "sports", state: { vertical: "sports", event_completion_telemetry_verified: false, promoter_insurance_clearance: true, is_collegiate_nil_waterfall: false }, code: "sports_telemetry_unverified" },
+  { vertical: "sports", state: { vertical: "sports", event_completion_telemetry_verified: true, promoter_insurance_clearance: false, is_collegiate_nil_waterfall: false }, code: "sports_insurance_not_cleared" },
+  { vertical: "sports", state: { vertical: "sports", event_completion_telemetry_verified: true, promoter_insurance_clearance: true, is_collegiate_nil_waterfall: true, nil_compliance_audit_cleared: false }, code: "sports_nil_audit_not_cleared" },
+  { vertical: "sports", state: { vertical: "sports", event_completion_telemetry_verified: true, promoter_insurance_clearance: true, is_collegiate_nil_waterfall: true }, code: "sports_nil_audit_not_cleared" },
 ];
 
 describe("payoutGate — per-vertical families", () => {

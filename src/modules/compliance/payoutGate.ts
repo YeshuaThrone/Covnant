@@ -64,6 +64,11 @@ import type { KycStatus } from "@/lib/don/types";
  *   resource    environmental_compliance_cleared AND
  *               title_ownership_verification_passed (energy and resource
  *               payouts — environmental compliance and title ownership)
+ *   sports      event_completion_telemetry_verified AND
+ *               promoter_insurance_clearance (sports gate and ticketing
+ *               payouts — event completion telemetry and promoter
+ *               insurance); collegiate NIL waterfall disbursements
+ *               additionally require nil_compliance_audit_cleared
  *
  * The vertical state is read through the seam the recon layer populates
  * (settlement/compliance hold state per payee and vertical). Until that
@@ -91,6 +96,7 @@ export const ASSET_VERTICALS = [
   "software",
   "hardware",
   "resource",
+  "sports",
 ] as const;
 
 export type AssetVertical = (typeof ASSET_VERTICALS)[number];
@@ -220,6 +226,19 @@ export type ResourceComplianceState = {
   title_ownership_verification_passed: boolean;
 };
 
+export type SportsComplianceState = {
+  vertical: "sports";
+  event_completion_telemetry_verified: boolean;
+  promoter_insurance_clearance: boolean;
+  /**
+   * True when the disbursement is a collegiate NIL waterfall payout; only
+   * those payouts require the NIL compliance audit. Explicit false marks a
+   * non-NIL sports payout and skips the audit condition.
+   */
+  is_collegiate_nil_waterfall: boolean;
+  nil_compliance_audit_cleared?: boolean;
+};
+
 export type VerticalComplianceState =
   | MusicComplianceState
   | FilmComplianceState
@@ -239,7 +258,8 @@ export type VerticalComplianceState =
   | ServicesComplianceState
   | SoftwareComplianceState
   | HardwareComplianceState
-  | ResourceComplianceState;
+  | ResourceComplianceState
+  | SportsComplianceState;
 
 /**
  * The state source the recon layer populates. Receives the payee key (the
@@ -714,6 +734,33 @@ export function evaluatePayoutCompliance(
           code: "resource_title_unverified",
           message:
             "Payout refused: title ownership has not been verified for this energy or resource payout.",
+        };
+      }
+      return { ok: true };
+    }
+    case "sports": {
+      if (state.event_completion_telemetry_verified !== true) {
+        return {
+          ok: false,
+          code: "sports_telemetry_unverified",
+          message:
+            "Payout refused: event completion telemetry has not been verified for this sports or ticketing payout.",
+        };
+      }
+      if (state.promoter_insurance_clearance !== true) {
+        return {
+          ok: false,
+          code: "sports_insurance_not_cleared",
+          message:
+            "Payout refused: promoter insurance has not been cleared for this sports or ticketing payout.",
+        };
+      }
+      if (state.is_collegiate_nil_waterfall === true && state.nil_compliance_audit_cleared !== true) {
+        return {
+          ok: false,
+          code: "sports_nil_audit_not_cleared",
+          message:
+            "Payout refused: the NIL compliance audit has not been cleared for this collegiate NIL waterfall disbursement.",
         };
       }
       return { ok: true };

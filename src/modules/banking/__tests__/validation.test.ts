@@ -114,6 +114,7 @@ describe("validateLithicAchDispatchPayload", () => {
       "software",
       "hardware",
       "resource",
+      "sports",
     ]) {
       const parsed = validateLithicAchDispatchPayload(lithicBody({ vertical }));
       expect(parsed.ok).toBe(true);
