@@ -559,6 +559,43 @@ export class SupabaseStore implements Store {
     );
   }
 
+  // --- Unclaimed royalty holding (PR 7) ---
+
+  async listUnclaimedHoldingCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'unclaimed_holding')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listUnclaimedHoldingCredits',
+    );
+  }
+
+  async settleUnclaimedHolding(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The status predicate in the UPDATE's WHERE is the CAS: PostgREST
+    // matches the row only while it is still held, so the concurrent release
+    // loser gets zero rows back (maybeSingle → undefined).
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'unclaimed_holding')
+        .select()
+        .maybeSingle(),
+      'settleUnclaimedHolding',
+    );
+  }
+
   // --- BaaS transfers ---
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {

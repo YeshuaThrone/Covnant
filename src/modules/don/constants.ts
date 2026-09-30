@@ -1,6 +1,13 @@
 export const BPS_DENOMINATOR = 10_000;
 export const COMPANY_VARIANCE_PAYEE_ID = "platform";
 export const COMPANY_VARIANCE_PAYEE_NAME = "Don Engine Variance";
+// Unclaimed royalty holding (PR 7): the sentinel payee held credits carry.
+// Deliberately NOT 'platform' — holding funds are distinct from company dust
+// (payee 'platform') and from every creator's vault, in payee, GL account,
+// and ledger kind, so no query can fold one into another.
+export const UNCLAIMED_HOLDING_PAYEE_ID = "unclaimed";
+export const UNCLAIMED_HOLDING_PAYEE_NAME = "Unclaimed Royalty Holding";
+export const GL_ACCOUNT_UNCLAIMED_HOLDING = "unclaimed_holding";
 export const BACKUP_WITHHOLDING_BPS = 2_400;
 export const FORM_1099_THRESHOLD_CENTS = 60_000;
 export const PLAID_TOKEN_ENC_PREFIX = "enc:v1:";
@@ -36,6 +43,11 @@ export const JOURNAL_KINDS = [
   // Banking rails funding (PR 4): money arrives from Stripe into the Gold
   // Board — the inbound mirror of payout_settled. Additive only.
   "funding_received",
+  // Unclaimed royalty holding (PR 7): recon-identified unallocated funds
+  // park in holding (post), then release to verified creator balances
+  // through the clearance-gated settlement path (release). Additive only.
+  "unclaimed_holding_post",
+  "unclaimed_holding_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

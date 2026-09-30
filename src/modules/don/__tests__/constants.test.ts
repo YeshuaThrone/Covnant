@@ -65,6 +65,8 @@ describe('don constants', () => {
       'dispute_unlock',
       'royalty_reversal',
       'funding_received',
+      'unclaimed_holding_post',
+      'unclaimed_holding_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

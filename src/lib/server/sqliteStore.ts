@@ -1154,6 +1154,40 @@ export class SqliteStore implements Store {
     return this.getLedgerTransaction(id);
   }
 
+  // --- Unclaimed royalty holding (PR 7) ---
+
+  async listUnclaimedHoldingCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'unclaimed_holding' AND status = 'unclaimed_holding'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleUnclaimedHolding(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS. changes = 0
+    // means the row is absent or no longer held; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'unclaimed_holding'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {
     const record: BaasTransferRecord = { ...row, id: randomUUID() };
     this.db

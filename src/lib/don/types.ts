@@ -80,6 +80,11 @@ export const LEDGER_STATUSES = [
   "submitted",
   "settled",
   "failed",
+  // Unclaimed royalty holding (PR 7): recon-identified unallocated funds sit
+  // in holding until identity AND splits are fully verified. A held row's
+  // kind is 'unclaimed_holding'; release settles it through the normal
+  // clearance-gated settlement path (status → 'settled' + release journal).
+  "unclaimed_holding",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -91,6 +96,10 @@ export const LEDGER_KINDS = [
   // money-IN leg. Never written by charge creation — only the signed
   // payment_intent.succeeded webhook posts it.
   "funding_received",
+  // Unclaimed royalty holding (PR 7): a recon-sourced credit parked in
+  // holding. Kind marks WHAT the row is for its whole life (status carries
+  // the state machine), the same division 'payout_failed_reversal' uses.
+  "unclaimed_holding",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

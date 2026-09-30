@@ -7,6 +7,7 @@
 
 import {
   GL_ACCOUNT_FBO_CASH,
+  GL_ACCOUNT_UNCLAIMED_HOLDING,
   vaultGlAccount,
   type VaultBucket,
 } from "@/modules/don/constants";
@@ -74,6 +75,26 @@ export function fboDebit(amountCents: number): GlLegInput {
 
 export function fboCredit(amountCents: number): GlLegInput {
   return { account: GL_ACCOUNT_FBO_CASH, debit_cents: 0, credit_cents: amountCents };
+}
+
+// Unclaimed royalty holding (PR 7): the platform-scoped obligation account
+// parked between "cash received" and "payee owed". A held credit posts a
+// credit here against an FBO debit; a release debits it against vault
+// credits — never a vault bucket, never the dust payee's account.
+export function unclaimedHoldingDebit(amountCents: number): GlLegInput {
+  return {
+    account: GL_ACCOUNT_UNCLAIMED_HOLDING,
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function unclaimedHoldingCredit(amountCents: number): GlLegInput {
+  return {
+    account: GL_ACCOUNT_UNCLAIMED_HOLDING,
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
 }
 
 // --- Audit-surveillance helpers (Cursor's Batch 2 drop, landed with the
