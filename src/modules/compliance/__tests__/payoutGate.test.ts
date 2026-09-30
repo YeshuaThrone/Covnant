@@ -112,6 +112,11 @@ const ALL_SATISFIED: Record<string, VerticalComplianceState> = {
     frand_rate_court_determination_cleared: true,
     sep_essentiality_audit_verified: true,
   },
+  resource: {
+    vertical: "resource",
+    environmental_compliance_cleared: true,
+    title_ownership_verification_passed: true,
+  },
 };
 
 describe("payoutGate — common conditions", () => {
@@ -157,7 +162,7 @@ describe("payoutGate — common conditions", () => {
     expect(state).toBeNull();
   });
 
-  it("covers exactly the eighteen founder-directed verticals", () => {
+  it("covers exactly the nineteen founder-directed verticals", () => {
     expect(ASSET_VERTICALS).toEqual([
       "music",
       "film",
@@ -177,6 +182,7 @@ describe("payoutGate — common conditions", () => {
       "services",
       "software",
       "hardware",
+      "resource",
     ]);
   });
 });
@@ -227,6 +233,8 @@ const REFUSAL_CASES: { vertical: string; state: VerticalComplianceState; code: s
   { vertical: "software", state: { vertical: "software", api_uptime_sla_verified: true, software_security_audit_cleared: false }, code: "software_security_audit_not_cleared" },
   { vertical: "hardware", state: { vertical: "hardware", frand_rate_court_determination_cleared: false, sep_essentiality_audit_verified: true }, code: "hardware_frand_rate_not_cleared" },
   { vertical: "hardware", state: { vertical: "hardware", frand_rate_court_determination_cleared: true, sep_essentiality_audit_verified: false }, code: "hardware_essentiality_unverified" },
+  { vertical: "resource", state: { vertical: "resource", environmental_compliance_cleared: false, title_ownership_verification_passed: true }, code: "resource_environmental_not_cleared" },
+  { vertical: "resource", state: { vertical: "resource", environmental_compliance_cleared: true, title_ownership_verification_passed: false }, code: "resource_title_unverified" },
 ];
 
 describe("payoutGate — per-vertical families", () => {

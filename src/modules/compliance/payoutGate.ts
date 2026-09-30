@@ -61,6 +61,9 @@ import type { KycStatus } from "@/lib/don/types";
  *   hardware    frand_rate_court_determination_cleared AND
  *               sep_essentiality_audit_verified (hardware patent payouts —
  *               FRAND rate court determination and SEP essentiality audit)
+ *   resource    environmental_compliance_cleared AND
+ *               title_ownership_verification_passed (energy and resource
+ *               payouts — environmental compliance and title ownership)
  *
  * The vertical state is read through the seam the recon layer populates
  * (settlement/compliance hold state per payee and vertical). Until that
@@ -87,6 +90,7 @@ export const ASSET_VERTICALS = [
   "services",
   "software",
   "hardware",
+  "resource",
 ] as const;
 
 export type AssetVertical = (typeof ASSET_VERTICALS)[number];
@@ -210,6 +214,12 @@ export type HardwareComplianceState = {
   sep_essentiality_audit_verified: boolean;
 };
 
+export type ResourceComplianceState = {
+  vertical: "resource";
+  environmental_compliance_cleared: boolean;
+  title_ownership_verification_passed: boolean;
+};
+
 export type VerticalComplianceState =
   | MusicComplianceState
   | FilmComplianceState
@@ -228,7 +238,8 @@ export type VerticalComplianceState =
   | CulinaryComplianceState
   | ServicesComplianceState
   | SoftwareComplianceState
-  | HardwareComplianceState;
+  | HardwareComplianceState
+  | ResourceComplianceState;
 
 /**
  * The state source the recon layer populates. Receives the payee key (the
@@ -684,6 +695,25 @@ export function evaluatePayoutCompliance(
           code: "hardware_essentiality_unverified",
           message:
             "Payout refused: the SEP essentiality audit has not been verified for this hardware patent payout.",
+        };
+      }
+      return { ok: true };
+    }
+    case "resource": {
+      if (state.environmental_compliance_cleared !== true) {
+        return {
+          ok: false,
+          code: "resource_environmental_not_cleared",
+          message:
+            "Payout refused: environmental compliance has not been cleared for this energy or resource payout.",
+        };
+      }
+      if (state.title_ownership_verification_passed !== true) {
+        return {
+          ok: false,
+          code: "resource_title_unverified",
+          message:
+            "Payout refused: title ownership has not been verified for this energy or resource payout.",
         };
       }
       return { ok: true };
