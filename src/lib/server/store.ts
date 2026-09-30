@@ -77,6 +77,11 @@ import type {
   ReconJobResult,
   RoyaltyReconJobRecord,
 } from '@/modules/recon/records';
+import type {
+  DistributorConnectionInput,
+  DistributorConnectionRecord,
+  DistributorConnectionUpsert,
+} from '@/modules/vault/records';
 import {
   createAdminClient as createSupabaseAdminClient,
   readSupabaseEnv,
@@ -580,6 +585,52 @@ export interface Store {
    * most recent failure reason. undefined = no such job.
    */
   failReconJob(id: string, error: string): Promise<RoyaltyReconJobRecord | undefined>;
+
+  //
+  // The UCT credential vault surface (migration 0013, PR 5). Every method
+  // takes the holder id as its FIRST argument — holder scoping is the
+  // method-signature contract, not a caller's afterthought — and the
+  // records that flow through carry only ciphertext (the routes encrypt
+  // app-side before the store boundary, the Plaid token precedent).
+
+  /**
+   * Creates the holder's ACTIVE connection for a distributor — or, when a
+   * connected row already exists for (holder, distributor), rotates its
+   * ciphertexts in place (reconnect = update; the migration's partial
+   * unique index makes one-active-row a database invariant too, so a race
+   * that slips past this read fails closed on the insert). The store mints
+   * the id and stamps both timestamps; `created_at` survives rotation
+   * (the connection's age is the holder's tenure, not the password's).
+   * The result states WHICH outcome happened — rotation is the store's
+   * knowledge, never a caller's timestamp inference.
+   */
+  createDistributorConnection(
+    input: DistributorConnectionInput,
+  ): Promise<DistributorConnectionUpsert>;
+  /**
+   * The holder's rows, newest first — the status route's only read. Rows
+   * carry ciphertext; the route projects them through toConnectionStatus
+   * before responding.
+   */
+  listDistributorConnections(holderId: string): Promise<DistributorConnectionRecord[]>;
+  /**
+   * One holder-scoped point lookup. undefined when the id is unknown OR
+   * belongs to another holder — the two are indistinguishable by design.
+   */
+  getDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined>;
+  /**
+   * The holder's explicit disconnect: status 'disconnected', ciphertexts
+   * KEPT (the holder's history is theirs; a reconnect starts a fresh row).
+   * undefined (no such row, or a foreign holder's row) mutates nothing and
+   * the route answers the same 404 either way — no existence disclosure.
+   */
+  disconnectDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
@@ -631,6 +682,15 @@ export type {
   RoyaltyReconJobRecord,
   RoyaltyReconJobStatus,
 } from '@/modules/recon/records';
+export type {
+  ConnectionPublicStatus,
+  DistributorConnectionInput,
+  DistributorConnectionRecord,
+  DistributorConnectionSource,
+  DistributorConnectionState,
+  DistributorConnectionUpsert,
+} from '@/modules/vault/records';
+export { toConnectionStatus } from '@/modules/vault/records';
 
 // ---------------------------------------------------------------------------
 // Singleton — the spec's exact shape: getStore() boots the Supabase

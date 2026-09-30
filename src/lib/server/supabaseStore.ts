@@ -38,6 +38,11 @@ import {
 } from '@/lib/server/store';
 import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
+  DistributorConnectionInput,
+  DistributorConnectionRecord,
+  DistributorConnectionUpsert,
+} from '@/modules/vault/records';
+import type {
   BaasTransferRecord,
   KycVerificationRecord,
   LedgerTransactionRecord,
@@ -123,6 +128,9 @@ const TABLES = {
   // Migration 0011 — the Deep Royalties orchestration queue. Parsed line
   // items live in match_queue; this table moves the job, never the rows.
   reconJobs: 'royalty_recon_jobs',
+  // Migration 0013 — the UCT credential vault. Ciphertext columns only:
+  // the routes encrypt app-side before this store ever sees a credential.
+  distributorConnections: 'distributor_connections',
   universalRoyaltyLedger: 'universal_royalty_ledger',
   // Migration 0005 — the append-only operator audit trail. RLS grants no
   // anon/authenticated access: the service-role client this store holds is
@@ -1381,6 +1389,114 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'failReconJob',
+    );
+  }
+
+  // --- The UCT credential vault (migration 0013, PR 5) — every query is
+  // holder-scoped: a foreign (holder, id) pair matches no row, which the
+  // routes surface as the same 404 an unknown id gets.
+
+  async createDistributorConnection(
+    input: DistributorConnectionInput,
+  ): Promise<DistributorConnectionUpsert> {
+    const now = new Date().toISOString();
+    // Reconnect = rotate: one ACTIVE row per (holder, distributor) — this
+    // read-then-write is the store seam's enforcement of the migration's
+    // partial unique index. A race that slips between the two statements
+    // fails closed: Postgres rejects the second insert (uq_distributor_connections_active)
+    // and the thrown store error propagates — the route never half-writes.
+    const active = await this.one<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .select()
+        .eq('holder_id', input.holder_id)
+        .eq('distributor', input.distributor)
+        .eq('status', 'connected')
+        .maybeSingle(),
+      'createDistributorConnection',
+    );
+    if (active !== undefined) {
+      return this.oneStrict<DistributorConnectionRecord>(
+        this.client
+          .from(TABLES.distributorConnections)
+          .update({
+            username_encrypted: input.username_encrypted,
+            password_encrypted: input.password_encrypted,
+            updated_at: now,
+          })
+          .eq('id', active.id)
+          .eq('holder_id', input.holder_id)
+          .select()
+          .maybeSingle(),
+        'createDistributorConnection',
+      ).then((connection) => ({ connection, rotated: true }));
+    }
+    const record = {
+      id: crypto.randomUUID(),
+      holder_id: input.holder_id,
+      distributor: input.distributor,
+      status: 'connected' as const,
+      username_encrypted: input.username_encrypted,
+      password_encrypted: input.password_encrypted,
+      last_verified_at: null, // the Astra agent writes traversal provenance (PR 6)
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    return this.oneStrict<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .insert(record)
+        .select()
+        .maybeSingle(),
+      'createDistributorConnection',
+    ).then((connection) => ({ connection, rotated: false }));
+  }
+
+  async listDistributorConnections(holderId: string): Promise<DistributorConnectionRecord[]> {
+    // Newest first — insertion_order DESC is the strict tiebreak when
+    // created_at strings tie.
+    return this.many<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .select()
+        .eq('holder_id', holderId)
+        .order('insertion_order', { ascending: false }),
+      'listDistributorConnections',
+    );
+  }
+
+  async getDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    return this.one<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .select()
+        .eq('id', id)
+        .eq('holder_id', holderId)
+        .maybeSingle(),
+      'getDistributorConnection',
+    );
+  }
+
+  async disconnectDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const now = new Date().toISOString();
+    // PostgREST update+select returns the rows the filter matched — the
+    // holder_id eq makes a foreign id match nothing, i.e. undefined.
+    return this.one<DistributorConnectionRecord>(
+      this.client
+        .from(TABLES.distributorConnections)
+        .update({ status: 'disconnected', updated_at: now })
+        .eq('id', id)
+        .eq('holder_id', holderId)
+        .select()
+        .maybeSingle(),
+      'disconnectDistributorConnection',
     );
   }
 

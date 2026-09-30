@@ -71,6 +71,15 @@ export const PHONE_OTP_REQUEST_RATE_LIMIT: RateLimitConfig = { limit: 3, windowM
  */
 export const PHONE_OTP_VERIFY_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
 
+/**
+ * Credential vault surfaces (POST/GET /api/covnant/connections, DELETE
+ * /api/covnant/connections/[id]): 30 requests per client address per minute
+ * — the Don surface's window, shared with recon. One allowed connect is one
+ * cipher pair plus one store upsert, so the budget guards the vault's write
+ * rate, not a compute path.
+ */
+export const CONNECTIONS_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
+
 type Bucket = { count: number; windowStart: number };
 
 const buckets = new Map<string, Bucket>();

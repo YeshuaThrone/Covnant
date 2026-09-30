@@ -43,6 +43,11 @@ import {
 } from '@/lib/server/store';
 import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
+  DistributorConnectionInput,
+  DistributorConnectionRecord,
+  DistributorConnectionUpsert,
+} from '@/modules/vault/records';
+import type {
   BaasTransferRecord,
   KycVerificationRecord,
   LedgerTransactionRecord,
@@ -541,6 +546,28 @@ CREATE TABLE IF NOT EXISTS royalty_recon_jobs (
 CREATE INDEX IF NOT EXISTS royalty_recon_jobs_status_idx
   ON royalty_recon_jobs (status, created_at);
 
+-- --- The UCT credential vault (migration 0013) — local mirror ---
+--
+-- uuid/timestamptz walls are TEXT (ISO strings, the store-seam convention);
+-- the one-active-per-(holder, distributor) rule and the distributor/status
+-- vocabularies ride the guarded store methods (the in-memory backend and
+-- the Postgres partial unique index enforce the same contract).
+CREATE TABLE IF NOT EXISTS distributor_connections (
+  id TEXT PRIMARY KEY,
+  holder_id TEXT NOT NULL,
+  distributor TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'connected',
+  username_encrypted TEXT NOT NULL,
+  password_encrypted TEXT NOT NULL,
+  last_verified_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS distributor_connections_holder_idx
+  ON distributor_connections (holder_id, status);
+
 -- --- Clearinghouse kernel + Sync Library seams (migration 0008 — the
 --     SyncMarketplaceRegistry amendment) ---
 
@@ -615,6 +642,13 @@ function reconJobFromDbRow(row: ReconJobDbRow): RoyaltyReconJobRecord {
   }
   return { ...row, result };
 }
+
+// --- The UCT credential vault (migration 0013) — row projection helpers ---
+//
+// Every record field is already SQLite-safe (strings and nulls only — no
+// jsonb packing, no 0/1 booleans), so the row type is the record itself.
+
+type DistributorConnectionRow = DistributorConnectionRecord;
 
 /**
  * better-sqlite3 binds numbers, strings, bigints, buffers, and null only —
@@ -2108,6 +2142,110 @@ export class SqliteStore implements Store {
         .run(error, now, id);
     }
     return this.getReconJob(id);
+  }
+
+  // --- The UCT credential vault (migration 0013, PR 5) — every statement
+  // is holder-scoped first: a foreign (holder, id) pair matches no row, so
+  // it is indistinguishable from an unknown id on this backend too.
+
+  async createDistributorConnection(
+    input: DistributorConnectionInput,
+  ): Promise<DistributorConnectionUpsert> {
+    const now = new Date().toISOString();
+    // Reconnect = rotate: one ACTIVE row per (holder, distributor), the
+    // SQLite equivalent of the migration's partial unique index.
+    const active = this.db
+      .prepare(
+        `SELECT * FROM distributor_connections
+         WHERE holder_id = ? AND distributor = ? AND status = 'connected'`,
+      )
+      .get(input.holder_id, input.distributor) as DistributorConnectionRow | undefined;
+    if (active !== undefined) {
+      this.db
+        .prepare(
+          `UPDATE distributor_connections
+           SET username_encrypted = ?, password_encrypted = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(input.username_encrypted, input.password_encrypted, now, active.id);
+      return Promise.resolve({
+        connection: this.readDistributorConnection(active.id) as DistributorConnectionRecord,
+        rotated: true,
+      });
+    }
+    const record: DistributorConnectionRecord = {
+      id: randomUUID(),
+      holder_id: input.holder_id,
+      distributor: input.distributor,
+      status: 'connected',
+      username_encrypted: input.username_encrypted,
+      password_encrypted: input.password_encrypted,
+      last_verified_at: null, // the Astra agent writes traversal provenance (PR 6)
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO distributor_connections (
+           id, holder_id, distributor, status,
+           username_encrypted, password_encrypted,
+           last_verified_at, last_error, created_at, updated_at
+         ) VALUES (
+           @id, @holder_id, @distributor, @status,
+           @username_encrypted, @password_encrypted,
+           @last_verified_at, @last_error, @created_at, @updated_at
+         )`,
+      )
+      .run(record);
+    return Promise.resolve({ connection: record, rotated: false });
+  }
+
+  async listDistributorConnections(holderId: string): Promise<DistributorConnectionRecord[]> {
+    // Newest first — rowid DESC is this backend's insertion_order.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM distributor_connections WHERE holder_id = ? ORDER BY rowid DESC`,
+      )
+      .all(holderId) as DistributorConnectionRow[];
+    return Promise.resolve(rows.map((row) => ({ ...row })));
+  }
+
+  async getDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    return Promise.resolve(this.readDistributorConnection(id, holderId));
+  }
+
+  async disconnectDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const connection = this.readDistributorConnection(id, holderId);
+    if (connection === undefined) return Promise.resolve(undefined);
+    if (connection.status === 'disconnected') return Promise.resolve(connection); // replay
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE distributor_connections
+         SET status = 'disconnected', updated_at = ?
+         WHERE id = ? AND holder_id = ?`,
+      )
+      .run(now, id, holderId);
+    return Promise.resolve(this.readDistributorConnection(id, holderId));
+  }
+
+  /** Point lookup — holderId omitted only for the rotate path's own re-read. */
+  private readDistributorConnection(id: string, holderId?: string): DistributorConnectionRecord | undefined {
+    const row = (
+      holderId === undefined
+        ? this.db.prepare(`SELECT * FROM distributor_connections WHERE id = ?`).get(id)
+        : this.db
+            .prepare(`SELECT * FROM distributor_connections WHERE id = ? AND holder_id = ?`)
+            .get(id, holderId)
+    ) as DistributorConnectionRow | undefined;
+    return row === undefined ? undefined : { ...row };
   }
 
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
