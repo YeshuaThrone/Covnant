@@ -1,66 +1,35 @@
--- ============================================================================
--- Covnant — Deep Royalties recon job queue (0011)
--- The durable orchestration table for the royalty-recon engine (spec
--- art_7M0snhxc): the UCT layer's sync routes enqueue one row and return
--- 202 — the request cycle never parses, never calls a model, never fans
--- out — and the CVT worker (a standalone process outside Vercel) claims,
--- parses, and completes jobs in the background lane.
+-- ---------------------------------------------------------------------------
+-- Migration 0011 — royalty_recon_jobs (Deep Royalties recon queue, spec
+-- art_7M0snhxc, build item 1).
 --
--- Two deliberate reuses, both locked decisions from the spec:
---   - The parsed line items are NOT stored here. match_queue (0007) IS the
---     line-item store — the directive's "royalty_recon_line_items" already
---     exists under that name. This table is orchestration only.
---   - The claim concurrency is the settlement canon (0009): one atomic
---     claim_royalty_recon_job() RPC with FOR UPDATE SKIP LOCKED (two
---     workers can never hold one job), a 30-minute stale-claim recovery
---     (a crashed worker's job re-enters the pool), and the attempts cap 3
---     (the worker's failReconJob makes failure terminal past the budget —
---     no sweeper process exists; crash recovery IS the claim query).
+-- The orchestration table the UCT layer hands work to with ONE insert: the
+-- enqueue route writes a pending row and returns 202 — no parsing, no model
+-- calls, no outbound fetch in a request cycle. Parsed line items stay in the
+-- EXISTING match_queue (the locked decision — never a parallel table).
 --
--- Conventions, per migrations 0006–0010:
---  - Text UUIDs (gen_random_uuid default), timestamptz walls written as
---    ISO strings by the store. The store still mints ids app-side
---    (randomUUID); the database default covers any non-store writer.
---  - bigint generated always as identity = insertion_order (rowid
---    substitute; the claim's created_at tiebreak on the local stores'
---    rowid/array-index equivalents).
---  - Every statement is idempotent (if not exists / or replace / drop +
---    create): re-running the file is a no-op.
---  - RLS is enabled with no policies (deny-all); only the service role —
---    the store seam and the CVT worker — reads and writes.
---
--- Completion webhook: notify_recon_job_complete() POSTs the job's id and
--- status to the UCT callback route (/api/covnant/recon/jobs/callback) via
--- pg_net when the database settings app.recon_webhook_url and
--- app.recon_webhook_secret are set — e.g.
---   alter database <db> set app.recon_webhook_url = 'https://.../callback';
--- While they are unset the trigger is a strict NO-OP: polling
--- (GET /api/covnant/recon/jobs/:id) is the v1 completion path, and the
--- webhook activates by configuration only when the worker host lands.
--- The EXCEPTION wrapper is load-bearing: a webhook failure (pg_net absent,
--- host down, bad URL) is logged-and-dropped, never allowed to fail the
--- worker's transaction or roll a completed job back.
--- ============================================================================
+-- House pattern (0006/0010): check-constrained status, RLS deny-all, full
+-- service_role grant, insertion_order bigint. This file is idempotent —
+-- CI applies it twice; every object uses IF NOT EXISTS / OR REPLACE.
+-- ---------------------------------------------------------------------------
 
--- ---------------------------------------------------------------------------
--- The orchestration queue — one row per requested recon run.
--- ---------------------------------------------------------------------------
 create table if not exists public.royalty_recon_jobs (
-  id            uuid primary key default gen_random_uuid(),
-  status        text not null default 'pending'
-                check (status in ('pending', 'processing', 'completed', 'failed', 'cancelled')),
-  source        text not null,
-  ingest_id     text references public.statement_ingests (id),
-  requested_by  uuid,
-  engine        text,
-  attempts      int not null default 0,
-  error         text,
-  result        jsonb,
-  claimed_at    timestamptz,
-  started_at    timestamptz,
-  completed_at  timestamptz,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now(),
+  id              uuid primary key default gen_random_uuid(),
+  status          text not null default 'pending'
+                  check (status in ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+  source          text not null,
+  -- statement_ingests.id is TEXT (0007; the store mints randomUUID() into
+  -- it) — the FK must match the referenced column's type exactly.
+  ingest_id       text references public.statement_ingests (id),
+  requested_by    uuid,
+  engine          text,
+  attempts        int not null default 0,
+  error           text,
+  result          jsonb,
+  claimed_at      timestamptz,
+  started_at      timestamptz,
+  completed_at    timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
   insertion_order bigint generated always as identity
 );
 
@@ -84,9 +53,10 @@ create index if not exists idx_recon_jobs_status
   on public.royalty_recon_jobs (status, created_at);
 
 -- ---------------------------------------------------------------------------
--- The claim RPC — the settlement concurrency canon (0009): one atomic
--- statement, FOR UPDATE SKIP LOCKED so concurrent workers serialize on the
--- pool, stale-claim recovery built into the candidate filter, attempts
+-- The claim RPC — the settlement concurrency canon (0009): FOR UPDATE SKIP
+-- LOCKED so concurrent workers serialize on the pool, stale-claim recovery
+-- built into the candidate filter (a processing claim older than 30 minutes
+-- is re-claimable — a crashed worker's job re-enters the pool), attempts
 -- incremented on the same statement that hands the job out. Returns the
 -- claimed job as jsonb, or null when the pool is empty.
 -- ---------------------------------------------------------------------------
@@ -117,6 +87,609 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Rights-type separation (V1 directive addendum, 2026-09-30): line items must
+-- be explicitly tagged MASTER vs PUBLISHING so split calculations never
+-- conflate recording royalties with composition royalties. The canonical
+-- `rights_pipeline` (composition_mechanical, master_interactive, ...) records
+-- usage kind and is NOT the rights family — the tag is explicit, never
+-- derived. Vocabulary matches the house lowercase convention; the directive's
+-- MASTER/PUBLISHING map to 'master'/'publishing'. Quarantine rule: 'unknown'
+-- rows are excluded from split math until reclassified — the default
+-- quarantines unclassified ingests instead of guessing.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists rights_type text not null default 'unknown';
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_rights_type_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_rights_type_check
+      check (rights_type in ('master', 'publishing', 'unknown'));
+  end if;
+end $$;
+
+create index if not exists match_queue_rights_type_idx
+  on public.match_queue (rights_type);
+
+comment on column public.match_queue.rights_type is
+  'Rights family for the line item — values master, publishing, unknown. Quarantine rule: unknown rows are excluded from split math until reclassified (never guessed from rights_pipeline). Added by the V1 rights-separation directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Film waterfall (V1 directive addendum 2, 2026-09-30): sequential tier-level
+-- ordering for film waterfall ingestion and a statement-kind tag. tier_level
+-- is the waterfall tier (0 through 5); null rides the non-waterfall default
+-- lane. statement_source_type distinguishes VOD and SVOD statements,
+-- theatrical box office reports, and international sales agent statements —
+-- the existing 17 columns cannot (source is ingress webhook/statement/
+-- api_pull, rights_pipeline carries only the four music/DSP pipelines, and
+-- platform is free-form per-event display data). Null statement_source_type
+-- means not classified (the music lane). Relaxing either bound is a one-line
+-- additive migration if the waterfall engine needs more vocabulary.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists tier_level int;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_tier_level_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_tier_level_check
+      check (tier_level between 0 and 5);
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists statement_source_type text;
+
+do $$
+begin
+  if exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_statement_source_type_check'
+      and pg_get_constraintdef(oid) not like '%game_platform%'
+  ) then
+    alter table public.match_queue
+      drop constraint match_queue_statement_source_type_check;
+  end if;
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_statement_source_type_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_statement_source_type_check
+      check (statement_source_type in ('vod', 'svod', 'theatrical_box_office', 'international_sales_agent', 'game_platform', 'livestream'));
+  end if;
+end $$;
+
+create index if not exists match_queue_tier_level_idx
+  on public.match_queue (tier_level, insertion_order);
+
+comment on column public.match_queue.tier_level is
+  'Film waterfall tier, 0 through 5 — null rides the non-waterfall default lane. Added by the V1 film-waterfall directive addendum (2026-09-30).';
+comment on column public.match_queue.statement_source_type is
+  'Statement kind for film-waterfall ingestion — values vod, svod, theatrical_box_office, international_sales_agent; null = not classified (music lane). Added by the V1 film-waterfall directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Podcast vertical (V1 directive addendum 3, 2026-09-30): DAI and RSS
+-- ingestion. revenue_channel carries the revenue lane — channel_a_dai
+-- (programmatic), channel_b_host_read (sponsor and affiliate),
+-- channel_c_subscription (membership); null = non-podcast lines. ad_slot is
+-- the pod position for ad lines (pre_roll, mid_roll, post_roll); null for
+-- non-ad lines. verified_impressions is the ad-verified count (non-negative;
+-- null when unverified or non-ad). network_sold marks network-sold inventory
+-- (null = unknown or not applicable). All four are nullable — the podcast
+-- IAB engine populates them; relaxing a vocabulary is a one-line additive
+-- migration.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists revenue_channel text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_revenue_channel_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_revenue_channel_check
+      check (revenue_channel in ('channel_a_dai', 'channel_b_host_read', 'channel_c_subscription'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists ad_slot text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_ad_slot_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_ad_slot_check
+      check (ad_slot in ('pre_roll', 'mid_roll', 'post_roll'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists verified_impressions int;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_verified_impressions_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_verified_impressions_check
+      check (verified_impressions >= 0);
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists network_sold boolean;
+
+comment on column public.match_queue.revenue_channel is
+  'Podcast revenue lane — values channel_a_dai (programmatic), channel_b_host_read (sponsor and affiliate), channel_c_subscription (membership); null = non-podcast lines. Added by the V1 podcast directive addendum (2026-09-30).';
+comment on column public.match_queue.ad_slot is
+  'Pod position for ad lines — values pre_roll, mid_roll, post_roll; null for non-ad lines. Added by the V1 podcast directive addendum (2026-09-30).';
+comment on column public.match_queue.verified_impressions is
+  'Ad-verified impression count (non-negative); null when unverified or non-ad. Added by the V1 podcast directive addendum (2026-09-30).';
+comment on column public.match_queue.network_sold is
+  'Network-sold inventory flag; null = unknown or not applicable. Added by the V1 podcast directive addendum (2026-09-30).';
+
+
+-- ---------------------------------------------------------------------------
+-- Gaming vertical (V1 directive addendum 4, 2026-09-30): game platform
+-- revenue. sale_type separates primary sales from secondary resale.
+-- virtual_currency_code / virtual_amount / exchange_rate carry the
+-- virtual-currency legs (Robux, V-Bucks, Coins, ...) — all three null for
+-- fiat lines; virtual amounts and rates are exact decimals as text, the
+-- table's fixed-point convention (never a float). engine_royalty_micros and
+-- platform_commission_micros follow the gross_micros convention: fixed-point
+-- micros as text. Game-platform statements carry statement_source_type =
+-- 'game_platform' (see the film block); which platform rides the existing
+-- free-text `platform` column. The gaming fee parser and DevEx converter
+-- populate these; vocabularies relax via one-line additive migrations.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists sale_type text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_sale_type_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_sale_type_check
+      check (sale_type in ('primary', 'secondary_resale'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists virtual_currency_code text;
+
+alter table public.match_queue
+  add column if not exists virtual_amount text;
+
+alter table public.match_queue
+  add column if not exists exchange_rate text;
+
+alter table public.match_queue
+  add column if not exists engine_royalty_micros text;
+
+alter table public.match_queue
+  add column if not exists platform_commission_micros text;
+
+comment on column public.match_queue.sale_type is
+  'Game-platform sale type — values primary, secondary_resale; null = not applicable (non-game lines). Added by the V1 gaming directive addendum (2026-09-30).';
+comment on column public.match_queue.virtual_currency_code is
+  'Platform virtual-currency denomination (Robux, V-Bucks, Coins, ...); null for fiat lines. Added by the V1 gaming directive addendum (2026-09-30).';
+comment on column public.match_queue.virtual_amount is
+  'Exact virtual amount as decimal text — never a float; null for fiat lines. Added by the V1 gaming directive addendum (2026-09-30).';
+comment on column public.match_queue.exchange_rate is
+  'Fiat-per-virtual-unit exchange rate as exact decimal text; null for fiat lines. Added by the V1 gaming directive addendum (2026-09-30).';
+comment on column public.match_queue.engine_royalty_micros is
+  'Engine royalty, fixed-point micros as text — never a float; null when none. Added by the V1 gaming directive addendum (2026-09-30).';
+comment on column public.match_queue.platform_commission_micros is
+  'Platform commission, fixed-point micros as text — never a float; null when none. Added by the V1 gaming directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Derivative inheritance + livestream/esports (V1 directive addendum 5,
+-- 2026-09-30). parent_asset_id points a derivative micro-item or mod at the
+-- upstream cbt_assets row it builds on — the cascade allocator distributes
+-- royalties upstream-first before downstream net (locked rule). Livestream
+-- lines: stream_platform distinguishes the six stream sources; alert_type +
+-- revenue_basis carry sponsor overlay economics (flat or CPM);
+-- prize_pool_batch groups esports waterfall lines into their prize pool —
+-- the waterfall STEPS reuse tier_level (same sequential-recoupment ordering
+-- concept as film; relaxing the 0-5 bound is the documented one-line
+-- migration if esports needs deeper tiers).
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists parent_asset_id uuid references public.cbt_assets (id);
+
+alter table public.match_queue
+  add column if not exists stream_platform text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_stream_platform_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_stream_platform_check
+      check (stream_platform in ('twitch', 'youtube_live', 'kick', 'tiktok_live', 'streamlabs', 'streamelements'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists alert_type text;
+
+alter table public.match_queue
+  add column if not exists revenue_basis text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_revenue_basis_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_revenue_basis_check
+      check (revenue_basis in ('flat', 'cpm'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists prize_pool_batch text;
+
+comment on column public.match_queue.parent_asset_id is
+  'Upstream cbt_assets row a derivative item or mod builds on; null = original work. The cascade allocator walks it upstream-first. Added by the V1 derivative directive addendum (2026-09-30).';
+comment on column public.match_queue.stream_platform is
+  'Stream source for livestream lines — values twitch, youtube_live, kick, tiktok_live, streamlabs, streamelements; null = non-livestream. Added by the V1 livestream directive addendum (2026-09-30).';
+comment on column public.match_queue.alert_type is
+  'Sponsor overlay alert type (donation, subscription, follow, ...); null = no alert context. Added by the V1 livestream directive addendum (2026-09-30).';
+comment on column public.match_queue.revenue_basis is
+  'Sponsor payout basis — values flat, cpm; null when not sponsorship lines. Added by the V1 livestream directive addendum (2026-09-30).';
+comment on column public.match_queue.prize_pool_batch is
+  'Esports prize-pool batch grouping waterfall lines; steps reuse tier_level. Added by the V1 esports directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Music dependency + film tax + podcast feed mapping (V1 directive
+-- addendum 6, 2026-09-30). parent_composition_id tracks sample and
+-- interpolation dependencies — the upstream COMPOSITION a derivative
+-- recording builds on (distinct from parent_asset_id, the upstream asset
+-- for derivative micro-items and mods); both walk cbt_assets for upstream-
+-- first distribution. is_cover_version carries the HFA/MLC statutory cover
+-- flag. territory_code + foreign_tax_withheld give film lines their
+-- territory-level tax handling — the code is the withholding jurisdiction,
+-- separate from the free-form market `territory`. rss_feed_id maps podcast
+-- lines to their feed. ad_placement_type stands alone: it is the DELIVERY
+-- method (host_read, dai) and can diverge from the revenue lane in
+-- revenue_channel (host-read copy served through DAI insertion), so it is
+-- a separate nullable column, not a refinement of that enum.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists parent_composition_id uuid references public.cbt_assets (id);
+
+alter table public.match_queue
+  add column if not exists is_cover_version boolean;
+
+alter table public.match_queue
+  add column if not exists territory_code text;
+
+alter table public.match_queue
+  add column if not exists foreign_tax_withheld boolean;
+
+alter table public.match_queue
+  add column if not exists rss_feed_id text;
+
+alter table public.match_queue
+  add column if not exists ad_placement_type text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_ad_placement_type_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_ad_placement_type_check
+      check (ad_placement_type in ('host_read', 'dai'));
+  end if;
+end $$;
+
+comment on column public.match_queue.parent_composition_id is
+  'Upstream cbt_assets composition a sample or interpolation builds on; null = original work. Distinct from parent_asset_id (the derivative-asset parent). Added by the V1 music dependency directive addendum (2026-09-30).';
+comment on column public.match_queue.is_cover_version is
+  'HFA/MLC statutory cover flag; null = not classified. Added by the V1 music dependency directive addendum (2026-09-30).';
+comment on column public.match_queue.territory_code is
+  'Withholding jurisdiction for territory-level film tax handling; separate from the free-form market territory. Added by the V1 film tax directive addendum (2026-09-30).';
+comment on column public.match_queue.foreign_tax_withheld is
+  'Whether foreign tax was withheld on the line; null = unknown. Added by the V1 film tax directive addendum (2026-09-30).';
+comment on column public.match_queue.rss_feed_id is
+  'Podcast feed the line maps to; null = not feed-scoped. Added by the V1 podcast feed directive addendum (2026-09-30).';
+comment on column public.match_queue.ad_placement_type is
+  'Ad delivery method — values host_read, dai; independent of the revenue_channel lane (host-read copy can be served through DAI). Added by the V1 podcast feed directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Publishing / webtoon vertical (V1 directive addendum 7, 2026-09-30).
+-- format_type maps the publication format a line was earned in — print,
+-- digital chapter, coin unlock, KENP page-read, audio. language_code
+-- isolates per-language feeds so the same title in different languages
+-- reconciles separately. Webtoon Coins and Tapas Ink ride the EXISTING
+-- virtual-currency columns (virtual_currency_code / virtual_amount /
+-- exchange_rate) from the gaming addendum — deliberately not duplicated
+-- here.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists format_type text;
+
+do $$
+begin
+  if not exists (
+    select from pg_constraint
+    where conrelid = 'public.match_queue'::regclass
+      and conname = 'match_queue_format_type_check'
+  ) then
+    alter table public.match_queue
+      add constraint match_queue_format_type_check
+      check (format_type in ('print', 'digital_chapter', 'coin_unlock', 'kenp_page_read', 'audio'));
+  end if;
+end $$;
+
+alter table public.match_queue
+  add column if not exists language_code text;
+
+comment on column public.match_queue.format_type is
+  'Publication format — values print, digital_chapter, coin_unlock, kenp_page_read, audio; null = not classified. Added by the V1 publishing directive addendum (2026-09-30).';
+comment on column public.match_queue.language_code is
+  'Per-language feed isolation code; null = not language-scoped. Added by the V1 publishing directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Merch and AI metering (V1 directive addendum 8, 2026-09-30). sku_id
+-- maps a physical-merch line to its inventory SKU; cogs_per_unit_micros
+-- carries the per-unit cost of goods for FIFO amortization — named for
+-- the table's money convention (fixed-point micros as text, like
+-- gross_micros and the gaming fee columns), never a float. usage_unit +
+-- usage_quantity carry AI metering (tokens, characters, minutes) — the
+-- unit is free-form because platform vocabularies proliferate, and the
+-- quantity is exact decimal as text so billing math stays exact.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists sku_id text;
+
+alter table public.match_queue
+  add column if not exists cogs_per_unit_micros text;
+
+alter table public.match_queue
+  add column if not exists usage_unit text;
+
+alter table public.match_queue
+  add column if not exists usage_quantity text;
+
+comment on column public.match_queue.sku_id is
+  'Physical inventory SKU the merch line maps to; null = non-merch lines. Added by the V1 merch directive addendum (2026-09-30).';
+comment on column public.match_queue.cogs_per_unit_micros is
+  'Per-unit cost of goods for FIFO amortization, fixed-point micros as text — never a float; null when not applicable. Added by the V1 merch directive addendum (2026-09-30).';
+comment on column public.match_queue.usage_unit is
+  'AI metering unit — tokens, characters, minutes, ...; null = non-metered lines. Added by the V1 AI directive addendum (2026-09-30).';
+comment on column public.match_queue.usage_quantity is
+  'Metered usage amount as exact decimal text — never a float; null when not metered. Added by the V1 AI directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Books and AI attribution (V1 directive addendum 9, 2026-09-30). isbn
+-- maps a line to its book title. country_code isolates publishing
+-- localization — deliberately SEPARATE from territory_code (addendum 6):
+-- territory_code is the film tax-withholding jurisdiction, while the
+-- publishing localization market is a different concern filled by a
+-- different parser; overloading one column would couple the two verticals
+-- semantics. ai_model_id + dataset_attribution_weight carry fractional AI
+-- inference attribution — the weight is exact decimal as text (the table
+-- fixed-point convention, never a float).
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists isbn text;
+
+alter table public.match_queue
+  add column if not exists country_code text;
+
+alter table public.match_queue
+  add column if not exists ai_model_id text;
+
+alter table public.match_queue
+  add column if not exists dataset_attribution_weight text;
+
+comment on column public.match_queue.isbn is
+  'ISBN-13 (or legacy ISBN-10 normalized by the parser) of the book title; null = non-book lines. Added by the V1 book directive addendum (2026-09-30).';
+comment on column public.match_queue.country_code is
+  'Publishing localization market — separate from territory_code (the film tax jurisdiction). Added by the V1 book directive addendum (2026-09-30).';
+comment on column public.match_queue.ai_model_id is
+  'AI model whose inference produced the line; null = non-AI lines. Added by the V1 AI attribution directive addendum (2026-09-30).';
+comment on column public.match_queue.dataset_attribution_weight is
+  'Fractional dataset-attribution weight as exact decimal text — never a float; null when not attributed. Added by the V1 AI attribution directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Art market (V1 directive addendum 10, 2026-09-30). artwork_id maps a
+-- line to the art object; provenance_hash anchors the line to the
+-- provenance chain for verification; jurisdiction_code carries the
+-- cross-border RESALE-right jurisdiction — deliberately separate from
+-- territory_code (film tax withholding) and country_code (publishing
+-- localization): three verticals, three legal semantics, three columns.
+-- The artist-estate flag is ENTITY-level, not line-level — it ALTERs
+-- creator_profiles below (is_artist_estate / estate_succession_verified),
+-- where the art payout gate reads the succession state fail-closed.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists artwork_id text;
+
+alter table public.match_queue
+  add column if not exists provenance_hash text;
+
+alter table public.match_queue
+  add column if not exists jurisdiction_code text;
+
+comment on column public.match_queue.artwork_id is
+  'Art object the line maps to; null = non-art lines. Added by the V1 art directive addendum (2026-09-30).';
+comment on column public.match_queue.provenance_hash is
+  'Provenance-chain hash anchoring the line for verification; null = not provenance-anchored. Added by the V1 art directive addendum (2026-09-30).';
+comment on column public.match_queue.jurisdiction_code is
+  'Cross-border resale-right jurisdiction — separate from territory_code (film tax) and country_code (publishing localization). Added by the V1 art directive addendum (2026-09-30).';
+
+-- Artist-estate state: ENTITY-level on creator_profiles (0003), deliberately
+-- not on match_queue lines. The art payout gate reads
+-- estate_succession_verified fail-closed — null counts as unverified,
+-- never as verified.
+alter table public.creator_profiles
+  add column if not exists is_artist_estate boolean;
+
+alter table public.creator_profiles
+  add column if not exists estate_succession_verified boolean;
+
+comment on column public.creator_profiles.is_artist_estate is
+  'Whether this creator entity is an artist''s estate; null = not assessed. Added by the V1 art directive addendum (2026-09-30).';
+comment on column public.creator_profiles.estate_succession_verified is
+  'Estate-succession verification state the art payout gate reads — fail-closed: null counts as unverified. Added by the V1 art directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Live theater and comedy (V1 directive addendum 11, 2026-09-30).
+-- production_id and venue_id map a line to the production and the venue;
+-- show_date carries the performance date as an ISO date string (the
+-- store's text timestamp convention). RIGHTS-TYPE JUDGMENT: rights_type
+-- keeps its three-value rights family (master/publishing/unknown) — a
+-- Grand Rights line is publishing-family, and folding a licensing
+-- sub-category into the rights family would break the split-quarantine
+-- contract. The theatrical routing value rides a separate license_class
+-- column below; the Grand Rights vs small rights ROUTING RULE itself
+-- ships in allocator PRs 30 and 31.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists production_id text;
+
+alter table public.match_queue
+  add column if not exists venue_id text;
+
+alter table public.match_queue
+  add column if not exists show_date text;
+
+alter table public.match_queue
+  add column if not exists license_class text;
+
+do $$
+begin
+  alter table public.match_queue add constraint match_queue_license_class_check
+    check (license_class is null or license_class in ('grand_rights', 'small_rights'));
+exception
+  when duplicate_object then null;
+end $$;
+
+create index if not exists idx_match_queue_show_date
+  on public.match_queue (show_date);
+
+comment on column public.match_queue.production_id is
+  'Live production the line maps to; null = non-theatrical lines. Added by the V1 theater directive addendum (2026-09-30).';
+comment on column public.match_queue.venue_id is
+  'Venue the performance ran at; null = non-theatrical lines. Added by the V1 theater directive addendum (2026-09-30).';
+comment on column public.match_queue.show_date is
+  'Performance date as an ISO date string; null = non-performance lines. Added by the V1 theater directive addendum (2026-09-30).';
+comment on column public.match_queue.license_class is
+  'Grand Rights vs small rights routing class — the routing rule itself ships in allocator PRs 30/31; null = not classified. Added by the V1 theater directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Brand licensing (V1 directive addendum 12, 2026-09-30). license_id
+-- maps a line to the license agreement it falls under; category_code
+-- carries the licensed product category. TERRITORY JUDGMENT:
+-- territory_iso stands SEPARATE from territory_code (film tax
+-- withholding), country_code (publishing localization), and
+-- jurisdiction_code (art resale rights) — a license's territorial grant
+-- scope is a contractual concept, the fourth distinct territory-ish
+-- semantic; one vertical, one legal semantic, one column.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists license_id text;
+
+alter table public.match_queue
+  add column if not exists category_code text;
+
+alter table public.match_queue
+  add column if not exists territory_iso text;
+
+comment on column public.match_queue.license_id is
+  'License agreement the line falls under; null = non-licensed lines. Added by the V1 brand-licensing directive addendum (2026-09-30).';
+comment on column public.match_queue.category_code is
+  'Licensed product category; null = unclassified lines. Added by the V1 brand-licensing directive addendum (2026-09-30).';
+comment on column public.match_queue.territory_iso is
+  'License territorial grant scope — separate from territory_code (film tax), country_code (publishing localization), and jurisdiction_code (art resale). Added by the V1 brand-licensing directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- NIL (name, image, likeness) (V1 directive addendum 13, 2026-09-30).
+-- athlete_id maps a line to the athlete; school_id to their program.
+-- JURISDICTION JUDGMENT: state_jurisdiction_code stands SEPARATE from
+-- jurisdiction_code (art cross-border resale): NIL compliance runs on US
+-- state statutes — a different legal regime, filler, and vertical. The
+-- one-vertical-one-semantic-one-column rule now covers five territory-ish
+-- columns (territory_code, country_code, jurisdiction_code,
+-- territory_iso, state_jurisdiction_code).
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists athlete_id text;
+
+alter table public.match_queue
+  add column if not exists school_id text;
+
+alter table public.match_queue
+  add column if not exists state_jurisdiction_code text;
+
+comment on column public.match_queue.athlete_id is
+  'Athlete the NIL line maps to; null = non-NIL lines. Added by the V1 NIL directive addendum (2026-09-30).';
+comment on column public.match_queue.school_id is
+  'Athletic program (school) the NIL line maps to; null = non-NIL lines. Added by the V1 NIL directive addendum (2026-09-30).';
+comment on column public.match_queue.state_jurisdiction_code is
+  'US state whose NIL statute governs the line — separate from jurisdiction_code (art resale). Added by the V1 NIL directive addendum (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Spatial / location-based entertainment (V1 directive addendum 14 +
+-- founder patch, 2026-09-30). venue_id already exists (addendum 11);
+-- these two founder-named columns locate the line WITHIN the venue.
+-- zone_code is the founder-specified name (supersedes the zone_id
+-- judgment call); spatial_footprint_sqft carries the zone footprint as
+-- exact-decimal text per the table's fixed-point convention.
+-- JUDGMENT (reported): throughput counters stay payload-side — they are
+-- time-series telemetry, not line-level classification, so raw_payload
+-- carries them. Beacon/RFID hardware identifiers ride identifiers_json.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists zone_code text;
+
+alter table public.match_queue
+  add column if not exists spatial_footprint_sqft text;
+
+comment on column public.match_queue.zone_code is
+  'Spatial zone within the venue (founder-patched name); null = non-spatial lines. Added by the V1 spatial directive (2026-09-30).';
+comment on column public.match_queue.spatial_footprint_sqft is
+  'Zone footprint in square feet, exact-decimal text; null = non-spatial lines. Added by the V1 spatial directive (2026-09-30).';
+-- ---------------------------------------------------------------------------
 -- The pg_net completion webhook — STRICT NO-OP while app.recon_webhook_url
 -- is unset (polling is the v1 completion path). Fires on the status UPDATE
 -- into a terminal state only. Every failure inside the notify is caught:
@@ -128,8 +701,8 @@ language plpgsql
 set search_path = public
 as $$
 declare
-  v_url    text;
-  v_secret text;
+  v_url     text;
+  v_secret  text;
   v_headers jsonb;
 begin
   if new.status is distinct from old.status
@@ -174,6 +747,5 @@ create trigger trg_recon_job_complete
 -- ---------------------------------------------------------------------------
 
 alter table public.royalty_recon_jobs enable row level security;
-
 grant all on public.royalty_recon_jobs to service_role;
 grant execute on function public.claim_royalty_recon_job(timestamptz, text) to service_role;
