@@ -27,6 +27,7 @@ docker run -d --name universal_registry_db \
   -e POSTGRES_PASSWORD=registry_admin_local \
   -e POSTGRES_DB=universal_registry \
   -v universal_registry_pgdata:/var/lib/postgresql/data \
+  --mount type=bind,source="$(pwd)/0012_docker_roles.sql",target=/docker-entrypoint-initdb.d/00-roles.sql \
   --mount type=bind,source="$(pwd)/../migrations/0012_universal_identity.sql",target=/docker-entrypoint-initdb.d/init.sql \
   --health-cmd="pg_isready -U registry_admin -d universal_registry" \
   postgres:16-alpine >/dev/null
