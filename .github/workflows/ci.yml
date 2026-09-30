@@ -34,6 +34,7 @@ jobs:
 
   schema:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -82,6 +83,20 @@ jobs:
           # the migration is idempotent.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
+          # SDK collection surfaces + Sync Library + concurrency guards +
+          # phone verification (0007-0010), then the Deep Royalties recon
+          # queue (spec art_7M0snhxc): 0011 applied twice — the second apply
+          # must be a clean no-op, proving idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0007_sdk_collection.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0008_sync_library.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0009_concurrency_guards.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0010_phone_verifications.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
+          # Founder DDL (canon v10, addendum 29): the universal identity
+          # tables — applied twice like 0011 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -146,6 +161,118 @@ jobs:
             "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid where n.nspname = 'public' and p.proname = 'record_checkout_purchase'")
           [ "$rpc_exists" = "1" ] || { echo "MISSING RPC record_checkout_purchase"; exit 1; }
           echo "OK: record_checkout_purchase RPC exists"
+
+          # Deep Royalties recon queue (migration 0011, spec art_7M0snhxc):
+          # the orchestration table's inventory, the claim RPC, the pg_net
+          # completion trigger, and the check-constrained status — a bad
+          # status value must be REJECTED, never silently stored.
+          assert_cols royalty_recon_jobs id status source ingest_id requested_by engine attempts error result claimed_at started_at completed_at created_at updated_at insertion_order
+          rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='royalty_recon_jobs'")
+          [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on royalty_recon_jobs"; exit 1; }
+          echo "OK: royalty_recon_jobs RLS enabled"
+          # The check constraint MUST reject this insert — psql exits non-zero
+          # by design. `|| true` keeps the step alive under the workflow's
+          # `bash -eo pipefail` (the rejection is the expectation, not an error).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into royalty_recon_jobs (id, status, source) values (gen_random_uuid(), 'engine_running', 'statement')" >/dev/null 2>&1 || true
+          bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from royalty_recon_jobs where status = 'engine_running'")
+          [ "$bad_status" = "0" ] || { echo "BAD STATUS ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: royalty_recon_jobs status check constraint rejects bad values"
+          claim_rpc=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid where n.nspname = 'public' and p.proname = 'claim_royalty_recon_job'")
+          [ "$claim_rpc" = "1" ] || { echo "MISSING RPC claim_royalty_recon_job"; exit 1; }
+          echo "OK: claim_royalty_recon_job RPC exists"
+          trigger_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_trigger where tgrelid = 'public.royalty_recon_jobs'::regclass and tgisinternal = false")
+          [ "$trigger_exists" -ge "1" ] || { echo "MISSING recon completion trigger"; exit 1; }
+          echo "OK: recon completion trigger exists"
+          # The directive-addendum vertical columns on match_queue (rights
+          # separation, film waterfall, podcast, gaming, livestream/esports,
+          # derivative inheritance, publishing) — the parser and engine PRs
+          # build on this schema, so CI asserts every column exists.
+          assert_cols match_queue event_id status reason rights_pipeline rights_type tier_level statement_source_type revenue_channel ad_slot verified_impressions network_sold sale_type virtual_currency_code virtual_amount exchange_rate engine_royalty_micros platform_commission_micros parent_asset_id stream_platform alert_type revenue_basis prize_pool_batch parent_composition_id is_cover_version territory_code foreign_tax_withheld rss_feed_id ad_placement_type format_type language_code sku_id cogs_per_unit_micros usage_unit usage_quantity isbn country_code ai_model_id dataset_attribution_weight artwork_id provenance_hash jurisdiction_code production_id venue_id show_date license_class license_id category_code territory_iso athlete_id school_id state_jurisdiction_code zone_code spatial_footprint_sqft trainer_id program_id studio_franchise_code chef_id recipe_id ghost_kitchen_location_id stylist_id salon_location_id protocol_id developer_id api_endpoint_id sdk_package_hash patent_family_id sep_pool_code device_imei_mac parcel_id well_meter_id gpu_cluster_hash nil_contract_id athlete_glan venue_gln league_rights_code turnstile_scan_hash resolved_chain resolved_identifiers unclaimed_identifier_hold identifier_hold_reason source platform territory period currency gross_micros identifiers_json raw_payload matched_cbt_code resolved_at
+          assert_cols identifier_cross_mappings id chain source_code_type source_code_value target_code_type target_code_value verified created_at updated_at insertion_order
+          # The check-constrained vertical vocabularies MUST reject bad values.
+          # Every probe supplies the NOT NULL columns (reason, raw_payload) so
+          # the ONLY possible failure cause is the check constraint itself — a
+          # probe that failed on an unset column would false-pass the assertion.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload, statement_source_type) values (gen_random_uuid()::text, 'evt_bad_stmt', 'composition_performance', 'statement', 'probe', '{}', 'vhs_tape')" >/dev/null 2>&1 || true
+          bad_stmt=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from match_queue where statement_source_type = 'vhs_tape'")
+          [ "$bad_stmt" = "0" ] || { echo "BAD statement_source_type ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: match_queue statement_source_type check rejects bad values"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload, ad_placement_type) values (gen_random_uuid()::text, 'evt_bad_slot', 'composition_performance', 'statement', 'probe', '{}', 'billboard')" >/dev/null 2>&1 || true
+          bad_slot=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from match_queue where ad_placement_type = 'billboard'")
+          [ "$bad_slot" = "0" ] || { echo "BAD ad_placement_type ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: match_queue ad_placement_type check rejects bad values"
+          # Livestream and game-platform kinds are FIRST-CLASS in the extended
+          # statement vocabulary — accepted, not rejected.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload, statement_source_type) values (gen_random_uuid()::text, 'evt_good_stream', 'composition_performance', 'statement', 'probe', '{}', 'livestream')" >/dev/null 2>&1 || true
+          good_stream=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from match_queue where statement_source_type = 'livestream'")
+          [ "$good_stream" = "1" ] || { echo "livestream statement_source_type REJECTED — the extended vocabulary is missing"; exit 1; }
+          echo "OK: match_queue statement_source_type accepts livestream and game_platform kinds"
+          # Universal identifier layer — canon v2 (addendum 23): resolved_chain
+          # vocabulary and the identifier_cross_mappings chain-vocabulary check.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload, resolved_chain) values (gen_random_uuid()::text, 'evt_bad_chain', 'composition_performance', 'statement', 'probe', '{}', 'holo')" >/dev/null 2>&1 || true
+          bad_chain=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from match_queue where resolved_chain = 'holo'")
+          [ "$bad_chain" = "0" ] || { echo "BAD resolved_chain ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: match_queue resolved_chain check rejects bad values"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload, resolved_chain) values (gen_random_uuid()::text, 'evt_good_chain', 'composition_performance', 'statement', 'probe', '{}', 'fine_art')" >/dev/null 2>&1 || true
+          good_chain=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from match_queue where resolved_chain = 'fine_art'")
+          [ "$good_chain" = "1" ] || { echo "fine_art resolved_chain REJECTED — the canon-v2 vocabulary is missing"; exit 1; }
+          echo "OK: match_queue resolved_chain accepts canon-v2 chains"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('corporate', 'DUNS', 'DUNS-CI-1', 'LEI', 'LEI-CI-1')" >/dev/null 2>&1 || true
+          good_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where source_code_type = 'DUNS'")
+          [ "$good_map" = "1" ] || { echo "corporate DUNS->LEI mapping REJECTED — the canon-v2 chain vocabulary is missing"; exit 1; }
+          echo "OK: identifier_cross_mappings accepts canon-v2 corporate mappings"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('film', 'DUNS', 'DUNS-CI-2', 'LEI', 'LEI-CI-2')" >/dev/null 2>&1 || true
+          bad_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where source_code_type = 'DUNS' and chain = 'film'")
+          [ "$bad_map" = "0" ] || { echo "BAD mapping chain-vocab ACCEPTED — film must not carry DUNS codes"; exit 1; }
+          echo "OK: identifier_cross_mappings chain-vocabulary check rejects cross-chain membership"
+          # Canon v8 (addenda 24-27): fine-art heritage codes, sports
+          # rosters, spatial hardware, fitness/health, salon/beauty, and
+          # corporate settlement counterparties.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('corporate', 'BIC/SWIFT Code', 'BIC-CI-1', 'EIN', 'EIN-CI-1')" >/dev/null 2>&1 || true
+          good_bic=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where source_code_type = 'BIC/SWIFT Code'")
+          [ "$good_bic" = "1" ] || { echo "corporate BIC/SWIFT->EIN mapping REJECTED — the canon-v8 settlement vocabulary is missing"; exit 1; }
+          echo "OK: identifier_cross_mappings accepts canon-v8 corporate settlement mappings"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('salon_beauty', 'CAS Registry Number', 'CAS-CI-1', 'FDA UNII', 'UNII-CI-1')" >/dev/null 2>&1 || true
+          good_cas=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where chain = 'salon_beauty'")
+          [ "$good_cas" = "1" ] || { echo "salon_beauty CAS->UNII mapping REJECTED — the canon-v4 salon vocabulary is missing"; exit 1; }
+          echo "OK: identifier_cross_mappings accepts canon-v4 salon/beauty mappings"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('music', 'DICOM Study Instance UID', 'DICOM-CI-1', 'LOINC Code', 'LOINC-CI-1')" >/dev/null 2>&1 || true
+          bad_med=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where chain = 'music' and source_code_type = 'DICOM Study Instance UID'")
+          [ "$bad_med" = "0" ] || { echo "BAD mapping chain-vocab ACCEPTED — music must not carry DICOM codes"; exit 1; }
+          echo "OK: identifier_cross_mappings chain-vocabulary check rejects medical codes on music"
+          # Canon v10 (addendum 29): cultural property codes on fine art,
+          # and the founder's universal identity tables.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into identifier_cross_mappings (chain, source_code_type, source_code_value, target_code_type, target_code_value) values ('fine_art', 'CIDOC-CRM ID', 'CRM-CI-1', 'CONA ID', 'CONA-CI-1')" >/dev/null 2>&1 || true
+          good_crm=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where source_code_type = 'CIDOC-CRM ID'")
+          [ "$good_crm" = "1" ] || { echo "fine_art CIDOC-CRM mapping REJECTED — the canon-v10 vocabulary is missing"; exit 1; }
+          echo "OK: identifier_cross_mappings accepts canon-v10 cultural property mappings"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('11111111-1111-1111-1111-111111111111', 'FINE_ART', 'DARIA_ID', 'DARIA-C1D2E3F4A5B60718')" >/dev/null 2>&1 || true
+          good_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'DARIA-C1D2E3F4A5B60718'")
+          [ "$good_map" = "1" ] || { echo "universal_identity_map insert REJECTED — the founder DDL (0012) is missing"; exit 1; }
+          echo "OK: universal_identity_map accepts master codes (70-type trigger registry)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('22222222-2222-2222-2222-222222222222', 'PRO_SPORTS', 'DARIA_ID', 'DARIA-C1D2E3F4A5B60718')" >/dev/null 2>&1 || true
+          dup_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'DARIA_ID'")
+          [ "$dup_map" = "1" ] || { echo "unique_code_per_type NOT ENFORCED — the founder constraint is missing"; exit 1; }
+          echo "OK: unique_code_per_type rejects duplicate primary codes"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('33333333-3333-3333-3333-333333333333', 'HARDWARE', 'PURL', 'pkg:npm/@scope/name@1.0.0')" >/dev/null 2>&1 || true
+          purl_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'PURL'")
+          [ "$purl_map" = "1" ] || { echo "scoped npm purl REJECTED — the at-sign namespace correction is missing"; exit 1; }
+          echo "OK: scoped npm purl accepted (at-sign namespace correction verified)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('44444444-4444-4444-4444-444444444444', 'PRO_SPORTS', 'OPTA_PERSON_ID', 'p123456')" >/dev/null 2>&1 || true
+          opta_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'OPTA_PERSON_ID'")
+          [ "$opta_map" = "1" ] || { echo "v15 telemetry type REJECTED — the seven sports telemetry branches are missing"; exit 1; }
+          echo "OK: v15 telemetry types accepted"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('66666666-6666-6666-6666-666666666666', 'FINE_ART', 'AAT_ID', 'INVALID_AAT_CODE')" >/dev/null 2>&1 || true
+          reject_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'INVALID_AAT_CODE'")
+          [ "$reject_map" = "0" ] || { echo "validate_global_identifier did NOT reject a malformed code"; exit 1; }
+          echo "OK: the trigger rejects a malformed code"
+
+      - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
+        run: |
+          bash supabase/tests/0012_docker_harness.sh
 
   e2e:
     runs-on: ubuntu-latest

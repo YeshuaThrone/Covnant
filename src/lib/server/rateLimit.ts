@@ -48,6 +48,14 @@ export const ADMIN_API_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_0
 export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 /**
+ * Recon job enqueue (POST /api/covnant/recon/jobs): 30 requests per client
+ * address per minute — the Don surface's window. One allowed call is one
+ * INSERT into royalty_recon_jobs (the 202 contract), so the budget guards
+ * the queue's size, not a compute path.
+ */
+export const RECON_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
+
+/**
  * Phone OTP request (POST /api/covnant/auth/phone/otp): 3 requests per
  * client address per minute — one of the most rate-limited surfaces in the
  * app because every allowed call can spend a real SMS. The per-phone

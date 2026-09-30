@@ -25,17 +25,23 @@ import Database from 'better-sqlite3';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  RECON_MAX_ATTEMPTS,
+  RECON_STALE_CLAIM_MS,
   type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
   type LivePingRecord,
+  type ReconJobInput,
+  type ReconJobResult,
+  type RoyaltyReconJobRecord,
   type ShowRecord,
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
   type VaultDeltaInput,
 } from '@/lib/server/store';
+import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
   BaasTransferRecord,
   KycVerificationRecord,
@@ -407,6 +413,82 @@ CREATE TABLE IF NOT EXISTS match_queue (
   status TEXT NOT NULL DEFAULT 'open',
   reason TEXT NOT NULL,
   rights_pipeline TEXT NOT NULL,
+  rights_type TEXT NOT NULL DEFAULT 'unknown',
+  tier_level INTEGER,
+  statement_source_type TEXT,
+  revenue_channel TEXT,
+  ad_slot TEXT,
+  verified_impressions INTEGER,
+  network_sold BOOLEAN,
+  sale_type TEXT,
+  virtual_currency_code TEXT,
+  virtual_amount TEXT,
+  exchange_rate TEXT,
+  engine_royalty_micros TEXT,
+  platform_commission_micros TEXT,
+  parent_asset_id TEXT,
+  stream_platform TEXT,
+  alert_type TEXT,
+  revenue_basis TEXT,
+  prize_pool_batch TEXT,
+  parent_composition_id TEXT,
+  is_cover_version BOOLEAN,
+  territory_code TEXT,
+  foreign_tax_withheld BOOLEAN,
+  rss_feed_id TEXT,
+  ad_placement_type TEXT,
+  format_type TEXT,
+  language_code TEXT,
+  sku_id TEXT,
+  cogs_per_unit_micros TEXT,
+  usage_unit TEXT,
+  usage_quantity TEXT,
+  isbn TEXT,
+  country_code TEXT,
+  ai_model_id TEXT,
+  dataset_attribution_weight TEXT,
+  artwork_id TEXT,
+  provenance_hash TEXT,
+  jurisdiction_code TEXT,
+  production_id TEXT,
+  venue_id TEXT,
+  show_date TEXT,
+  license_class TEXT,
+  license_id TEXT,
+  category_code TEXT,
+  territory_iso TEXT,
+  athlete_id TEXT,
+  school_id TEXT,
+  state_jurisdiction_code TEXT,
+  zone_code TEXT,
+  spatial_footprint_sqft TEXT,
+  trainer_id TEXT,
+  program_id TEXT,
+  studio_franchise_code TEXT,
+  chef_id TEXT,
+  recipe_id TEXT,
+  ghost_kitchen_location_id TEXT,
+  stylist_id TEXT,
+  salon_location_id TEXT,
+  protocol_id TEXT,
+  developer_id TEXT,
+  api_endpoint_id TEXT,
+  sdk_package_hash TEXT,
+  patent_family_id TEXT,
+  sep_pool_code TEXT,
+  device_imei_mac TEXT,
+  parcel_id TEXT,
+  well_meter_id TEXT,
+  gpu_cluster_hash TEXT,
+  nil_contract_id TEXT,
+  athlete_glan TEXT,
+  venue_gln TEXT,
+  league_rights_code TEXT,
+  turnstile_scan_hash TEXT,
+  resolved_chain TEXT,
+  resolved_identifiers TEXT,
+  unclaimed_identifier_hold BOOLEAN NOT NULL DEFAULT 0,
+  identifier_hold_reason TEXT,
   source TEXT NOT NULL,
   platform TEXT,
   territory TEXT,
@@ -433,6 +515,31 @@ CREATE TABLE IF NOT EXISTS statement_ingests (
   error TEXT,
   created_at TEXT NOT NULL
 );
+
+-- Royalty recon orchestration queue (migration 0011, spec art_7M0snhxc).
+-- Orchestration only — parsed line items live in match_queue. Local mirror
+-- of the Postgres table: uuid/timestamptz walls are TEXT (ISO strings, the
+-- store-seam convention); the check constraint rides the guarded store
+-- methods, and rowid is the insertion_order tiebreak.
+CREATE TABLE IF NOT EXISTS royalty_recon_jobs (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending',
+  source TEXT NOT NULL,
+  ingest_id TEXT,
+  requested_by TEXT,
+  engine TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  result TEXT,
+  claimed_at TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS royalty_recon_jobs_status_idx
+  ON royalty_recon_jobs (status, created_at);
 
 -- --- Clearinghouse kernel + Sync Library seams (migration 0008 — the
 --     SyncMarketplaceRegistry amendment) ---
@@ -481,6 +588,52 @@ CREATE TABLE IF NOT EXISTS universal_royalty_ledger (
   created_at TEXT NOT NULL
 );
 `;
+
+// --- Royalty recon job queue (migration 0011) — row projection helpers ---
+//
+// The SQLite mirror keeps the Postgres wall types as TEXT (uuid /
+// timestamptz read back as strings) and packs result jsonb as TEXT JSON —
+// the same store-seam discipline the other local tables use.
+
+type ReconJobDbRow = Omit<RoyaltyReconJobRecord, 'result'> & { result: string | null };
+
+function reconJobToDbRow(record: RoyaltyReconJobRecord): ReconJobDbRow {
+  return { ...record, result: record.result === null ? null : JSON.stringify(record.result) };
+}
+
+function reconJobFromDbRow(row: ReconJobDbRow): RoyaltyReconJobRecord {
+  let result: ReconJobResult | null = null;
+  if (typeof row.result === 'string') {
+    try {
+      result = JSON.parse(row.result) as ReconJobResult;
+    } catch (error) {
+      throw new Error(
+        `royalty_recon_jobs.result for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+        { cause: error },
+      );
+    }
+  }
+  return { ...row, result };
+}
+
+/**
+ * better-sqlite3 binds numbers, strings, bigints, buffers, and null only —
+ * boolean record fields ride as 0/1 on write and restore on read.
+ */
+type MatchQueueSqliteRow = Omit<MatchQueueRecord, 'unclaimed_identifier_hold'> & {
+  unclaimed_identifier_hold: 0 | 1;
+};
+
+function matchQueueToSqliteRow(record: MatchQueueRecord): MatchQueueSqliteRow {
+  return {
+    ...record,
+    unclaimed_identifier_hold: record.unclaimed_identifier_hold ? 1 : 0,
+  };
+}
+
+function matchQueueFromSqliteRow(row: MatchQueueSqliteRow): MatchQueueRecord {
+  return { ...row, unclaimed_identifier_hold: row.unclaimed_identifier_hold === 1 };
+}
 
 export class SqliteStore implements Store {
   private readonly db: Database.Database;
@@ -1687,24 +1840,73 @@ export class SqliteStore implements Store {
     this.db
       .prepare(
         `INSERT INTO match_queue (
-           id, event_id, status, reason, rights_pipeline, source, platform, territory,
+           id, event_id, status, reason, rights_pipeline, rights_type, tier_level,
+           statement_source_type, revenue_channel, ad_slot, verified_impressions,
+           network_sold, sale_type, virtual_currency_code, virtual_amount,
+           exchange_rate, engine_royalty_micros, platform_commission_micros,
+           parent_asset_id, stream_platform, alert_type, revenue_basis,
+           prize_pool_batch, parent_composition_id, is_cover_version,
+           territory_code, foreign_tax_withheld, rss_feed_id, ad_placement_type,
+           format_type, language_code, sku_id, cogs_per_unit_micros,
+           usage_unit, usage_quantity, isbn, country_code,
+           ai_model_id, dataset_attribution_weight, artwork_id,
+           provenance_hash, jurisdiction_code, production_id,
+           venue_id, show_date, license_class, license_id,
+           category_code, territory_iso, athlete_id,
+           school_id, state_jurisdiction_code, zone_code,
+           spatial_footprint_sqft, trainer_id, program_id,
+           studio_franchise_code, chef_id, recipe_id,
+           ghost_kitchen_location_id, stylist_id, salon_location_id,
+           protocol_id, developer_id, api_endpoint_id,
+           sdk_package_hash, patent_family_id, sep_pool_code,
+           device_imei_mac, parcel_id, well_meter_id,
+           gpu_cluster_hash, nil_contract_id, athlete_glan,
+           venue_gln, league_rights_code, turnstile_scan_hash,
+           resolved_chain, resolved_identifiers,
+           unclaimed_identifier_hold, identifier_hold_reason,
+           source, platform, territory,
            period, currency, gross_micros, identifiers_json, raw_payload,
            matched_cbt_code, resolved_at, created_at
          ) VALUES (
-           @id, @event_id, @status, @reason, @rights_pipeline, @source, @platform, @territory,
+           @id, @event_id, @status, @reason, @rights_pipeline, @rights_type, @tier_level,
+           @statement_source_type, @revenue_channel, @ad_slot, @verified_impressions,
+           @network_sold, @sale_type, @virtual_currency_code, @virtual_amount,
+           @exchange_rate, @engine_royalty_micros, @platform_commission_micros,
+           @parent_asset_id, @stream_platform, @alert_type, @revenue_basis,
+           @prize_pool_batch, @parent_composition_id, @is_cover_version,
+           @territory_code, @foreign_tax_withheld, @rss_feed_id, @ad_placement_type,
+           @format_type, @language_code, @sku_id, @cogs_per_unit_micros,
+           @usage_unit, @usage_quantity, @isbn, @country_code,
+           @ai_model_id, @dataset_attribution_weight, @artwork_id,
+           @provenance_hash, @jurisdiction_code, @production_id,
+           @venue_id, @show_date, @license_class, @license_id,
+           @category_code, @territory_iso, @athlete_id,
+           @school_id, @state_jurisdiction_code, @zone_code,
+           @spatial_footprint_sqft, @trainer_id, @program_id,
+           @studio_franchise_code, @chef_id, @recipe_id,
+           @ghost_kitchen_location_id, @stylist_id, @salon_location_id,
+           @protocol_id, @developer_id, @api_endpoint_id,
+           @sdk_package_hash, @patent_family_id, @sep_pool_code,
+           @device_imei_mac, @parcel_id, @well_meter_id,
+           @gpu_cluster_hash, @nil_contract_id, @athlete_glan,
+           @venue_gln, @league_rights_code, @turnstile_scan_hash,
+           @resolved_chain, @resolved_identifiers,
+           @unclaimed_identifier_hold, @identifier_hold_reason,
+           @source, @platform, @territory,
            @period, @currency, @gross_micros, @identifiers_json, @raw_payload,
            @matched_cbt_code, @resolved_at, @created_at
          )`,
       )
-      .run(record);
+      .run(matchQueueToSqliteRow(record));
     return Promise.resolve(record);
   }
 
   async getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM match_queue WHERE id = ?`)
+      .get(id) as MatchQueueSqliteRow | undefined;
     return Promise.resolve(
-      this.db
-        .prepare(`SELECT * FROM match_queue WHERE id = ?`)
-        .get(id) as MatchQueueRecord | undefined,
+      row === undefined ? undefined : matchQueueFromSqliteRow(row),
     );
   }
 
@@ -1728,7 +1930,8 @@ export class SqliteStore implements Store {
                ORDER BY created_at DESC, rowid DESC
                LIMIT ?`,
             )
-            .all(status, limit)) as MatchQueueRecord[],
+            .all(status, limit))
+        .map((row) => matchQueueFromSqliteRow(row as MatchQueueSqliteRow)),
     );
   }
 
@@ -1774,6 +1977,137 @@ export class SqliteStore implements Store {
         .prepare(`SELECT * FROM statement_ingests WHERE id = ?`)
         .get(id) as StatementIngestRecord | undefined,
     );
+  }
+
+  // --- Royalty recon job queue (migration 0011, spec art_7M0snhxc) ---
+
+  async createReconJob(input: ReconJobInput): Promise<RoyaltyReconJobRecord> {
+    const now = new Date().toISOString();
+    const record: RoyaltyReconJobRecord = {
+      id: randomUUID(),
+      status: 'pending',
+      source: input.source,
+      ingest_id: input.ingest_id ?? null,
+      requested_by: input.requested_by ?? null,
+      engine: null, // resolved at claim — deterministic parse only by default
+      attempts: 0,
+      error: null,
+      result: null,
+      claimed_at: null,
+      started_at: null,
+      completed_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO royalty_recon_jobs (
+           id, status, source, ingest_id, requested_by, engine, attempts,
+           error, result, claimed_at, started_at, completed_at, created_at, updated_at
+         ) VALUES (
+           @id, @status, @source, @ingest_id, @requested_by, @engine, @attempts,
+           @error, @result, @claimed_at, @started_at, @completed_at, @created_at, @updated_at
+         )`,
+      )
+      .run(reconJobToDbRow(record));
+    return Promise.resolve(record);
+  }
+
+  async getReconJob(id: string): Promise<RoyaltyReconJobRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM royalty_recon_jobs WHERE id = ?`)
+      .get(id) as ReconJobDbRow | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve(reconJobFromDbRow(row));
+  }
+
+  async claimReconJob(
+    now: Date = new Date(),
+    engine: string | null = null,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    const nowIso = now.toISOString();
+    const staleCutoff = new Date(now.getTime() - RECON_STALE_CLAIM_MS).toISOString();
+    // BEGIN IMMEDIATE: the candidate scan and the transition commit as one
+    // write transaction — the SQLite equivalent of the claim RPC's
+    // FOR UPDATE SKIP LOCKED serialization (the canon's concurrency guard).
+    const claim = this.db.transaction(
+      (stamp: string, cutoff: string, claimEngine: string | null): ReconJobDbRow | undefined => {
+        const candidate = this.db
+          .prepare(
+            `SELECT id FROM royalty_recon_jobs
+             WHERE status = 'pending'
+                OR (status = 'processing' AND claimed_at IS NOT NULL AND claimed_at < ?)
+             ORDER BY created_at, rowid
+             LIMIT 1`,
+          )
+          .get(cutoff) as { id: string } | undefined;
+        if (candidate === undefined) return undefined;
+        this.db
+          .prepare(
+            `UPDATE royalty_recon_jobs
+             SET status = 'processing',
+                 engine = ?,
+                 claimed_at = ?,
+                 started_at = COALESCE(started_at, ?),
+                 attempts = attempts + 1,
+                 updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(claimEngine, stamp, stamp, stamp, candidate.id);
+        return this.db
+          .prepare(`SELECT * FROM royalty_recon_jobs WHERE id = ?`)
+          .get(candidate.id) as ReconJobDbRow | undefined;
+      },
+    );
+    const row = claim.immediate(nowIso, staleCutoff, engine);
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve(reconJobFromDbRow(row));
+  }
+
+  async completeReconJob(
+    id: string,
+    result: ReconJobResult,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return Promise.resolve(undefined);
+    if (isTerminalReconJob(job)) return Promise.resolve(job); // replay — untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return Promise.resolve(job);
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE royalty_recon_jobs
+         SET status = 'completed', result = ?, error = NULL,
+             completed_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('pending', 'processing')`,
+      )
+      .run(JSON.stringify(result), now, now, id);
+    return this.getReconJob(id);
+  }
+
+  async failReconJob(id: string, error: string): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return Promise.resolve(undefined);
+    if (isTerminalReconJob(job)) return Promise.resolve(job); // replay — untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return Promise.resolve(job);
+    const now = new Date().toISOString();
+    if (job.attempts >= RECON_MAX_ATTEMPTS) {
+      this.db
+        .prepare(
+          `UPDATE royalty_recon_jobs
+           SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
+           WHERE id = ? AND status IN ('pending', 'processing')`,
+        )
+        .run(error, now, now, id);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE royalty_recon_jobs
+           SET status = 'pending', error = ?, claimed_at = NULL, updated_at = ?
+           WHERE id = ? AND status IN ('pending', 'processing')`,
+        )
+        .run(error, now, id);
+    }
+    return this.getReconJob(id);
   }
 
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
