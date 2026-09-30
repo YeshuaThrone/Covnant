@@ -31,9 +31,27 @@ docker run -d --name universal_registry_db \
   --health-cmd="pg_isready -U registry_admin -d universal_registry" \
   postgres:16-alpine >/dev/null
 
-until docker exec universal_registry_db pg_isready -U registry_admin -d universal_registry >/dev/null 2>&1; do
+# Bounded readiness wait (2 min cap): if the container dies mid-init (initdb
+# failure, pull stall), docker exec would fail forever in an unbounded loop —
+# so detect a dead container, dump its logs, and fail loudly instead.
+ready=0
+for _ in $(seq 1 120); do
+  if [ "$(docker inspect -f '{{.State.Running}}' universal_registry_db 2>/dev/null)" != "true" ]; then
+    echo "FATAL: universal_registry_db is not running — initdb likely failed. Container logs:" >&2
+    docker logs universal_registry_db 2>&1 | tail -40 >&2 || true
+    exit 1
+  fi
+  if docker exec universal_registry_db pg_isready -U registry_admin -d universal_registry >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
   sleep 1
 done
+if [ "$ready" != 1 ]; then
+  echo "FATAL: postgres not ready after 120s. Container logs:" >&2
+  docker logs universal_registry_db 2>&1 | tail -40 >&2 || true
+  exit 1
+fi
 
 # The v12 acceptance suite: 13 valid rows INSERT, 3 malformed rows raise the
 # trigger exception, ROLLBACK leaves nothing. Exits non-zero if any expected
