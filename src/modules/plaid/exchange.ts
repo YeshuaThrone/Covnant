@@ -44,6 +44,9 @@ export async function exchangePlaidPublicToken(
     accessToken = encryptAccessToken(accessToken);
     await store.updatePlaidAccessToken(session.public_token, accessToken);
   }
+  // Lithic is a payout rail, never a Plaid processor: readBaasProvider is
+  // deliberately typed "column" | "unit" so legacy provider selection stays
+  // narrow even though BaasProvider now includes the Lithic rail.
   const processor = input.processor ?? readBaasProvider();
   const existing = await store.getProcessorToken(session.public_token, processor);
   const processorRow =

@@ -24,6 +24,8 @@ import {
   getBaasAdapter,
   type BaasTransferResult,
 } from "@/services/baas";
+import type { AchTransferRequest } from "@/services/baas/types";
+import type { BaasProvider } from "@/lib/don/types";
 import { postJournal } from "@/modules/ledger/engine";
 import {
   fboCredit,
@@ -34,7 +36,6 @@ import {
 } from "@/modules/ledger/journal";
 import type { PayoutReversalRecord, SovereignVaultRecord } from "@/modules/don/records";
 import {
-  creditBalances,
   debitPending,
   emptyVaultBalances,
   holdPayout,
@@ -504,10 +505,21 @@ async function insertPayoutLedger(
   });
 }
 
+/**
+ * An injected dispatch function replaces the default BaaS adapter entirely —
+ * the compliance-gated Lithic rail flows through this SAME
+ * hold → ledger → dispatch → journal sequence; it never gets a parallel
+ * path around the vault engine.
+ */
+export type VaultPayoutDispatcher = (
+  request: AchTransferRequest,
+) => Promise<BaasTransferResult>;
+
 export async function payoutFromVault(
   store: Store,
   input: VaultPayoutInput,
   now: Date = new Date(),
+  dispatch?: VaultPayoutDispatcher,
 ): Promise<
   | {
       ok: true;
@@ -576,7 +588,6 @@ export async function payoutFromVault(
     },
     now,
   );
-  const adapter = getBaasAdapter(store);
   const request = {
     payee_id: current.payee_id,
     payee_name: current.payee_name,
@@ -584,10 +595,20 @@ export async function payoutFromVault(
     currency: "USD",
     ledger_transaction_id: ledger.id,
   };
-  const result =
-    input.rail === "rtp"
-      ? await adapter.createRtpPayment(request)
-      : await adapter.createAchTransfer(request);
+  let dispatchedProvider: BaasProvider | null = null;
+  let result: BaasTransferResult;
+  if (dispatch) {
+    // An injected dispatcher's failure envelope does not identify a provider
+    // — record null rather than guessing one for the ledger row.
+    result = await dispatch(request);
+  } else {
+    const adapter = getBaasAdapter(store);
+    dispatchedProvider = adapter.provider;
+    result =
+      input.rail === "rtp"
+        ? await adapter.createRtpPayment(request)
+        : await adapter.createAchTransfer(request);
+  }
   if (!result.ok) {
     // Roll the hold back with the inverse, guarded delta (migration 0009,
     // H1) — a full-row overwrite of the stale pre-hold vault would clobber
@@ -614,7 +635,7 @@ export async function payoutFromVault(
     await store.updateLedgerSettlement(ledger.id, {
       status: "failed",
       rail: input.rail,
-      baas_provider: adapter.provider,
+      baas_provider: dispatchedProvider,
       baas_transfer_id: null,
       settled_at: null,
     });
@@ -623,7 +644,7 @@ export async function payoutFromVault(
   await store.updateLedgerSettlement(ledger.id, {
     status: "submitted",
     rail: input.rail,
-    baas_provider: adapter.provider,
+    baas_provider: result.transfer.provider,
     baas_transfer_id: result.transfer.id,
     settled_at: null,
   });
