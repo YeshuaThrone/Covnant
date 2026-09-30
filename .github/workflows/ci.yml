@@ -248,14 +248,30 @@ jobs:
           good_crm=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from identifier_cross_mappings where source_code_type = 'CIDOC-CRM ID'")
           [ "$good_crm" = "1" ] || { echo "fine_art CIDOC-CRM mapping REJECTED — the canon-v10 vocabulary is missing"; exit 1; }
           echo "OK: identifier_cross_mappings accepts canon-v10 cultural property mappings"
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('11111111-1111-1111-1111-111111111111', 'FINE_ART', 'DARIA', 'DARIA-CI-1')" >/dev/null 2>&1 || true
-          good_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'DARIA-CI-1'")
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('11111111-1111-1111-1111-111111111111', 'FINE_ART', 'DARIA_ID', 'DARIA-C1D2E3F4A5B60718')" >/dev/null 2>&1 || true
+          good_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'DARIA-C1D2E3F4A5B60718'")
           [ "$good_map" = "1" ] || { echo "universal_identity_map insert REJECTED — the founder DDL (0012) is missing"; exit 1; }
-          echo "OK: universal_identity_map accepts master codes"
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('22222222-2222-2222-2222-222222222222', 'PRO_SPORTS', 'DARIA', 'DARIA-CI-1')" >/dev/null 2>&1 || true
-          dup_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'DARIA'")
+          echo "OK: universal_identity_map accepts master codes (70-type trigger registry)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('22222222-2222-2222-2222-222222222222', 'PRO_SPORTS', 'DARIA_ID', 'DARIA-C1D2E3F4A5B60718')" >/dev/null 2>&1 || true
+          dup_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'DARIA_ID'")
           [ "$dup_map" = "1" ] || { echo "unique_code_per_type NOT ENFORCED — the founder constraint is missing"; exit 1; }
           echo "OK: unique_code_per_type rejects duplicate primary codes"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('33333333-3333-3333-3333-333333333333', 'HARDWARE', 'PURL', 'pkg:npm/@scope/name@1.0.0')" >/dev/null 2>&1 || true
+          purl_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'PURL'")
+          [ "$purl_map" = "1" ] || { echo "scoped npm purl REJECTED — the at-sign namespace correction is missing"; exit 1; }
+          echo "OK: scoped npm purl accepted (at-sign namespace correction verified)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('44444444-4444-4444-4444-444444444444', 'PRO_SPORTS', 'OPTA_PERSON_ID', 'p123456')" >/dev/null 2>&1 || true
+          opta_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'OPTA_PERSON_ID'")
+          [ "$opta_map" = "1" ] || { echo "v15 telemetry type REJECTED — the seven sports telemetry branches are missing"; exit 1; }
+          echo "OK: v15 telemetry types accepted"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('66666666-6666-6666-6666-666666666666', 'FINE_ART', 'AAT_ID', 'INVALID_AAT_CODE')" >/dev/null 2>&1 || true
+          reject_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'INVALID_AAT_CODE'")
+          [ "$reject_map" = "0" ] || { echo "validate_global_identifier did NOT reject a malformed code"; exit 1; }
+          echo "OK: the trigger rejects a malformed code"
+
+      - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
+        run: |
+          bash supabase/tests/0012_docker_harness.sh
 
   e2e:
     runs-on: ubuntu-latest
