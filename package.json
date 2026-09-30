@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "mcp": "npx tsx src/mcp/covenant-mcp-server.ts",
-    "covenant-mcp": "npx tsx src/mcp/covenant-mcp-server.ts"
+    "covenant-mcp": "npx tsx src/mcp/covenant-mcp-server.ts",
+    "worker:recon": "npx tsx src/workers/recon/main.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
