@@ -284,6 +284,12 @@ export interface MatchQueueRecord {
   sep_pool_code: string | null;
   /** Device-level IMEI or MAC identifier; null = non-device lines. */
   device_imei_mac: string | null;
+  /** Land or resource parcel for energy royalty lines. */
+  parcel_id: string | null;
+  /** Producing well or meter identifier; null = non-resource lines. */
+  well_meter_id: string | null;
+  /** Compute cluster identifier for GPU-hosting lines. */
+  gpu_cluster_hash: string | null;
   /** The event's ingress source, verbatim from the canonical event. */
   source: MatchQueueSource;
   platform: string | null;

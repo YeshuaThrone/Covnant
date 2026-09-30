@@ -336,6 +336,19 @@ export const reconSepPoolCodeSchema = z.string().min(1).nullable();
 /** Optional device-level IMEI or MAC identifier. */
 export const reconDeviceImeiMacSchema = z.string().min(1).nullable();
 
+/**
+ * Energy and resource (V1 directive addendum 20, 2026-09-30,
+ * founder-specified). parcel_id keys the land parcel, well_meter_id carries
+ * the producing meter, and gpu_cluster_hash identifies the compute cluster.
+ */
+export const reconParcelIdSchema = z.string().min(1).nullable();
+
+/** Optional producing well or meter identifier. */
+export const reconWellMeterIdSchema = z.string().min(1).nullable();
+
+/** Optional compute cluster identifier for GPU-hosting lines. */
+export const reconGpuClusterHashSchema = z.string().min(1).nullable();
+
 /** The worker's outcome summary — schema-validated, never invented here. */
 const reconJobResultSchema = z.object({
   events_written: z.number().int().min(0),

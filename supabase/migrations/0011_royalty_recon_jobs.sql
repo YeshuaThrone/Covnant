@@ -810,6 +810,28 @@ comment on column public.match_queue.sep_pool_code is
   'Standard-essential patent pool code; null = non-pool lines. Added by the V1 hardware-patent directive (2026-09-30).';
 comment on column public.match_queue.device_imei_mac is
   'Device-level IMEI or MAC identifier; null = non-device lines. Added by the V1 hardware-patent directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Energy and resource vertical (V1 directive addendum 20, 2026-09-30,
+-- founder-specified). parcel_id keys the land parcel; well_meter_id
+-- carries the producing meter; gpu_cluster_hash identifies the compute
+-- cluster for GPU-hosting royalty lines.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists parcel_id text;
+
+alter table public.match_queue
+  add column if not exists well_meter_id text;
+
+alter table public.match_queue
+  add column if not exists gpu_cluster_hash text;
+
+comment on column public.match_queue.parcel_id is
+  'Land or resource parcel for energy royalty lines; null = non-resource lines. Added by the V1 energy directive (2026-09-30).';
+comment on column public.match_queue.well_meter_id is
+  'Producing well or meter identifier; null = non-resource lines. Added by the V1 energy directive (2026-09-30).';
+comment on column public.match_queue.gpu_cluster_hash is
+  'Compute cluster identifier for GPU-hosting lines; null = non-compute lines. Added by the V1 energy directive (2026-09-30).';
 -- ---------------------------------------------------------------------------
 -- The pg_net completion webhook — STRICT NO-OP while app.recon_webhook_url
 -- is unset (polling is the v1 completion path). Fires on the status UPDATE
