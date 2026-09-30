@@ -254,6 +254,36 @@ export interface MatchQueueRecord {
   zone_code: string | null;
   /** Zone footprint in square feet, exact-decimal text; null = non-spatial. */
   spatial_footprint_sqft: string | null;
+  /** Workout IP trainer for fitness streams and class check-ins. */
+  trainer_id: string | null;
+  /** Fitness program — the module-weighted waterfall key. */
+  program_id: string | null;
+  /** Boutique franchise location code; null = non-franchise lines. */
+  studio_franchise_code: string | null;
+  /** Recipe IP chef for culinary streams and ghost-kitchen lines. */
+  chef_id: string | null;
+  /** Licensed recipe for culinary royalty lines. */
+  recipe_id: string | null;
+  /** Producing ghost-kitchen location; null = non-culinary lines. */
+  ghost_kitchen_location_id: string | null;
+  /** Service IP stylist for salon and med-spa lines. */
+  stylist_id: string | null;
+  /** Hospitality or salon franchise location. */
+  salon_location_id: string | null;
+  /** Licensed treatment protocol (service IP); null = non-service lines. */
+  protocol_id: string | null;
+  /** Software IP developer for dev-tool royalty lines. */
+  developer_id: string | null;
+  /** Metered API endpoint reference; null = non-API lines. */
+  api_endpoint_id: string | null;
+  /** Distributed SDK package build hash; null = non-package lines. */
+  sdk_package_hash: string | null;
+  /** Licensed hardware patent family; null = non-patent lines. */
+  patent_family_id: string | null;
+  /** Standard-essential patent pool code; null = non-pool lines. */
+  sep_pool_code: string | null;
+  /** Device-level IMEI or MAC identifier; null = non-device lines. */
+  device_imei_mac: string | null;
   /** The event's ingress source, verbatim from the canonical event. */
   source: MatchQueueSource;
   platform: string | null;

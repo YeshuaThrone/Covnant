@@ -689,6 +689,127 @@ comment on column public.match_queue.zone_code is
   'Spatial zone within the venue (founder-patched name); null = non-spatial lines. Added by the V1 spatial directive (2026-09-30).';
 comment on column public.match_queue.spatial_footprint_sqft is
   'Zone footprint in square feet, exact-decimal text; null = non-spatial lines. Added by the V1 spatial directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Fitness / connected-wellness vertical (V1 directive addendum 15 +
+-- founder patch, 2026-09-30). trainer_id and program_id key workout IP;
+-- studio_franchise_code is the founder-patched boutique franchise
+-- location code (the patch supersedes the payload-side judgment for the
+-- franchise code specifically).
+-- JUDGMENT (reported): wearable device IDs ride identifiers_json — device
+-- hardware ids are identifiers, the same lane as the spatial beacon/RFID
+-- choice. Residual agreement-level context (rate cards, exclusivity
+-- terms) stays payload-side in raw_payload.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists trainer_id text;
+
+alter table public.match_queue
+  add column if not exists program_id text;
+
+alter table public.match_queue
+  add column if not exists studio_franchise_code text;
+
+comment on column public.match_queue.trainer_id is
+  'Workout IP trainer for fitness streams and class check-ins; null = non-fitness lines. Added by the V1 fitness directive (2026-09-30).';
+comment on column public.match_queue.program_id is
+  'Fitness program (module-weighted waterfall key); null = non-fitness lines. Added by the V1 fitness directive (2026-09-30).';
+comment on column public.match_queue.studio_franchise_code is
+  'Boutique franchise location code (founder-patched); null = non-franchise lines. Added by the V1 fitness directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Culinary / ghost-kitchen vertical (V1 directive addendum 16,
+-- 2026-09-30, founder-specified). chef_id and recipe_id key recipe IP;
+-- ghost_kitchen_location_id tracks the producing kitchen.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists chef_id text;
+
+alter table public.match_queue
+  add column if not exists recipe_id text;
+
+alter table public.match_queue
+  add column if not exists ghost_kitchen_location_id text;
+
+comment on column public.match_queue.chef_id is
+  'Recipe IP chef for culinary streams and ghost-kitchen lines; null = non-culinary lines. Added by the V1 culinary directive (2026-09-30).';
+comment on column public.match_queue.recipe_id is
+  'Licensed recipe for culinary royalty lines; null = non-culinary lines. Added by the V1 culinary directive (2026-09-30).';
+comment on column public.match_queue.ghost_kitchen_location_id is
+  'Producing ghost-kitchen location; null = non-culinary lines. Added by the V1 culinary directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Salon / med-spa / hospitality franchise vertical (V1 directive
+-- addendum 17 + founder patch, 2026-09-30). stylist_id, protocol_id, and
+-- salon_location_id key service IP on the line (founder-patched names,
+-- replacing the addendum-17 technician/franchise-location/treatment names
+-- before the migration ever merged).
+-- JUDGMENT (reported): membership account identifiers stay payload-side —
+-- they are buyer-entity context, not line-level royalty classification,
+-- and ride identifiers_json/raw_payload. Backbar product SKUs also stay
+-- payload-side: service-delivery consumables are cost context for the
+-- supplier-rebate engine, and reusing retail's sku_id (addendum 8) would
+-- conflate sale mapping with consumption.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists stylist_id text;
+
+alter table public.match_queue
+  add column if not exists salon_location_id text;
+
+alter table public.match_queue
+  add column if not exists protocol_id text;
+
+comment on column public.match_queue.stylist_id is
+  'Service IP stylist for salon and med-spa lines; null = non-service lines. Added by the V1 salon directive (2026-09-30).';
+comment on column public.match_queue.salon_location_id is
+  'Hospitality or salon franchise location; null = non-franchise lines. Added by the V1 salon directive (2026-09-30).';
+comment on column public.match_queue.protocol_id is
+  'Licensed treatment protocol (service IP) for med-spa lines; null = non-service lines. Added by the V1 salon directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Developer tools vertical (V1 directive addendum 18, 2026-09-30,
+-- founder-specified). developer_id keys software IP; api_endpoint_id
+-- maps metered API usage; sdk_package_hash identifies the distributed
+-- package build.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists developer_id text;
+
+alter table public.match_queue
+  add column if not exists api_endpoint_id text;
+
+alter table public.match_queue
+  add column if not exists sdk_package_hash text;
+
+comment on column public.match_queue.developer_id is
+  'Software IP developer for dev-tool royalty lines; null = non-developer lines. Added by the V1 developer-tools directive (2026-09-30).';
+comment on column public.match_queue.api_endpoint_id is
+  'Metered API endpoint reference; null = non-API lines. Added by the V1 developer-tools directive (2026-09-30).';
+comment on column public.match_queue.sdk_package_hash is
+  'Distributed SDK package build hash; null = non-package lines. Added by the V1 developer-tools directive (2026-09-30).';
+
+-- ---------------------------------------------------------------------------
+-- Hardware patent vertical (V1 directive addendum 19, 2026-09-30,
+-- founder-specified). patent_family_id keys the licensed family;
+-- sep_pool_code identifies the standard-essential pool;
+-- device_imei_mac carries the device-level hardware identifier.
+-- ---------------------------------------------------------------------------
+alter table public.match_queue
+  add column if not exists patent_family_id text;
+
+alter table public.match_queue
+  add column if not exists sep_pool_code text;
+
+alter table public.match_queue
+  add column if not exists device_imei_mac text;
+
+comment on column public.match_queue.patent_family_id is
+  'Licensed hardware patent family; null = non-patent lines. Added by the V1 hardware-patent directive (2026-09-30).';
+comment on column public.match_queue.sep_pool_code is
+  'Standard-essential patent pool code; null = non-pool lines. Added by the V1 hardware-patent directive (2026-09-30).';
+comment on column public.match_queue.device_imei_mac is
+  'Device-level IMEI or MAC identifier; null = non-device lines. Added by the V1 hardware-patent directive (2026-09-30).';
 -- ---------------------------------------------------------------------------
 -- The pg_net completion webhook — STRICT NO-OP while app.recon_webhook_url
 -- is unset (polling is the v1 completion path). Fires on the status UPDATE

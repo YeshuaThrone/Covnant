@@ -267,6 +267,75 @@ export const reconZoneCodeSchema = z.string().min(1).nullable();
 /** Optional zone footprint in square feet — exact-decimal text. */
 export const reconSpatialFootprintSqftSchema = z.string().min(1).nullable();
 
+/**
+ * Fitness / connected-wellness (V1 directive addendum 15 founder patch,
+ * 2026-09-30). trainer_id keys workout IP, program_id is the module-weighted
+ * waterfall key, and studio_franchise_code is the founder-patched boutique
+ * franchise location code.
+ */
+export const reconTrainerIdSchema = z.string().min(1).nullable();
+
+/** Optional fitness program reference — module-weighted waterfall key. */
+export const reconProgramIdSchema = z.string().min(1).nullable();
+
+/** Optional boutique franchise location code — founder-patched column. */
+export const reconStudioFranchiseCodeSchema = z.string().min(1).nullable();
+
+/**
+ * Culinary / ghost-kitchen (V1 directive addendum 16, 2026-09-30,
+ * founder-specified). chef_id and recipe_id key recipe IP;
+ * ghost_kitchen_location_id tracks the producing kitchen.
+ */
+export const reconChefIdSchema = z.string().min(1).nullable();
+
+/** Optional licensed recipe reference for culinary royalty lines. */
+export const reconRecipeIdSchema = z.string().min(1).nullable();
+
+/** Optional producing ghost-kitchen location. */
+export const reconGhostKitchenLocationIdSchema = z.string().min(1).nullable();
+
+/**
+ * Salon / med-spa / hospitality franchise (V1 directive addendum 17 founder
+ * patch, 2026-09-30). stylist_id keys service IP, protocol_id is the
+ * licensed treatment protocol, and salon_location_id is the franchise
+ * location — founder-patched names replacing the addendum-17 originals.
+ */
+export const reconStylistIdSchema = z.string().min(1).nullable();
+
+/** Optional licensed treatment protocol (service IP). */
+export const reconProtocolIdSchema = z.string().min(1).nullable();
+
+/** Optional hospitality or salon franchise location. */
+export const reconSalonLocationIdSchema = z.string().min(1).nullable();
+
+/**
+ * Developer tools (V1 directive addendum 18, 2026-09-30,
+ * founder-specified). developer_id keys software IP, api_endpoint_id maps
+ * metered API usage, and sdk_package_hash identifies the distributed
+ * package build.
+ */
+export const reconDeveloperIdSchema = z.string().min(1).nullable();
+
+/** Optional metered API endpoint reference. */
+export const reconApiEndpointIdSchema = z.string().min(1).nullable();
+
+/** Optional distributed SDK package build hash. */
+export const reconSdkPackageHashSchema = z.string().min(1).nullable();
+
+/**
+ * Hardware patent (V1 directive addendum 19, 2026-09-30,
+ * founder-specified). patent_family_id keys the licensed family,
+ * sep_pool_code identifies the standard-essential pool, and
+ * device_imei_mac carries the device-level hardware identifier.
+ */
+export const reconPatentFamilyIdSchema = z.string().min(1).nullable();
+
+/** Optional standard-essential patent pool code. */
+export const reconSepPoolCodeSchema = z.string().min(1).nullable();
+
+/** Optional device-level IMEI or MAC identifier. */
+export const reconDeviceImeiMacSchema = z.string().min(1).nullable();
+
 /** The worker's outcome summary — schema-validated, never invented here. */
 const reconJobResultSchema = z.object({
   events_written: z.number().int().min(0),
