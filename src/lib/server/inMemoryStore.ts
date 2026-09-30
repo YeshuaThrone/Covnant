@@ -42,6 +42,11 @@ import {
 } from '@/lib/server/store';
 import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
+  DistributorConnectionInput,
+  DistributorConnectionRecord,
+  DistributorConnectionUpsert,
+} from '@/modules/vault/records';
+import type {
   BaasTransferRecord,
   KycVerificationRecord,
   LedgerTransactionRecord,
@@ -141,6 +146,10 @@ export class InMemoryStore implements Store {
   private statementIngests = new Map<string, StatementIngestRecord>();
   // Insertion-ordered — the claim's created_at/insertion tiebreak (0011).
   private reconJobs: RoyaltyReconJobRecord[] = [];
+  // --- The UCT credential vault (migration 0013) ---
+  // Array push = the database's insertion_order — the status read's
+  // newest-first tiebreak for rows sharing a created_at.
+  private distributorConnections: DistributorConnectionRecord[] = [];
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
   private creatorUcts = new Map<string, CreatorUctRecord>();
   private syncCatalog = new Map<string, SyncCatalogItemRecord>();
@@ -1025,6 +1034,84 @@ export class InMemoryStore implements Store {
         };
     this.reconJobs = this.reconJobs.map((row) => (row.id === id ? failed : row));
     return failed;
+  }
+
+  // --- The UCT credential vault (migration 0013, PR 5) ---
+
+  async createDistributorConnection(
+    input: DistributorConnectionInput,
+  ): Promise<DistributorConnectionUpsert> {
+    const now = new Date().toISOString();
+    // Reconnect = rotate: one ACTIVE row per (holder, distributor), the
+    // in-memory equivalent of the migration's partial unique index.
+    const existing = this.distributorConnections.find(
+      (row) =>
+        row.holder_id === input.holder_id &&
+        row.distributor === input.distributor &&
+        row.status === 'connected',
+    );
+    if (existing !== undefined) {
+      const rotated: DistributorConnectionRecord = {
+        ...existing,
+        username_encrypted: input.username_encrypted,
+        password_encrypted: input.password_encrypted,
+        updated_at: now,
+      };
+      this.distributorConnections = this.distributorConnections.map((row) =>
+        row.id === existing.id ? rotated : row,
+      );
+      return { connection: rotated, rotated: true };
+    }
+    const record: DistributorConnectionRecord = {
+      id: randomUUID(),
+      holder_id: input.holder_id,
+      distributor: input.distributor,
+      status: 'connected',
+      username_encrypted: input.username_encrypted,
+      password_encrypted: input.password_encrypted,
+      last_verified_at: null, // the Astra agent writes traversal provenance (PR 6)
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    this.distributorConnections.push(record);
+    return { connection: record, rotated: false };
+  }
+
+  async listDistributorConnections(holderId: string): Promise<DistributorConnectionRecord[]> {
+    // Newest first — the array's insertion order reversed (created_at ties
+    // resolve by insertion_order, which the push order IS).
+    return this.distributorConnections
+      .filter((row) => row.holder_id === holderId)
+      .slice()
+      .reverse();
+  }
+
+  async getDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    return this.distributorConnections.find(
+      (row) => row.id === id && row.holder_id === holderId,
+    );
+  }
+
+  async disconnectDistributorConnection(
+    holderId: string,
+    id: string,
+  ): Promise<DistributorConnectionRecord | undefined> {
+    const connection = await this.getDistributorConnection(holderId, id);
+    if (connection === undefined) return undefined;
+    if (connection.status === 'disconnected') return connection; // replay — untouched
+    const disconnected: DistributorConnectionRecord = {
+      ...connection,
+      status: 'disconnected',
+      updated_at: new Date().toISOString(),
+    };
+    this.distributorConnections = this.distributorConnections.map((row) =>
+      row.id === id ? disconnected : row,
+    );
+    return disconnected;
   }
 
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---

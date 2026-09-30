@@ -97,6 +97,11 @@ jobs:
           # tables — applied twice like 0011 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
+          # The UCT credential vault (spec art_7M0snhxc, PR 5): the
+          # distributor_connections table — applied twice like 0011/0012 to
+          # prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -269,6 +274,31 @@ jobs:
           reject_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'INVALID_AAT_CODE'")
           [ "$reject_map" = "0" ] || { echo "validate_global_identifier did NOT reject a malformed code"; exit 1; }
           echo "OK: the trigger rejects a malformed code"
+
+          # The UCT credential vault (migration 0013, PR 5): the vault
+          # table's inventory, RLS, and the two guarded invariants — the
+          # distributor vocabulary must REJECT an unknown dashboard, and the
+          # partial unique index must allow exactly ONE active connection
+          # per (holder, distributor) while disconnected rows stay exempt.
+          assert_cols distributor_connections id holder_id distributor status username_encrypted password_encrypted last_verified_at last_error created_at updated_at insertion_order
+          vault_rls=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='distributor_connections'")
+          [ "$vault_rls" = "t" ] || { echo "RLS NOT ENABLED on distributor_connections"; exit 1; }
+          echo "OK: distributor_connections RLS enabled"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into distributor_connections (id, holder_id, distributor, username_encrypted, password_encrypted) values ('90000000-0000-0000-0000-000000000001', '80000000-0000-0000-0000-000000000001', 'spotify', 'enc:v1:x.y.z', 'enc:v1:x.y.z')" >/dev/null 2>&1 || true
+          bad_distributor=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from distributor_connections where distributor = 'spotify'")
+          [ "$bad_distributor" = "0" ] || { echo "BAD DISTRIBUTOR ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: distributor_connections distributor check rejects unknown dashboards"
+          psql -h localhost -U postgres -d covnant_check -c "insert into distributor_connections (id, holder_id, distributor, username_encrypted, password_encrypted) values ('90000000-0000-0000-0000-000000000002', '80000000-0000-0000-0000-000000000002', 'distrokid', 'enc:v1:u1.p1.c1', 'enc:v1:u2.p2.c2')" >/dev/null
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into distributor_connections (id, holder_id, distributor, username_encrypted, password_encrypted) values ('90000000-0000-0000-0000-000000000003', '80000000-0000-0000-0000-000000000002', 'distrokid', 'enc:v1:u3.p3.c3', 'enc:v1:u4.p4.c4')" >/dev/null 2>&1 || true
+          double_active=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from distributor_connections where holder_id = '80000000-0000-0000-0000-000000000002'")
+          [ "$double_active" = "1" ] || { echo "TWO ACTIVE ROWS ACCEPTED for one (holder, distributor) — the partial unique index is missing"; exit 1; }
+          echo "OK: the partial unique index caps one ACTIVE connection per (holder, distributor)"
+          psql -h localhost -U postgres -d covnant_check -c "update distributor_connections set status = 'disconnected' where id = '90000000-0000-0000-0000-000000000002'" >/dev/null
+          psql -h localhost -U postgres -d covnant_check -c "insert into distributor_connections (id, holder_id, distributor, username_encrypted, password_encrypted) values ('90000000-0000-0000-0000-000000000004', '80000000-0000-0000-0000-000000000002', 'distrokid', 'enc:v1:u5.p5.c5', 'enc:v1:u6.p6.c6')" >/dev/null
+          reconnect=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from distributor_connections where holder_id = '80000000-0000-0000-0000-000000000002' and status = 'connected'")
+          [ "$reconnect" = "1" ] || { echo "RECONNECT AFTER DISCONNECT REJECTED — the unique index must only bind ACTIVE rows"; exit 1; }
+          echo "OK: reconnect after disconnect inserts a fresh active row"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

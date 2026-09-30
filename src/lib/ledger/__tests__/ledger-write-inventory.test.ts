@@ -226,6 +226,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // identifier tables; still no DDL on universal_royalty_ledger —
       // the referencing pin below holds.
       '0012_universal_identity.sql',
+      // UCT credential vault (spec PR 5): the distributor_connections table
+      // (AES-256-GCM ciphertexts, RLS deny-all, one-active-connection index);
+      // still no DDL on universal_royalty_ledger — the referencing pin
+      // below holds.
+      '0013_distributor_credentials.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
