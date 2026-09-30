@@ -21,17 +21,22 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  RECON_MAX_ATTEMPTS,
   type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
   type LivePingRecord,
+  type ReconJobInput,
+  type ReconJobResult,
+  type RoyaltyReconJobRecord,
   type ShowRecord,
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
   type VaultDeltaInput,
 } from '@/lib/server/store';
+import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
   BaasTransferRecord,
   KycVerificationRecord,
@@ -115,6 +120,9 @@ const TABLES = {
   mulClearanceTransitions: 'mul_clearance_transitions',
   matchQueue: 'match_queue',
   statementIngests: 'statement_ingests',
+  // Migration 0011 — the Deep Royalties orchestration queue. Parsed line
+  // items live in match_queue; this table moves the job, never the rows.
+  reconJobs: 'royalty_recon_jobs',
   universalRoyaltyLedger: 'universal_royalty_ledger',
   // Migration 0005 — the append-only operator audit trail. RLS grants no
   // anon/authenticated access: the service-role client this store holds is
@@ -1259,6 +1267,120 @@ export class SupabaseStore implements Store {
     return this.one<StatementIngestRecord>(
       this.client.from(TABLES.statementIngests).select().eq('id', id).maybeSingle(),
       'getStatementIngest',
+    );
+  }
+
+  // --- Royalty recon job queue (migration 0011, spec art_7M0snhxc) ---
+
+  async createReconJob(input: ReconJobInput): Promise<RoyaltyReconJobRecord> {
+    const now = new Date().toISOString();
+    const record: RoyaltyReconJobRecord = {
+      id: crypto.randomUUID(),
+      status: 'pending',
+      source: input.source,
+      ingest_id: input.ingest_id ?? null,
+      requested_by: input.requested_by ?? null,
+      engine: null, // resolved at claim — deterministic parse only by default
+      attempts: 0,
+      error: null,
+      result: null,
+      claimed_at: null,
+      started_at: null,
+      completed_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    return this.oneStrict<RoyaltyReconJobRecord>(
+      this.client
+        .from(TABLES.reconJobs)
+        .insert(record)
+        .select()
+        .maybeSingle(),
+      'createReconJob',
+    );
+  }
+
+  async getReconJob(id: string): Promise<RoyaltyReconJobRecord | undefined> {
+    return this.one<RoyaltyReconJobRecord>(
+      this.client.from(TABLES.reconJobs).select().eq('id', id).maybeSingle(),
+      'getReconJob',
+    );
+  }
+
+  async claimReconJob(
+    now: Date = new Date(),
+    engine: string | null = null,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    // The migration-0011 claim RPC — one atomic statement with FOR UPDATE
+    // SKIP LOCKED, stale-claim recovery, and the attempts increment. jsonb
+    // null back means the pool was empty (a legal result, not an error).
+    return this.one<RoyaltyReconJobRecord>(
+      this.client.rpc('claim_royalty_recon_job', {
+        p_now: now.toISOString(),
+        p_engine: engine,
+      }),
+      'claimReconJob',
+    );
+  }
+
+  async completeReconJob(
+    id: string,
+    result: ReconJobResult,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return undefined;
+    if (isTerminalReconJob(job)) return job; // replay — leave the row untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return job;
+    const now = new Date().toISOString();
+    // The status .in() guard makes the transition safe against a concurrent
+    // claim the read couldn't see — an unlucky race finishes as a no-op read.
+    return this.one<RoyaltyReconJobRecord>(
+      this.client
+        .from(TABLES.reconJobs)
+        .update({
+          status: 'completed',
+          result,
+          error: null,
+          completed_at: now,
+          updated_at: now,
+        })
+        .eq('id', id)
+        .in('status', ['pending', 'processing'])
+        .select()
+        .maybeSingle(),
+      'completeReconJob',
+    );
+  }
+
+  async failReconJob(id: string, error: string): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return undefined;
+    if (isTerminalReconJob(job)) return job; // replay — leave the row untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return job;
+    const now = new Date().toISOString();
+    const patch =
+      job.attempts >= RECON_MAX_ATTEMPTS
+        ? {
+            status: 'failed',
+            error,
+            completed_at: now,
+            updated_at: now,
+          }
+        : {
+            status: 'pending', // back to the pool for the next claim
+            error,
+            claimed_at: null, // nobody holds it while it waits
+            updated_at: now,
+          };
+    return this.one<RoyaltyReconJobRecord>(
+      this.client
+        .from(TABLES.reconJobs)
+        .update(patch)
+        .eq('id', id)
+        .in('status', ['pending', 'processing'])
+        .select()
+        .maybeSingle(),
+      'failReconJob',
     );
   }
 

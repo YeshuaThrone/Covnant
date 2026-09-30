@@ -24,17 +24,23 @@ import { randomUUID } from 'node:crypto';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  RECON_MAX_ATTEMPTS,
+  RECON_STALE_CLAIM_MS,
   type ApplyVaultDeltaResult,
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
   type LivePingRecord,
+  type ReconJobInput,
+  type ReconJobResult,
+  type RoyaltyReconJobRecord,
   type ShowRecord,
   type Store,
   type ValidLivePingPayload,
   type ValidShowPayload,
   type VaultDeltaInput,
 } from '@/lib/server/store';
+import { isTerminalReconJob } from '@/modules/recon/records';
 import type {
   BaasTransferRecord,
   KycVerificationRecord,
@@ -133,6 +139,8 @@ export class InMemoryStore implements Store {
   private clearanceTransitions: MulClearanceTransitionRecord[] = [];
   private matchQueue: MatchQueueRecord[] = [];
   private statementIngests = new Map<string, StatementIngestRecord>();
+  // Insertion-ordered — the claim's created_at/insertion tiebreak (0011).
+  private reconJobs: RoyaltyReconJobRecord[] = [];
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---
   private creatorUcts = new Map<string, CreatorUctRecord>();
   private syncCatalog = new Map<string, SyncCatalogItemRecord>();
@@ -907,6 +915,116 @@ export class InMemoryStore implements Store {
 
   async getStatementIngest(id: string): Promise<StatementIngestRecord | undefined> {
     return this.statementIngests.get(id);
+  }
+
+  // --- Royalty recon job queue (migration 0011, spec art_7M0snhxc) ---
+
+  async createReconJob(input: ReconJobInput): Promise<RoyaltyReconJobRecord> {
+    const now = new Date().toISOString();
+    const record: RoyaltyReconJobRecord = {
+      id: randomUUID(),
+      status: 'pending',
+      source: input.source,
+      ingest_id: input.ingest_id ?? null,
+      requested_by: input.requested_by ?? null,
+      engine: null, // resolved at claim — deterministic parse only by default
+      attempts: 0,
+      error: null,
+      result: null,
+      claimed_at: null,
+      started_at: null,
+      completed_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    // Array push = the database's insertion_order — the claim's tiebreak
+    // for rows sharing a created_at.
+    this.reconJobs.push(record);
+    return record;
+  }
+
+  async getReconJob(id: string): Promise<RoyaltyReconJobRecord | undefined> {
+    return this.reconJobs.find((job) => job.id === id);
+  }
+
+  async claimReconJob(
+    now: Date = new Date(),
+    engine: string | null = null,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    const nowIso = now.toISOString();
+    const staleCutoff = new Date(now.getTime() - RECON_STALE_CLAIM_MS).toISOString();
+    // Single-threaded equivalent of FOR UPDATE SKIP LOCKED: the candidate
+    // scan and the transition happen with no await between them. Scanning
+    // the insertion-ordered array keeps the EARLIEST claimable job —
+    // strict < on created_at preserves insertion order on a tie.
+    let best: RoyaltyReconJobRecord | undefined;
+    for (const job of this.reconJobs) {
+      const claimable =
+        job.status === 'pending' ||
+        (job.status === 'processing' &&
+          job.claimed_at !== null &&
+          job.claimed_at < staleCutoff);
+      if (!claimable) continue;
+      if (best === undefined || job.created_at < best.created_at) best = job;
+    }
+    if (best === undefined) return undefined;
+    const claimed: RoyaltyReconJobRecord = {
+      ...best,
+      status: 'processing',
+      engine,
+      claimed_at: nowIso,
+      started_at: best.started_at ?? nowIso,
+      attempts: best.attempts + 1,
+      updated_at: nowIso,
+    };
+    this.reconJobs = this.reconJobs.map((row) => (row.id === best.id ? claimed : row));
+    return claimed;
+  }
+
+  async completeReconJob(
+    id: string,
+    result: ReconJobResult,
+  ): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return undefined;
+    if (isTerminalReconJob(job)) return job; // replay — leave the row untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return job;
+    const completed: RoyaltyReconJobRecord = {
+      ...job,
+      status: 'completed',
+      result,
+      error: null,
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.reconJobs = this.reconJobs.map((row) => (row.id === id ? completed : row));
+    return completed;
+  }
+
+  async failReconJob(id: string, error: string): Promise<RoyaltyReconJobRecord | undefined> {
+    const job = await this.getReconJob(id);
+    if (job === undefined) return undefined;
+    if (isTerminalReconJob(job)) return job; // replay — leave the row untouched
+    if (job.status !== 'pending' && job.status !== 'processing') return job;
+    const now = new Date().toISOString();
+    const pastBudget = job.attempts >= RECON_MAX_ATTEMPTS;
+    const failed: RoyaltyReconJobRecord = pastBudget
+      ? {
+          ...job,
+          status: 'failed',
+          error,
+          completed_at: now,
+          updated_at: now,
+        }
+      : {
+          ...job,
+          status: 'pending', // back to the pool for the next claim
+          error,
+          claimed_at: null, // nobody holds it while it waits
+          updated_at: now,
+        };
+    this.reconJobs = this.reconJobs.map((row) => (row.id === id ? failed : row));
+    return failed;
   }
 
   // --- Clearinghouse kernel + Sync Library seams (migration 0008) ---

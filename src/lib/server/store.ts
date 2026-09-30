@@ -72,6 +72,12 @@ import type {
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
+import type {
+  ReconJobInput,
+  ReconJobResult,
+  RoyaltyReconJobRecord,
+  RoyaltyReconJobStatus,
+} from '@/modules/recon/records';
 import {
   createAdminClient as createSupabaseAdminClient,
   readSupabaseEnv,
@@ -133,6 +139,16 @@ export type ArtistRecord = {
 
 /** Cap for GET /api/shows — sane default, overridable per call. */
 export const DEFAULT_LIST_SHOWS_LIMIT = 200;
+
+/**
+ * Recon claim concurrency constants (migration 0011, spec art_7M0snhxc —
+ * the settlement concurrency canon from 0009). A processing claim older
+ * than RECON_STALE_CLAIM_MS is stale — its worker crashed, and the job is
+ * re-claimable. RECON_MAX_ATTEMPTS is the retry budget failReconJob
+ * enforces; past the cap, failure is terminal and honest.
+ */
+export const RECON_STALE_CLAIM_MS = 30 * 60 * 1000;
+export const RECON_MAX_ATTEMPTS = 3;
 
 /**
  * Outcome of recording one completed checkout session. `recorded` is the
@@ -520,6 +536,51 @@ export interface Store {
    * never fabricated rows.
    */
   listAdminActions(limit?: number): Promise<AdminActionRecord[]>;
+
+  // --- Royalty recon job queue (migration 0011, spec art_7M0snhxc) ---
+  //
+  // The Deep Royalties orchestration surface. A recon job is the UCT
+  // layer's ONE write — the enqueue route inserts and returns 202; the
+  // CVT worker (standalone process, never a Vercel function) resolves jobs
+  // through claim/complete/fail. Parsed line items go to the EXISTING
+  // match_queue (0007), never a parallel table.
+
+  /**
+   * Enqueues one recon job: status 'pending', attempts 0, engine null
+   * (resolved at claim), all timestamps null but created_at/updated_at —
+   * which the store mints (the enqueue route carries no clock).
+   */
+  createReconJob(input: ReconJobInput): Promise<RoyaltyReconJobRecord>;
+  /** The enqueue route's status poll read (the v1 completion path). */
+  getReconJob(id: string): Promise<RoyaltyReconJobRecord | undefined>;
+  /**
+   * The worker's claim — the settlement concurrency canon (0009): the
+   * oldest pending job, or a processing job whose claim went stale more
+   * than RECON_STALE_CLAIM_MS ago (crash recovery — no sweeper process),
+   * moves to 'processing' with claimed_at = now, started_at kept on its
+   * first value, attempts incremented, engine resolved (null =
+   * deterministic parse only). `now` is injectable so tests drive the
+   * staleness window without fake timers; production calls claim with no
+   * arguments. undefined = the pool is empty. Production concurrency:
+   * SupabaseStore claims through the migration-0011 RPC
+   * (FOR UPDATE SKIP LOCKED); SqliteStore claims inside BEGIN IMMEDIATE;
+   * the in-memory backend is single-threaded by construction.
+   */
+  claimReconJob(now?: Date, engine?: string | null): Promise<RoyaltyReconJobRecord | undefined>;
+  /**
+   * Completes a claimed job: status 'completed' with the result summary
+   * and completed_at. A terminal job is left untouched (the callback's
+   * replay no-op reads the returned record). undefined = no such job.
+   */
+  completeReconJob(id: string, result: ReconJobResult): Promise<RoyaltyReconJobRecord | undefined>;
+  /**
+   * Fails a claimed job honestly: back to 'pending' while the retry budget
+   * holds (attempts < RECON_MAX_ATTEMPTS, claimed_at cleared for the next
+   * claim), terminal 'failed' with the error past it. The error is
+   * recorded either way — a pending job with an error text carries its
+   * most recent failure reason. undefined = no such job.
+   */
+  failReconJob(id: string, error: string): Promise<RoyaltyReconJobRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
@@ -564,6 +625,13 @@ export type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+export type {
+  ReconJobInput,
+  ReconJobResult,
+  ReconJobSource,
+  RoyaltyReconJobRecord,
+  RoyaltyReconJobStatus,
+} from '@/modules/recon/records';
 
 // ---------------------------------------------------------------------------
 // Singleton — the spec's exact shape: getStore() boots the Supabase
