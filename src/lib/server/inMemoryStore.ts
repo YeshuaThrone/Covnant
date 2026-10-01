@@ -77,6 +77,9 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingEngineRoyaltyEventRecord,
+  GamingItemSplitScheduleRecord,
+  GamingSplitPayoutRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -155,6 +158,10 @@ export class InMemoryStore implements Store {
   private podcastEpisodeSplitAccruals: PodcastEpisodeSplitAccrualRecord[] = [];
   private podcastGuestBonusDefinitions: PodcastGuestBonusDefinitionRecord[] = [];
   private podcastGuestBonusAccruals: PodcastGuestBonusAccrualRecord[] = [];
+  // Gaming engine-royalty accumulator + item splits (migration 0018, PR 12).
+  private gamingEngineRoyaltyEvents: GamingEngineRoyaltyEventRecord[] = [];
+  private gamingItemSplitSchedules = new Map<string, GamingItemSplitScheduleRecord>();
+  private gamingSplitPayouts: GamingSplitPayoutRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -735,6 +742,93 @@ export class InMemoryStore implements Store {
     // Oldest first — accrual order (push order IS insertion_order for ties).
     return sortByTime(
       this.podcastGuestBonusAccruals.filter((row) => row.episode_id === episodeId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  // --- Gaming engine-royalty accumulator + item splits (migration 0018, PR 12) ---
+
+  async insertGamingEngineRoyaltyEvent(
+    row: Omit<GamingEngineRoyaltyEventRecord, 'id'>,
+  ): Promise<GamingEngineRoyaltyEventRecord> {
+    // UNIQUE on event_id — one contribution per queue event, ever; a
+    // duplicate insert throws the unique violation (the replay no-op).
+    if (this.gamingEngineRoyaltyEvents.some((existing) => existing.event_id === row.event_id)) {
+      uniqueViolation('gaming_engine_royalty_events.event_id');
+    }
+    const record: GamingEngineRoyaltyEventRecord = { ...row, id: randomUUID() };
+    this.gamingEngineRoyaltyEvents.push(record);
+    return record;
+  }
+
+  async getGamingEngineRoyaltyEventByEventId(
+    eventId: string,
+  ): Promise<GamingEngineRoyaltyEventRecord | undefined> {
+    return this.gamingEngineRoyaltyEvents.find((row) => row.event_id === eventId);
+  }
+
+  async sumGamingEngineRoyaltyGross(
+    platform: string,
+    productId: string,
+    annualYear: number,
+  ): Promise<string> {
+    // The accumulator's state is the DERIVED sum of the contribution rows —
+    // never a mutable counter (replayed gross can never cross the $1M
+    // threshold twice). BigInt addition, exact.
+    let total = 0n;
+    for (const row of this.gamingEngineRoyaltyEvents) {
+      if (
+        row.platform === platform &&
+        row.product_id === productId &&
+        row.annual_year === annualYear
+      ) {
+        total += BigInt(row.gross_micros);
+      }
+    }
+    return total.toString();
+  }
+
+  async upsertGamingItemSplitSchedule(
+    row: GamingItemSplitScheduleRecord,
+  ): Promise<GamingItemSplitScheduleRecord> {
+    // One schedule per item — the map's key IS the item id, so an upsert
+    // replaces the row atomically (the engine bumps the version).
+    this.gamingItemSplitSchedules.set(row.item_id, row);
+    return row;
+  }
+
+  async getGamingItemSplitSchedule(
+    itemId: string,
+  ): Promise<GamingItemSplitScheduleRecord | undefined> {
+    return this.gamingItemSplitSchedules.get(itemId);
+  }
+
+  async insertGamingSplitPayout(
+    row: Omit<GamingSplitPayoutRecord, 'id'>,
+  ): Promise<GamingSplitPayoutRecord> {
+    // UNIQUE on source_event_id — one routing per funding event, ever; a
+    // duplicate insert throws the unique violation (the replay no-op).
+    if (
+      this.gamingSplitPayouts.some((existing) => existing.source_event_id === row.source_event_id)
+    ) {
+      uniqueViolation('gaming_split_payouts.source_event_id');
+    }
+    const record: GamingSplitPayoutRecord = { ...row, id: randomUUID() };
+    this.gamingSplitPayouts.push(record);
+    return record;
+  }
+
+  async getGamingSplitPayoutBySourceEvent(
+    sourceEventId: string,
+  ): Promise<GamingSplitPayoutRecord | undefined> {
+    return this.gamingSplitPayouts.find((row) => row.source_event_id === sourceEventId);
+  }
+
+  async listGamingSplitPayouts(itemId: string): Promise<GamingSplitPayoutRecord[]> {
+    // Oldest first — routing order (push order IS insertion_order for ties).
+    return sortByTime(
+      this.gamingSplitPayouts.filter((row) => row.item_id === itemId),
       (row) => row.created_at,
       'asc',
     );
