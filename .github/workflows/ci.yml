@@ -112,6 +112,11 @@ jobs:
           # to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
+          # Film waterfall engine (Deep Royalties PR 8): the registered
+          # deal + the routing-decision distributions — applied twice like
+          # 0011-0015 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -338,6 +343,30 @@ jobs:
           reconnect=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from distributor_connections where holder_id = '80000000-0000-0000-0000-000000000002' and status = 'connected'")
           [ "$reconnect" = "1" ] || { echo "RECONNECT AFTER DISCONNECT REJECTED — the unique index must only bind ACTIVE rows"; exit 1; }
           echo "OK: reconnect after disconnect inserts a fresh active row"
+
+          # Film waterfall engine (migration 0016, Deep Royalties PR 8):
+          # the two waterfall tables' inventory, the escrow FK, and RLS
+          # deny-all on both — the coverage gap that let 0016's malformed
+          # DO-block opener reach PR 88 unseen.
+          assert_cols film_waterfall_definitions film_id definition created_at updated_at
+          assert_cols film_waterfall_distributions id film_id escrow_ledger_id status fdg_bypass_cents legs tier_allocations unpaid_total_cents created_at insertion_order
+          for table in film_waterfall_definitions film_waterfall_distributions; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: film_waterfall_definitions and film_waterfall_distributions RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.film_waterfall_distributions'::regclass and conname = 'fk_film_waterfall_distributions_escrow'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_film_waterfall_distributions_escrow"; exit 1; }
+          echo "OK: fk_film_waterfall_distributions_escrow exists"
+          # The FK MUST reject a distribution routed against an escrow
+          # receipt that never landed in ledger_transactions — the insert
+          # is expected to fail, `|| true` keeps the step alive.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_waterfall_distributions (film_id, escrow_ledger_id, legs, tier_allocations) values ('film_fk_probe', 'no-such-receipt', '{}', '{}')" >/dev/null 2>&1 || true
+          orphan_dist=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_waterfall_distributions where escrow_ledger_id = 'no-such-receipt'")
+          [ "$orphan_dist" = "0" ] || { echo "ORPHAN DISTRIBUTION ACCEPTED — the escrow FK is missing"; exit 1; }
+          echo "OK: film_waterfall_distributions escrow FK rejects unrouted receipts"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
