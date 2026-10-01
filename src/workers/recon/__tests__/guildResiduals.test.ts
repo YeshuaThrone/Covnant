@@ -37,6 +37,7 @@ function filmLine(micros: bigint, period: string): ParsedStatementLine {
     guildResidual: null,
     podcastDetail: null,
     gamingDetail: null,
+    livestreamDetail: null,
   };
 }
 

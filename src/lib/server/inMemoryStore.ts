@@ -874,6 +874,36 @@ export class InMemoryStore implements Store {
     return row;
   }
 
+  async listEsportsPoolEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'esports_prize_pool_pending' &&
+          row.status === 'esports_prize_pool_pending',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleEsportsPoolEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The same CAS as the film-escrow and gaming-cashout settles — the
+    // esports status is its own lock state, never folded into another
+    // account's.
+    if (row === undefined || row.status !== 'esports_prize_pool_pending') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
   async insertGamingDevexConversionLog(
     row: Omit<GamingDevexConversionLogRecord, 'id'>,
   ): Promise<GamingDevexConversionLogRecord> {

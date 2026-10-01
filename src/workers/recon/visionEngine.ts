@@ -161,6 +161,7 @@ function validateVisionLine(
       guildResidual: null,
       podcastDetail: null,
       gamingDetail: null,
+      livestreamDetail: null,
     },
   };
 }

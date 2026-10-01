@@ -1,0 +1,4 @@
+Report Date,Channel,Revenue Kind,Subscription Tier,Bits,Rate per Bit (USD),Alert Type,Payout Basis,Impressions,CPM (USD),Gross Amount (USD),Channel DOI,Currency
+2026-03-14,thronestream,bits,,500,,overlay_alert,,0,0,,10.61982/covenant.channel-001,USD
+2026-03-14,thronestream,subscription,Tier 2,,0,,,0,0,9.99,10.61982/covenant.channel-001,USD
+2026-03-15,thronestream,overlay_alert,,0,,sponsor_banner,cpm,10000,2.50,,10.61982/covenant.channel-001,USD

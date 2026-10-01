@@ -83,6 +83,7 @@ function filmLine(overrides: Partial<ParsedStatementLine> = {}): ParsedStatement
     guildResidual: null,
     podcastDetail: null,
     gamingDetail: null,
+    livestreamDetail: null,
     ...overrides,
   };
 }

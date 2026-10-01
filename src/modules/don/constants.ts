@@ -51,6 +51,28 @@ export function gamingCashoutGlAccount(platform: string): string {
   return `gaming_cashout:${platform}`;
 }
 
+// Esports prize pool escrow (PR 14, founder livestream directive): a
+// tournament's prize pool receipt locks in the waterfall's escrow until the
+// release runs the sequential recoupment waterfall. The lock is PER-BATCH —
+// the payee and GL account carry the prize pool batch id the way the film
+// escrow carries the film id — because the waterfall steps, the roster
+// split, and the cross-reference are all per-batch. Deliberately NOT
+// 'platform', NOT the unclaimed holding sentinel, NOT the film escrow
+// prefix, and NOT the gaming cashout prefix: prize pool escrow is distinct
+// from company dust, from every creator vault, from unallocated recon
+// funds, from film escrow, and from gaming cashout, in payee, GL account,
+// and ledger kind, so no query can fold one into another.
+export const ESPORTS_POOL_PAYEE_PREFIX = "esports_pool_escrow";
+export function esportsPoolEscrowPayeeId(batch: string): string {
+  return `${ESPORTS_POOL_PAYEE_PREFIX}:${batch}`;
+}
+export function esportsPoolEscrowPayeeName(batch: string): string {
+  return `Esports Prize Pool Escrow — ${batch}`;
+}
+export function esportsPoolEscrowGlAccount(batch: string): string {
+  return `esports_prize_pool_escrow:${batch}`;
+}
+
 // The film waterfall's tier accounts (PR 9 ledger states; the sequential
 // cascade allocator itself is the film waterfall engine). Tiers 0 through 4
 // each get a plain account; tier 5 — the net profit pool — is locked 50/50:
@@ -124,6 +146,13 @@ export const JOURNAL_KINDS = [
   // clearance-gated creator-credit sequence. Additive only.
   "gaming_cashout_post",
   "gaming_cashout_release",
+  // Esports prize pool escrow (PR 14): a tournament's prize pool receipt
+  // locks in the waterfall's escrow (post), then the verified release runs
+  // the sequential recoupment waterfall — contract-mandated expenses, the
+  // org cut, the roster split — with any integer-cent dust swept to the
+  // platform payee. Additive only.
+  "esports_pool_escrow_post",
+  "esports_pool_escrow_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

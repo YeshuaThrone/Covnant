@@ -98,6 +98,10 @@ export const LEDGER_STATUSES = [
   // through the normal clearance-gated settlement path (status → 'settled'
   // + release journal).
   "virtual_currency_cashout_pending",
+  // Esports prize pool pending (PR 14): a tournament organizer's prize-pool
+  // remittance locked into the batch's waterfall escrow until the verified
+  // release runs the sequential recoupment waterfall (status → 'settled').
+  "esports_prize_pool_pending",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -125,6 +129,12 @@ export const LEDGER_KINDS = [
   // 'virtual_currency_cashout_pending' with status 'settled'), the same
   // division PR 7 and PR 9 use.
   "virtual_currency_cashout_pending",
+  // Esports prize pool pending (PR 14): a tournament's prize-pool receipt,
+  // locked per batch until the verified waterfall release. Kind marks WHAT
+  // the row is for its whole life (a released receipt stays kind
+  // 'esports_prize_pool_pending' with status 'settled'), the same division
+  // PR 7, PR 9, and PR 13 use.
+  "esports_prize_pool_pending",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

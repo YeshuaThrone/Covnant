@@ -16,10 +16,12 @@
 import type {
   MatchQueueAdPlacementType,
   MatchQueueAdSlot,
+  MatchQueueRevenueBasis,
   MatchQueueRevenueChannel,
   MatchQueueRightsType,
   MatchQueueSaleType,
   MatchQueueStatementSourceType,
+  MatchQueueStreamPlatform,
   RightsPipeline,
 } from "@/modules/sdk/records";
 
@@ -42,7 +44,13 @@ export type StatementProfileKind =
   | "unity_asset_store_payout_csv"
   | "roblox_devex_csv"
   | "steamworks_sales_csv"
-  | "apple_vision_pro_payments_csv";
+  | "apple_vision_pro_payments_csv"
+  | "twitch_livestream_payouts_csv"
+  | "youtube_live_livestream_payouts_csv"
+  | "kick_livestream_payouts_csv"
+  | "tiktok_live_livestream_payouts_csv"
+  | "streamlabs_streamelements_alerts_csv"
+  | "esports_tournament_prize_pool_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -120,6 +128,77 @@ export interface PodcastLineDetail {
   /** Network commission as whole basis points — validated into the
    * 2000-4000 contract band at parse time on network-sold inventory. */
   readonly commissionBps: number | null;
+}
+
+/**
+ * The livestream lane's per-line revenue kind (PR 14, founder livestream
+ * directive) — what the row reports, driving the conversion/split math:
+ *
+ *   bits          — Twitch Bits (virtual count + the net rate recorded)
+ *   subscription  — platform subscription revenue (Kick tiers carry the
+ *                   95/5 model's creator share; Twitch/YouTube subs post
+ *                   the reported amount as-is)
+ *   super_chat    — YouTube Live Super Chat
+ *   membership    — YouTube Live channel memberships
+ *   diamond       — TikTok Live Diamonds (variable rate, recorded per row)
+ *   overlay_alert — sponsorship overlay alerts (flat or CPM basis)
+ *   prize_pool    — an esports tournament prize-pool receipt (locks into
+ *                   the waterfall's per-batch escrow, never to holding)
+ */
+export type LivestreamRevenueKind =
+  | "bits"
+  | "subscription"
+  | "super_chat"
+  | "membership"
+  | "diamond"
+  | "overlay_alert"
+  | "prize_pool";
+
+/**
+ * The livestream lane's per-line context (PR 14). Null on every
+ * non-livestream line — the field's PRESENCE is the lane discriminator,
+ * the same pattern as podcastDetail and gamingDetail. Every field the
+ * lane's money math and audit trail need ride the line: the applied
+ * conversion rate is RECORDED here per row (the founder's rate-logging
+ * rule), the Kick split's applied share is recorded per row, and the
+ * sponsorship alert's type/basis/impressions are recorded per row.
+ */
+export interface LivestreamLineDetail {
+  /** The stream platform whose report the row came from — null on esports
+   * prize-pool receipt rows (a tournament payout is not a stream platform's
+   * row; the prize_pool_batch cell is that row's identity). */
+  readonly platform: MatchQueueStreamPlatform | null;
+  /** What the row reports — the conversion/split math's discriminator. */
+  readonly revenueKind: LivestreamRevenueKind;
+  /** Overlay alert type (donation, sub, follow, sponsor_banner, ...);
+   * required on overlay_alert lines, null elsewhere. */
+  readonly alertType: string | null;
+  /** Sponsor payout basis — flat or cpm; required on overlay_alert lines,
+   * null elsewhere. */
+  readonly revenueBasis: MatchQueueRevenueBasis | null;
+  /** The line's impression count — required on CPM-basis alert lines. */
+  readonly impressions: number | null;
+  /** CPM as exact 1e-8 micros — required on CPM-basis alert lines. */
+  readonly cpmMicros: bigint | null;
+  /** Virtual-currency denomination ('Bits' or 'Diamonds'); null on
+   * fiat-native rows. */
+  readonly virtualCurrencyCode: string | null;
+  /** Exact virtual amount as decimal text (never a float); null on
+   * fiat-native rows. */
+  readonly virtualAmount: string | null;
+  /** The APPLIED fiat-per-virtual-unit rate as exact decimal text —
+   * recorded on every conversion log row (the founder's rate-logging
+   * rule); null on fiat-native rows. */
+  readonly exchangeRate: string | null;
+  /** The platform subscription tier (Kick tiers); null elsewhere. */
+  readonly subscriptionTier: string | null;
+  /** The APPLIED creator share in whole basis points (the Kick 95/5
+   * model — default 9500, contract-configurable, recorded per row); null
+   * where no split model applies. */
+  readonly creatorShareBps: number | null;
+  /** The esports prize-pool batch the receipt funds — required on
+   * prize_pool lines, null elsewhere. */
+  readonly prizePoolBatch: string | null;
 }
 
 /**
@@ -228,6 +307,11 @@ export interface ParsedStatementLine {
    * commission band, DevEx conversion cells); null on every non-gaming line
    * — the presence IS the lane discriminator. */
   gamingDetail: GamingLineDetail | null;
+  /** Livestream lane context (stream platform, revenue kind, overlay alert
+   * cells, recorded conversion rate, Kick split share, prize-pool batch);
+   * null on every non-livestream line — the presence IS the lane
+   * discriminator. */
+  livestreamDetail: LivestreamLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

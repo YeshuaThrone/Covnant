@@ -130,6 +130,7 @@ describe("isPostableLine — the seam's subject rule", () => {
     guildResidual: null,
     podcastDetail: null,
     gamingDetail: null,
+    livestreamDetail: null,
     ...overrides,
   });
 

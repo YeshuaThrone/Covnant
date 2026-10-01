@@ -1161,6 +1161,40 @@ export class SupabaseStore implements Store {
     );
   }
 
+  async listEsportsPoolEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'esports_prize_pool_pending')
+        .eq('status', 'esports_prize_pool_pending')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listEsportsPoolEscrowCredits',
+    );
+  }
+
+  async settleEsportsPoolEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The same CAS as the film-escrow and gaming-cashout settles, scoped
+    // to the esports lock state only.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'esports_prize_pool_pending')
+        .select()
+        .maybeSingle(),
+      'settleEsportsPoolEscrow',
+    );
+  }
+
   async insertGamingDevexConversionLog(
     row: Omit<GamingDevexConversionLogRecord, 'id'>,
   ): Promise<GamingDevexConversionLogRecord> {
