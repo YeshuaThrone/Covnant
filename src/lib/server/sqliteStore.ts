@@ -1868,19 +1868,21 @@ export class SqliteStore implements Store {
   }
 
   async sumGamingEngineRoyaltyGross(
-    platform: string,
+    platforms: readonly string[],
     productId: string,
     annualYear: number,
   ): Promise<string> {
     // The accumulator's state is the DERIVED sum of the contribution rows —
     // never a mutable counter (replayed gross can never cross the $1M
-    // threshold twice). BigInt addition over the text micros, exact.
+    // threshold twice). The family's platforms share one per-product line.
+    // BigInt addition over the text micros, exact.
+    const placeholders = platforms.map(() => '?').join(', ');
     const rows = this.db
       .prepare(
         `SELECT gross_micros FROM gaming_engine_royalty_events
-         WHERE platform = ? AND product_id = ? AND annual_year = ?`,
+         WHERE platform IN (${placeholders}) AND product_id = ? AND annual_year = ?`,
       )
-      .all(platform, productId, annualYear) as Array<{ gross_micros: string }>;
+      .all(...platforms, productId, annualYear) as Array<{ gross_micros: string }>;
     let total = 0n;
     for (const row of rows) {
       total += BigInt(row.gross_micros);

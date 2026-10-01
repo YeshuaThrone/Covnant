@@ -769,17 +769,18 @@ export class InMemoryStore implements Store {
   }
 
   async sumGamingEngineRoyaltyGross(
-    platform: string,
+    platforms: readonly string[],
     productId: string,
     annualYear: number,
   ): Promise<string> {
     // The accumulator's state is the DERIVED sum of the contribution rows —
     // never a mutable counter (replayed gross can never cross the $1M
-    // threshold twice). BigInt addition, exact.
+    // threshold twice). The family's platforms share one per-product line.
+    // BigInt addition, exact.
     let total = 0n;
     for (const row of this.gamingEngineRoyaltyEvents) {
       if (
-        row.platform === platform &&
+        platforms.includes(row.platform) &&
         row.product_id === productId &&
         row.annual_year === annualYear
       ) {

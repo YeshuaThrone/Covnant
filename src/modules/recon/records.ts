@@ -113,6 +113,12 @@ export interface ReconJobResult {
   gaming_split_payouts?: number;
   /** Gaming lane: payout routings that already existed — counted no-ops. */
   gaming_split_replays?: number;
+  /** Gaming lane: resale-royalty micro-payout credits posted this pass
+   * (the original creator's own holding credit per funding line + payee). */
+  gaming_royalty_payouts?: number;
+  /** Gaming lane: royalty credits whose post hit the per-source replay
+   * guard — counted no-ops. */
+  gaming_royalty_replays?: number;
   /** Gaming lane: postable lines whose item has no registered schedule —
    * honest skips (the credit releases through the manual-split path). */
   gaming_split_skipped_no_schedule?: number;

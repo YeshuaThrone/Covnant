@@ -1020,18 +1020,19 @@ export class SupabaseStore implements Store {
   }
 
   async sumGamingEngineRoyaltyGross(
-    platform: string,
+    platforms: readonly string[],
     productId: string,
     annualYear: number,
   ): Promise<string> {
     // The accumulator's state is the DERIVED sum of the contribution rows —
     // never a mutable counter (replayed gross can never cross the $1M
-    // threshold twice). BigInt addition over the text micros, exact.
+    // threshold twice). The family's platforms share one per-product line.
+    // BigInt addition over the text micros, exact.
     const rows = await this.many<{ gross_micros: string }>(
       this.client
         .from(TABLES.gamingEngineRoyaltyEvents)
         .select('gross_micros')
-        .eq('platform', platform)
+        .in('platform', [...platforms])
         .eq('product_id', productId)
         .eq('annual_year', annualYear),
       'sumGamingEngineRoyaltyGross',

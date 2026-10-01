@@ -36,6 +36,7 @@ import { StatementParseError } from "./records";
 import {
   bearsEngineRoyalty,
   engineRoyaltyMicros,
+  EPIC_FAMILY_PLATFORMS,
   gamingLineEventId,
   isEpicFamilyPlatform,
   platformCommissionMicros,
@@ -119,7 +120,9 @@ export async function writeGamingLinesToMatchQueue(
       } else {
         const cumBefore = BigInt(
           await store.sumGamingEngineRoyaltyGross(
-            detail.platform,
+            // The FAMILY's gross draws the line — an EGS sale moves the
+            // Unreal Marketplace row's threshold window and vice versa.
+            EPIC_FAMILY_PLATFORMS,
             productId,
             detail.annualYear,
           ),

@@ -1,8 +1,8 @@
 /**
  * CVT recon worker — the gaming lane's pure fee/conversion engine (PR 12,
  * founder gaming directive). The store-touching passes live in
- * gamingQueue.ts / gamingPosting.ts and the split accrual module
- * (src/modules/gamingSplits/); this module is the math and the identity
+ * gamingQueue.ts / gamingPosting.ts and the split engine
+ * (./gamingSplits.ts); this module is the math and the identity
  * spaces, no store, no clock, no IO — the same discipline as the podcast
  * and waterfall engines.
  *
@@ -54,9 +54,10 @@ export const MICROS_SCALE = 100_000_000n;
 
 /**
  * The Unreal engine royalty threshold — $1,000,000 gross annual revenue
- * per product, in 1e-8 micros (100,000,000 cents × 10^6).
+ * per product, in 1e-8 micros: 100,000,000 cents ($1M) × 10^6 statement
+ * micros per cent.
  */
-export const ENGINE_ROYALTY_THRESHOLD_MICROS = 100_000_000n * MICROS_SCALE;
+export const ENGINE_ROYALTY_THRESHOLD_MICROS = 100_000_000n * 1_000_000n;
 
 /** The engine royalty rate once the threshold is crossed — 3.5% = 350 bps. */
 export const ENGINE_ROYALTY_BPS = 350;
@@ -76,9 +77,17 @@ export const ROBLOX_COMMISSION_BPS = 3000;
 export const MIN_RESALE_ROYALTY_BPS = 500;
 export const MAX_RESALE_ROYALTY_BPS = 1000;
 
-/** The platforms whose sales accumulate toward the engine-royalty threshold. */
+/** The platforms whose sales accumulate toward the engine-royalty threshold.
+ * The accumulator is per-product ANNUAL across this family — an Epic Games
+ * Store sale and an Unreal Marketplace sale of the same product draw the
+ * same $1M line, whichever comes first. */
+export const EPIC_FAMILY_PLATFORMS: readonly GamingPlatform[] = [
+  "epic_games_store",
+  "unreal_marketplace",
+];
+
 export function isEpicFamilyPlatform(platform: GamingPlatform): boolean {
-  return platform === "epic_games_store" || platform === "unreal_marketplace";
+  return EPIC_FAMILY_PLATFORMS.includes(platform);
 }
 
 /**

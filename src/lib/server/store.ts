@@ -569,9 +569,12 @@ export interface Store {
    * The accumulator's per-product annual state — the DERIVED sum of the
    * product's contribution rows for the year (never a mutable counter, so
    * replayed gross can never cross the $1M threshold twice). Micros as text.
+   * `platforms` is the accumulating FAMILY (Epic Games Store + Unreal
+   * Marketplace share one per-product line) — every platform in the list
+   * contributes to the sum.
    */
   sumGamingEngineRoyaltyGross(
-    platform: string,
+    platforms: readonly string[],
     productId: string,
     annualYear: number,
   ): Promise<string>;

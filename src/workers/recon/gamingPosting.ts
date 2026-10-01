@@ -4,15 +4,18 @@
  *
  * The music lane posts a matched line's GROSS; the podcast lane posts the
  * creator NET of the network commission; the gaming lane posts the creator
- * NET of BOTH gaming deductions — the platform commission (Apple 15-30%,
+ * NET of ALL the gaming deductions — the platform commission (Apple 15-30%,
  * Steam 30, EGS 12, Unity 30, Roblox 30 — validated at parse, recorded on
- * the queue row at write time) and the Unreal engine royalty (the marginal
+ * the queue row at write time), the Unreal engine royalty (the marginal
  * 3.5% above the $1M annual per-product threshold, fixed by the
- * accumulator at write time). The founder directive's "engine-specific
+ * accumulator at write time), and on secondary_resale lines the resale
+ * royalty pool (the 5-10% platform creator fee, which the accrual pass
+ * then posts as the original creator's OWN holding credit under the
+ * `gaming:royalty:` event id). The founder directive's "engine-specific
  * threshold deductions applied before net fiat posts" is THIS ordering:
- * neither deduction ever touches the ledger's integer-cent credit — the
- * holding receives exactly what the creator is owed, and the deductions
- * ride the queue row's records.
+ * no deduction ever rounds into the ledger's integer-cent credit — the
+ * holding receives exactly the seller's net, and the deductions ride the
+ * queue row's records.
  *
  * FAIL-CLOSED, the same locked discipline as the music and podcast seams:
  * - the match_queue row was written BEFORE this pass (a posting failure
@@ -58,9 +61,9 @@ export interface GamingPostingCounts {
 /**
  * True when the gaming line is this seam's subject: a line whose DOI
  * matched a verified vault asset, not an adjustment, worth at least a
- * whole micro. Both deductions (commission, engine royalty) deduct before
- * the posting amount is computed — from the queue row's recorded values,
- * never recomputed.
+ * whole micro. All deductions (commission, engine royalty, resale pool)
+ * deduct before the posting amount is computed — from the queue row's
+ * recorded values, never recomputed.
  */
 export function isPostableGamingLine(
   line: ParsedStatementLine,
@@ -109,8 +112,9 @@ export async function postGamingLinesToHolding(
     }
     const commissionMicros = BigInt(outcome.commissionMicros);
     const engineRoyalty = BigInt(outcome.engineRoyaltyMicros);
+    const resalePool = BigInt(outcome.resaleRoyaltyMicros);
     const netMicros =
-      outcome.line.grossMicros - commissionMicros - engineRoyalty;
+      outcome.line.grossMicros - commissionMicros - engineRoyalty - resalePool;
 
     let posted: UnclaimedHoldingPostSuccess | UnclaimedHoldingFailure;
     try {

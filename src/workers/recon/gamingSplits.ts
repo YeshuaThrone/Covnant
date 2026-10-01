@@ -41,10 +41,6 @@ const FORBIDDEN_PAYEE_IDS: readonly string[] = [
   COMPANY_VARIANCE_PAYEE_ID,
 ];
 
-/** The secondary-resale creator-fee band the platform reports (canon: 5-10%). */
-export const RESALE_ROYALTY_MIN_BPS = 500;
-export const RESALE_ROYALTY_MAX_BPS = 1_000;
-
 function isSafePositiveInt(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
@@ -173,39 +169,6 @@ export function validateGamingItemSchedule(
     }
   }
   return { ok: true, splits: parties.splits };
-}
-
-/**
- * The secondary-resale royalty for one line, integer cents. The parser
- * already validated the row's reported rate into the 5-10% band — this
- * re-checks it anyway (a corrupt stored rate fails closed, never charges).
- * The truncation floor favors the creator pool: the sub-cent remainder
- * stays in the routed money the splits distribute, never leaks to the
- * platform.
- */
-export function resaleRoyaltyCents(
-  sourceAmountCents: number,
-  rateBps: number,
-): { ok: true; royalty_cents: number } | GamingSplitsError {
-  if (!Number.isSafeInteger(sourceAmountCents) || sourceAmountCents < 0) {
-    return {
-      ok: false,
-      code: 'gaming_split_source_invalid',
-      message: `Resale royalty computes over whole integer cents, got ${sourceAmountCents}.`,
-    };
-  }
-  if (
-    !Number.isSafeInteger(rateBps) ||
-    rateBps < RESALE_ROYALTY_MIN_BPS ||
-    rateBps > RESALE_ROYALTY_MAX_BPS
-  ) {
-    return {
-      ok: false,
-      code: 'gaming_resale_royalty_invalid',
-      message: `Resale royalty rate must be 500-1000 bps (5-10%), got ${rateBps}.`,
-    };
-  }
-  return { ok: true, royalty_cents: Math.trunc((sourceAmountCents * rateBps) / BPS_DENOMINATOR) };
 }
 
 export type GamingSplitAllocationResult =

@@ -265,6 +265,8 @@ async function parseGaming(
     gaming_commission_micros: posting.commissionMicrosDeducted.toString(),
     gaming_split_payouts: accrual.payouts,
     gaming_split_replays: accrual.replays,
+    gaming_royalty_payouts: accrual.royaltiesPosted,
+    gaming_royalty_replays: accrual.royaltiesReplayed,
     gaming_split_skipped_no_schedule: accrual.skippedNoSchedule,
   };
 }
