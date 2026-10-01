@@ -1686,6 +1686,11 @@ export class SupabaseStore implements Store {
     holderId: string,
     id: string,
   ): Promise<DistributorConnectionRecord | undefined> {
+    // The replay no-op: an already-disconnected connection returns untouched —
+    // no second write, no fresh updated_at (SQLite + in-memory parity).
+    const existing = await this.getDistributorConnection(holderId, id);
+    if (existing === undefined || existing.status === 'disconnected') return existing;
+
     const now = new Date().toISOString();
     // PostgREST update+select returns the rows the filter matched — the
     // holder_id eq makes a foreign id match nothing, i.e. undefined.
