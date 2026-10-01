@@ -81,7 +81,7 @@ create index if not exists idx_film_waterfall_distributions_film
 -- 0011 statement_ingests precedent).
 -- ---------------------------------------------------------------------------
 
-do $
+do $$
 begin
   if not exists (
     select from pg_constraint
