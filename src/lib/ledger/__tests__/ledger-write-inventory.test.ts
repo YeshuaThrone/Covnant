@@ -241,6 +241,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // change; still no DDL on universal_royalty_ledger — the referencing
       // pin below holds.
       '0015_spatial_web3_identifiers.sql',
+      // Film waterfall engine (Deep Royalties PR 8): the
+      // film_waterfall_definitions registry + film_waterfall_distributions
+      // per-receipt records; still no DDL on universal_royalty_ledger —
+      // the referencing pin below holds.
+      '0016_film_waterfall_engine.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

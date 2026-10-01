@@ -63,6 +63,10 @@ import type {
   VaultDisputeRecord,
 } from '@/modules/don/records';
 import type {
+  FilmWaterfallDefinitionRecord,
+  FilmWaterfallDistributionRecord,
+} from '@/modules/don/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -392,6 +396,75 @@ export interface Store {
    * no receipts.
    */
   sumFilmGrossReceiptCents(filmId: string): Promise<number>;
+
+  // --- Film waterfall engine (PR 8) ---
+  // The registered deal (the waterfall definition) and the routing-decision
+  // record (the distributions) — the state the pure sequential recoupment
+  // router consumes. The definition is ONE row per film asset (jsonb, validated
+  // by the waterfall module's registration gate); the distributions carry the
+  // per-leg routing detail that makes shortfall carry honest — the GL's tier
+  // legs are per-TIER, so per-obligation paid state is not recoverable from
+  // them when bps legs and fixed legs share a tier. Migration 0016.
+
+  /**
+   * Registers (or replaces) a film's waterfall definition. The caller has
+   * already run the waterfall module's registration gate and the definition
+   * lock (a film with applied distributions refuses a changed definition —
+   * the cumulative per-leg state must stay coherent); this is the write.
+   */
+  upsertFilmWaterfallDefinition(
+    row: FilmWaterfallDefinitionRecord,
+  ): Promise<FilmWaterfallDefinitionRecord>;
+
+  /** The film's registered waterfall, or undefined when the film has none. */
+  getFilmWaterfallDefinition(
+    filmId: string,
+  ): Promise<FilmWaterfallDefinitionRecord | undefined>;
+
+  /**
+   * Persists one routing decision. UNIQUE on escrow_ledger_id — one routing
+   * decision per released receipt, ever; a duplicate insert throws (the
+   * quarantine-once precedent) and the caller recovers by reading the
+   * existing row through getFilmWaterfallDistributionByEscrow.
+   */
+  insertFilmWaterfallDistribution(
+    row: Omit<FilmWaterfallDistributionRecord, 'id'>,
+  ): Promise<FilmWaterfallDistributionRecord>;
+
+  /**
+   * The routing decision previously made for one released escrow receipt, or
+   * undefined — the crash-repair read and the replay guard.
+   */
+  getFilmWaterfallDistributionByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmWaterfallDistributionRecord | undefined>;
+
+  /**
+   * Flips one routing decision's status ('routed' → 'applied' on release
+   * success). Returns the row, or undefined when the id is unknown — the
+   * caller deleted it (the release refused) or it never existed.
+   */
+  updateFilmWaterfallDistributionStatus(
+    id: string,
+    status: FilmWaterfallDistributionRecord['status'],
+  ): Promise<FilmWaterfallDistributionRecord | undefined>;
+
+  /**
+   * Drops a routing decision whose money move was refused (retryable) — the
+   * payout-reversal precedent. Cumulative paid sums never see it.
+   */
+  deleteFilmWaterfallDistribution(id: string): Promise<void>;
+
+  /**
+   * The film's routing decisions, oldest first (created_at ASC, insertion
+   * order as tiebreak) — the cumulative paid state and the film's waterfall
+   * history. Bounded by no limit: a film's distributions are its deal
+   * lifetime, and the paid state must be exact (the store returns them all).
+   */
+  listFilmWaterfallDistributions(
+    filmId: string,
+  ): Promise<FilmWaterfallDistributionRecord[]>;
+
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
