@@ -98,8 +98,12 @@ export function buildContractRegistrySection(
 ): ContractRegistrySection {
   const executions: ExecutionStampRow[] = [...listDemoLaneExecutions()];
   const covered = new Set(executions.map((execution) => execution.ledgerId));
+  // The demo asset join rides ONLY behind the demo door: in production a
+  // real clearing-ledger record must never pick up a demo CBT/CVT pill
+  // through a title match — the honest null state renders instead
+  // (beta-readiness purge, 2026-10-01).
   const demoAssetByTitle = new Map(
-    MASTER_DEMO_ASSET_REGISTRY.map((asset) => [asset.title, asset]),
+    (isDemoDoorOpen() ? MASTER_DEMO_ASSET_REGISTRY : []).map((asset) => [asset.title, asset]),
   );
   for (const record of masterRecords) {
     if (record.clearinghouseStatus !== 'PENDING_CLEARANCE' || covered.has(record.ledgerId)) continue;
@@ -147,11 +151,21 @@ export function buildAdminTaxJoinContext(
   assets: ListAssetsResult,
   contracts: SectionData<ContractRow[]>,
 ): TaxJoinContext {
+  // The demo registry's joins ride ONLY behind the demo door. In production
+  // this context is built for the Tax tab, the CSV export, and the
+  // Operations tab, so a real deployment path must carry zero demo
+  // entries: the labels/states below key on demo-only CBT codes (inert on
+  // real rows), but they are fabricated data by construction — beta-readiness
+  // purge, 2026-10-01. Demo mode keeps them: the demo ledger's rows can
+  // only join their kinds and event states through this context.
+  const demoDoor = isDemoDoorOpen();
   return buildTaxJoinContext(assets, {
-    entityTypeLabels: MASTER_DEMO_ASSET_REGISTRY.map((asset) => ({
-      cbtCode: asset.cbt,
-      label: asset.kind,
-    })),
+    entityTypeLabels: demoDoor
+      ? MASTER_DEMO_ASSET_REGISTRY.map((asset) => ({
+          cbtCode: asset.cbt,
+          label: asset.kind,
+        }))
+      : [],
     templateBindings: [
       ...(contracts.kind === 'ready'
         ? contracts.value.map((contract) => ({
@@ -159,15 +173,19 @@ export function buildAdminTaxJoinContext(
             templateId: contract.templateId,
           }))
         : []),
+      // The minted lane executions exist only behind the demo door —
+      // MINTED_LANE_EXECUTIONS fills exclusively through the seed.
       ...listDemoLaneExecutions().map((execution) => ({
         cbtCode: execution.cbt ?? '',
         templateId: execution.templateId,
       })),
     ],
-    eventStates: MASTER_DEMO_ASSET_REGISTRY.flatMap((asset) => {
-      const state = stateFromGoverningLaw(asset.agreement.governingLaw);
-      return state ? [{ cbtCode: asset.cbt, state }] : [];
-    }),
+    eventStates: demoDoor
+      ? MASTER_DEMO_ASSET_REGISTRY.flatMap((asset) => {
+          const state = stateFromGoverningLaw(asset.agreement.governingLaw);
+          return state ? [{ cbtCode: asset.cbt, state }] : [];
+        })
+      : [],
   });
 }
 
