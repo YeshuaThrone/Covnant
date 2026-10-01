@@ -165,22 +165,34 @@ describe('adminSessionCookie / checkAdminGate — the cookie the routes verify',
   });
 });
 
-describe('verifyAdminSession — the DON_DEV_SEED carve-out is dev-only (hardening gen 12)', () => {
+describe('verifyAdminSession — the DON_DEV_SEED carve-out is deployment-aware (J1 preview)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     withEnv(undefined);
     delete process.env.DON_DEV_SEED;
+    delete process.env.VERCEL_ENV;
   });
 
-  it('opens without a password under DON_DEV_SEED=1 in a non-production runtime', () => {
-    vi.stubEnv('NODE_ENV', 'test');
+  it('opens without a password under DON_DEV_SEED=1 on a production-BUILD preview server (next start e2e)', () => {
+    // The seeded preview runs `next build && next start`: NODE_ENV is
+    // 'production' there, and the deployment tier (VERCEL_ENV) is unset.
+    vi.stubEnv('NODE_ENV', 'production');
     process.env.DON_DEV_SEED = '1';
     withEnv(undefined);
     expect(verifyAdminSession(null)).toEqual({ ok: true });
   });
 
-  it('NEVER opens a production console on the seed flag — 503 admin_not_configured', () => {
+  it('opens on a Vercel preview deployment (VERCEL_ENV=preview) — also a production build', () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(undefined);
+    expect(verifyAdminSession(null)).toEqual({ ok: true });
+  });
+
+  it('NEVER opens a production DEPLOYMENT console on the seed flag — 503 admin_not_configured', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'production');
     process.env.DON_DEV_SEED = '1';
     withEnv(undefined);
     const verdict = verifyAdminSession(null);
@@ -192,7 +204,7 @@ describe('verifyAdminSession — the DON_DEV_SEED carve-out is dev-only (hardeni
   });
 
   it('a configured password still requires the cookie even with the seed flag set', () => {
-    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('NODE_ENV', 'production');
     process.env.DON_DEV_SEED = '1';
     withEnv(PASSWORD);
     const verdict = verifyAdminSession(null);

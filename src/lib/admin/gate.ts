@@ -114,13 +114,17 @@ export function verifyAdminSession(
   now: Date = new Date(),
 ): AdminGateVerdict {
   const password = readAdminPassword(env);
-  // J1 preview carve-out: the demo preview runs with DON_DEV_SEED=1 and no
+  // J1 preview carve-out: the seeded preview runs with DON_DEV_SEED=1 and no
   // operator secret, so the console opens without a sign-in form. Keyed to
-  // non-production (hardening gen 12): a production runtime can never open
-  // the console on the seed flag alone — a real deployment (password
-  // configured) stays fail-closed, and production without a configured
-  // secret still answers 503 admin_not_configured.
-  if (!password && env.DON_DEV_SEED === '1' && process.env.NODE_ENV !== 'production') {
+  // the DEPLOYMENT tier, not the build mode: the preview IS a production
+  // build (`next build && next start`, VERCEL_ENV 'preview'), so the gen-12
+  // NODE_ENV form of this guard fail-closed every seeded preview — the e2e
+  // web server included — and the console could never render. A genuine
+  // production deployment (VERCEL_ENV === 'production', the same signal
+  // isDevSeedMode uses) never opens on the seed flag alone: with the
+  // password configured it demands the signed cookie; without one it still
+  // answers 503 admin_not_configured.
+  if (!password && env.DON_DEV_SEED === '1' && env.VERCEL_ENV !== 'production') {
     return { ok: true };
   }
   if (!password) return NOT_CONFIGURED;
