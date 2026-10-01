@@ -73,6 +73,7 @@ function impLine(
     guildResidual: null,
     podcastDetail: detail,
     gamingDetail: null,
+    livestreamDetail: null,
     ...lineOverrides,
   };
 }

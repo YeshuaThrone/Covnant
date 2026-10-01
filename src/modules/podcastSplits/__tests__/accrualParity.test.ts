@@ -100,6 +100,7 @@ function makePodcastLine(
       commissionBps: null,
     },
     gamingDetail: null,
+    livestreamDetail: null,
   };
 }
 

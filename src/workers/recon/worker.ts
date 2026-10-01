@@ -32,6 +32,9 @@ import { runGamingSplitAccrualPass } from "./gamingAccrual";
 import { postGamingLinesToHolding } from "./gamingPosting";
 import { writeGamingLinesToMatchQueue } from "./gamingQueue";
 import { isGamingProfileKind } from "./gamingProfiles";
+import { postLivestreamLines } from "./livestreamPosting";
+import { writeLivestreamLinesToMatchQueue } from "./livestreamQueue";
+import { isLivestreamProfileKind } from "./livestreamProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -146,6 +149,14 @@ async function processJobBody(
     // accrual — never the music queue's split math.
     if (isGamingProfileKind(matchedProfile.kind)) {
       return await parseGaming(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The livestream lane branches the same way (PR 14): its lines carry
+    // stream-platform attribution whose money passes the durable conversion
+    // log (Bits/Diamonds), the batch prize-pool escrow lock (esports
+    // receipts), and the Kick-fee net posting — never the music queue's
+    // split math and never the gaming accumulator.
+    if (isLivestreamProfileKind(matchedProfile.kind)) {
+      return await parseLivestream(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -268,6 +279,48 @@ async function parseGaming(
     gaming_royalty_payouts: accrual.royaltiesPosted,
     gaming_royalty_replays: accrual.royaltiesReplayed,
     gaming_split_skipped_no_schedule: accrual.skippedNoSchedule,
+  };
+}
+
+/**
+ * The livestream lane (PR 14): match_queue write (DOI cross-reference,
+ * stream metadata, recorded Kick fee) → posting pass — the durable
+ * virtual-currency conversion log first (Bits/Diamonds rows), then the
+ * esports prize-pool escrow lock (batch receipt rows), then the Kick-fee
+ * net holding credit (everything else). Every pass is idempotent (replays
+ * are counted no-ops through the per-source guards).
+ */
+async function parseLivestream(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeLivestreamLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+    deps.vault,
+    now,
+  );
+  const posting = await postLivestreamLines(deps.store, counts.lineOutcomes, now);
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    livestream_written: counts.written,
+    livestream_replayed: counts.alreadyPresent,
+    livestream_conversions_logged: posting.conversionsLogged,
+    livestream_conversions_replayed: posting.conversionsReplayed,
+    livestream_platform_fee_micros: posting.platformFeeMicrosDeducted.toString(),
+    livestream_prize_pools_locked: posting.prizePoolsLocked,
+    livestream_prize_pools_replayed: posting.prizePoolsReplayed,
+    livestream_prize_pool_locked_cents: posting.prizePoolLockedCents,
   };
 }
 

@@ -72,6 +72,8 @@ describe('don constants', () => {
       'film_net_points',
       'gaming_cashout_post',
       'gaming_cashout_release',
+      'esports_pool_escrow_post',
+      'esports_pool_escrow_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

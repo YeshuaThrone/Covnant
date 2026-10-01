@@ -24,6 +24,7 @@
 import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/identifiers";
 import { PODCAST_PROFILES } from "./podcastProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
+import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import {
   optionalCell,
   parseStatementMoney,
@@ -120,6 +121,7 @@ function musicLine(
     guildResidual: null,
     podcastDetail: null,
     gamingDetail: null,
+    livestreamDetail: null,
   };
 }
 
@@ -397,6 +399,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           guildResidual: null,
           podcastDetail: null,
           gamingDetail: null,
+          livestreamDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -521,6 +524,11 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // the profile kind before the music machinery (commission bands, the
   // engine-royalty accumulator, and the DevEx converter are gaming-only).
   ...GAMING_PROFILES,
+  // The livestream/esports lane (PR 14) — same dispatch opinion; the worker
+  // branches on the profile kind before the music machinery (the virtual
+  // currency converter, the 95/5 Kick split, and the prize-pool escrow are
+  // livestream-only).
+  ...LIVESTREAM_PROFILES,
 ];
 
 /**

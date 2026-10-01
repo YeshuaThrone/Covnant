@@ -8,6 +8,7 @@
 import {
   GL_ACCOUNT_FBO_CASH,
   GL_ACCOUNT_UNCLAIMED_HOLDING,
+  esportsPoolEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   tier5InvestorPoolGlAccount,
@@ -139,6 +140,28 @@ export function gamingCashoutDebit(platform: string, amountCents: number): GlLeg
 export function gamingCashoutCredit(platform: string, amountCents: number): GlLegInput {
   return {
     account: gamingCashoutGlAccount(platform),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Esports prize pool escrow (PR 14): the per-batch escrow obligation
+// account. A locked prize pool receipt posts a credit here against an FBO
+// debit; the verified waterfall release debits it against the routing legs
+// — never a vault bucket, never the dust payee's account, never the
+// unclaimed holding account, never the film escrow or gaming cashout
+// accounts.
+export function esportsPoolEscrowDebit(batch: string, amountCents: number): GlLegInput {
+  return {
+    account: esportsPoolEscrowGlAccount(batch),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function esportsPoolEscrowCredit(batch: string, amountCents: number): GlLegInput {
+  return {
+    account: esportsPoolEscrowGlAccount(batch),
     debit_cents: 0,
     credit_cents: amountCents,
   };

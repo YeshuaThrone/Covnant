@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers fourteen profiles in dispatch order", () => {
+  it("registers twenty profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -44,6 +44,15 @@ describe("profile registry", () => {
       "roblox_devex_csv",
       "steamworks_sales_csv",
       "apple_vision_pro_payments_csv",
+      // The livestream/esports lane (PR 14) — dispatched after gaming, its
+      // own rights family (stream_platform statements and prize-pool
+      // receipts through the per-batch escrow).
+      "twitch_livestream_payouts_csv",
+      "youtube_live_livestream_payouts_csv",
+      "kick_livestream_payouts_csv",
+      "tiktok_live_livestream_payouts_csv",
+      "streamlabs_streamelements_alerts_csv",
+      "esports_tournament_prize_pool_csv",
     ]);
   });
 

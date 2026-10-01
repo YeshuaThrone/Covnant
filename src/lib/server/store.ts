@@ -674,6 +674,30 @@ export interface Store {
     studioPayeeId: string,
   ): Promise<GamingStudioKycRecord | undefined>;
 
+  // --- Esports prize pool escrow (PR 14) ---
+
+  /**
+   * Compare-and-set release lock for one esports prize pool receipt: flips
+   * ONE row from status 'esports_prize_pool_pending' to 'settled' and
+   * returns it; reads undefined when the row is absent or no longer locked
+   * (the concurrent release loser). The conditional read IS the CAS — the
+   * film-escrow precedent. The flip happens BEFORE any waterfall leg
+   * (insert-as-lock), so a crash mid-release fails toward "nothing moved
+   * twice".
+   */
+  settleEsportsPoolEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * The locked prize-pool receipt work queue: ledger rows with kind AND
+   * status 'esports_prize_pool_pending' (a released receipt leaves the
+   * listing — its status is 'settled'), newest first, bounded like every
+   * other list seam. Mirrors listVirtualCurrencyCashoutCredits.
+   */
+  listEsportsPoolEscrowCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
   getBaasTransfer(id: string): Promise<BaasTransferRecord | undefined>;

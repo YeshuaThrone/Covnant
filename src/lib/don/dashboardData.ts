@@ -148,6 +148,8 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   film_net_points: 'Net points paid',
   gaming_cashout_post: 'Game payout escrowed',
   gaming_cashout_release: 'Game payout released',
+  esports_pool_escrow_post: 'Esports prize pool locked',
+  esports_pool_escrow_release: 'Esports prize pool released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

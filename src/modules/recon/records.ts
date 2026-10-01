@@ -122,6 +122,28 @@ export interface ReconJobResult {
   /** Gaming lane: postable lines whose item has no registered schedule —
    * honest skips (the credit releases through the manual-split path). */
   gaming_split_skipped_no_schedule?: number;
+  /** Livestream lane (PR 14): queue rows written this pass. */
+  livestream_written?: number;
+  /** Livestream lane: same-row replays caught by the event-id guard. */
+  livestream_replayed?: number;
+  /** Livestream lane: durable virtual-currency conversion logs written this
+   * pass (Bits/Diamonds rows — the founder's rate-logging rule, made
+   * durable before any fiat movement posts). */
+  livestream_conversions_logged?: number;
+  /** Livestream lane: conversion logs that already existed — counted no-ops. */
+  livestream_conversions_replayed?: number;
+  /** Livestream lane: the Kick 95/5 platform fee deducted across the pass's
+   * posts, exact fixed-point micros as text (never a float). */
+  livestream_platform_fee_micros?: string;
+  /** Livestream lane: esports prize-pool receipts locked into the batch
+   * escrow this pass (never the unclaimed holding). */
+  livestream_prize_pools_locked?: number;
+  /** Livestream lane: prize-pool receipts whose escrow lock hit the
+   * per-source replay guard — counted no-ops. */
+  livestream_prize_pools_replayed?: number;
+  /** Livestream lane: integer cents locked into esports batch escrows this
+   * pass. */
+  livestream_prize_pool_locked_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

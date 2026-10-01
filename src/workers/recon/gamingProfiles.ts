@@ -235,6 +235,7 @@ function gamingLine(
     guildResidual: null,
     podcastDetail: null,
     gamingDetail: detail,
+    livestreamDetail: null,
   };
 }
 

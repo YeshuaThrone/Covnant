@@ -2057,6 +2057,39 @@ export class SqliteStore implements Store {
     return this.getLedgerTransaction(id);
   }
 
+  async listEsportsPoolEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'esports_prize_pool_pending' AND status = 'esports_prize_pool_pending'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleEsportsPoolEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the esports lock state only. changes = 0 means the row is absent or
+    // no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'esports_prize_pool_pending'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
   async insertGamingDevexConversionLog(
     row: Omit<GamingDevexConversionLogRecord, 'id'>,
   ): Promise<GamingDevexConversionLogRecord> {
