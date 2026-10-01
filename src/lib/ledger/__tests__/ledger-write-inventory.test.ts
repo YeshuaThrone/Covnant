@@ -251,6 +251,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // bonus definition/accrual ledger; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0017_podcast_episode_splits.sql',
+      // Gaming engine-royalty accumulator + item splits (Deep Royalties
+      // PR 12): the append-only engine-royalty contribution log, the
+      // per-item split schedules, and the per-funding-event payout
+      // routings; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0018_gaming_fee_parser_devex.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

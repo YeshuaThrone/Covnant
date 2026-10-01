@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers nine profiles in dispatch order", () => {
+  it("registers fourteen profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -37,6 +37,13 @@ describe("profile registry", () => {
       "film_international_sales_agent_csv",
       "podcast_dai_log_csv",
       "podcast_rss_report_csv",
+      // The gaming lane (Deep Royalties PR 12) — dispatched after podcast,
+      // its own rights family (rights_type 'unknown').
+      "epic_games_sales_csv",
+      "unity_asset_store_payout_csv",
+      "roblox_devex_csv",
+      "steamworks_sales_csv",
+      "apple_vision_pro_payments_csv",
     ]);
   });
 

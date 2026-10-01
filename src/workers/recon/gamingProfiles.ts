@@ -276,6 +276,7 @@ const EPIC_HEADER = [
   "Sale Type",
   "Gross",
   "Platform Commission %",
+  "Resale Royalty %",
   "Catalog DOI",
   "Currency",
 ] as const;
@@ -347,6 +348,7 @@ const UNITY_HEADER = [
   "Sale Type",
   "Gross",
   "Platform Commission %",
+  "Resale Royalty %",
   "Catalog DOI",
   "Currency",
 ] as const;
@@ -501,6 +503,7 @@ const STEAM_HEADER = [
   "Sale Type",
   "Gross",
   "Platform Commission %",
+  "Resale Royalty %",
   "Catalog DOI",
   "Currency",
 ] as const;
@@ -561,6 +564,7 @@ const APPLE_HEADER = [
   "Sale Type",
   "Gross",
   "Platform Commission %",
+  "Resale Royalty %",
   "Catalog DOI",
   "Currency",
 ] as const;
