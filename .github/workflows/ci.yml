@@ -135,6 +135,12 @@ jobs:
           # twice like 0011-0018 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
+          # VTuber agency holdback states (Deep Royalties PR 15): the tax
+          # withholding verification state and the tech setup amortization
+          # schedule/line ledger — applied twice like 0011-0019 to prove
+          # idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -454,6 +460,44 @@ jobs:
           empty_roster=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from gaming_studio_kyc_verifications where studio_payee_id = 'studio_check_probe'")
           [ "$empty_roster" = "0" ] || { echo "EMPTY ROSTER ACCEPTED by the check constraint"; exit 1; }
           echo "OK: gaming_studio_kyc_verifications roster check rejects an empty roster"
+
+          # VTuber agency holdback states (migration 0020, Deep Royalties
+          # PR 15): the three holdback tables' inventory, RLS deny-all, the
+          # schedule FK, and the check-constrained vocabularies.
+          assert_cols vtuber_tax_withholding_verifications id payee_id tax_year state tin_verified w9_on_file evidence_ref verified_at created_at updated_at
+          assert_cols vtuber_tech_setup_amortization_schedules id schedule_ref agency_payee_id description total_cost_cents amortization_periods created_at
+          assert_cols vtuber_tech_setup_amortization_lines id schedule_ref line_index line_cents deducted_at created_at insertion_order
+          for table in vtuber_tax_withholding_verifications vtuber_tech_setup_amortization_schedules vtuber_tech_setup_amortization_lines; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: all three VTuber holdback tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.vtuber_tech_setup_amortization_lines'::regclass and conname = 'fk_vtuber_amortization_lines_schedule'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_vtuber_amortization_lines_schedule"; exit 1; }
+          echo "OK: fk_vtuber_amortization_lines_schedule exists"
+          # The FK MUST reject an amortization line hung on a schedule that
+          # never landed — a consumed line cannot exist without its contract.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into vtuber_tech_setup_amortization_lines (schedule_ref, line_index, line_cents, deducted_at) values ('no-such-schedule', 0, 100, now())" >/dev/null 2>&1 || true
+          orphan_line=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from vtuber_tech_setup_amortization_lines where schedule_ref = 'no-such-schedule'")
+          [ "$orphan_line" = "0" ] || { echo "ORPHAN AMORTIZATION LINE ACCEPTED — the schedule FK is missing"; exit 1; }
+          echo "OK: vtuber_tech_setup_amortization_lines schedule FK rejects orphaned lines"
+          # The check-constrained vocabularies MUST reject bad values — the
+          # verification state, the zero-period schedule, and the negative
+          # line index.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into vtuber_tax_withholding_verifications (payee_id, tax_year, state) values ('vtuber_check_probe', 2026, 'approved')" >/dev/null 2>&1 || true
+          bad_state=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from vtuber_tax_withholding_verifications where payee_id = 'vtuber_check_probe'")
+          [ "$bad_state" = "0" ] || { echo "BAD verification state ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: vtuber_tax_withholding_verifications state check rejects bad values"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into vtuber_tech_setup_amortization_schedules (schedule_ref, agency_payee_id, description, total_cost_cents, amortization_periods) values ('vtuber:amort:check_probe', 'payee_1', 'probe', 10000, 0)" >/dev/null 2>&1 || true
+          zero_periods=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from vtuber_tech_setup_amortization_schedules where schedule_ref = 'vtuber:amort:check_probe'")
+          [ "$zero_periods" = "0" ] || { echo "ZERO-PERIOD SCHEDULE ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: vtuber_tech_setup_amortization_schedules periods check rejects zero periods"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into vtuber_tech_setup_amortization_lines (schedule_ref, line_index, line_cents, deducted_at) values ((select schedule_ref from vtuber_tech_setup_amortization_schedules limit 1), -1, 100, now())" >/dev/null 2>&1 || true
+          bad_index=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from vtuber_tech_setup_amortization_lines where line_index < 0")
+          [ "$bad_index" = "0" ] || { echo "NEGATIVE LINE INDEX ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: vtuber_tech_setup_amortization_lines index check rejects negative lines"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

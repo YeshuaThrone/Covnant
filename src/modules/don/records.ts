@@ -481,3 +481,85 @@ export type GamingStudioKycRecord = {
   created_at: string;
   updated_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// VTuber agency licensing holdbacks + tax withholding verification
+// (migration 0020, PR 15). The LEDGER state itself — kind and status
+// 'avatar_ip_licensing_holdback' — rides the existing ledger_transactions
+// free-text columns (the PR 7/PR 9/PR 13/PR 14 precedent; no migration).
+// ---------------------------------------------------------------------------
+
+/** The verification state's vocabulary — pending/failed refuse at the gate. */
+export type VtuberTaxWithholdingVerificationState = "pending" | "verified" | "failed";
+
+/**
+ * One payee's tax-withholding verification for one tax year — the durable
+ * state behind the livestream payout gate's `tax_withholding_verified`
+ * read. One row per (payee_id, tax_year); a re-verification replaces the
+ * row. Wired to the withholding machinery of record: a 'verified' state is
+ * only writable when the payee's creator tax profile (the fields
+ * applyWithholding maintains) shows tin_verified AND w9_on_file.
+ */
+export type VtuberTaxWithholdingVerificationRecord = {
+  id: string;
+  /** The payee's sovereign identity — UNIQUE with tax_year. */
+  payee_id: string;
+  /** The tax year the verification covers. */
+  tax_year: number;
+  /** 'verified' is the only passing state; pending/failed refuse at the gate. */
+  state: VtuberTaxWithholdingVerificationState;
+  /** The payee's TIN status of record (the creator tax profile's field). */
+  tin_verified: boolean;
+  /** The payee's W-9/W-8 status of record (the creator tax profile's field). */
+  w9_on_file: boolean;
+  /** The withholding evidence the verification cites (required for 'verified'). */
+  evidence_ref: string | null;
+  /** When the verification reached its state (null while pending). */
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One tech setup amortization schedule — the agency's advanced 3D model
+ * rigging / tech setup cost, recovered as deterministic integer-cent line
+ * deductions across the releases. The schedule row is the immutable
+ * contract; the consumption state lives in the LINES (append-only — the
+ * PR 12 accumulator's insert-as-lock discipline), never in a mutable
+ * counter, so a concurrent consume is a unique violation on
+ * (schedule_ref, line_index), never a lost update.
+ */
+export type VtuberTechSetupAmortizationScheduleRecord = {
+  id: string;
+  /** UNIQUE — the contract's own schedule reference (provenance). */
+  schedule_ref: string;
+  /** The agency payee the deductions route to (the advanced cost's owner). */
+  agency_payee_id: string;
+  /** What the schedule amortizes ('3D model rigging', 'tech setup', ...). */
+  description: string;
+  /** The advanced cost, integer cents — conserved exactly across the lines. */
+  total_cost_cents: number;
+  /** The number of integer-cent line deductions (>= 1). */
+  amortization_periods: number;
+  created_at: string;
+};
+
+/**
+ * One consumed amortization line — APPEND-ONLY, unique per
+ * (schedule_ref, line_index). The line's cents are computed by the pure
+ * schedule math at consume time: floor(total/periods) per line, the LAST
+ * line absorbing the integer-cent remainder. Sum of lines === total cost,
+ * always.
+ */
+export type VtuberTechSetupAmortizationLineRecord = {
+  id: string;
+  /** The schedule the line consumes — FK to schedules.schedule_ref (0020). */
+  schedule_ref: string;
+  /** Zero-based line position — UNIQUE with schedule_ref (the consume arbiter). */
+  line_index: number;
+  /** The line's deterministic integer-cent deduction. */
+  line_cents: number;
+  /** When the line was consumed (the release that deducted it). */
+  deducted_at: string;
+  created_at: string;
+};

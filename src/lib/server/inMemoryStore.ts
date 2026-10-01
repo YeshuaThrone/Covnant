@@ -86,6 +86,9 @@ import type {
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
   PodcastGuestBonusDefinitionRecord,
+  VtuberTaxWithholdingVerificationRecord,
+  VtuberTechSetupAmortizationLineRecord,
+  VtuberTechSetupAmortizationScheduleRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -125,6 +128,11 @@ function sortByTime<T>(rows: T[], pick: (row: T) => string, direction: 'asc' | '
 
 function uniqueViolation(constraint: string): never {
   throw new Error(`UNIQUE constraint failed: ${constraint}`);
+}
+
+/** One verification state per payee per tax year — the Map key IS the composite. */
+function vtuberVerificationKey(payeeId: string, taxYear: number): string {
+  return `${payeeId}::${taxYear}`;
 }
 
 export class InMemoryStore implements Store {
@@ -169,6 +177,14 @@ export class InMemoryStore implements Store {
   // verification state per studio payee.
   private gamingDevexConversionLogs: GamingDevexConversionLogRecord[] = [];
   private gamingStudioKycVerifications = new Map<string, GamingStudioKycRecord>();
+  // --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) ---
+  private vtuberTaxWithholdingVerifications = new Map<
+    string,
+    VtuberTaxWithholdingVerificationRecord
+  >();
+  private vtuberTechSetupAmortizationSchedules: VtuberTechSetupAmortizationScheduleRecord[] =
+    [];
+  private vtuberTechSetupAmortizationLines: VtuberTechSetupAmortizationLineRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -968,6 +984,112 @@ export class InMemoryStore implements Store {
     studioPayeeId: string,
   ): Promise<GamingStudioKycRecord | undefined> {
     return this.gamingStudioKycVerifications.get(studioPayeeId);
+  }
+
+  // --- VTuber agency licensing holdbacks + tax verification (migration 0020, PR 15) ---
+
+  async listAvatarIpHoldbackCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'avatar_ip_licensing_holdback' &&
+          row.status === 'avatar_ip_licensing_holdback',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleAvatarIpHoldback(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — the same single-threaded-by-
+    // construction atomicity the film-escrow/gaming-cashout settles ride.
+    if (row === undefined || row.status !== 'avatar_ip_licensing_holdback') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async upsertVtuberTaxWithholdingVerification(
+    row: VtuberTaxWithholdingVerificationRecord,
+  ): Promise<VtuberTaxWithholdingVerificationRecord> {
+    // One verification state per payee + tax year — the Map key IS the
+    // composite, so a re-verification replaces the row.
+    this.vtuberTaxWithholdingVerifications.set(
+      vtuberVerificationKey(row.payee_id, row.tax_year),
+      row,
+    );
+    return row;
+  }
+
+  async getVtuberTaxWithholdingVerification(
+    payeeId: string,
+    taxYear: number,
+  ): Promise<VtuberTaxWithholdingVerificationRecord | undefined> {
+    return this.vtuberTaxWithholdingVerifications.get(
+      vtuberVerificationKey(payeeId, taxYear),
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationSchedule(
+    row: Omit<VtuberTechSetupAmortizationScheduleRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord> {
+    // UNIQUE on schedule_ref — one schedule per contract reference, ever; a
+    // duplicate insert throws the unique violation.
+    if (
+      this.vtuberTechSetupAmortizationSchedules.some(
+        (existing) => existing.schedule_ref === row.schedule_ref,
+      )
+    ) {
+      uniqueViolation('vtuber_tech_setup_amortization_schedules.schedule_ref');
+    }
+    const record: VtuberTechSetupAmortizationScheduleRecord = { ...row, id: randomUUID() };
+    this.vtuberTechSetupAmortizationSchedules.push(record);
+    return record;
+  }
+
+  async getVtuberTechSetupAmortizationScheduleByRef(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord | undefined> {
+    return this.vtuberTechSetupAmortizationSchedules.find(
+      (row) => row.schedule_ref === scheduleRef,
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationLine(
+    row: Omit<VtuberTechSetupAmortizationLineRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationLineRecord> {
+    // UNIQUE on (schedule_ref, line_index) — the insert-as-lock consume
+    // arbiter; a concurrent consume of the same line throws the unique
+    // violation (the PR 12 accumulator discipline).
+    if (
+      this.vtuberTechSetupAmortizationLines.some(
+        (existing) =>
+          existing.schedule_ref === row.schedule_ref &&
+          existing.line_index === row.line_index,
+      )
+    ) {
+      uniqueViolation('vtuber_tech_setup_amortization_lines.schedule_ref,line_index');
+    }
+    const record: VtuberTechSetupAmortizationLineRecord = { ...row, id: randomUUID() };
+    this.vtuberTechSetupAmortizationLines.push(record);
+    return record;
+  }
+
+  async listVtuberTechSetupAmortizationLines(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationLineRecord[]> {
+    // Line index order — the deterministic consumption order.
+    return this.vtuberTechSetupAmortizationLines
+      .filter((row) => row.schedule_ref === scheduleRef)
+      .sort((a, b) => a.line_index - b.line_index);
   }
 
   async sumVerifiedImpressionsByEpisode(

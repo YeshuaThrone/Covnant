@@ -87,6 +87,9 @@ import type {
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
   PodcastGuestBonusDefinitionRecord,
+  VtuberTaxWithholdingVerificationRecord,
+  VtuberTechSetupAmortizationLineRecord,
+  VtuberTechSetupAmortizationScheduleRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -776,6 +779,47 @@ CREATE TABLE IF NOT EXISTS gaming_studio_kyc_verifications (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- VTuber agency licensing holdback states (PR 15) — the durable state
+-- behind the livestream gate's tax_withholding_verified read (one row per
+-- payee + tax year) and the tech setup amortization contracts. The schedule
+-- row is the immutable contract; consumption lives in the APPEND-ONLY lines
+-- (the PR 12 accumulator's insert-as-lock discipline), unique per
+-- (schedule_ref, line_index) — a concurrent consume throws, never a lost
+-- update.
+CREATE TABLE IF NOT EXISTS vtuber_tax_withholding_verifications (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  tax_year INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  tin_verified INTEGER NOT NULL,
+  w9_on_file INTEGER NOT NULL,
+  evidence_ref TEXT,
+  verified_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, tax_year)
+);
+
+CREATE TABLE IF NOT EXISTS vtuber_tech_setup_amortization_schedules (
+  id TEXT PRIMARY KEY,
+  schedule_ref TEXT NOT NULL UNIQUE,
+  agency_payee_id TEXT NOT NULL,
+  description TEXT NOT NULL,
+  total_cost_cents INTEGER NOT NULL,
+  amortization_periods INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS vtuber_tech_setup_amortization_lines (
+  id TEXT PRIMARY KEY,
+  schedule_ref TEXT NOT NULL,
+  line_index INTEGER NOT NULL,
+  line_cents INTEGER NOT NULL,
+  deducted_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (schedule_ref, line_index)
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -1002,6 +1046,36 @@ function gamingStudioKycFromDbRow(row: GamingStudioKycDbRow): GamingStudioKycRec
     );
   }
   return { ...row, team_members: teamMembers };
+}
+
+// --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) —
+// row projection helpers. SQLite has no boolean type — the verification's
+// profile-of-record fields ride as 0/1 integers, the same discipline the
+// UCT credential vault rows use.
+
+type VtuberVerificationSqliteRow = Omit<
+  VtuberTaxWithholdingVerificationRecord,
+  'tin_verified' | 'w9_on_file'
+> & { tin_verified: number; w9_on_file: number };
+
+function vtuberVerificationToSqliteRow(
+  record: VtuberTaxWithholdingVerificationRecord,
+): VtuberVerificationSqliteRow {
+  return {
+    ...record,
+    tin_verified: record.tin_verified ? 1 : 0,
+    w9_on_file: record.w9_on_file ? 1 : 0,
+  };
+}
+
+function vtuberVerificationFromSqliteRow(
+  row: VtuberVerificationSqliteRow,
+): VtuberTaxWithholdingVerificationRecord {
+  return {
+    ...row,
+    tin_verified: row.tin_verified === 1,
+    w9_on_file: row.w9_on_file === 1,
+  };
 }
 
 // --- The UCT credential vault (migration 0013) — row projection helpers ---
@@ -2184,6 +2258,147 @@ export class SqliteStore implements Store {
       .get(studioPayeeId) as GamingStudioKycDbRow | undefined;
     return Promise.resolve(
       row === undefined ? undefined : gamingStudioKycFromDbRow(row),
+    );
+  }
+
+  // --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) ---
+
+  async listAvatarIpHoldbackCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'avatar_ip_licensing_holdback' AND status = 'avatar_ip_licensing_holdback'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleAvatarIpHoldback(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the holdback lock state only. changes = 0 means the row is absent or
+    // no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'avatar_ip_licensing_holdback'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  async upsertVtuberTaxWithholdingVerification(
+    row: VtuberTaxWithholdingVerificationRecord,
+  ): Promise<VtuberTaxWithholdingVerificationRecord> {
+    // One verification state per payee + tax year — INSERT ON CONFLICT
+    // replaces the row atomically (a re-verification, the studio-KYC
+    // precedent at year scope).
+    this.db
+      .prepare(
+        `INSERT INTO vtuber_tax_withholding_verifications
+           (id, payee_id, tax_year, state, tin_verified, w9_on_file, evidence_ref, verified_at, created_at, updated_at)
+         VALUES (@id, @payee_id, @tax_year, @state, @tin_verified, @w9_on_file, @evidence_ref, @verified_at, @created_at, @updated_at)
+         ON CONFLICT(payee_id, tax_year) DO UPDATE SET
+           id = excluded.id,
+           state = excluded.state,
+           tin_verified = excluded.tin_verified,
+           w9_on_file = excluded.w9_on_file,
+           evidence_ref = excluded.evidence_ref,
+           verified_at = excluded.verified_at,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(vtuberVerificationToSqliteRow(row) as unknown as Record<string, unknown>);
+    const stored = this.db
+      .prepare(
+        `SELECT * FROM vtuber_tax_withholding_verifications WHERE payee_id = ? AND tax_year = ?`,
+      )
+      .get(row.payee_id, row.tax_year) as VtuberVerificationSqliteRow;
+    return Promise.resolve(vtuberVerificationFromSqliteRow(stored));
+  }
+
+  async getVtuberTaxWithholdingVerification(
+    payeeId: string,
+    taxYear: number,
+  ): Promise<VtuberTaxWithholdingVerificationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM vtuber_tax_withholding_verifications WHERE payee_id = ? AND tax_year = ?`,
+      )
+      .get(payeeId, taxYear) as VtuberVerificationSqliteRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : vtuberVerificationFromSqliteRow(row),
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationSchedule(
+    row: Omit<VtuberTechSetupAmortizationScheduleRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord> {
+    // UNIQUE on schedule_ref — one schedule per contract reference, ever; a
+    // duplicate insert throws (better-sqlite3 surfaces the constraint
+    // violation).
+    const record: VtuberTechSetupAmortizationScheduleRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO vtuber_tech_setup_amortization_schedules
+           (id, schedule_ref, agency_payee_id, description, total_cost_cents, amortization_periods, created_at)
+         VALUES (@id, @schedule_ref, @agency_payee_id, @description, @total_cost_cents, @amortization_periods, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getVtuberTechSetupAmortizationScheduleByRef(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM vtuber_tech_setup_amortization_schedules WHERE schedule_ref = ?`,
+        )
+        .get(scheduleRef) as VtuberTechSetupAmortizationScheduleRecord | undefined,
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationLine(
+    row: Omit<VtuberTechSetupAmortizationLineRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationLineRecord> {
+    // UNIQUE on (schedule_ref, line_index) — the insert-as-lock consume
+    // arbiter; a concurrent consume of the same line throws (the PR 12
+    // accumulator discipline) and the caller re-derives the next line.
+    const record: VtuberTechSetupAmortizationLineRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO vtuber_tech_setup_amortization_lines
+           (id, schedule_ref, line_index, line_cents, deducted_at, created_at)
+         VALUES (@id, @schedule_ref, @line_index, @line_cents, @deducted_at, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listVtuberTechSetupAmortizationLines(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationLineRecord[]> {
+    // Line index order — the deterministic consumption order (rowid ASC is
+    // the strict tiebreak, though the unique constraint precludes ties).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM vtuber_tech_setup_amortization_lines
+         WHERE schedule_ref = ?
+         ORDER BY line_index ASC, rowid ASC`,
+        )
+        .all(scheduleRef) as VtuberTechSetupAmortizationLineRecord[],
     );
   }
 

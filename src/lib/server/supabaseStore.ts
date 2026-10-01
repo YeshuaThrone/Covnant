@@ -82,6 +82,9 @@ import type {
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
   PodcastGuestBonusDefinitionRecord,
+  VtuberTaxWithholdingVerificationRecord,
+  VtuberTechSetupAmortizationLineRecord,
+  VtuberTechSetupAmortizationScheduleRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -185,6 +188,16 @@ const TABLES = {
   // payout gate's studio/team read.
   gamingDevexConversionLogs: 'gaming_devex_conversion_logs',
   gamingStudioKycVerifications: 'gaming_studio_kyc_verifications',
+  // Migration 0020 — the VTuber agency holdback states (PR 15). The durable
+  // tax-withholding verification state behind the livestream gate's
+  // tax_withholding_verified read (one row per payee + tax year), and the
+  // tech setup amortization contracts — the schedule row is the immutable
+  // contract, the consumed LINES are append-only and unique per
+  // (schedule_ref, line_index) — the PR 12 accumulator's insert-as-lock
+  // discipline.
+  vtuberTaxWithholdingVerifications: 'vtuber_tax_withholding_verifications',
+  vtuberTechSetupAmortizationSchedules: 'vtuber_tech_setup_amortization_schedules',
+  vtuberTechSetupAmortizationLines: 'vtuber_tech_setup_amortization_lines',
 } as const;
 
 /**
@@ -1284,6 +1297,133 @@ export class SupabaseStore implements Store {
         .eq('studio_payee_id', studioPayeeId)
         .maybeSingle(),
       'getGamingStudioKyc',
+    );
+  }
+
+  // --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) ---
+
+  async listAvatarIpHoldbackCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'avatar_ip_licensing_holdback')
+        .eq('status', 'avatar_ip_licensing_holdback')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listAvatarIpHoldbackCredits',
+    );
+  }
+
+  async settleAvatarIpHoldback(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The same CAS as the film-escrow/gaming-cashout/esports settles,
+    // scoped to the holdback lock state only.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'avatar_ip_licensing_holdback')
+        .select()
+        .maybeSingle(),
+      'settleAvatarIpHoldback',
+    );
+  }
+
+  async upsertVtuberTaxWithholdingVerification(
+    row: VtuberTaxWithholdingVerificationRecord,
+  ): Promise<VtuberTaxWithholdingVerificationRecord> {
+    // One verification state per payee + tax year — the upsert targets the
+    // composite key, so a re-verification replaces the row atomically.
+    return this.oneStrict<VtuberTaxWithholdingVerificationRecord>(
+      this.client
+        .from(TABLES.vtuberTaxWithholdingVerifications)
+        .upsert(row, { onConflict: 'payee_id,tax_year' })
+        .select()
+        .maybeSingle(),
+      'upsertVtuberTaxWithholdingVerification',
+    );
+  }
+
+  async getVtuberTaxWithholdingVerification(
+    payeeId: string,
+    taxYear: number,
+  ): Promise<VtuberTaxWithholdingVerificationRecord | undefined> {
+    return this.one<VtuberTaxWithholdingVerificationRecord>(
+      this.client
+        .from(TABLES.vtuberTaxWithholdingVerifications)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('tax_year', taxYear)
+        .maybeSingle(),
+      'getVtuberTaxWithholdingVerification',
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationSchedule(
+    row: Omit<VtuberTechSetupAmortizationScheduleRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord> {
+    // UNIQUE on schedule_ref: a duplicate insert throws here (the same
+    // failure mode the canonical store exhibits).
+    return this.oneStrict<VtuberTechSetupAmortizationScheduleRecord>(
+      this.client
+        .from(TABLES.vtuberTechSetupAmortizationSchedules)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertVtuberTechSetupAmortizationSchedule',
+    );
+  }
+
+  async getVtuberTechSetupAmortizationScheduleByRef(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord | undefined> {
+    return this.one<VtuberTechSetupAmortizationScheduleRecord>(
+      this.client
+        .from(TABLES.vtuberTechSetupAmortizationSchedules)
+        .select()
+        .eq('schedule_ref', scheduleRef)
+        .maybeSingle(),
+      'getVtuberTechSetupAmortizationScheduleByRef',
+    );
+  }
+
+  async insertVtuberTechSetupAmortizationLine(
+    row: Omit<VtuberTechSetupAmortizationLineRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationLineRecord> {
+    // UNIQUE on (schedule_ref, line_index): a concurrent consume of the
+    // same line throws — the insert-as-lock consume arbiter (the PR 12
+    // accumulator discipline) — and the caller re-derives the next line.
+    return this.oneStrict<VtuberTechSetupAmortizationLineRecord>(
+      this.client
+        .from(TABLES.vtuberTechSetupAmortizationLines)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertVtuberTechSetupAmortizationLine',
+    );
+  }
+
+  async listVtuberTechSetupAmortizationLines(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationLineRecord[]> {
+    // Line index order — the deterministic consumption order
+    // (insertion_order ASC is the strict tiebreak, though the unique
+    // constraint precludes ties).
+    return this.many<VtuberTechSetupAmortizationLineRecord>(
+      this.client
+        .from(TABLES.vtuberTechSetupAmortizationLines)
+        .select()
+        .eq('schedule_ref', scheduleRef)
+        .order('line_index', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listVtuberTechSetupAmortizationLines',
     );
   }
 
