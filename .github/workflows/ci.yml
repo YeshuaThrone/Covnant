@@ -146,6 +146,12 @@ jobs:
           # to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
+          # Music sample cascade + statutory cover mechanicals (Deep
+          # Royalties PR 17): the sample-clearance edge contracts and the
+          # covered-composition publisher registry — applied twice like
+          # 0011-0021 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -531,6 +537,64 @@ jobs:
           dup_edges=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from derivative_royalty_edges where asset_id = 'mod_dup_probe'")
           [ "$dup_edges" = "1" ] || { echo "DUPLICATE CONTRACT ACCEPTED by the UNIQUE triple"; exit 1; }
           echo "OK: derivative_royalty_edges UNIQUE triple rejects duplicate contracts"
+
+          # Music sample cascade + statutory cover mechanicals (migration
+          # 0022, Deep Royalties PR 17): the clearance-edge and publisher
+          # registry tables' inventory, RLS deny-all, and check-constrained
+          # vocabularies. The tables carry guarded FKs to cbt_assets(id),
+          # so the probes first seed two real asset rows.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c \
+            "insert into cbt_assets (id, cbt_code, title, medium, created_timestamp) values
+              ('11111111-1111-4111-8111-111111111111', 'CBT-SC-PROBE-A', 'Sample cascade probe parent', 'music', 0),
+              ('22222222-2222-4222-8222-222222222222', 'CBT-SC-PROBE-B', 'Sample cascade probe child', 'music', 0)
+             on conflict (id) do nothing"
+          assert_cols sample_clearance_edges id work_id parent_composition_id rights_type rights_holder_payee_id rights_holder_payee_name license_bps clearance_agreement_ref created_at insertion_order
+          assert_cols composition_publishers id composition_id publisher_payee_id publisher_payee_name share_bps created_at insertion_order
+          rls_edges=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='sample_clearance_edges'")
+          [ "$rls_edges" = "t" ] || { echo "RLS NOT ENABLED on sample_clearance_edges"; exit 1; }
+          rls_pubs=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='composition_publishers'")
+          [ "$rls_pubs" = "t" ] || { echo "RLS NOT ENABLED on composition_publishers"; exit 1; }
+          echo "OK: sample cascade tables have RLS enabled"
+          # A self-edge is a malformed tree at the DDL (the planner's
+          # path-based cycle detection only ever sees longer loops).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into sample_clearance_edges (work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref) values ('22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222', 'master', 'payee_1', 'Payee', 100, 'AGR-SELF-PROBE')" >/dev/null 2>&1 || true
+          self_edge=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from sample_clearance_edges where work_id = parent_composition_id")
+          [ "$self_edge" = "0" ] || { echo "SELF-EDGE ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: sample_clearance_edges self-edge check rejects a self-edge"
+          # The license fraction is a safe fraction: more than the whole
+          # line (bps > 10000) must be refused at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into sample_clearance_edges (work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref) values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'master', 'payee_1', 'Payee', 10001, 'AGR-BPS-PROBE')" >/dev/null 2>&1 || true
+          greedy_bps=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from sample_clearance_edges where license_bps > 10000")
+          [ "$greedy_bps" = "0" ] || { echo "LICENSE BPS ABOVE 10000 ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: sample_clearance_edges license_bps check rejects more than the whole line"
+          # The rights separation is exactly two sides: anything else
+          # refuses at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into sample_clearance_edges (work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref) values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'sync', 'payee_1', 'Payee', 100, 'AGR-SIDE-PROBE')" >/dev/null 2>&1 || true
+          bad_side=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from sample_clearance_edges where rights_type not in ('master', 'publishing')")
+          [ "$bad_side" = "0" ] || { echo "FOREIGN RIGHTS TYPE ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: sample_clearance_edges rights_type check rejects outside the two sides"
+          # One contract per (work, parent, payee, side): the replay
+          # surface is the UNIQUE quad, a duplicate registration throws
+          # 23505.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into sample_clearance_edges (work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref) values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'master', 'payee_1', 'Payee', 100, 'AGR-DUP-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into sample_clearance_edges (work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref) values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'master', 'payee_1', 'Payee', 150, 'AGR-DUP-PROBE')" >/dev/null 2>&1 || true
+          dup_edges=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from sample_clearance_edges where clearance_agreement_ref = 'AGR-DUP-PROBE'")
+          [ "$dup_edges" = "1" ] || { echo "DUPLICATE CONTRACT ACCEPTED by the UNIQUE quad"; exit 1; }
+          echo "OK: sample_clearance_edges UNIQUE quad rejects duplicate contracts"
+          # A composition's publisher registry is one row per publisher:
+          # the UNIQUE (composition, payee) pair refuses duplicates, and a
+          # share above the whole pool refuses at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into composition_publishers (composition_id, publisher_payee_id, publisher_payee_name, share_bps) values ('11111111-1111-4111-8111-111111111111', 'pub_probe_1', 'Probe Publisher', 5000)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into composition_publishers (composition_id, publisher_payee_id, publisher_payee_name, share_bps) values ('11111111-1111-4111-8111-111111111111', 'pub_probe_1', 'Probe Publisher', 6000)" >/dev/null 2>&1 || true
+          dup_pubs=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from composition_publishers where composition_id = '11111111-1111-4111-8111-111111111111'")
+          [ "$dup_pubs" = "1" ] || { echo "DUPLICATE PUBLISHER ACCEPTED by the UNIQUE pair"; exit 1; }
+          echo "OK: composition_publishers UNIQUE pair rejects duplicate publishers"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into composition_publishers (composition_id, publisher_payee_id, publisher_payee_name, share_bps) values ('11111111-1111-4111-8111-111111111111', 'pub_probe_2', 'Probe Publisher 2', 10001)" >/dev/null 2>&1 || true
+          greedy_share=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from composition_publishers where share_bps > 10000")
+          [ "$greedy_share" = "0" ] || { echo "SHARE BPS ABOVE 10000 ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: composition_publishers share_bps check rejects more than the whole pool"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

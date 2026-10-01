@@ -86,6 +86,8 @@ import type {
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
   DerivativeRoyaltyEdgeRecord,
+  SampleClearanceEdgeRecord,
+  CompositionPublisherRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -202,6 +204,8 @@ const TABLES = {
   // Migration 0021 — the derivative cascade's per-edge fractional royalty
   // contracts over the parent_asset_id dependency tree (PR 16).
   derivativeRoyaltyEdges: 'derivative_royalty_edges',
+  sampleClearanceEdges: 'sample_clearance_edges',
+  compositionPublishers: 'composition_publishers',
 } as const;
 
 /**
@@ -1460,6 +1464,70 @@ export class SupabaseStore implements Store {
         .order('created_at', { ascending: true })
         .order('insertion_order', { ascending: true }),
       'getDerivativeRoyaltyEdgesByAsset',
+    );
+  }
+
+  async insertSampleClearanceEdge(
+    row: Omit<SampleClearanceEdgeRecord, 'id'>,
+  ): Promise<SampleClearanceEdgeRecord> {
+    // UNIQUE on (work_id, parent_composition_id, rights_holder_payee_id,
+    // rights_type): a duplicate registration throws here (the same failure
+    // mode the canonical store exhibits). The same (work, parent) pair on
+    // BOTH sides of the rights separation is two distinct contracts, not a
+    // duplicate.
+    return this.oneStrict<SampleClearanceEdgeRecord>(
+      this.client
+        .from(TABLES.sampleClearanceEdges)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertSampleClearanceEdge',
+    );
+  }
+
+  async getSampleClearanceEdgesByWork(workId: string): Promise<SampleClearanceEdgeRecord[]> {
+    // created_at ASC with the insertion-order tiebreak — the deterministic
+    // reservation order (the walk's per-node lookup). Edges for BOTH sides
+    // of the rights separation return; the cascade planner filters by the
+    // line's rights_type.
+    return this.many<SampleClearanceEdgeRecord>(
+      this.client
+        .from(TABLES.sampleClearanceEdges)
+        .select()
+        .eq('work_id', workId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'getSampleClearanceEdgesByWork',
+    );
+  }
+
+  async insertCompositionPublisher(
+    row: Omit<CompositionPublisherRecord, 'id'>,
+  ): Promise<CompositionPublisherRecord> {
+    // UNIQUE on (composition_id, publisher_payee_id): a duplicate
+    // registration throws here (the same failure mode the canonical store
+    // exhibits).
+    return this.oneStrict<CompositionPublisherRecord>(
+      this.client
+        .from(TABLES.compositionPublishers)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertCompositionPublisher',
+    );
+  }
+
+  async listCompositionPublishers(compositionId: string): Promise<CompositionPublisherRecord[]> {
+    // created_at ASC with the insertion-order tiebreak — the deterministic
+    // order the statutory mechanical pool routes in.
+    return this.many<CompositionPublisherRecord>(
+      this.client
+        .from(TABLES.compositionPublishers)
+        .select()
+        .eq('composition_id', compositionId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listCompositionPublishers',
     );
   }
 

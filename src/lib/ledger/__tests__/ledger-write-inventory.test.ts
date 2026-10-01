@@ -268,6 +268,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // constrained royalty_bps, self-edge check); still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0021_derivative_royalty_cascade.sql',
+      // Music sample cascade + statutory cover mechanicals (Deep Royalties
+      // PR 17): the per-work clearance contract table (parent_composition_id
+      // dependency edges, constrained license_bps, self-edge check) and the
+      // composition publisher registry for statutory mechanical routing;
+      // still no DDL on universal_royalty_ledger — the referencing pin
+      // below holds.
+      '0022_sample_cascade_cover_mechanicals.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

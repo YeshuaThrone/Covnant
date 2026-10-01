@@ -180,12 +180,12 @@ export type SplitReversalRecord = {
  */
 export type FilmWaterfallDefinitionRecord = {
   film_id: string;
-  definition: import('@/modules/waterfall/engine').FilmWaterfallDefinition;
+  definition: import("@/modules/waterfall/engine").FilmWaterfallDefinition;
   created_at: string;
   updated_at: string;
 };
 
-export type FilmWaterfallDistributionStatus = 'routed' | 'applied';
+export type FilmWaterfallDistributionStatus = "routed" | "applied";
 
 /**
  * One routing decision on a released escrow receipt — the state that makes
@@ -204,9 +204,9 @@ export type FilmWaterfallDistributionRecord = {
   /** The First Dollar Gross bypass the routing took off the top, integer cents. */
   fdg_bypass_cents: number;
   /** The per-leg routing detail (the router's leg outcomes), stored jsonb. */
-  legs: import('@/modules/waterfall/engine').WaterfallLegRouting[];
+  legs: import("@/modules/waterfall/engine").WaterfallLegRouting[];
   /** The per-tier totals the release applied, stored jsonb. */
-  tier_allocations: import('@/modules/waterfall/engine').WaterfallTierAllocation[];
+  tier_allocations: import("@/modules/waterfall/engine").WaterfallTierAllocation[];
   /** The honest carry this routing reported, integer cents. */
   unpaid_total_cents: number;
   created_at: string;
@@ -231,7 +231,7 @@ export type PodcastEpisodeSplitScheduleRecord = {
    * The per-holder routing. share_bps must sum to EXACTLY 10000 (100.0000%)
    * — validated at registration and re-validated at every accrual.
    */
-  splits: import('@/lib/don/types').SplitPartyInput[];
+  splits: import("@/lib/don/types").SplitPartyInput[];
   /** Monotonic registration version — bumped on every accepted re-registration. */
   version: number;
   created_at: string;
@@ -258,13 +258,13 @@ export type PodcastEpisodeSplitAccrualRecord = {
   /** The schedule version the accrual used. */
   split_version: number;
   /** The per-holder integer-cent accruals (floor shares, dust swept out). */
-  accruals: import('@/lib/don/types').AllocatedSplit[];
+  accruals: import("@/lib/don/types").AllocatedSplit[];
   /** The integer-cent dust the sweep routed to the variance account. */
   company_dust_cents: number;
   created_at: string;
 };
 
-export type PodcastMilestoneKind = 'downloads' | 'reach';
+export type PodcastMilestoneKind = "downloads" | "reach";
 
 /**
  * One registered guest milestone bonus — a contractual micro-payout that
@@ -289,7 +289,7 @@ export type PodcastGuestBonusDefinitionRecord = {
   updated_at: string;
 };
 
-export type PodcastGuestBonusAccrualStatus = 'accrued' | 'posted';
+export type PodcastGuestBonusAccrualStatus = "accrued" | "posted";
 
 /**
  * One crossed milestone — the once-only record (unique on event_id, a
@@ -367,7 +367,7 @@ export type GamingItemSplitScheduleRecord = {
    * EXACTLY 10000 (100.0000%) — validated at registration and re-validated
    * at every accrual.
    */
-  splits: import('@/lib/don/types').SplitPartyInput[];
+  splits: import("@/lib/don/types").SplitPartyInput[];
   /**
    * The original-creator payee for the secondary-resale royalty (the 5-10%
    * platform creator fee). Required when the item's contract enables
@@ -406,7 +406,7 @@ export type GamingSplitPayoutRecord = {
   /** The schedule version the accrual used. */
   split_version: number;
   /** The per-payee integer-cent accruals (floor shares, dust swept out). */
-  accruals: import('@/lib/don/types').AllocatedSplit[];
+  accruals: import("@/lib/don/types").AllocatedSplit[];
   /** The integer-cent dust the sweep routed to the variance account. */
   company_dust_cents: number;
   created_at: string;
@@ -473,7 +473,7 @@ export type GamingStudioKycRecord = {
   /** UNIQUE — the studio's payee id (the Don store's sovereign identity). */
   studio_payee_id: string;
   /** The studio's own KYC status — the Don KycStatus union. */
-  studio_kyc_status: import('@/lib/don/types').KycStatus;
+  studio_kyc_status: import("@/lib/don/types").KycStatus;
   /** The named roster — every member the studio-level verification covers. */
   team_members: GamingStudioTeamMember[];
   /** The verified studio contract's reference, when known (provenance). */
@@ -490,7 +490,8 @@ export type GamingStudioKycRecord = {
 // ---------------------------------------------------------------------------
 
 /** The verification state's vocabulary — pending/failed refuse at the gate. */
-export type VtuberTaxWithholdingVerificationState = "pending" | "verified" | "failed";
+export type VtuberTaxWithholdingVerificationState =
+  "pending" | "verified" | "failed";
 
 /**
  * One payee's tax-withholding verification for one tax year — the durable
@@ -590,3 +591,56 @@ export type DerivativeRoyaltyEdgeRecord = {
   created_at: string;
 };
 
+/**
+ * One clearance agreement of record (migration 0022) — the music sample
+ * cascade's input registry. The child work licenses an upstream composition
+ * on ONE side of the rights separation (rights_type 'master' = master sample,
+ * 'publishing' = interpolation); a line's cascade fires only the edges
+ * matching the line's own rights_type. When the work's line releases, the
+ * allocator reserves floor(license_bps * line_gross / 10000) integer cents
+ * for this edge's rights holder BEFORE the net artist/producer split math.
+ * UNIQUE on (work_id, parent_composition_id, rights_holder_payee_id,
+ * rights_type): a duplicate registration throws the unique violation; the
+ * same (work, parent) pair may be licensed on both sides of the separation.
+ */
+export type SampleClearanceEdgeRecord = {
+  id: string;
+  /** The downstream work using the sample/interpolation — the walk's start. */
+  work_id: string;
+  /** The upstream composition this work samples or interpolates. */
+  parent_composition_id: string;
+  /** Which side of the rights separation this edge belongs to. */
+  rights_type: "master" | "publishing";
+  /** The rights holder the edge pays — the sovereign payee identity. */
+  rights_holder_payee_id: string;
+  /** The payee's display name of record at registration. */
+  rights_holder_payee_name: string;
+  /** The edge's fraction of the line gross, basis points (0 < bps <= 10000). */
+  license_bps: number;
+  /** The clearance agreement the percentage was extracted from (of record). */
+  clearance_agreement_ref: string;
+  created_at: string;
+};
+
+/**
+ * The publishers of record per composition (migration 0022) — the statutory
+ * cover mechanical's input registry. A cover version routes the statutory
+ * mechanical pool to these publishers directly, by share, BEFORE the
+ * recording artist. Shares are the publishers' splits of the mechanical pool
+ * and must sum to exactly 10000 per composition — a cross-row sum no per-row
+ * constraint can express, so the planner enforces it fail-closed. UNIQUE on
+ * (composition_id, publisher_payee_id): a duplicate registration throws the
+ * unique violation.
+ */
+export type CompositionPublisherRecord = {
+  id: string;
+  /** The composition the publisher holds a share of (cbt_assets identity). */
+  composition_id: string;
+  /** The publisher of record — the sovereign payee identity. */
+  publisher_payee_id: string;
+  /** The payee's display name of record at registration. */
+  publisher_payee_name: string;
+  /** The publisher's share of the statutory mechanical pool, basis points. */
+  share_bps: number;
+  created_at: string;
+};

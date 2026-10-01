@@ -91,6 +91,8 @@ import type {
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
   DerivativeRoyaltyEdgeRecord,
+  SampleClearanceEdgeRecord,
+  CompositionPublisherRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -842,6 +844,44 @@ CREATE INDEX IF NOT EXISTS idx_derivative_royalty_edges_asset
   ON derivative_royalty_edges (asset_id);
 CREATE INDEX IF NOT EXISTS idx_derivative_royalty_edges_parent
   ON derivative_royalty_edges (parent_asset_id);
+
+-- Music sample cascade + statutory cover mechanicals (migration 0022): the
+-- contract layer the sample-cascade and cover-mechanical planners read. The
+-- walk key is match_queue.parent_composition_id — work_id /
+-- parent_composition_id / composition_id are cbt_assets identities. The
+-- rights-type separation: master and publishing are separate sides of the
+-- queue; an edge belongs to one side and a line's cascade fires only its
+-- own side's edges. Self-edges refuse here; longer cycles refuse at plan
+-- time (fail-closed).
+CREATE TABLE IF NOT EXISTS sample_clearance_edges (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  parent_composition_id TEXT NOT NULL,
+  rights_type TEXT NOT NULL CHECK (rights_type IN ('master', 'publishing')),
+  rights_holder_payee_id TEXT NOT NULL,
+  rights_holder_payee_name TEXT NOT NULL,
+  license_bps INTEGER NOT NULL CHECK (license_bps > 0 AND license_bps <= 10000),
+  clearance_agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (work_id, parent_composition_id, rights_holder_payee_id, rights_type),
+  CHECK (work_id <> parent_composition_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sample_clearance_edges_work
+  ON sample_clearance_edges (work_id);
+CREATE INDEX IF NOT EXISTS idx_sample_clearance_edges_parent
+  ON sample_clearance_edges (parent_composition_id);
+
+CREATE TABLE IF NOT EXISTS composition_publishers (
+  id TEXT PRIMARY KEY,
+  composition_id TEXT NOT NULL,
+  publisher_payee_id TEXT NOT NULL,
+  publisher_payee_name TEXT NOT NULL,
+  share_bps INTEGER NOT NULL CHECK (share_bps > 0 AND share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  UNIQUE (composition_id, publisher_payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_composition_publishers_composition
+  ON composition_publishers (composition_id);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -2454,6 +2494,68 @@ export class SqliteStore implements Store {
          ORDER BY rowid ASC`,
         )
         .all(assetId) as DerivativeRoyaltyEdgeRecord[],
+    );
+  }
+
+  async insertSampleClearanceEdge(
+    row: Omit<SampleClearanceEdgeRecord, 'id'>,
+  ): Promise<SampleClearanceEdgeRecord> {
+    // UNIQUE on (work_id, parent_composition_id, rights_holder_payee_id,
+    // rights_type) — a duplicate registration throws (better-sqlite3
+    // surfaces the constraint violation — the replay surface). The same
+    // (work, parent) pair on BOTH sides of the rights separation is two
+    // distinct contracts, not a duplicate.
+    const record: SampleClearanceEdgeRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO sample_clearance_edges
+           (id, work_id, parent_composition_id, rights_type, rights_holder_payee_id, rights_holder_payee_name, license_bps, clearance_agreement_ref, created_at)
+         VALUES (@id, @work_id, @parent_composition_id, @rights_type, @rights_holder_payee_id, @rights_holder_payee_name, @license_bps, @clearance_agreement_ref, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getSampleClearanceEdgesByWork(workId: string): Promise<SampleClearanceEdgeRecord[]> {
+    // Insertion order (rowid ASC) — the deterministic reservation order.
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM sample_clearance_edges
+         WHERE work_id = ?
+         ORDER BY rowid ASC`,
+        )
+        .all(workId) as SampleClearanceEdgeRecord[],
+    );
+  }
+
+  async insertCompositionPublisher(
+    row: Omit<CompositionPublisherRecord, 'id'>,
+  ): Promise<CompositionPublisherRecord> {
+    // UNIQUE on (composition_id, publisher_payee_id) — a duplicate
+    // registration throws (better-sqlite3 surfaces the constraint
+    // violation — the replay surface).
+    const record: CompositionPublisherRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO composition_publishers
+           (id, composition_id, publisher_payee_id, publisher_payee_name, share_bps, created_at)
+         VALUES (@id, @composition_id, @publisher_payee_id, @publisher_payee_name, @share_bps, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listCompositionPublishers(compositionId: string): Promise<CompositionPublisherRecord[]> {
+    // Insertion order (rowid ASC) — the deterministic routing order.
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM composition_publishers
+         WHERE composition_id = ?
+         ORDER BY rowid ASC`,
+        )
+        .all(compositionId) as CompositionPublisherRecord[],
     );
   }
 

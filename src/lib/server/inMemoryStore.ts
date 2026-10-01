@@ -90,6 +90,8 @@ import type {
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
   DerivativeRoyaltyEdgeRecord,
+  SampleClearanceEdgeRecord,
+  CompositionPublisherRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -188,6 +190,8 @@ export class InMemoryStore implements Store {
   private vtuberTechSetupAmortizationLines: VtuberTechSetupAmortizationLineRecord[] = [];
   // Insertion-ordered — the cascade walk's reservation order (0021).
   private derivativeRoyaltyEdges: DerivativeRoyaltyEdgeRecord[] = [];
+  private sampleClearanceEdges: SampleClearanceEdgeRecord[] = [];
+  private compositionPublishers: CompositionPublisherRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -1121,6 +1125,62 @@ export class InMemoryStore implements Store {
     // Insertion order — the deterministic reservation order (the array IS
     // the insertion_order identity column's local mirror).
     return this.derivativeRoyaltyEdges.filter((row) => row.asset_id === assetId);
+  }
+
+  async insertSampleClearanceEdge(
+    row: Omit<SampleClearanceEdgeRecord, 'id'>,
+  ): Promise<SampleClearanceEdgeRecord> {
+    // UNIQUE on (work_id, parent_composition_id, rights_holder_payee_id,
+    // rights_type) — a duplicate registration throws the unique violation
+    // (the replay surface). The same (work, parent) pair on BOTH sides of
+    // the rights separation is two distinct contracts, not a duplicate.
+    if (
+      this.sampleClearanceEdges.some(
+        (existing) =>
+          existing.work_id === row.work_id &&
+          existing.parent_composition_id === row.parent_composition_id &&
+          existing.rights_holder_payee_id === row.rights_holder_payee_id &&
+          existing.rights_type === row.rights_type,
+      )
+    ) {
+      uniqueViolation(
+        'sample_clearance_edges.work_id,parent_composition_id,rights_holder_payee_id,rights_type',
+      );
+    }
+    const record: SampleClearanceEdgeRecord = { ...row, id: randomUUID() };
+    this.sampleClearanceEdges.push(record);
+    return record;
+  }
+
+  async getSampleClearanceEdgesByWork(workId: string): Promise<SampleClearanceEdgeRecord[]> {
+    // Insertion order — the deterministic reservation order (the array IS
+    // the insertion_order identity column's local mirror).
+    return this.sampleClearanceEdges.filter((row) => row.work_id === workId);
+  }
+
+  async insertCompositionPublisher(
+    row: Omit<CompositionPublisherRecord, 'id'>,
+  ): Promise<CompositionPublisherRecord> {
+    // UNIQUE on (composition_id, publisher_payee_id) — a duplicate
+    // registration throws the unique violation (the replay surface).
+    if (
+      this.compositionPublishers.some(
+        (existing) =>
+          existing.composition_id === row.composition_id &&
+          existing.publisher_payee_id === row.publisher_payee_id,
+      )
+    ) {
+      uniqueViolation('composition_publishers.composition_id,publisher_payee_id');
+    }
+    const record: CompositionPublisherRecord = { ...row, id: randomUUID() };
+    this.compositionPublishers.push(record);
+    return record;
+  }
+
+  async listCompositionPublishers(compositionId: string): Promise<CompositionPublisherRecord[]> {
+    // Insertion order — the deterministic routing order (the array IS the
+    // insertion_order identity column's local mirror).
+    return this.compositionPublishers.filter((row) => row.composition_id === compositionId);
   }
 
 

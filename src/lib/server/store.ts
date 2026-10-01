@@ -78,6 +78,8 @@ import type {
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
   DerivativeRoyaltyEdgeRecord,
+  SampleClearanceEdgeRecord,
+  CompositionPublisherRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -787,6 +789,37 @@ export interface Store {
    * edge; each contract row reserves independently.
    */
   getDerivativeRoyaltyEdgesByAsset(assetId: string): Promise<DerivativeRoyaltyEdgeRecord[]>;
+
+  /**
+   * Register a clearance agreement of record (migration 0022): the work's
+   * licensed use of an upstream composition on one side of the rights
+   * separation. Duplicate (work, parent, payee, rights_type) throws the
+   * unique violation.
+   */
+  insertSampleClearanceEdge(
+    row: Omit<SampleClearanceEdgeRecord, 'id'>,
+  ): Promise<SampleClearanceEdgeRecord>;
+
+  /**
+   * One work's outgoing clearance edges — the depth-first walk's per-node
+   * lookup, oldest first (created_at ASC, insertion_order ASC): the
+   * deterministic reservation order. Edges for BOTH sides of the rights
+   * separation return here; the cascade planner filters by the line's
+   * rights_type.
+   */
+  getSampleClearanceEdgesByWork(workId: string): Promise<SampleClearanceEdgeRecord[]>;
+
+  /** Register a composition's publisher of record (migration 0022). */
+  insertCompositionPublisher(
+    row: Omit<CompositionPublisherRecord, 'id'>,
+  ): Promise<CompositionPublisherRecord>;
+
+  /**
+   * One composition's publishers of record, oldest first (created_at ASC,
+   * insertion_order ASC): the deterministic order the statutory mechanical
+   * pool routes in.
+   */
+  listCompositionPublishers(compositionId: string): Promise<CompositionPublisherRecord[]>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
