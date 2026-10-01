@@ -73,6 +73,8 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  FilmTerritoryWithholdingRecord,
+  FilmTerritoryDistributionRecord,
   GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
@@ -206,6 +208,12 @@ const TABLES = {
   derivativeRoyaltyEdges: 'derivative_royalty_edges',
   sampleClearanceEdges: 'sample_clearance_edges',
   compositionPublishers: 'composition_publishers',
+  // Migration 0023 — the film multi-territory withholding log + territory
+  // envelopes (PR 18). The withholding log is the per-line, pre-conversion
+  // foreign-tax evidence; the envelopes are the per-territory routing
+  // decisions behind the cross-collateralization firewall.
+  filmTerritoryWithholdings: 'film_territory_withholdings',
+  filmTerritoryDistributions: 'film_territory_distributions',
 } as const;
 
 /**
@@ -819,6 +827,126 @@ export class SupabaseStore implements Store {
         .order('insertion_order', { ascending: true }),
       'listFilmWaterfallDistributions',
     );
+  }
+
+  // --- Film multi-territory withholding + cross-collateralization firewall (migration 0023, PR 18) ---
+
+  async insertFilmTerritoryWithholding(
+    row: Omit<FilmTerritoryWithholdingRecord, 'id'>,
+  ): Promise<FilmTerritoryWithholdingRecord> {
+    // UNIQUE on event_id (the content-derived match_queue event): a duplicate
+    // insert throws here (the same failure mode the canonical store
+    // exhibits) and the caller recovers by reading the existing row — one
+    // withholding log per line, ever.
+    return this.oneStrict<FilmTerritoryWithholdingRecord>(
+      this.client
+        .from(TABLES.filmTerritoryWithholdings)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertFilmTerritoryWithholding',
+    );
+  }
+
+  async getFilmTerritoryWithholdingByEventId(
+    eventId: string,
+  ): Promise<FilmTerritoryWithholdingRecord | undefined> {
+    return this.one<FilmTerritoryWithholdingRecord>(
+      this.client
+        .from(TABLES.filmTerritoryWithholdings)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getFilmTerritoryWithholdingByEventId',
+    );
+  }
+
+  async listFilmTerritoryWithholdingsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryWithholdingRecord[]> {
+    // Oldest first (created_at ASC, insertion_order ASC) — the film's
+    // withholding history in log order.
+    return this.many<FilmTerritoryWithholdingRecord>(
+      this.client
+        .from(TABLES.filmTerritoryWithholdings)
+        .select()
+        .eq('film_id', filmId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listFilmTerritoryWithholdingsByFilm',
+    );
+  }
+
+  async insertFilmTerritoryDistribution(
+    row: Omit<FilmTerritoryDistributionRecord, 'id'>,
+  ): Promise<FilmTerritoryDistributionRecord> {
+    // UNIQUE on (escrow_ledger_id, territory_code): a duplicate insert
+    // throws here (the same failure mode the canonical store exhibits) and
+    // the caller recovers by reading the existing rows — one routing
+    // decision per released receipt per territory, ever.
+    return this.oneStrict<FilmTerritoryDistributionRecord>(
+      this.client
+        .from(TABLES.filmTerritoryDistributions)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertFilmTerritoryDistribution',
+    );
+  }
+
+  async listFilmTerritoryDistributionsByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    // One receipt's territory envelopes, territory_code ASC (deterministic).
+    return this.many<FilmTerritoryDistributionRecord>(
+      this.client
+        .from(TABLES.filmTerritoryDistributions)
+        .select()
+        .eq('escrow_ledger_id', escrowLedgerId)
+        .order('territory_code', { ascending: true }),
+      'listFilmTerritoryDistributionsByEscrow',
+    );
+  }
+
+  async listFilmTerritoryDistributionsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    // Oldest first — the per-territory paid state folds in routing order
+    // (insertion_order ASC is the strict tiebreak when created_at ties).
+    return this.many<FilmTerritoryDistributionRecord>(
+      this.client
+        .from(TABLES.filmTerritoryDistributions)
+        .select()
+        .eq('film_id', filmId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listFilmTerritoryDistributionsByFilm',
+    );
+  }
+
+  async updateFilmTerritoryDistributionStatus(
+    id: string,
+    status: FilmTerritoryDistributionRecord['status'],
+  ): Promise<FilmTerritoryDistributionRecord | undefined> {
+    return this.one<FilmTerritoryDistributionRecord>(
+      this.client
+        .from(TABLES.filmTerritoryDistributions)
+        .update({ status })
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'updateFilmTerritoryDistributionStatus',
+    );
+  }
+
+  async deleteFilmTerritoryDistribution(id: string): Promise<void> {
+    const { error } = await this.client
+      .from(TABLES.filmTerritoryDistributions)
+      .delete()
+      .eq('id', id);
+    if (error) {
+      throw new Error(`deleteFilmTerritoryDistribution: ${error.message} (code ${error.code})`);
+    }
   }
 
   // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---

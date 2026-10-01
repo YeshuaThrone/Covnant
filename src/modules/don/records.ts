@@ -212,6 +212,96 @@ export type FilmWaterfallDistributionRecord = {
   created_at: string;
 };
 
+// --- Film multi-territory withholding + cross-collateralization firewall (PR 18, migration 0023) ---
+
+/**
+ * One film line's foreign-withholding log (migration 0023) — the per-line,
+ * pre-conversion record. The withholding is computed on the SOURCE-currency
+ * amount at the territory's pinned treaty rate and logged BEFORE anything
+ * converts into the Don ledger base currency; the log row is the
+ * foreign-tax-credit evidence and the rate+amount audit of record. UNIQUE on
+ * event_id (the content-derived match_queue event): one withholding log per
+ * line, ever — a replayed line recovers by reading the existing row.
+ */
+export type FilmTerritoryWithholdingRecord = {
+  id: string;
+  /** UNIQUE — the content-derived match_queue event id (addendum 6, migration 0011). */
+  event_id: string;
+  /** The film the line receipts against (the escrow/waterfall key). */
+  film_id: string;
+  /** The film tax jurisdiction (ISO 3166-1 alpha-2). */
+  territory_code: string;
+  /** Addendum 6's flag as the line carried it. */
+  foreign_tax_withheld: boolean;
+  /** The applied treaty rate in bps — 0 when the line was not withheld. */
+  withholding_rate_bps: number;
+  /** The rate-table version consulted — null when the line was not withheld. */
+  rate_table_version: string | null;
+  /** The statement's own denomination. */
+  source_currency: string;
+  /** Exact source amounts as decimal micros text — never a float. */
+  gross_source_micros: string;
+  withheld_source_micros: string;
+  net_source_micros: string;
+  /** The Don ledger base currency the net posts into. */
+  base_currency: string;
+  /** The applied FX rate (micros of base per source unit), logged with the conversion. */
+  fx_rate_micros: number;
+  /** Whole base-currency cents: the escrow posts the NET; the log carries all three. */
+  gross_base_cents: number;
+  withheld_base_cents: number;
+  net_base_cents: number;
+  created_at: string;
+};
+
+export type FilmTerritoryDistributionStatus = "routed" | "applied";
+
+/** One cross-territorial application — the CAMA-permitted sweep's audit row. */
+export type FilmTerritoryCrossApplication = {
+  /** The territory whose obligation drew. */
+  debtor_territory: string;
+  /** The territory whose tier-5 residue funded it. */
+  creditor_territory: string;
+  /** The debtor's obligation leg the application satisfied. */
+  debtor_leg_id: string;
+  /** Exact integer cents that crossed. */
+  applied_cents: number;
+};
+
+/**
+ * One territory envelope's routing decision on a released escrow receipt
+ * (migration 0023) — the territory partition of the film_waterfall_distributions
+ * record (PR 8). One row per released receipt PER TERRITORY (unique on
+ * (escrow_ledger_id, territory_code)): the per-leg routing detail computed
+ * from that territory's own money and its own paid state, so the shortfall
+ * carry stays per-territory and no pooled allocation can pass the firewall.
+ * Lifecycle mirrors the parent record: inserted 'routed' before the money
+ * moves, flipped 'applied' on release success, deleted when the release
+ * refuses. The CAMA firewall state rides the row: the flag as honored, and
+ * the cross-territorial applications when the override fired (null = none —
+ * the default-deny shape).
+ */
+export type FilmTerritoryDistributionRecord = {
+  id: string;
+  film_id: string;
+  escrow_ledger_id: string;
+  territory_code: string;
+  status: FilmTerritoryDistributionStatus;
+  /** The First Dollar Gross bypass this territory's envelope took, integer cents. */
+  fdg_bypass_cents: number;
+  /** The per-leg routing detail (the router's leg outcomes), stored jsonb. */
+  legs: import("@/modules/waterfall/engine").WaterfallLegRouting[];
+  /** The per-tier totals this envelope routed, stored jsonb. */
+  tier_allocations: import("@/modules/waterfall/engine").WaterfallTierAllocation[];
+  /** The honest per-territory carry after this routing, integer cents. */
+  unpaid_total_cents: number;
+  /** The CAMA cross-collateralization flag as honored at routing (default false). */
+  cross_collateralization_permitted: boolean;
+  /** The cross-territorial applications when the CAMA override fired; null = none. */
+  cross_applications: FilmTerritoryCrossApplication[] | null;
+  created_at: string;
+};
+
 // --- Podcast episode splits + guest milestone bonuses (PR 11, migration 0017) ---
 
 /**

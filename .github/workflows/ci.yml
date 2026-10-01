@@ -152,6 +152,12 @@ jobs:
           # 0011-0021 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
+          # Film multi-territory withholding + cross-collateralization
+          # firewall (Deep Royalties PR 18): the per-line pre-conversion
+          # withholding log and the per-territory routing envelopes —
+          # applied twice like 0011-0022 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -595,6 +601,84 @@ jobs:
           greedy_share=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from composition_publishers where share_bps > 10000")
           [ "$greedy_share" = "0" ] || { echo "SHARE BPS ABOVE 10000 ACCEPTED by the check constraint"; exit 1; }
           echo "OK: composition_publishers share_bps check rejects more than the whole pool"
+
+          # Film multi-territory withholding + cross-collateralization
+          # firewall (migration 0023, Deep Royalties PR 18): the withholding
+          # log's inventory, RLS deny-all, the guarded line-event FK, the
+          # rate-consistency and UNIQUE replay checks, and the territory
+          # envelopes' CAMA firewall invariant.
+          assert_cols film_territory_withholdings id event_id film_id territory_code foreign_tax_withheld withholding_rate_bps rate_table_version source_currency gross_source_micros withheld_source_micros net_source_micros base_currency fx_rate_micros gross_base_cents withheld_base_cents net_base_cents created_at insertion_order
+          assert_cols film_territory_distributions id film_id escrow_ledger_id territory_code status fdg_bypass_cents legs tier_allocations unpaid_total_cents cross_collateralization_permitted cross_applications created_at insertion_order
+          for table in film_territory_withholdings film_territory_distributions; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: film territory tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.film_territory_withholdings'::regclass and conname = 'fk_film_territory_withholdings_event'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_film_territory_withholdings_event"; exit 1; }
+          echo "OK: fk_film_territory_withholdings_event exists"
+          # The FK MUST reject a withholding log against a line that never
+          # entered the match queue — the insert is expected to fail.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_withholdings (event_id, film_id, territory_code, foreign_tax_withheld, withholding_rate_bps, source_currency, gross_source_micros, withheld_source_micros, net_source_micros, base_currency, fx_rate_micros, gross_base_cents, withheld_base_cents, net_base_cents) values ('no-such-film-line', 'film_wh_probe', 'FR', false, 0, 'EUR', '1000000000', '0', '1000000000', 'USD', 1080000, 108, 0, 108)" >/dev/null 2>&1 || true
+          orphan_wh=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_withholdings where event_id = 'no-such-film-line'")
+          [ "$orphan_wh" = "0" ] || { echo "ORPHAN WITHHOLDING LOG ACCEPTED — the line-event FK is missing"; exit 1; }
+          echo "OK: film_territory_withholdings line-event FK rejects unmatched lines"
+          # The rate-consistency check: a withheld line pairs a positive
+          # treaty rate with a rate-table version; an unwithheld line pairs
+          # zero with null. Anything else refuses at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into match_queue (id, event_id, rights_pipeline, source, reason, raw_payload) values (gen_random_uuid()::text, 'evt_film_wh_probe', 'composition_performance', 'statement', 'probe', '{}')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_withholdings (event_id, film_id, territory_code, foreign_tax_withheld, withholding_rate_bps, source_currency, gross_source_micros, withheld_source_micros, net_source_micros, base_currency, fx_rate_micros, gross_base_cents, withheld_base_cents, net_base_cents) values ('evt_film_wh_probe', 'film_wh_probe', 'FR', true, 0, 'EUR', '1000000000', '0', '1000000000', 'USD', 1080000, 108, 0, 108)" >/dev/null 2>&1 || true
+          bad_wh=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_withholdings where event_id = 'evt_film_wh_probe' and withholding_rate_bps = 0")
+          [ "$bad_wh" = "0" ] || { echo "WITHHELD LINE WITH ZERO RATE ACCEPTED by the consistency check"; exit 1; }
+          echo "OK: film_territory_withholdings rate-consistency check rejects an unpaired withheld line"
+          # One withholding log per line, ever: the UNIQUE event_id refuses
+          # a replayed line (23505), the engine recovers by reading.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into film_territory_withholdings (event_id, film_id, territory_code, foreign_tax_withheld, withholding_rate_bps, rate_table_version, source_currency, gross_source_micros, withheld_source_micros, net_source_micros, base_currency, fx_rate_micros, gross_base_cents, withheld_base_cents, net_base_cents) values ('evt_film_wh_probe', 'film_wh_probe', 'FR', true, 3000, 'treaty-2026-v1', '1000000000', '300000000', '700000000', 'USD', 1080000, 108, 32, 76)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_withholdings (event_id, film_id, territory_code, foreign_tax_withheld, withholding_rate_bps, rate_table_version, source_currency, gross_source_micros, withheld_source_micros, net_source_micros, base_currency, fx_rate_micros, gross_base_cents, withheld_base_cents, net_base_cents) values ('evt_film_wh_probe', 'film_wh_probe', 'FR', true, 3000, 'treaty-2026-v1', '1000000000', '300000000', '700000000', 'USD', 1080000, 108, 32, 76)" >/dev/null 2>&1 || true
+          dup_wh=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_withholdings where event_id = 'evt_film_wh_probe'")
+          [ "$dup_wh" = "1" ] || { echo "DUPLICATE WITHHOLDING LOG ACCEPTED by the UNIQUE event_id"; exit 1; }
+          echo "OK: film_territory_withholdings UNIQUE event_id rejects a replayed line"
+          # The CAMA firewall as a database invariant: a cross-application
+          # row without the explicit override flag refuses at the DDL.
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.film_territory_distributions'::regclass and conname = 'fk_film_territory_distributions_escrow'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_film_territory_distributions_escrow"; exit 1; }
+          echo "OK: fk_film_territory_distributions_escrow exists"
+          # The FK MUST reject an envelope routed against an escrow receipt
+          # that never landed in ledger_transactions.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, legs, tier_allocations) values ('film_cama_probe', 'no-such-receipt-cama', 'FR', '{}', '{}')" >/dev/null 2>&1 || true
+          orphan_dist=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where escrow_ledger_id = 'no-such-receipt-cama'")
+          [ "$orphan_dist" = "0" ] || { echo "ORPHAN TERRITORY ENVELOPE ACCEPTED — the escrow FK is missing"; exit 1; }
+          echo "OK: film_territory_distributions escrow FK rejects unrouted receipts"
+          # One routing decision per released receipt per territory, ever:
+          # the UNIQUE (escrow_ledger_id, territory_code) pair refuses a
+          # duplicate envelope but not a second territory on the same
+          # receipt — the territory partition stays open, the per-territory
+          # row stays single.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ledger_transactions (id, split_run_id, line_item_id, payee_id, payee_name, role, share_bps, amount_cents, currency, status, created_at, kind) values ('escrow_cama_probe', 'run_cama_probe', 'line_cama_probe', 'film_escrow:film_cama_probe', 'Film escrow', 'platform', 10000, 50000, 'USD', 'escrow_waterfall_pending', now(), 'escrow_waterfall_pending')"
+          # The CAMA firewall as a database invariant: a cross-application
+          # row without the explicit override flag refuses at the DDL. The
+          # insert targets the REAL receipt above, so the only possible
+          # failure cause is the check constraint itself.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, legs, tier_allocations, cross_collateralization_permitted, cross_applications) values ('film_cama_probe', 'escrow_cama_probe', 'FR', '{}', '{}', false, '[{\"debtor_territory\":\"DE\",\"creditor_territory\":\"FR\",\"debtor_leg_id\":\"leg_1\",\"applied_cents\":100}]')" >/dev/null 2>&1 || true
+          cross_probe=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where film_id = 'film_cama_probe' and cross_applications is not null")
+          [ "$cross_probe" = "0" ] || { echo "CROSS-APPLICATION WITHOUT THE CAMA FLAG ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: film_territory_distributions refuses a cross-application without the CAMA override"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, legs, tier_allocations) values ('film_cama_probe', 'escrow_cama_probe', 'FR', '{}', '{}')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, legs, tier_allocations) values ('film_cama_probe', 'escrow_cama_probe', 'FR', '{}', '{}')" >/dev/null 2>&1 || true
+          dup_env=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where escrow_ledger_id = 'escrow_cama_probe' and territory_code = 'FR'")
+          [ "$dup_env" = "1" ] || { echo "DUPLICATE TERRITORY ENVELOPE ACCEPTED by the UNIQUE pair"; exit 1; }
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, legs, tier_allocations) values ('film_cama_probe', 'escrow_cama_probe', 'DE', '{}', '{}')"
+          multi_env=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where escrow_ledger_id = 'escrow_cama_probe'")
+          [ "$multi_env" = "2" ] || { echo "SECOND TERRITORY ENVELOPE REFUSED — the receipt partition is not per-territory"; exit 1; }
+          echo "OK: film_territory_distributions UNIQUE pair rejects duplicates, keeps the territory partition open"
+          # A status outside the routed/applied lifecycle refuses at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into film_territory_distributions (film_id, escrow_ledger_id, territory_code, status, legs, tier_allocations) values ('film_cama_probe', 'escrow_cama_probe', 'UK', 'settled', '{}', '{}')" >/dev/null 2>&1 || true
+          bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where territory_code = 'UK'")
+          [ "$bad_status" = "0" ] || { echo "BAD ENVELOPE STATUS ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: film_territory_distributions status check rejects off-lifecycle states"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

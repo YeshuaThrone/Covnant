@@ -65,6 +65,8 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  FilmTerritoryWithholdingRecord,
+  FilmTerritoryDistributionRecord,
   GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
@@ -479,6 +481,70 @@ export interface Store {
   listFilmWaterfallDistributions(
     filmId: string,
   ): Promise<FilmWaterfallDistributionRecord[]>;
+
+  // --- Film multi-territory withholding + cross-collateralization firewall (migration 0023, PR 18) ---
+
+  /**
+   * Writes one film line's foreign-withholding log. UNIQUE on event_id (the
+   * content-derived match_queue event) — one withholding log per line, ever;
+   * a duplicate insert throws the unique violation and the caller recovers
+   * by reading the existing row (the replay surface).
+   */
+  insertFilmTerritoryWithholding(
+    row: Omit<FilmTerritoryWithholdingRecord, 'id'>,
+  ): Promise<FilmTerritoryWithholdingRecord>;
+
+  /** One line's withholding log by its event id, or undefined — the replay recovery read. */
+  getFilmTerritoryWithholdingByEventId(
+    eventId: string,
+  ): Promise<FilmTerritoryWithholdingRecord | undefined>;
+
+  /** The film's withholding logs, oldest first (created_at ASC, insertion order as tiebreak). */
+  listFilmTerritoryWithholdingsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryWithholdingRecord[]>;
+
+  /**
+   * Persists one territory envelope's routing decision on a released escrow
+   * receipt. UNIQUE on (escrow_ledger_id, territory_code) — one routing
+   * decision per receipt per territory, ever; a duplicate insert throws
+   * (the quarantine-once precedent) and the caller recovers by reading the
+   * existing rows through listFilmTerritoryDistributionsByEscrow.
+   */
+  insertFilmTerritoryDistribution(
+    row: Omit<FilmTerritoryDistributionRecord, 'id'>,
+  ): Promise<FilmTerritoryDistributionRecord>;
+
+  /** One released escrow receipt's territory envelopes, territory_code ASC. */
+  listFilmTerritoryDistributionsByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]>;
+
+  /**
+   * The film's territory envelopes, oldest first (created_at ASC, insertion
+   * order as tiebreak) — the per-territory paid state and the film's
+   * multi-territory routing history.
+   */
+  listFilmTerritoryDistributionsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]>;
+
+  /**
+   * Flips one territory envelope's status ('routed' → 'applied' on release
+   * success). Returns the row, or undefined when the id is unknown — the
+   * caller deleted it (the release refused) or it never existed.
+   */
+  updateFilmTerritoryDistributionStatus(
+    id: string,
+    status: FilmTerritoryDistributionRecord['status'],
+  ): Promise<FilmTerritoryDistributionRecord | undefined>;
+
+  /**
+   * Drops a territory envelope whose money move was refused (retryable) —
+   * the parent routing decision's lifecycle. Per-territory paid sums
+   * never see it.
+   */
+  deleteFilmTerritoryDistribution(id: string): Promise<void>;
 
   // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
 
