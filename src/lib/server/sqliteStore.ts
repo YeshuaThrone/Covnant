@@ -1189,6 +1189,54 @@ export class SqliteStore implements Store {
     return this.getLedgerTransaction(id);
   }
 
+  // --- Film waterfall escrow (PR 9) ---
+
+  async listFilmEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'escrow_waterfall_pending' AND status = 'escrow_waterfall_pending'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleFilmEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS. changes = 0
+    // means the row is absent or no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'escrow_waterfall_pending'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  async sumFilmGrossReceiptCents(filmId: string): Promise<number> {
+    // Gross receipts count EVERY escrow receipt row for the film, held or
+    // released — money is received when it locks, not when it releases. The
+    // per-film payee id (film_escrow:{filmId}) is the grouping key.
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS gross_cents
+         FROM ledger_transactions
+         WHERE kind = 'escrow_waterfall_pending' AND payee_id = ?`,
+      )
+      .get(`film_escrow:${filmId}`) as { gross_cents: number };
+    return Promise.resolve(row.gross_cents);
+  }
+
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {
     const record: BaasTransferRecord = { ...row, id: randomUUID() };
     this.db

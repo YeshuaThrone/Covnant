@@ -143,6 +143,9 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   funding_received: 'Funding received',
   unclaimed_holding_post: 'Unclaimed royalty holding',
   unclaimed_holding_release: 'Unclaimed royalty released',
+  film_escrow_post: 'Film receipt escrowed',
+  film_escrow_release: 'Film escrow released',
+  film_net_points: 'Net points paid',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
@@ -163,6 +166,13 @@ const INFLOW_KINDS: ReadonlySet<JournalKind> = new Set<JournalKind>([
   // CREDIT the verified allocation lands in. The post kind faces no vault —
   // its credit side is the platform holding account — so it stays out.
   'unclaimed_holding_release',
+  // Film escrow release (PR 9): the holder-facing legs are the FDG
+  // participant vault CREDITs and the platform dust credit; the tier legs
+  // face no vault. The post kind faces no vault — its credit side is the
+  // film's escrow account — so it stays out. Net points credit talent
+  // vaults from the producer pool.
+  'film_escrow_release',
+  'film_net_points',
 ]);
 
 /** The entry_hash short form — the leading hash characters, display-safe. */

@@ -67,6 +67,9 @@ describe('don constants', () => {
       'funding_received',
       'unclaimed_holding_post',
       'unclaimed_holding_release',
+      'film_escrow_post',
+      'film_escrow_release',
+      'film_net_points',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

@@ -8,7 +8,11 @@
 import {
   GL_ACCOUNT_FBO_CASH,
   GL_ACCOUNT_UNCLAIMED_HOLDING,
+  filmEscrowGlAccount,
+  tier5InvestorPoolGlAccount,
+  tier5ProducerPoolGlAccount,
   vaultGlAccount,
+  waterfallTierGlAccount,
   type VaultBucket,
 } from "@/modules/don/constants";
 
@@ -92,6 +96,67 @@ export function unclaimedHoldingDebit(amountCents: number): GlLegInput {
 export function unclaimedHoldingCredit(amountCents: number): GlLegInput {
   return {
     account: GL_ACCOUNT_UNCLAIMED_HOLDING,
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Film waterfall escrow (PR 9): the per-film escrow obligation account. A
+// locked receipt posts a credit here against an FBO debit; the verified
+// release debits it against the waterfall routing legs — never a vault
+// bucket, never the dust payee's account, never the unclaimed holding
+// account.
+export function filmEscrowDebit(filmId: string, amountCents: number): GlLegInput {
+  return {
+    account: filmEscrowGlAccount(filmId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function filmEscrowCredit(filmId: string, amountCents: number): GlLegInput {
+  return {
+    account: filmEscrowGlAccount(filmId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Waterfall tier legs (PR 9): tiers 0 through 4 are plain accounts. The
+// tier-5 net profit pool is NEVER a plain leg — route its credit through
+// tier5ProducerPoolCredit/tier5InvestorPoolCredit, which split the locked
+// 50/50 (net points draw only from the producer half).
+export function waterfallTierCredit(
+  filmId: string,
+  tierLevel: number,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: waterfallTierGlAccount(filmId, tierLevel),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+export function tier5ProducerPoolCredit(filmId: string, amountCents: number): GlLegInput {
+  return {
+    account: tier5ProducerPoolGlAccount(filmId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+export function tier5ProducerPoolDebit(filmId: string, amountCents: number): GlLegInput {
+  return {
+    account: tier5ProducerPoolGlAccount(filmId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function tier5InvestorPoolCredit(filmId: string, amountCents: number): GlLegInput {
+  return {
+    account: tier5InvestorPoolGlAccount(filmId),
     debit_cents: 0,
     credit_cents: amountCents,
   };

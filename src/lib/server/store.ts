@@ -347,6 +347,52 @@ export interface Store {
     settledAt: string,
   ): Promise<LedgerTransactionRecord | undefined>;
 
+  // --- Film waterfall escrow (PR 9) ---
+  // Film distributor receipts lock as ledger rows with kind and status
+  // 'escrow_waterfall_pending' — money received from a film distributor that
+  // stays OUT of every payee vault and out of the waterfall tiers until the
+  // statement line items are cross-referenced against the signed deal memo
+  // and CAMA agreement. The escrow is per-film: the payee id is
+  // `film_escrow:{filmId}` and the GL account is `film_waterfall_escrow:{filmId}`,
+  // the way vault accounts carry the payee id. No migration: status/kind are
+  // free text (0006 has no check constraint on either), so the state extends
+  // the existing ledger contract in place.
+
+  /**
+   * The held escrow credits, newest first (created_at DESC, insertion order
+   * as tiebreak), bounded by limit — across ALL films. Released credits
+   * (status 'settled') are history, not holdings — they never appear here.
+   */
+  listFilmEscrowCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * The verified-release CAS — the settlement concurrency canon (0009)
+   * applied to a locked film receipt: flips ONE row from status
+   * 'escrow_waterfall_pending' to 'settled' (settled_at = the passed
+   * instant) in a single conditional statement. Returns the row only when
+   * THIS call won the transition; undefined when the id is unknown OR the
+   * receipt is no longer locked — the concurrent release loser reads
+   * exactly that and refuses. The flip happens BEFORE any waterfall leg
+   * (insert-as-lock, the payout-reversal precedent), so a crash mid-release
+   * fails toward "nothing moved twice": the settled row with no
+   * film_escrow_release journal is the visible alarm.
+   */
+  settleFilmEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * The film's cumulative gross receipts, integer cents: the sum over ALL
+   * of the film's escrow receipt rows (kind 'escrow_waterfall_pending',
+   * payee `film_escrow:{filmId}`) regardless of status — money counts as
+   * RECEIVED when it locks, not when it releases, so the First Dollar Gross
+   * trigger reads the film's true gross. The aggregate is exact (the store
+   * computes it; callers never sum a truncated page). Zero for a film with
+   * no receipts.
+   */
+  sumFilmGrossReceiptCents(filmId: string): Promise<number>;
+
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
   getBaasTransfer(id: string): Promise<BaasTransferRecord | undefined>;

@@ -473,6 +473,50 @@ export class InMemoryStore implements Store {
     return row;
   }
 
+  // --- Film waterfall escrow (PR 9) ---
+
+  async listFilmEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'escrow_waterfall_pending' &&
+          row.status === 'escrow_waterfall_pending',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleFilmEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'escrow_waterfall_pending') return undefined;
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async sumFilmGrossReceiptCents(filmId: string): Promise<number> {
+    // Gross receipts count EVERY escrow receipt row for the film, held or
+    // released — money is received when it locks, not when it releases. The
+    // per-film payee id (film_escrow:{filmId}) is the grouping key.
+    const payeeId = `film_escrow:${filmId}`;
+    return this.ledgerTransactions.reduce(
+      (total, row) =>
+        row.kind === 'escrow_waterfall_pending' && row.payee_id === payeeId
+          ? total + row.amount_cents
+          : total,
+      0,
+    );
+  }
+
   // --- BaaS transfers ---
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {

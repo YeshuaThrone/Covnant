@@ -85,6 +85,11 @@ export const LEDGER_STATUSES = [
   // kind is 'unclaimed_holding'; release settles it through the normal
   // clearance-gated settlement path (status → 'settled' + release journal).
   "unclaimed_holding",
+  // Film waterfall escrow (PR 9): a film distributor's receipt locks in
+  // escrow until the statement line items are cross-referenced against the
+  // signed deal memo and CAMA agreement; the verified release settles the
+  // row (status → 'settled') and routes the money into the waterfall.
+  "escrow_waterfall_pending",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -100,6 +105,11 @@ export const LEDGER_KINDS = [
   // holding. Kind marks WHAT the row is for its whole life (status carries
   // the state machine), the same division 'payout_failed_reversal' uses.
   "unclaimed_holding",
+  // Film waterfall escrow (PR 9): a film distributor's receipt locked in
+  // escrow for the waterfall. Kind marks WHAT the row is for its whole life
+  // (a released receipt stays kind 'escrow_waterfall_pending' with status
+  // 'settled'), the same division PR 7 uses.
+  "escrow_waterfall_pending",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
