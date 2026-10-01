@@ -61,6 +61,12 @@ export interface ReconJobResult {
   unmatched?: number;
   /** The engine that produced the parse; null = deterministic code only. */
   engine_used?: string | null;
+  /** Matched MUSIC lines credited to UNCLAIMED_HOLDING (the activated
+   * canonical posting seam — integer cents, per-source replay guard). */
+  holding_posted?: number;
+  /** Matched lines whose post hit the per-source replay guard (409) —
+   * counted no-ops, never double posts. */
+  holding_replayed?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

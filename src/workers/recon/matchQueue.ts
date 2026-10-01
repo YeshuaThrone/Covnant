@@ -196,12 +196,27 @@ export async function crossReferenceLine(
   return { matchedCbtCode: null };
 }
 
+/**
+ * One line's write outcome — the canonical posting seam's input (the
+ * activated PR 2 → PR 7 wiring). Produced here so the vault lookup is
+ * never duplicated downstream: the posting pass re-derives nothing.
+ */
+export interface LineWriteOutcome {
+  line: ParsedStatementLine;
+  eventId: string;
+  matchedCbtCode: string | null;
+  /** false = the row already existed (a replay wrote nothing). */
+  written: boolean;
+}
+
 /** Aggregate write outcome for one ingest — the completion result's core. */
 export interface MatchQueueWriteCounts {
   written: number;
   alreadyPresent: number;
   matched: number;
   unmatched: number;
+  /** Per-line detail, in write order — the canonical posting seam's input. */
+  lineOutcomes: LineWriteOutcome[];
 }
 
 /**
@@ -222,13 +237,15 @@ export async function writeLinesToMatchQueue(
     alreadyPresent: 0,
     matched: 0,
     unmatched: 0,
+    lineOutcomes: [],
   };
   for (const line of lines) {
     const match =
       vault === null ? { matchedCbtCode: null } : await crossReferenceLine(line, vault);
+    const eventId = reconEventId(ingestId, line);
     const row = buildMatchQueueRow(
       line,
-      reconEventId(ingestId, line),
+      eventId,
       `recon:${line.profile}`,
     );
     try {
@@ -236,9 +253,24 @@ export async function writeLinesToMatchQueue(
       counts.written += 1;
       if (match.matchedCbtCode === null) counts.unmatched += 1;
       else counts.matched += 1;
+      counts.lineOutcomes.push({
+        line,
+        eventId,
+        matchedCbtCode: match.matchedCbtCode,
+        written: true,
+      });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       counts.alreadyPresent += 1;
+      // The row already exists — still record the outcome so a replayed
+      // pass re-enters the posting seam and reads the replay guard instead
+      // of silently assuming the money never posted.
+      counts.lineOutcomes.push({
+        line,
+        eventId,
+        matchedCbtCode: match.matchedCbtCode,
+        written: false,
+      });
     }
   }
   return counts;

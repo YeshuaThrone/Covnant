@@ -16,8 +16,10 @@
 
 import type { RoyaltyReconJobRecord } from "@/modules/recon/records";
 import type { Store } from "@/lib/server/store";
+import type { ParsedStatementLine } from "./records";
 import { calculateGuildResiduals } from "./guildResiduals";
 import { writeLinesToMatchQueue, type VaultLookup } from "./matchQueue";
+import { postMatchedLinesToHolding } from "./posting";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -50,12 +52,17 @@ export interface ProcessedJob {
   outcome: "completed" | "failed";
 }
 
-/** The completion result the worker writes — the spec's exact shape. */
+/** The completion result the worker writes — the spec's shape, plus the
+ * activated canonical-posting seam's honest counts. */
 export interface ReconWorkerResult {
   events_written: number;
   matched: number;
   unmatched: number;
   engine_used: string | null;
+  /** Matched MUSIC lines credited to UNCLAIMED_HOLDING this pass. */
+  holding_posted: number;
+  /** Matched lines whose post hit the per-source replay guard — no-ops. */
+  holding_replayed: number;
 }
 
 /**
@@ -124,18 +131,7 @@ async function parseDeterministic(
   // lines pass through untouched. A missing period or rate version fails
   // the job honestly (never a skipped obligation).
   const residualHolds = calculateGuildResiduals(lines);
-  const counts = await writeLinesToMatchQueue(
-    deps.store,
-    ingestId,
-    [...lines, ...residualHolds],
-    deps.vault,
-  );
-  return {
-    events_written: counts.written,
-    matched: counts.matched,
-    unmatched: counts.unmatched,
-    engine_used: null,
-  };
+  return await writeAndPost(deps, ingestId, [...lines, ...residualHolds], null);
 }
 
 /** The env-gated seam — PDF/image statements only, fail-closed when unset. */
@@ -160,17 +156,39 @@ async function parseThroughVisionEngine(
   if (!outcome.ok) {
     throw new StatementParseError(outcome.reason);
   }
-  const counts = await writeLinesToMatchQueue(
+  return await writeAndPost(deps, ingestId, outcome.lines, outcome.model);
+}
+
+/**
+ * The two lanes' shared tail: land the lines in match_queue, then run the
+ * ACTIVATED canonical posting seam — every matched music line's gross
+ * credits UNCLAIMED_HOLDING through PR 7's module (per-source replay
+ * guard, integer cents). The queue row is already durable when posting
+ * runs, so a posting failure throws into the job's fail-closed error path:
+ * the row stays open as the quarantine record and a retry re-enters
+ * idempotently through the replay guard — never a drop, never a double
+ * post. Film receipts and guild residual holds are rights_type 'unknown'
+ * and post nothing here — the film waterfall ledger is its own machine.
+ */
+async function writeAndPost(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  lines: readonly ParsedStatementLine[],
+  engineUsed: string | null,
+): Promise<ReconWorkerResult> {
+  const counts = await writeLinesToMatchQueue(deps.store, ingestId, lines, deps.vault);
+  const posting = await postMatchedLinesToHolding(
     deps.store,
-    ingestId,
-    outcome.lines,
-    deps.vault,
+    counts.lineOutcomes,
+    (deps.now ?? (() => new Date()))(),
   );
   return {
     events_written: counts.written,
     matched: counts.matched,
     unmatched: counts.unmatched,
-    engine_used: outcome.model,
+    engine_used: engineUsed,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
   };
 }
 
@@ -203,7 +221,9 @@ export async function runWorkerLoop(
       console.log(
         `[recon-worker] ${job.outcome} ${job.job.id}: ` +
           `written=${r?.events_written ?? 0} matched=${r?.matched ?? 0} ` +
-          `unmatched=${r?.unmatched ?? 0} engine=${r?.engine_used ?? "deterministic"}`,
+          `unmatched=${r?.unmatched ?? 0} holding_posted=${r?.holding_posted ?? 0} ` +
+          `holding_replayed=${r?.holding_replayed ?? 0} ` +
+          `engine=${r?.engine_used ?? "deterministic"}`,
       );
     } catch (error) {
       // Surface, never swallow — the queue's own stale-claim recovery
