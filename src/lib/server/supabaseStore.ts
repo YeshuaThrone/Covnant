@@ -73,6 +73,10 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  PodcastEpisodeSplitAccrualRecord,
+  PodcastEpisodeSplitScheduleRecord,
+  PodcastGuestBonusAccrualRecord,
+  PodcastGuestBonusDefinitionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -90,6 +94,7 @@ import {
   type TerritorySettlementRecord,
   type UniversalRoyaltyLedgerRow,
 } from '@/lib/server/territorySettlement';
+import { podcastEpisodeIdOfQueueRow } from '@/modules/podcastSplits/engine';
 
 /** Drops the store-internal ordering column; the DB row is otherwise the record. */
 function toRecord<T>(row: Record<string, unknown>): T {
@@ -152,7 +157,22 @@ const TABLES = {
   // routing-decision record (the honest shortfall carry).
   filmWaterfallDefinitions: 'film_waterfall_definitions',
   filmWaterfallDistributions: 'film_waterfall_distributions',
+  // Migration 0017 — the podcast episode split ledger + guest milestone
+  // bonuses (PR 11). The schedule is ONE validated routing per episode;
+  // accruals are unique per funding event and bonus accruals per
+  // content-derived event id — the once-only replay guards.
+  podcastEpisodeSplitSchedules: 'podcast_episode_split_schedules',
+  podcastEpisodeSplitAccruals: 'podcast_episode_split_accruals',
+  podcastGuestBonusDefinitions: 'podcast_guest_bonus_definitions',
+  podcastGuestBonusAccruals: 'podcast_guest_bonus_accruals',
 } as const;
+
+/**
+ * How far a verified-count scan reaches into the queue (PR 11). A truncated
+ * scan under-counts an episode — a milestone then under-fires and the money
+ * stays held (the fail-closed direction: never over-pays, never guesses).
+ */
+const VERIFIED_COUNT_SCAN_LIMIT = 10_000;
 
 /** The designated self-serve identity registry row (signup route header). */
 const SIGNUP_REGISTRY_CBT_CODE = 'CBT-SIGNUP-REGISTRY';
@@ -758,6 +778,203 @@ export class SupabaseStore implements Store {
         .order('insertion_order', { ascending: true }),
       'listFilmWaterfallDistributions',
     );
+  }
+
+  // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
+
+  async upsertPodcastEpisodeSplitSchedule(
+    row: PodcastEpisodeSplitScheduleRecord,
+  ): Promise<PodcastEpisodeSplitScheduleRecord> {
+    // One schedule per episode — the upsert targets the episode_id key, so
+    // a re-registration after the lock check replaces the row atomically.
+    return this.oneStrict<PodcastEpisodeSplitScheduleRecord>(
+      this.client
+        .from(TABLES.podcastEpisodeSplitSchedules)
+        .upsert(row, { onConflict: 'episode_id' })
+        .select()
+        .maybeSingle(),
+      'upsertPodcastEpisodeSplitSchedule',
+    );
+  }
+
+  async getPodcastEpisodeSplitSchedule(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitScheduleRecord | undefined> {
+    return this.one<PodcastEpisodeSplitScheduleRecord>(
+      this.client
+        .from(TABLES.podcastEpisodeSplitSchedules)
+        .select()
+        .eq('episode_id', episodeId)
+        .maybeSingle(),
+      'getPodcastEpisodeSplitSchedule',
+    );
+  }
+
+  async insertPodcastEpisodeSplitAccrual(
+    row: Omit<PodcastEpisodeSplitAccrualRecord, 'id'>,
+  ): Promise<PodcastEpisodeSplitAccrualRecord> {
+    // UNIQUE on source_event_id: a duplicate insert throws here (the same
+    // failure mode the canonical store exhibits) and the caller counts the
+    // replay as a no-op — one accrual per funding event, ever.
+    return this.oneStrict<PodcastEpisodeSplitAccrualRecord>(
+      this.client
+        .from(TABLES.podcastEpisodeSplitAccruals)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertPodcastEpisodeSplitAccrual',
+    );
+  }
+
+  async getPodcastEpisodeSplitAccrualBySourceEvent(
+    sourceEventId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord | undefined> {
+    return this.one<PodcastEpisodeSplitAccrualRecord>(
+      this.client
+        .from(TABLES.podcastEpisodeSplitAccruals)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getPodcastEpisodeSplitAccrualBySourceEvent',
+    );
+  }
+
+  async listPodcastEpisodeSplitAccruals(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord[]> {
+    // Oldest first — routing order (insertion_order ASC is the strict
+    // tiebreak when created_at ties).
+    return this.many<PodcastEpisodeSplitAccrualRecord>(
+      this.client
+        .from(TABLES.podcastEpisodeSplitAccruals)
+        .select()
+        .eq('episode_id', episodeId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listPodcastEpisodeSplitAccruals',
+    );
+  }
+
+  async insertPodcastGuestBonusDefinition(
+    row: PodcastGuestBonusDefinitionRecord,
+  ): Promise<PodcastGuestBonusDefinitionRecord> {
+    // Composite UNIQUE (episode, guest, kind, threshold) — one contract per
+    // milestone; a duplicate insert throws (the caller surfaces it raw).
+    return this.oneStrict<PodcastGuestBonusDefinitionRecord>(
+      this.client
+        .from(TABLES.podcastGuestBonusDefinitions)
+        .insert(row)
+        .select()
+        .maybeSingle(),
+      'insertPodcastGuestBonusDefinition',
+    );
+  }
+
+  async listPodcastGuestBonusDefinitions(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusDefinitionRecord[]> {
+    // Oldest first — definition registration order (insertion_order ASC is
+    // the strict tiebreak when created_at ties).
+    return this.many<PodcastGuestBonusDefinitionRecord>(
+      this.client
+        .from(TABLES.podcastGuestBonusDefinitions)
+        .select()
+        .eq('episode_id', episodeId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listPodcastGuestBonusDefinitions',
+    );
+  }
+
+  async insertPodcastGuestBonusAccrual(
+    row: Omit<PodcastGuestBonusAccrualRecord, 'id'>,
+  ): Promise<PodcastGuestBonusAccrualRecord> {
+    // UNIQUE on event_id (the content-derived `podcast:bonus:` id) — the
+    // once-only milestone arbiter; a duplicate insert throws.
+    return this.oneStrict<PodcastGuestBonusAccrualRecord>(
+      this.client
+        .from(TABLES.podcastGuestBonusAccruals)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertPodcastGuestBonusAccrual',
+    );
+  }
+
+  async markPodcastGuestBonusAccrualPosted(
+    id: string,
+    holdingLedgerId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord | undefined> {
+    return this.one<PodcastGuestBonusAccrualRecord>(
+      this.client
+        .from(TABLES.podcastGuestBonusAccruals)
+        .update({ status: 'posted', holding_ledger_id: holdingLedgerId })
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'markPodcastGuestBonusAccrualPosted',
+    );
+  }
+
+  async deletePodcastGuestBonusAccrual(id: string): Promise<void> {
+    const { error } = await this.client
+      .from(TABLES.podcastGuestBonusAccruals)
+      .delete()
+      .eq('id', id);
+    if (error) {
+      throw new Error(
+        `deletePodcastGuestBonusAccrual: ${error.message} (code ${error.code})`,
+      );
+    }
+  }
+
+  async listPodcastGuestBonusAccruals(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord[]> {
+    // Oldest first — accrual order (insertion_order ASC is the strict
+    // tiebreak when created_at ties).
+    return this.many<PodcastGuestBonusAccrualRecord>(
+      this.client
+        .from(TABLES.podcastGuestBonusAccruals)
+        .select()
+        .eq('episode_id', episodeId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listPodcastGuestBonusAccruals',
+    );
+  }
+
+  async sumVerifiedImpressionsByEpisode(
+    episodeId: string,
+    eventIdPrefixes: readonly string[],
+  ): Promise<number> {
+    // The raw payload is the source of truth — parse it like every other
+    // recovery path. Only rows whose event_id matches a milestone-kind
+    // prefix count (downloads ignores subscription rows), and only VERIFIED
+    // impressions count: held rows carry `podcast:held:` ids and unverified
+    // rows never wrote a `podcast:imp:` row at all. The bound keeps the
+    // scan honest — a truncated scan under-counts (fail-closed), never
+    // over-pays.
+    const rows = await this.many<{
+      event_id: string;
+      verified_impressions: number | null;
+      raw_payload: string;
+    }>(
+      this.client
+        .from(TABLES.matchQueue)
+        .select('event_id,verified_impressions,raw_payload')
+        .limit(VERIFIED_COUNT_SCAN_LIMIT),
+      'sumVerifiedImpressionsByEpisode',
+    );
+    let total = 0;
+    for (const row of rows) {
+      if (!eventIdPrefixes.some((prefix) => row.event_id.startsWith(prefix))) {
+        continue;
+      }
+      if (podcastEpisodeIdOfQueueRow(row.raw_payload) !== episodeId) continue;
+      total += row.verified_impressions ?? 0;
+    }
+    return total;
   }
 
   // --- BaaS transfers ---

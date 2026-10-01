@@ -85,6 +85,15 @@ export interface ReconJobResult {
   /** Podcast lane: commission deducted across the pass's posts, exact
    * fixed-point micros as text (never a float). */
   podcast_commission_micros?: string;
+  /** Podcast lane (PR 11): split accrual rows written this pass — one per
+   * funding event (unique on source_event_id, the replay guard). */
+  podcast_split_accruals?: number;
+  /** Podcast lane: split accruals that already existed — counted no-ops. */
+  podcast_split_replays?: number;
+  /** Podcast lane: guest milestone bonuses accrued (holding credits posted). */
+  podcast_bonus_accrued?: number;
+  /** Podcast lane: milestone crossings already accrued — counted no-ops. */
+  podcast_bonus_replayed?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

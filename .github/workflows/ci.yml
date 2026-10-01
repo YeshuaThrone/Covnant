@@ -117,6 +117,12 @@ jobs:
           # 0011-0015 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
+          # Podcast episode splits + guest milestone bonuses (Deep
+          # Royalties PR 11): the split schedule/accrual ledger and the
+          # guest bonus definition/accrual ledger — applied twice like
+          # 0011-0016 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -367,6 +373,42 @@ jobs:
           orphan_dist=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_waterfall_distributions where escrow_ledger_id = 'no-such-receipt'")
           [ "$orphan_dist" = "0" ] || { echo "ORPHAN DISTRIBUTION ACCEPTED — the escrow FK is missing"; exit 1; }
           echo "OK: film_waterfall_distributions escrow FK rejects unrouted receipts"
+
+          # Podcast episode splits + guest milestone bonuses (migration
+          # 0017, Deep Royalties PR 11): the four split-ledger tables'
+          # inventory, RLS deny-all, the source-event FK, and the
+          # check-constrained vocabularies.
+          assert_cols podcast_episode_split_schedules episode_id show_cbt_code splits version created_at updated_at
+          assert_cols podcast_episode_split_accruals id episode_id source_event_id source_amount_cents split_version accruals company_dust_cents created_at insertion_order
+          assert_cols podcast_guest_bonus_definitions id episode_id guest_payee_id guest_payee_name milestone_kind threshold bonus_amount_cents currency created_at updated_at
+          assert_cols podcast_guest_bonus_accruals id event_id episode_id bonus_definition_id guest_payee_id milestone_kind threshold verified_count bonus_amount_cents status holding_ledger_id created_at insertion_order
+          for table in podcast_episode_split_schedules podcast_episode_split_accruals podcast_guest_bonus_definitions podcast_guest_bonus_accruals; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the four podcast split-ledger tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.podcast_episode_split_accruals'::regclass and conname = 'fk_podcast_split_accruals_source_event'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_podcast_split_accruals_source_event"; exit 1; }
+          echo "OK: fk_podcast_split_accruals_source_event exists"
+          # The FK MUST reject a split accrual routed against a funding
+          # queue event that never landed in match_queue — an accrual
+          # cannot exist without its funding event.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into podcast_episode_split_accruals (episode_id, source_event_id, split_version, accruals) values ('ep_fk_probe', 'podcast:imp:no-such-event', 1, '[]')" >/dev/null 2>&1 || true
+          orphan_accrual=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from podcast_episode_split_accruals where source_event_id = 'podcast:imp:no-such-event'")
+          [ "$orphan_accrual" = "0" ] || { echo "ORPHAN SPLIT ACCRUAL ACCEPTED — the source-event FK is missing"; exit 1; }
+          echo "OK: podcast_episode_split_accruals source-event FK rejects unfunded accruals"
+          # The check-constrained vocabularies MUST reject bad values —
+          # the milestone kind on both tables and the accrual lifecycle.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into podcast_guest_bonus_definitions (episode_id, guest_payee_id, guest_payee_name, milestone_kind, threshold, bonus_amount_cents, currency) values ('ep_check_probe', 'payee_1', 'Guest', 'streams', 1000, 500, 'USD')" >/dev/null 2>&1 || true
+          bad_kind=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from podcast_guest_bonus_definitions where milestone_kind = 'streams'")
+          [ "$bad_kind" = "0" ] || { echo "BAD milestone_kind ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: podcast_guest_bonus_definitions milestone_kind check rejects bad values"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into podcast_guest_bonus_accruals (event_id, episode_id, bonus_definition_id, guest_payee_id, milestone_kind, threshold, verified_count, bonus_amount_cents, status) values ('podcast:bonus:check_probe', 'ep_check_probe', gen_random_uuid(), 'payee_1', 'downloads', 1000, 1000, 500, 'paid')" >/dev/null 2>&1 || true
+          bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from podcast_guest_bonus_accruals where status = 'paid'")
+          [ "$bad_status" = "0" ] || { echo "BAD bonus accrual status ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: podcast_guest_bonus_accruals status check rejects bad values"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

@@ -27,9 +27,20 @@ export const UNIQUE_VIOLATION: FakeDbError = {
   code: "23505",
 };
 
-/** The columns with a UNIQUE constraint on this path (migration 0007). */
-export const UNIQUE_COLUMNS: Record<string, string[]> = {
-  match_queue: ["event_id"],
+/**
+ * The columns with a UNIQUE constraint on this path (migrations 0007,
+ * 0017). Each entry is a GROUP of columns — a composite primary key's
+ * columns are one group (all must match for a violation); single-column
+ * constraints are a group of one.
+ */
+export const UNIQUE_COLUMNS: Record<string, string[][]> = {
+  match_queue: [["event_id"]],
+  podcast_episode_split_schedules: [["episode_id"]],
+  podcast_episode_split_accruals: [["source_event_id"]],
+  podcast_guest_bonus_definitions: [
+    ["episode_id", "guest_payee_id", "milestone_kind", "threshold"],
+  ],
+  podcast_guest_bonus_accruals: [["event_id"]],
 };
 
 export class FakeTable {
@@ -43,12 +54,32 @@ export class FakeTable {
     return stored;
   }
 
-  isUniqueViolation(row: Row): boolean {
-    return this.rows.some(
-      (existing) =>
-        row.event_id !== undefined &&
-        existing.event_id === row.event_id,
+  isUniqueViolation(row: Row, columnGroups: string[][]): boolean {
+    return this.rows.some((existing) =>
+      columnGroups.some((group) =>
+        group.every(
+          (column) =>
+            row[column] !== undefined && existing[column] === row[column],
+        ),
+      ),
     );
+  }
+
+  /**
+   * PostgREST upsert (onConflict): the matching row is patched in place;
+   * no match inserts. Returns the upserted row.
+   */
+  upsert(row: Row, conflictColumns: string[]): Row {
+    for (let i = 0; i < this.rows.length; i++) {
+      if (
+        conflictColumns.length > 0 &&
+        conflictColumns.every((column) => this.rows[i][column] === row[column])
+      ) {
+        this.rows[i] = { ...this.rows[i], ...row };
+        return { ...this.rows[i] };
+      }
+    }
+    return this.insert(row);
   }
 
   select(): Row[] {
@@ -64,6 +95,18 @@ export class FakeTable {
       }
     }
     return changed;
+  }
+
+  /** PostgREST-style delete — removes every matching row in place. */
+  deleteRows(filters: Array<[string, unknown]>): number {
+    let removed = 0;
+    for (let i = this.rows.length - 1; i >= 0; i--) {
+      if (matchesRow(this.rows[i], filters)) {
+        this.rows.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /** In-place claim transition for the rpc shim — the row keeps its identity. */
@@ -119,7 +162,9 @@ class FakeQueryBuilder {
   private single = false;
   private operation:
     | { kind: "insert"; row: Row }
+    | { kind: "upsert"; row: Row; onConflict: string | null }
     | { kind: "update"; patch: Row }
+    | { kind: "delete" }
     | { kind: "select" } = { kind: "select" };
 
   constructor(
@@ -132,8 +177,22 @@ class FakeQueryBuilder {
     return this;
   }
 
+  upsert(row: Row, options?: { onConflict?: string }): this {
+    this.operation = {
+      kind: "upsert",
+      row,
+      onConflict: options?.onConflict ?? null,
+    };
+    return this;
+  }
+
   update(patch: Row): this {
     this.operation = { kind: "update", patch };
+    return this;
+  }
+
+  delete(): this {
+    this.operation = { kind: "delete" };
     return this;
   }
 
@@ -177,13 +236,30 @@ class FakeQueryBuilder {
   private execute(): FakeResult {
     const op = this.operation;
     if (op.kind === "insert") {
+      const uniqueGroups = UNIQUE_COLUMNS[this.tableName] ?? [];
       if (
-        (UNIQUE_COLUMNS[this.tableName] ?? []).includes("event_id") &&
-        this.table.isUniqueViolation(op.row)
+        uniqueGroups.length > 0 &&
+        this.table.isUniqueViolation(op.row, uniqueGroups)
       ) {
         return { data: null, error: UNIQUE_VIOLATION };
       }
       return { data: this.table.insert(op.row), error: null };
+    }
+    if (op.kind === "upsert") {
+      const conflictColumns =
+        op.onConflict === null
+          ? []
+          : op.onConflict
+              .split(",")
+              .map((column) => column.trim())
+              .filter((column) => column !== "");
+      const upserted = this.table.upsert(op.row, conflictColumns);
+      if (this.single) return { data: upserted, error: null };
+      return { data: [upserted], error: null };
+    }
+    if (op.kind === "delete") {
+      this.table.deleteRows(this.filters);
+      return { data: [], error: null };
     }
     if (op.kind === "update") {
       const changed = this.table.update(op.patch, this.filters);

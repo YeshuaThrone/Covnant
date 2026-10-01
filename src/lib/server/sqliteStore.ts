@@ -78,6 +78,10 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  PodcastEpisodeSplitAccrualRecord,
+  PodcastEpisodeSplitScheduleRecord,
+  PodcastGuestBonusAccrualRecord,
+  PodcastGuestBonusDefinitionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -95,6 +99,7 @@ import {
   type TerritorySettlementRecord,
   type UniversalRoyaltyLedgerRow,
 } from '@/lib/server/territorySettlement';
+import { podcastEpisodeIdOfQueueRow } from '@/modules/podcastSplits/engine';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shows (
@@ -643,6 +648,59 @@ CREATE TABLE IF NOT EXISTS film_waterfall_distributions (
   unpaid_total_cents INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- Podcast episode splits + guest milestone bonuses (PR 11) — the episode-
+-- scoped routing ledger. Splits jsonb packs as TEXT JSON (the waterfall
+-- discipline). Accruals are unique per source event and bonuses per
+-- content-derived event id — the once-only replay guards.
+CREATE TABLE IF NOT EXISTS podcast_episode_split_schedules (
+  episode_id TEXT PRIMARY KEY,
+  show_cbt_code TEXT,
+  splits TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS podcast_episode_split_accruals (
+  id TEXT PRIMARY KEY,
+  episode_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL UNIQUE,
+  source_amount_cents INTEGER NOT NULL,
+  split_version INTEGER NOT NULL,
+  accruals TEXT NOT NULL,
+  company_dust_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS podcast_guest_bonus_definitions (
+  id TEXT PRIMARY KEY,
+  episode_id TEXT NOT NULL,
+  guest_payee_id TEXT NOT NULL,
+  guest_payee_name TEXT NOT NULL,
+  milestone_kind TEXT NOT NULL,
+  threshold INTEGER NOT NULL,
+  bonus_amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (episode_id, guest_payee_id, milestone_kind, threshold)
+);
+
+CREATE TABLE IF NOT EXISTS podcast_guest_bonus_accruals (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  episode_id TEXT NOT NULL,
+  bonus_definition_id TEXT NOT NULL,
+  guest_payee_id TEXT NOT NULL,
+  milestone_kind TEXT NOT NULL,
+  threshold INTEGER NOT NULL,
+  verified_count INTEGER NOT NULL,
+  bonus_amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  holding_ledger_id TEXT,
+  created_at TEXT NOT NULL
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -731,6 +789,64 @@ function filmWaterfallDistributionFromDbRow(
       'tier_allocations',
     ),
   };
+}
+
+// --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) — row projection helpers ---
+//
+// The schedule splits and the per-holder accrual arrays pack as TEXT JSON —
+// the waterfall's discipline. Unpacking is fail-closed: a corrupt mirror
+// throws rather than silently yielding an empty allocation.
+
+type PodcastEpisodeSplitScheduleDbRow = Omit<
+  PodcastEpisodeSplitScheduleRecord,
+  'splits'
+> & { splits: string };
+
+function podcastEpisodeSplitScheduleToDbRow(
+  record: PodcastEpisodeSplitScheduleRecord,
+): PodcastEpisodeSplitScheduleDbRow {
+  return { ...record, splits: JSON.stringify(record.splits) };
+}
+
+function podcastEpisodeSplitScheduleFromDbRow(
+  row: PodcastEpisodeSplitScheduleDbRow,
+): PodcastEpisodeSplitScheduleRecord {
+  let splits: PodcastEpisodeSplitScheduleRecord['splits'];
+  try {
+    splits = JSON.parse(row.splits) as PodcastEpisodeSplitScheduleRecord['splits'];
+  } catch (error) {
+    throw new Error(
+      `podcast_episode_split_schedules.splits for ${row.episode_id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, splits };
+}
+
+type PodcastEpisodeSplitAccrualDbRow = Omit<
+  PodcastEpisodeSplitAccrualRecord,
+  'accruals'
+> & { accruals: string };
+
+function podcastEpisodeSplitAccrualToDbRow(
+  record: PodcastEpisodeSplitAccrualRecord,
+): PodcastEpisodeSplitAccrualDbRow {
+  return { ...record, accruals: JSON.stringify(record.accruals) };
+}
+
+function podcastEpisodeSplitAccrualFromDbRow(
+  row: PodcastEpisodeSplitAccrualDbRow,
+): PodcastEpisodeSplitAccrualRecord {
+  let accruals: PodcastEpisodeSplitAccrualRecord['accruals'];
+  try {
+    accruals = JSON.parse(row.accruals) as PodcastEpisodeSplitAccrualRecord['accruals'];
+  } catch (error) {
+    throw new Error(
+      `podcast_episode_split_accruals.accruals for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, accruals };
 }
 
 // --- The UCT credential vault (migration 0013) — row projection helpers ---
@@ -1452,6 +1568,197 @@ export class SqliteStore implements Store {
       )
       .all(filmId) as FilmWaterfallDistributionDbRow[];
     return Promise.resolve(rows.map(filmWaterfallDistributionFromDbRow));
+  }
+
+  // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
+
+  async upsertPodcastEpisodeSplitSchedule(
+    row: PodcastEpisodeSplitScheduleRecord,
+  ): Promise<PodcastEpisodeSplitScheduleRecord> {
+    // One schedule per episode — INSERT ON CONFLICT replaces the row
+    // atomically (a re-registration after the lock check).
+    this.db
+      .prepare(
+        `INSERT INTO podcast_episode_split_schedules
+           (episode_id, show_cbt_code, splits, version, created_at, updated_at)
+         VALUES (@episode_id, @show_cbt_code, @splits, @version, @created_at, @updated_at)
+         ON CONFLICT(episode_id) DO UPDATE SET
+           show_cbt_code = excluded.show_cbt_code,
+           splits = excluded.splits,
+           version = excluded.version,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        podcastEpisodeSplitScheduleToDbRow(row) as unknown as Record<string, unknown>,
+      );
+    return Promise.resolve(
+      podcastEpisodeSplitScheduleFromDbRow(
+        this.db
+          .prepare(`SELECT * FROM podcast_episode_split_schedules WHERE episode_id = ?`)
+          .get(row.episode_id) as PodcastEpisodeSplitScheduleDbRow,
+      ),
+    );
+  }
+
+  async getPodcastEpisodeSplitSchedule(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM podcast_episode_split_schedules WHERE episode_id = ?`)
+      .get(episodeId) as PodcastEpisodeSplitScheduleDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : podcastEpisodeSplitScheduleFromDbRow(row),
+    );
+  }
+
+  async insertPodcastEpisodeSplitAccrual(
+    row: Omit<PodcastEpisodeSplitAccrualRecord, 'id'>,
+  ): Promise<PodcastEpisodeSplitAccrualRecord> {
+    // UNIQUE on source_event_id: a duplicate insert throws (better-sqlite3
+    // surfaces the constraint violation) and the caller counts the replay
+    // as a no-op — one accrual per funding event, ever.
+    const record: PodcastEpisodeSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO podcast_episode_split_accruals
+           (id, episode_id, source_event_id, source_amount_cents, split_version, accruals, company_dust_cents, created_at)
+         VALUES (@id, @episode_id, @source_event_id, @source_amount_cents, @split_version, @accruals, @company_dust_cents, @created_at)`,
+      )
+      .run(
+        podcastEpisodeSplitAccrualToDbRow(record) as unknown as Record<string, unknown>,
+      );
+    return Promise.resolve(record);
+  }
+
+  async getPodcastEpisodeSplitAccrualBySourceEvent(
+    sourceEventId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM podcast_episode_split_accruals WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as PodcastEpisodeSplitAccrualDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : podcastEpisodeSplitAccrualFromDbRow(row),
+    );
+  }
+
+  async listPodcastEpisodeSplitAccruals(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord[]> {
+    // Oldest first — routing order (rowid ASC is the strict tiebreak when
+    // created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM podcast_episode_split_accruals
+         WHERE episode_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(episodeId) as PodcastEpisodeSplitAccrualDbRow[];
+    return Promise.resolve(rows.map(podcastEpisodeSplitAccrualFromDbRow));
+  }
+
+  async insertPodcastGuestBonusDefinition(
+    row: PodcastGuestBonusDefinitionRecord,
+  ): Promise<PodcastGuestBonusDefinitionRecord> {
+    // Composite UNIQUE (episode, guest, kind, threshold) — one contract per
+    // milestone; a duplicate insert throws the constraint violation.
+    this.db
+      .prepare(
+        `INSERT INTO podcast_guest_bonus_definitions
+           (id, episode_id, guest_payee_id, guest_payee_name, milestone_kind, threshold, bonus_amount_cents, currency, created_at, updated_at)
+         VALUES (@id, @episode_id, @guest_payee_id, @guest_payee_name, @milestone_kind, @threshold, @bonus_amount_cents, @currency, @created_at, @updated_at)`,
+      )
+      .run(row as unknown as Record<string, unknown>);
+    return Promise.resolve(row);
+  }
+
+  async listPodcastGuestBonusDefinitions(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusDefinitionRecord[]> {
+    // Oldest first — definition registration order (rowid ASC is the
+    // strict tiebreak when created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM podcast_guest_bonus_definitions
+         WHERE episode_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(episodeId) as PodcastGuestBonusDefinitionRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async insertPodcastGuestBonusAccrual(
+    row: Omit<PodcastGuestBonusAccrualRecord, 'id'>,
+  ): Promise<PodcastGuestBonusAccrualRecord> {
+    // UNIQUE on event_id (the content-derived `podcast:bonus:` id) — the
+    // once-only milestone arbiter; a duplicate insert throws.
+    const record: PodcastGuestBonusAccrualRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO podcast_guest_bonus_accruals
+           (id, event_id, episode_id, bonus_definition_id, guest_payee_id, milestone_kind, threshold, verified_count, bonus_amount_cents, status, holding_ledger_id, created_at)
+         VALUES (@id, @event_id, @episode_id, @bonus_definition_id, @guest_payee_id, @milestone_kind, @threshold, @verified_count, @bonus_amount_cents, @status, @holding_ledger_id, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async markPodcastGuestBonusAccrualPosted(
+    id: string,
+    holdingLedgerId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord | undefined> {
+    this.db
+      .prepare(
+        `UPDATE podcast_guest_bonus_accruals SET status = 'posted', holding_ledger_id = ? WHERE id = ?`,
+      )
+      .run(holdingLedgerId, id);
+    const row = this.db
+      .prepare(`SELECT * FROM podcast_guest_bonus_accruals WHERE id = ?`)
+      .get(id) as PodcastGuestBonusAccrualRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async deletePodcastGuestBonusAccrual(id: string): Promise<void> {
+    this.db.prepare(`DELETE FROM podcast_guest_bonus_accruals WHERE id = ?`).run(id);
+  }
+
+  async listPodcastGuestBonusAccruals(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord[]> {
+    // Oldest first — accrual order (rowid ASC is the strict tiebreak when
+    // created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM podcast_guest_bonus_accruals
+         WHERE episode_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(episodeId) as PodcastGuestBonusAccrualRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async sumVerifiedImpressionsByEpisode(
+    episodeId: string,
+    eventIdPrefixes: readonly string[],
+  ): Promise<number> {
+    // The raw payload is the source of truth — parse it like every other
+    // recovery path. Only rows whose event_id matches a milestone-kind
+    // prefix count (downloads ignores subscription rows), and only VERIFIED
+    // impressions count: held rows carry `podcast:held:` ids and unverified
+    // rows never wrote a `podcast:imp:` row at all.
+    const rows = this.db
+      .prepare(`SELECT event_id, verified_impressions, raw_payload FROM match_queue`)
+      .all() as { event_id: string; verified_impressions: number | null; raw_payload: string }[];
+    let total = 0;
+    for (const row of rows) {
+      if (!eventIdPrefixes.some((prefix) => row.event_id.startsWith(prefix))) {
+        continue;
+      }
+      if (podcastEpisodeIdOfQueueRow(row.raw_payload) !== episodeId) continue;
+      total += row.verified_impressions ?? 0;
+    }
+    return Promise.resolve(total);
   }
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {

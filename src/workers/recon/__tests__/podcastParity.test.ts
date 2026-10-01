@@ -139,6 +139,18 @@ const DAI_PODCAST_FIELDS = {
   podcast_commission_micros: "0",
 };
 
+/**
+ * The PR 11 split/bonus pass counters. This scenario registers no episode
+ * schedules and no bonus definitions, so the pass runs fail-closed and
+ * accrues nothing — counted skips, zeros on every backend, replay included.
+ */
+const SPLIT_BONUS_FIELDS = {
+  podcast_split_accruals: 0,
+  podcast_split_replays: 0,
+  podcast_bonus_accrued: 0,
+  podcast_bonus_replayed: 0,
+};
+
 const RSS_PODCAST_FIELDS = {
   podcast_written: 4,
   podcast_replayed: 1,
@@ -158,6 +170,7 @@ const EXPECTED: PodcastScenarioOutcome = {
     holding_posted: 2,
     holding_replayed: 0,
     ...DAI_PODCAST_FIELDS,
+    ...SPLIT_BONUS_FIELDS,
   },
   rssCounts: {
     events_written: 4,
@@ -167,6 +180,7 @@ const EXPECTED: PodcastScenarioOutcome = {
     holding_posted: 3,
     holding_replayed: 0,
     ...RSS_PODCAST_FIELDS,
+    ...SPLIT_BONUS_FIELDS,
   },
   replayCounts: {
     events_written: 0,
@@ -176,6 +190,7 @@ const EXPECTED: PodcastScenarioOutcome = {
     holding_posted: 0,
     holding_replayed: 0,
     ...DAI_PODCAST_FIELDS,
+    ...SPLIT_BONUS_FIELDS,
     // The queue refuses every row (all replayed); the IAB rejections are
     // per-batch engine counts, so they re-appear unchanged on the replay.
     podcast_written: 0,

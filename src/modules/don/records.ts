@@ -211,3 +211,109 @@ export type FilmWaterfallDistributionRecord = {
   unpaid_total_cents: number;
   created_at: string;
 };
+
+// --- Podcast episode splits + guest milestone bonuses (PR 11, migration 0017) ---
+
+/**
+ * One registered per-episode split schedule — the Don Ledger's episode-scoped
+ * routing for podcast revenue (the founder podcast directive: a flagship
+ * episode pays host 60 / co-host 30 / editor+producer 10 while the next
+ * episode pays a different sheet entirely). One row per episode
+ * (`podcast_episode_split_schedules`, migration 0017); the engine module
+ * (src/modules/podcastSplits/engine.ts) is the registration gate — rows are
+ * what passed it, keyed one schedule per episode with a monotonic version.
+ */
+export type PodcastEpisodeSplitScheduleRecord = {
+  episode_id: string;
+  /** The vault show the episode's DOI resolves to (matched_cbt_code), when known. */
+  show_cbt_code: string | null;
+  /**
+   * The per-holder routing. share_bps must sum to EXACTLY 10000 (100.0000%)
+   * — validated at registration and re-validated at every accrual.
+   */
+  splits: import('@/lib/don/types').SplitPartyInput[];
+  /** Monotonic registration version — bumped on every accepted re-registration. */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One per-holder split accrual — the routing-decision record for ONE
+ * holding credit (unique on source_event_id: the `podcast:imp:`/`podcast:sub:`
+ * queue event that funded it, the same id the holding credit carries as its
+ * line_item_id and journal ref). Written once per funding event, ever — a
+ * replayed ingest re-derives the same source_event_id and the UNIQUE
+ * constraint turns the replay into a counted no-op (the PR #93 per-source
+ * guard pattern). Per-holder amounts are integer cents; allocations plus
+ * company dust equal the source amount exactly (the locked Don invariant).
+ */
+export type PodcastEpisodeSplitAccrualRecord = {
+  id: string;
+  episode_id: string;
+  /** UNIQUE — the funding queue event; one accrual per funding event, ever. */
+  source_event_id: string;
+  /** The creator net that was routed, integer cents. */
+  source_amount_cents: number;
+  /** The schedule version the accrual used. */
+  split_version: number;
+  /** The per-holder integer-cent accruals (floor shares, dust swept out). */
+  accruals: import('@/lib/don/types').AllocatedSplit[];
+  /** The integer-cent dust the sweep routed to the variance account. */
+  company_dust_cents: number;
+  created_at: string;
+};
+
+export type PodcastMilestoneKind = 'downloads' | 'reach';
+
+/**
+ * One registered guest milestone bonus — a contractual micro-payout that
+ * triggers when an episode's VERIFIED IAB count crosses `threshold`
+ * (downloads = qualified impressions; reach = all verified listening
+ * including subscription rows). One row per (episode, guest, kind,
+ * threshold); the engine module is the registration gate.
+ */
+export type PodcastGuestBonusDefinitionRecord = {
+  id: string;
+  episode_id: string;
+  guest_payee_id: string;
+  guest_payee_name: string;
+  milestone_kind: PodcastMilestoneKind;
+  /** The verified count that triggers the bonus — a safe integer ≥ 1. */
+  threshold: number;
+  /** The bonus paid on crossing, integer cents ≥ 1 (never a float). */
+  bonus_amount_cents: number;
+  /** ISO-4217 alpha-3 (the bonus posts to holding in this currency). */
+  currency: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PodcastGuestBonusAccrualStatus = 'accrued' | 'posted';
+
+/**
+ * One crossed milestone — the once-only record (unique on event_id, a
+ * content-derived `podcast:bonus:` id over episode + definition + threshold).
+ * Lifecycle mirrors the film routing decision (insert-as-lock): written
+ * status 'accrued' BEFORE the holding post moves money, flipped 'posted' on
+ * posting success, DELETED when the post refuses (retryable). A replayed
+ * episode ingest derives the same event_id and the UNIQUE constraint makes
+ * the replay a counted no-op — a threshold crossing accrues exactly once.
+ */
+export type PodcastGuestBonusAccrualRecord = {
+  id: string;
+  /** UNIQUE, content-derived — the replay arbiter and the journal ref. */
+  event_id: string;
+  episode_id: string;
+  bonus_definition_id: string;
+  guest_payee_id: string;
+  milestone_kind: PodcastMilestoneKind;
+  threshold: number;
+  /** The verified count that crossed the threshold at accrual time. */
+  verified_count: number;
+  bonus_amount_cents: number;
+  status: PodcastGuestBonusAccrualStatus;
+  /** The holding credit the accrual posted, once posted. */
+  holding_ledger_id: string | null;
+  created_at: string;
+};

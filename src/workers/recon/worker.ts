@@ -26,6 +26,7 @@ import { postMatchedLinesToHolding } from "./posting";
 import { qualifyImpressionLines } from "./podcast";
 import { postPodcastLinesToHolding } from "./podcastPosting";
 import { writePodcastLinesToMatchQueue } from "./podcastQueue";
+import { runPodcastSplitBonusPass } from "@/modules/podcastSplits/accrual";
 import { isPodcastProfileKind } from "./podcastProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
@@ -174,6 +175,14 @@ async function parsePodcast(
     counts.lineOutcomes,
     (deps.now ?? (() => new Date()))(),
   );
+  // PR 11 — after the holding credits land: lock the per-holder episode
+  // split routing and fire every crossed guest milestone. Both passes are
+  // idempotent (replays are counted no-ops through the per-source guards).
+  const splitsAndBonuses = await runPodcastSplitBonusPass(
+    deps.store,
+    counts.lineOutcomes,
+    (deps.now ?? (() => new Date()))(),
+  );
   return {
     events_written: counts.written,
     matched: counts.matched,
@@ -188,6 +197,10 @@ async function parsePodcast(
     podcast_duplicates_deduped: qualification.counts.duplicatesDeduped,
     podcast_short_requests_rejected: qualification.counts.shortRequestsRejected,
     podcast_commission_micros: posting.commissionMicrosDeducted.toString(),
+    podcast_split_accruals: splitsAndBonuses.splitAccruals,
+    podcast_split_replays: splitsAndBonuses.splitReplays,
+    podcast_bonus_accrued: splitsAndBonuses.bonusAccrued,
+    podcast_bonus_replayed: splitsAndBonuses.bonusReplayed,
   };
 }
 

@@ -77,6 +77,10 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  PodcastEpisodeSplitAccrualRecord,
+  PodcastEpisodeSplitScheduleRecord,
+  PodcastGuestBonusAccrualRecord,
+  PodcastGuestBonusDefinitionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -94,6 +98,7 @@ import {
   type TerritorySettlementRecord,
   type UniversalRoyaltyLedgerRow,
 } from '@/lib/server/territorySettlement';
+import { podcastEpisodeIdOfQueueRow } from '@/modules/podcastSplits/engine';
 
 /**
  * Index-stable time sort. Ties keep insertion order in the list's own
@@ -143,6 +148,13 @@ export class InMemoryStore implements Store {
   private glEntries: GlEntryRecord[] = [];
   private recoupmentLedger: RecoupmentLedgerRecord[] = [];
   private catalogDisputes = new Map<string, CatalogDisputeRecord>();
+  private podcastEpisodeSplitSchedules = new Map<
+    string,
+    PodcastEpisodeSplitScheduleRecord
+  >();
+  private podcastEpisodeSplitAccruals: PodcastEpisodeSplitAccrualRecord[] = [];
+  private podcastGuestBonusDefinitions: PodcastGuestBonusDefinitionRecord[] = [];
+  private podcastGuestBonusAccruals: PodcastGuestBonusAccrualRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -597,6 +609,155 @@ export class InMemoryStore implements Store {
       (row) => row.created_at,
       'asc',
     );
+  }
+
+  // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
+
+  async upsertPodcastEpisodeSplitSchedule(
+    row: PodcastEpisodeSplitScheduleRecord,
+  ): Promise<PodcastEpisodeSplitScheduleRecord> {
+    // One schedule per episode — the map's key IS the episode id, so an
+    // upsert replaces the row atomically (the engine bumps the version).
+    this.podcastEpisodeSplitSchedules.set(row.episode_id, row);
+    return row;
+  }
+
+  async getPodcastEpisodeSplitSchedule(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitScheduleRecord | undefined> {
+    return this.podcastEpisodeSplitSchedules.get(episodeId);
+  }
+
+  async insertPodcastEpisodeSplitAccrual(
+    row: Omit<PodcastEpisodeSplitAccrualRecord, 'id'>,
+  ): Promise<PodcastEpisodeSplitAccrualRecord> {
+    // UNIQUE on source_event_id — a duplicate insert throws the unique
+    // violation (the caller counts the replay as a no-op).
+    if (
+      this.podcastEpisodeSplitAccruals.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('podcast_episode_split_accruals.source_event_id');
+    }
+    const record: PodcastEpisodeSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.podcastEpisodeSplitAccruals.push(record);
+    return record;
+  }
+
+  async getPodcastEpisodeSplitAccrualBySourceEvent(
+    sourceEventId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord | undefined> {
+    return this.podcastEpisodeSplitAccruals.find(
+      (row) => row.source_event_id === sourceEventId,
+    );
+  }
+
+  async listPodcastEpisodeSplitAccruals(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord[]> {
+    // Oldest first — routing order (push order IS insertion_order for ties).
+    return sortByTime(
+      this.podcastEpisodeSplitAccruals.filter((row) => row.episode_id === episodeId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertPodcastGuestBonusDefinition(
+    row: PodcastGuestBonusDefinitionRecord,
+  ): Promise<PodcastGuestBonusDefinitionRecord> {
+    // Composite UNIQUE (episode, guest, kind, threshold) — one contract per
+    // milestone; a duplicate insert throws the unique violation.
+    const duplicate = this.podcastGuestBonusDefinitions.some(
+      (existing) =>
+        existing.episode_id === row.episode_id &&
+        existing.guest_payee_id === row.guest_payee_id &&
+        existing.milestone_kind === row.milestone_kind &&
+        existing.threshold === row.threshold,
+    );
+    if (duplicate) {
+      uniqueViolation(
+        'podcast_guest_bonus_definitions.episode_id_guest_payee_id_milestone_kind_threshold',
+      );
+    }
+    this.podcastGuestBonusDefinitions.push(row);
+    return row;
+  }
+
+  async listPodcastGuestBonusDefinitions(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusDefinitionRecord[]> {
+    // Oldest first — definition registration order (push order IS
+    // insertion_order for created_at ties).
+    return sortByTime(
+      this.podcastGuestBonusDefinitions.filter((row) => row.episode_id === episodeId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertPodcastGuestBonusAccrual(
+    row: Omit<PodcastGuestBonusAccrualRecord, 'id'>,
+  ): Promise<PodcastGuestBonusAccrualRecord> {
+    // UNIQUE on event_id (the content-derived `podcast:bonus:` id) — the
+    // once-only milestone arbiter; a duplicate insert throws.
+    if (
+      this.podcastGuestBonusAccruals.some((existing) => existing.event_id === row.event_id)
+    ) {
+      uniqueViolation('podcast_guest_bonus_accruals.event_id');
+    }
+    const record: PodcastGuestBonusAccrualRecord = { ...row, id: randomUUID() };
+    this.podcastGuestBonusAccruals.push(record);
+    return record;
+  }
+
+  async markPodcastGuestBonusAccrualPosted(
+    id: string,
+    holdingLedgerId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord | undefined> {
+    const row = this.podcastGuestBonusAccruals.find((existing) => existing.id === id);
+    if (row === undefined) return undefined;
+    row.status = 'posted';
+    row.holding_ledger_id = holdingLedgerId;
+    return row;
+  }
+
+  async deletePodcastGuestBonusAccrual(id: string): Promise<void> {
+    this.podcastGuestBonusAccruals = this.podcastGuestBonusAccruals.filter(
+      (row) => row.id !== id,
+    );
+  }
+
+  async listPodcastGuestBonusAccruals(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord[]> {
+    // Oldest first — accrual order (push order IS insertion_order for ties).
+    return sortByTime(
+      this.podcastGuestBonusAccruals.filter((row) => row.episode_id === episodeId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async sumVerifiedImpressionsByEpisode(
+    episodeId: string,
+    eventIdPrefixes: readonly string[],
+  ): Promise<number> {
+    // The raw payload is the source of truth — parse it like every other
+    // recovery path. Only rows whose event_id matches a milestone-kind
+    // prefix count (downloads ignores subscription rows), and only VERIFIED
+    // impressions count: held rows carry `podcast:held:` ids and unverified
+    // rows never wrote a `podcast:imp:` row at all.
+    let total = 0;
+    for (const row of this.matchQueue) {
+      if (!eventIdPrefixes.some((prefix) => row.event_id.startsWith(prefix))) {
+        continue;
+      }
+      if (podcastEpisodeIdOfQueueRow(row.raw_payload) !== episodeId) continue;
+      total += row.verified_impressions ?? 0;
+    }
+    return total;
   }
 
   // --- BaaS transfers ---
