@@ -77,6 +77,7 @@ import type {
   VtuberTaxWithholdingVerificationRecord,
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
+  DerivativeRoyaltyEdgeRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -766,6 +767,26 @@ export interface Store {
   listVtuberTechSetupAmortizationLines(
     scheduleRef: string,
   ): Promise<VtuberTechSetupAmortizationLineRecord[]>;
+
+  // --- Derivative asset royalty cascade (migration 0021, PR 16) ---
+
+  /**
+   * Registers one per-edge fractional royalty contract over the
+   * parent_asset_id dependency tree. UNIQUE on
+   * (asset_id, parent_asset_id, upstream_creator_payee_id) — a duplicate
+   * registration throws the unique violation (the replay surface).
+   */
+  insertDerivativeRoyaltyEdge(
+    row: Omit<DerivativeRoyaltyEdgeRecord, 'id'>,
+  ): Promise<DerivativeRoyaltyEdgeRecord>;
+
+  /**
+   * One asset's outgoing edges — the depth-first walk's per-node lookup,
+   * oldest first (created_at ASC, insertion_order ASC): the deterministic
+   * reservation order. Distinct payees may hold distinct fractions on one
+   * edge; each contract row reserves independently.
+   */
+  getDerivativeRoyaltyEdgesByAsset(assetId: string): Promise<DerivativeRoyaltyEdgeRecord[]>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
