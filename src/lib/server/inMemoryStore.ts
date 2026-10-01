@@ -77,9 +77,11 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
   GamingSplitPayoutRecord,
+  GamingStudioKycRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -162,6 +164,11 @@ export class InMemoryStore implements Store {
   private gamingEngineRoyaltyEvents: GamingEngineRoyaltyEventRecord[] = [];
   private gamingItemSplitSchedules = new Map<string, GamingItemSplitScheduleRecord>();
   private gamingSplitPayouts: GamingSplitPayoutRecord[] = [];
+  // Gaming cashout states (migration 0019, PR 13): the durable DevEx
+  // conversion logs (push order IS insertion_order for ties) and one KYC
+  // verification state per studio payee.
+  private gamingDevexConversionLogs: GamingDevexConversionLogRecord[] = [];
+  private gamingStudioKycVerifications = new Map<string, GamingStudioKycRecord>();
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -833,6 +840,104 @@ export class InMemoryStore implements Store {
       (row) => row.created_at,
       'asc',
     );
+  }
+
+  // --- Gaming cashout states: DevEx conversion logs + studio KYC (migration 0019, PR 13) ---
+
+  async listVirtualCurrencyCashoutCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'virtual_currency_cashout_pending' &&
+          row.status === 'virtual_currency_cashout_pending',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleVirtualCurrencyCashout(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'virtual_currency_cashout_pending') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async insertGamingDevexConversionLog(
+    row: Omit<GamingDevexConversionLogRecord, 'id'>,
+  ): Promise<GamingDevexConversionLogRecord> {
+    // UNIQUE on event_id — one conversion log per funding line, ever; a
+    // duplicate insert throws the unique violation (the replay no-op).
+    if (this.gamingDevexConversionLogs.some((existing) => existing.event_id === row.event_id)) {
+      uniqueViolation('gaming_devex_conversion_logs.event_id');
+    }
+    const record: GamingDevexConversionLogRecord = { ...row, id: randomUUID() };
+    this.gamingDevexConversionLogs.push(record);
+    return record;
+  }
+
+  async getGamingDevexConversionLogByEventId(
+    eventId: string,
+  ): Promise<GamingDevexConversionLogRecord | undefined> {
+    return this.gamingDevexConversionLogs.find((row) => row.event_id === eventId);
+  }
+
+  async listGamingDevexConversionLogsByBatch(
+    batchRef: string,
+  ): Promise<GamingDevexConversionLogRecord[]> {
+    // Oldest first — write order (push order IS insertion_order for ties).
+    return sortByTime(
+      this.gamingDevexConversionLogs.filter((row) => row.settlement_batch_ref === batchRef),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async settleGamingDevexConversionLogsByBatch(
+    batchRef: string,
+    settledAt: string,
+  ): Promise<number> {
+    // The status predicate is the CAS at batch scope: only PENDING rows
+    // flip, already-settled rows are untouched, and the count is the honest
+    // report of what this call settled.
+    let settled = 0;
+    for (const row of this.gamingDevexConversionLogs) {
+      if (
+        row.settlement_batch_ref === batchRef &&
+        row.status === 'pending_fiat_settlement'
+      ) {
+        row.status = 'fiat_settled';
+        row.settled_at = settledAt;
+        settled += 1;
+      }
+    }
+    return settled;
+  }
+
+  async upsertGamingStudioKyc(
+    row: GamingStudioKycRecord,
+  ): Promise<GamingStudioKycRecord> {
+    // One verification state per studio payee — the Map key IS the payee
+    // id, so a re-verification replaces the row.
+    this.gamingStudioKycVerifications.set(row.studio_payee_id, row);
+    return row;
+  }
+
+  async getGamingStudioKyc(
+    studioPayeeId: string,
+  ): Promise<GamingStudioKycRecord | undefined> {
+    return this.gamingStudioKycVerifications.get(studioPayeeId);
   }
 
   async sumVerifiedImpressionsByEpisode(

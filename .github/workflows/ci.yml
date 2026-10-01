@@ -130,6 +130,11 @@ jobs:
           # idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
+          # Gaming cashout states (Deep Royalties PR 13): the durable DevEx
+          # conversion logs and the studio KYC verification state — applied
+          # twice like 0011-0018 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -416,6 +421,39 @@ jobs:
           bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from podcast_guest_bonus_accruals where status = 'paid'")
           [ "$bad_status" = "0" ] || { echo "BAD bonus accrual status ACCEPTED by the check constraint"; exit 1; }
           echo "OK: podcast_guest_bonus_accruals status check rejects bad values"
+
+          # Gaming cashout states (migration 0019, Deep Royalties PR 13):
+          # the two cashout tables' inventory, RLS deny-all, the
+          # source-event FK, and the check-constrained vocabularies.
+          assert_cols gaming_devex_conversion_logs id event_id line_event_id platform denomination virtual_amount exchange_rate fiat_net_cents settlement_batch_ref status settled_at created_at insertion_order
+          assert_cols gaming_studio_kyc_verifications id studio_payee_id studio_kyc_status team_members contract_ref created_at updated_at
+          for table in gaming_devex_conversion_logs gaming_studio_kyc_verifications; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: both gaming cashout tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.gaming_devex_conversion_logs'::regclass and conname = 'fk_gaming_devex_logs_line_event'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK fk_gaming_devex_logs_line_event"; exit 1; }
+          echo "OK: fk_gaming_devex_logs_line_event exists"
+          # The FK MUST reject a conversion log hung on a funding queue
+          # event that never landed in match_queue — a conversion log
+          # cannot exist without its funding line.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into gaming_devex_conversion_logs (event_id, line_event_id, platform, denomination, virtual_amount, exchange_rate, fiat_net_cents, settlement_batch_ref) values ('gaming:devex:no-such-event', 'no-such-event', 'Roblox', 'Robux', '1000', '0.0035', 350, 'batch_fk_probe')" >/dev/null 2>&1 || true
+          orphan_log=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from gaming_devex_conversion_logs where event_id = 'gaming:devex:no-such-event'")
+          [ "$orphan_log" = "0" ] || { echo "ORPHAN CONVERSION LOG ACCEPTED — the source-event FK is missing"; exit 1; }
+          echo "OK: gaming_devex_conversion_logs source-event FK rejects unfunded conversion logs"
+          # The check-constrained vocabularies MUST reject bad values — the
+          # fiat-settlement status and the empty roster.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into gaming_devex_conversion_logs (event_id, line_event_id, platform, denomination, virtual_amount, exchange_rate, fiat_net_cents, settlement_batch_ref, status) values ('gaming:devex:check_probe', 'check_probe', 'Roblox', 'Robux', '1000', '0.0035', 350, 'batch_check_probe', 'paid')" >/dev/null 2>&1 || true
+          bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from gaming_devex_conversion_logs where status = 'paid'")
+          [ "$bad_status" = "0" ] || { echo "BAD conversion log status ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: gaming_devex_conversion_logs status check rejects bad values"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into gaming_studio_kyc_verifications (studio_payee_id, studio_kyc_status, team_members) values ('studio_check_probe', 'verified', '[]'::jsonb)" >/dev/null 2>&1 || true
+          empty_roster=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from gaming_studio_kyc_verifications where studio_payee_id = 'studio_check_probe'")
+          [ "$empty_roster" = "0" ] || { echo "EMPTY ROSTER ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: gaming_studio_kyc_verifications roster check rejects an empty roster"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

@@ -411,3 +411,73 @@ export type GamingSplitPayoutRecord = {
   company_dust_cents: number;
   created_at: string;
 };
+
+// --- Gaming cashout states: DevEx conversion logs + studio KYC (PR 13, migration 0019) ---
+
+/**
+ * One durable virtual-currency conversion record — the DevEx conversion's
+ * auditable facts (the founder's rate-logging rule, made durable). The
+ * match_queue row carries the conversion cells at write time (PR 12); the
+ * CONVERSION LOG is the ledger-grade record that holds until the platform's
+ * fiat settlement completes: the release path reads a batch's logs and
+ * refuses while any is still pending. UNIQUE on event_id — the
+ * content-derived `gaming:devex:` id (per funding line) — so a replayed
+ * ingest re-derives the same id and the constraint turns the insert into a
+ * counted no-op. Integer cents; never a float.
+ */
+export type GamingDevexConversionLogRecord = {
+  id: string;
+  /** UNIQUE — the conversion log's own content-derived id (`gaming:devex:<line event id>`); one log per funding line, ever. */
+  event_id: string;
+  /** The funding queue event — match_queue.event_id (0007); the FK target. */
+  line_event_id: string;
+  /** The platform whose DevEx program converted (the recon worker's validated writer). */
+  platform: string;
+  /** The virtual-currency denomination ('Robux' on Roblox DevEx rows). */
+  denomination: string;
+  /** Exact virtual amount as decimal text — never a float. */
+  virtual_amount: string;
+  /** The applied fiat-per-virtual-unit exchange rate, exact decimal text. */
+  exchange_rate: string;
+  /** The conversion's fiat net in whole integer cents (floored from the exact micros product — sub-cent residue never rounds up). */
+  fiat_net_cents: number;
+  /** The platform payout batch the conversion rides — the cross-reference and settlement key. */
+  settlement_batch_ref: string;
+  /** 'pending_fiat_settlement' until the batch's fiat settlement completes, then 'fiat_settled'. */
+  status: "pending_fiat_settlement" | "fiat_settled";
+  /** When the batch's fiat settlement landed (null while pending). */
+  settled_at: string | null;
+  created_at: string;
+};
+
+/** One named studio team member's identity check (gaming vertical). */
+export type GamingStudioTeamMember = {
+  /** The member's identity key — the payout gate's team_member_checks member_ref. */
+  member_ref: string;
+  /** The member's role on the studio roster ('3d_artist', 'developer', 'sound_designer', ...). */
+  role: string;
+  /** Whether the member's identity check passed — false/unknown refuses at the gate. */
+  identity_check_passed: boolean;
+};
+
+/**
+ * One studio's KYC verification state — the STUDIO-LEVEL compliance record
+ * the gaming payout gate reads: the studio's own KYC status PLUS every
+ * named team member's identity check (3D artist, developer, sound
+ * designer, ...). One row per studio payee (the Don store's sovereign
+ * identity); a re-verification replaces the row. The gate refuses on an
+ * absent record — no state is never assumed verified.
+ */
+export type GamingStudioKycRecord = {
+  id: string;
+  /** UNIQUE — the studio's payee id (the Don store's sovereign identity). */
+  studio_payee_id: string;
+  /** The studio's own KYC status — the Don KycStatus union. */
+  studio_kyc_status: import('@/lib/don/types').KycStatus;
+  /** The named roster — every member the studio-level verification covers. */
+  team_members: GamingStudioTeamMember[];
+  /** The verified studio contract's reference, when known (provenance). */
+  contract_ref: string | null;
+  created_at: string;
+  updated_at: string;
+};

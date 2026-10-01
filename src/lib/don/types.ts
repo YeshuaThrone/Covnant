@@ -90,6 +90,14 @@ export const LEDGER_STATUSES = [
   // signed deal memo and CAMA agreement; the verified release settles the
   // row (status → 'settled') and routes the money into the waterfall.
   "escrow_waterfall_pending",
+  // Gaming cashout pending (PR 13): funds entering from a game platform's
+  // payout program hold until Astra cross-references the platform payout
+  // batch against verified studio contracts and store statements AND the
+  // batch's fiat settlement has completed. A locked row's kind is
+  // 'virtual_currency_cashout_pending'; the verified release settles it
+  // through the normal clearance-gated settlement path (status → 'settled'
+  // + release journal).
+  "virtual_currency_cashout_pending",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -110,6 +118,13 @@ export const LEDGER_KINDS = [
   // (a released receipt stays kind 'escrow_waterfall_pending' with status
   // 'settled'), the same division PR 7 uses.
   "escrow_waterfall_pending",
+  // Gaming cashout pending (PR 13): a game platform's fiat payout batch
+  // locked until the cross-reference (studio contracts + store statements)
+  // and the batch's fiat settlement verify. Kind marks WHAT the row is for
+  // its whole life (a released receipt stays kind
+  // 'virtual_currency_cashout_pending' with status 'settled'), the same
+  // division PR 7 and PR 9 use.
+  "virtual_currency_cashout_pending",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

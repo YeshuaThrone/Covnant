@@ -257,6 +257,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // routings; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0018_gaming_fee_parser_devex.sql',
+      '0019_gaming_cashout_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -29,6 +29,28 @@ export function filmEscrowGlAccount(filmId: string): string {
   return `film_waterfall_escrow:${filmId}`;
 }
 
+// Gaming cashout pending (PR 13): a game platform's fiat payout batch
+// locks in cashout-pending until Astra cross-references the payout batch
+// against verified studio contracts and store statements and the batch's
+// fiat settlement completes. The lock is PER-PLATFORM — the payee and GL
+// account carry the platform the way the film escrow carries the film id —
+// because the payout batches, the conversion logs, and the cross-reference
+// are all per-platform program. Deliberately NOT 'platform', NOT the
+// unclaimed holding sentinel, and NOT the film escrow prefix: gaming
+// cashout is distinct from company dust, from every creator vault, from
+// unallocated recon funds, and from film escrow, in payee, GL account, and
+// ledger kind, so no query can fold one into another.
+export const GAMING_CASHOUT_PAYEE_PREFIX = "gaming_cashout";
+export function gamingCashoutPayeeId(platform: string): string {
+  return `${GAMING_CASHOUT_PAYEE_PREFIX}:${platform}`;
+}
+export function gamingCashoutPayeeName(platform: string): string {
+  return `Gaming Cashout Pending — ${platform}`;
+}
+export function gamingCashoutGlAccount(platform: string): string {
+  return `gaming_cashout:${platform}`;
+}
+
 // The film waterfall's tier accounts (PR 9 ledger states; the sequential
 // cascade allocator itself is the film waterfall engine). Tiers 0 through 4
 // each get a plain account; tier 5 — the net profit pool — is locked 50/50:
@@ -95,6 +117,13 @@ export const JOURNAL_KINDS = [
   "film_escrow_post",
   "film_escrow_release",
   "film_net_points",
+  // Gaming cashout pending (PR 13): a game platform's fiat payout batch
+  // locks in cashout-pending (post), then the verified release — the
+  // cross-reference against studio contracts and store statements complete,
+  // the batch's fiat settlement confirmed — routes the net through the
+  // clearance-gated creator-credit sequence. Additive only.
+  "gaming_cashout_post",
+  "gaming_cashout_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
