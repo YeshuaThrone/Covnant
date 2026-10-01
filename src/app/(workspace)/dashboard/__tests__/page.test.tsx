@@ -4,9 +4,9 @@
  * store boots through the real engines (DON_DEV_SEED=1, no mocks — the
  * same path the e2e harness and preview use). Pins the Gold Board UI spec
  * (goldBoardUiSpec) element-for-element — THE DON wordmark, greeting +
- * avatar chip, three vault-bucket cards with right-aligned balances, NO
- * revenue streams strip (founder directive 2026-09-22: moved to the admin
- * Overview) and NO Quick Actions (goldBoardUiSpec), the ADMIN console pill
+ * avatar chip, three vault-bucket cards with right-aligned balances, the
+ * Revenue Streams strip (founder ruling 2026-10-01: back on the Gold Board)
+ * and NO Quick Actions (goldBoardUiSpec), the ADMIN console pill
  * in the page-header slot, carousel dots, no View all button (founder
  * directive 2026-09-22: /ledger is a backend data page), payout rail tiles
  * (RTP instant, ACH +3
@@ -76,26 +76,26 @@ describe('/dashboard — The Don composition', () => {
     // The founder's seeded portfolio, EXACT from integer cents through the
     // real engine paths — never display strings: available 330_000_000
     // (net royalty proceeds minus settled and in-flight payouts), pending
-    // 65_000_000 (two in-flight payout holds: 25M + 40M), reserve
-    // 100_000_000_000 (24% backup withholding credited to the creator's
-    // reserve bucket across five seeded UDR settlements).
+    // 65_000_000 (two in-flight payout holds: 25M + 40M), reserve 432_000_000
+    // — the five settlements' organic 24% backup withholding. Founder ruling
+    // 2026-10-01: the former $1B locked reserve was mock data, so the seed's
+    // reserve target is DERIVED from the run table — the dashboard renders
+    // the exact engine figure, and no fabricated $1B may appear anywhere.
     expect(html).toContain('$3,300,000.00');
     expect(html).toContain('$650,000.00');
-    // Founder directive 2026-09-21 — at full width '$1,000,000,000.00'
-    // overlaps the card placeholder, so the reserve renders compact ($1B),
-    // derived from the engine cents, not a display string. The full string
-    // must not appear AS the reserve balance — other surfaces (revenue
-    // streams) keep their exact formatting.
-    expect(html).toContain('$1B');
     const reserveBalance = html.split('data-testid="account-card-reserve-balance"')[1] ?? '';
-    expect(reserveBalance).toContain('$1B');
-    expect(reserveBalance.slice(0, 200)).not.toContain('$1,000,000,000.00');
+    expect(reserveBalance).toContain('$4,320,000.00');
+    expect(html).not.toContain('$1B');
+    expect(html).not.toContain('$1,000,000,000.00');
   });
 
-  it('renders NO revenue streams strip (founder directive 2026-09-22: moved to the admin Overview, under Smart Ledger Verification) and NO quick actions (goldBoardUiSpec)', async () => {
+  it('renders the Revenue Streams strip with the seeded sources and NO quick actions (founder ruling 2026-10-01: the strip returns to the Gold Board; quick actions stay removed per goldBoardUiSpec)', async () => {
     const html = await renderDashboardPage();
-    expect(html).not.toContain('Revenue streams');
-    expect(html).not.toContain('data-testid="revenue-streams"');
+    // The holder's royalty inflow by source — store-read aggregation over
+    // the seeded settlements' holder credit legs (Spotify, YouTube Music,
+    // Amazon Music, Bandcamp = four streams).
+    expect(html).toContain('data-testid="revenue-streams"');
+    expect((html.match(/data-testid="revenue-stream"/g) ?? []).length).toBe(4);
     // Quick actions are REMOVED — the strip is read-only financial truth.
     expect(html).not.toContain('data-testid="quick-actions"');
     expect(html).not.toContain('Quick actions');
@@ -145,8 +145,8 @@ describe('/dashboard — The Don composition', () => {
     // hold journals — each shows the holder-facing leg only.
     expect(html).toContain('DR $400,000.00 / CR $0.00');
     expect(html).toContain('DR $250,000.00 / CR $0.00');
-    expect(html).toContain('DR $1,162,716,666.68 / CR $0.00');
-    expect(html).toContain('DR $2,000,000,000.00 / CR $0.00');
+    expect(html).toContain('DR $3,730,000.00 / CR $0.00');
+    expect(html).toContain('DR $6,000,000.00 / CR $0.00');
     expect(html).toContain('−$250,000.00'); // payout displayed as outflow
     expect(html).toContain('data-testid="transactions-see-more"');
     // See more wires to the holder-facing /transactions surface — NOT /ledger

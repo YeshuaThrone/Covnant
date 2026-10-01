@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { ATOMIC_TEMPLATE_REGISTRY, atomicRecordsForCategory } from '@/lib/master/masterStore';
+
 /**
  * Spec §07 (directive §4) — Contract Vault gates: 20 deterministic agreements
  * across the SIX MASTER entertainment verticals (founder canon — Film &
@@ -57,9 +59,10 @@ test('/templates hydrates the Covnant Control Board across the six master vertic
   // The DEMO DATA disclosure stays on the factory.
   await expect(page.getByTestId('demo-data-badge')).toBeVisible();
 
-  // The atomic entity registry joins the page — 26
-  // sector records beneath the factory grids, every field from the store.
-  await expect(page.getByTestId('atomic-template-card')).toHaveCount(26);
+  // The atomic entity registry joins the page — every catalog record renders
+  // beneath the factory grids, every field from the store. The count is
+  // derived from the exported catalog so count drift cannot recur.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(ATOMIC_TEMPLATE_REGISTRY.length);
   const flm = page.locator('[data-testid="atomic-template-card"][data-template-id="TPL-FLM-001"]');
   await expect(flm).toContainText('Feature Film Theatrical Distribution Master Agreement');
   await expect(flm).toContainText('Film Studio');
@@ -85,9 +88,13 @@ test('/templates vertical tabs swap the factory library per master vertical', as
   await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toBeVisible();
   await expect(page.getByText('Master Recording & Streaming Royalty Agreement')).toHaveCount(0);
 
-  // The atomic registry swaps with the tab — this vertical clears the eight
-  // interactive/digital sectors, founder seeds included.
-  await expect(page.getByTestId('atomic-template-card')).toHaveCount(8);
+  // The atomic registry swaps with the tab — this vertical clears the
+  // interactive/digital sectors, founder seeds included. The count derives
+  // from the registry through the page's own filter, so catalog growth
+  // cannot drift the assertion.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(
+    atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'INTERACTIVE_AND_DIGITAL_MEDIA').length,
+  );
   await expect(page.getByText('3D CAD Mesh Spatial Asset Licensing Agreement')).toBeVisible();
   await expect(page.getByText('Virtual Avatar Rigging and Model Ownership Contract')).toBeVisible();
   await expect(page.getByTestId('atomic-template-card').filter({ hasText: 'MOTORSPORT' })).toHaveCount(0);
@@ -100,8 +107,10 @@ test('/templates vertical tabs swap the factory library per master vertical', as
   await expect(page.getByText('Live Stand-Up & Concert Touring Ticket Escrow')).toBeVisible();
   await expect(page.getByText('Video Game Distribution & Microtransaction Royalty Agreement')).toHaveCount(0);
 
-  // The atomic swap follows: four live-economy sectors, founder seeds first.
-  await expect(page.getByTestId('atomic-template-card')).toHaveCount(4);
+  // The atomic swap follows the tab through the same registry-derived filter.
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(
+    atomicRecordsForCategory(ATOMIC_TEMPLATE_REGISTRY, 'LIVE_PERFORMANCE_AND_COMEDY').length,
+  );
   await expect(page.getByText('Motorsport Circuit Trackage Media Rights Agreement')).toBeVisible();
   await expect(page.getByText('Arena Venue Facility Access and Gate Yield Clearing')).toBeVisible();
   await expect(page.getByText('3D CAD Mesh Spatial Asset Licensing Agreement')).toHaveCount(0);
@@ -110,7 +119,7 @@ test('/templates vertical tabs swap the factory library per master vertical', as
   await page.getByRole('tab', { name: 'All verticals' }).click();
   await page.waitForURL(/\/templates$/);
   await expect(page.getByTestId('factory-template-card')).toHaveCount(31);
-  await expect(page.getByTestId('atomic-template-card')).toHaveCount(26);
+  await expect(page.getByTestId('atomic-template-card')).toHaveCount(ATOMIC_TEMPLATE_REGISTRY.length);
 });
 
 test('template navigation generates an auto-filled agreement from the asset of record', async ({

@@ -289,9 +289,9 @@ describe('territory settlement seam — seed pins (Path B: zero rows added)', ()
     await expect(seeded.listTerritorySettlements()).resolves.toEqual([]);
   });
 
-  it('the Creator Analytics pins are untouched: game log 124, KPI 844510373336 cents', async () => {
+  it('the Creator Analytics pins are untouched: game log 124, KPI 14777040000 cents', async () => {
     const payload = await creatorAnalytics(seeded, null);
     expect(payload?.gameLog).toHaveLength(124);
-    expect(payload?.creatorPaidCents).toBe(844_510_373_336n);
+    expect(payload?.creatorPaidCents).toBe(14_777_040_000n);
   });
 });

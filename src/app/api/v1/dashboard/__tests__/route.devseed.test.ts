@@ -44,14 +44,14 @@ describe('GET /api/v1/dashboard — dev-seed integration', () => {
     expect(user.stage_name).toBe('Yeshua Throne');
     expect(user.initials).toBe('YT');
 
-    // The three vault buckets — the engine math: 416,666,666,668 creator
-    // allocations in, 100,000,000,000 withheld to reserve (24%, no verified
-    // TIN), 316,666,666,668 released, two payouts settled, two in flight.
+    // The three vault buckets — the engine math: 1,800,000,000 creator
+    // allocations in, 432,000,000 withheld to reserve (24%, no verified
+    // TIN), 1,368,000,000 released, two payouts settled, two in flight.
     const vault = body.vault as Record<string, number | string>;
     expect(vault.payee_id).toBe('rh_yeshua_throne_don');
     expect(vault.available_balance).toBe(330_000_000);
     expect(vault.pending_balance).toBe(65_000_000);
-    expect(vault.reserve_balance).toBe(100_000_000_000);
+    expect(vault.reserve_balance).toBe(432_000_000);
   });
 
   it('returns holder-scoped journals with balanced legs and the hash chain intact', async () => {

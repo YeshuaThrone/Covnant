@@ -66,10 +66,10 @@ describe('Operations · escrow & settlements', () => {
     // Founder vault — the demo-portfolio canon (available / pending / reserve).
     expect(founder!.availableCents).toBe(330_000_000n);
     expect(founder!.pendingCents).toBe(65_000_000n);
-    expect(founder!.reserveCents).toBe(100_000_000_000n);
+    expect(founder!.reserveCents).toBe(432_000_000n);
     // Label vault — every royalty run's label credits sit in pending.
     expect(label!.availableCents).toBe(0n);
-    expect(label!.pendingCents).toBe(427_843_706_668n);
+    expect(label!.pendingCents).toBe(12_977_040_000n);
     expect(label!.reserveCents).toBe(0n);
     // All money fields are bigints, no floats anywhere.
     for (const vault of flows.escrowSettlements.vaults) {
@@ -179,18 +179,18 @@ describe('Operations · escrow & settlements', () => {
       (r) => r.payeeId === founder!.payeeId && r.taxYear === 2026,
     );
     expect(rows2026).toHaveLength(5);
-    // Four full-price accruals + one prorated accrual — the seed's of-record
+    // Four full-price accruals + one smaller accrual — the seed's of-record
     // rows, pinned order-independently.
-    const full = rows2026.filter((r) => r.grossCents === 100_000_000_000n);
-    const prorated = rows2026.filter((r) => r.grossCents === 16_666_666_668n);
+    const full = rows2026.filter((r) => r.grossCents === 400_000_000n);
+    const prorated = rows2026.filter((r) => r.grossCents === 200_000_000n);
     expect(full).toHaveLength(4);
     expect(prorated).toHaveLength(1);
     for (const row of full) {
-      expect(row.withheldCents).toBe(24_000_000_000n);
-      expect(row.netCents).toBe(76_000_000_000n);
+      expect(row.withheldCents).toBe(96_000_000n);
+      expect(row.netCents).toBe(304_000_000n);
     }
-    expect(prorated[0].withheldCents).toBe(4_000_000_000n);
-    expect(prorated[0].netCents).toBe(12_666_666_668n);
+    expect(prorated[0].withheldCents).toBe(48_000_000n);
+    expect(prorated[0].netCents).toBe(152_000_000n);
     for (const row of rows2026) {
       expect(typeof row.grossCents).toBe('bigint');
       expect(row.tinVerified).toBe(false);
@@ -229,7 +229,7 @@ describe('Operations · runs & pipeline health', () => {
   it('pins the re-derived seed totals — 119 posted runs, zero variance', () => {
     expect(flows.runsPipeline.runs.every((r) => r.status === 'posted')).toBe(true);
     const totalGross = flows.runsPipeline.runs.reduce((sum, r) => sum + r.grossCents, 0n);
-    expect(totalGross).toBe(844_510_373_336n);
+    expect(totalGross).toBe(14_777_040_000n);
     const totalVariance = flows.runsPipeline.runs.reduce((sum, r) => sum + r.varianceAccountCents, 0n);
     expect(totalVariance).toBe(0n);
   });
@@ -338,7 +338,7 @@ describe('Operations · payee/creator registry', () => {
     const founderRow = flows.registry.find((r) => r.payeeId === 'rh_yeshua_throne_don');
     expect(founderRow).toBeDefined();
     expect(founderRow!.vault).not.toBeNull();
-    expect(founderRow!.vault!.reserveCents).toBe(100_000_000_000n);
+    expect(founderRow!.vault!.reserveCents).toBe(432_000_000n);
     expect(founderRow!.runCount).toBe(5);
   });
 
@@ -346,7 +346,7 @@ describe('Operations · payee/creator registry', () => {
     const labelRow = flows.registry.find((r) => r.payeeId === 'rh_thrones_label_don');
     expect(labelRow).toBeDefined();
     expect(labelRow!.runCount).toBe(119);
-    expect(labelRow!.vault!.pendingCents).toBe(427_843_706_668n);
+    expect(labelRow!.vault!.pendingCents).toBe(12_977_040_000n);
   });
 });
 

@@ -318,7 +318,7 @@ describe('the adapter over the live dev-seed selectors', () => {
     expect(summary.netPayout).toBe(formatCentsBigint(storedNet));
     expect(summary.displayCornerDust).toBe('$0.00');
     // Real dev-seed magnitudes ride the same bigint path: the register's
-    // gross crosses $1B by construction (the $1B reserve seed).
+    // gross spans the full seeded settlement history (comma-magnitude).
     expect(summary.gross).toContain(',');
   });
 });

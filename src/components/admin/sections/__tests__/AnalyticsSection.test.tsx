@@ -472,17 +472,17 @@ describe('AnalyticsSection — the live dev-seed render', () => {
 
   it('pins the six KPI cards to the derivation totals — the whole ledger, all window', () => {
     const html = renderView(allPayload, { kind: 'ready', value: readouts });
-    expect(html).toContain('$8,445,103,733.36'); // total cleared
-    expect(html).toContain('$2,955,786,306.67'); // creator paid (35%)
-    expect(html).toContain('$1,266,765,560.00'); // operations yield (15%)
-    expect(html).toContain('$4,222,551,866.69'); // company reserve (50%)
+    expect(html).toContain('$147,770,400.00'); // total cleared
+    expect(html).toContain('$51,719,640.00'); // creator paid (35%)
+    expect(html).toContain('$22,165,560.00'); // operations yield (15%)
+    expect(html).toContain('$73,885,200.00'); // company reserve (50%)
     expect(html).toContain('119'); // runs cleared
-    expect(html).toContain('$70,967,258.26'); // avg run
+    expect(html).toContain('$1,241,768.06'); // avg run
   });
 
   it('pins the flow-kind donut to the reconciled structural totals', () => {
     const html = renderView(allPayload, { kind: 'ready', value: readouts });
-    expect(html).toContain('$8,411,918,933.36'); // Royalty Distribution
+    expect(html).toContain('$114,585,600.00'); // Royalty Distribution
     expect(html).toContain('$24,250,000.00'); // Prize Purse
     expect(html).toContain('$8,720,000.00'); // Brand Partnership
     expect(html).toContain('$214,800.00'); // Platform Content Monetization
@@ -495,13 +495,13 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     for (const industry of ['Music', 'Film', 'Sports', 'Live', 'Publishing', 'TV', 'Sponsorship', 'Podcasting', 'Esports', 'Social']) {
       expect(html).toContain(`>${industry}<`);
     }
-    expect(html).toContain('$8,333,333,333.36'); // MUSIC
+    expect(html).toContain('$36,000,000.00'); // MUSIC
     expect(html).toContain('$30,250,000.00'); // SPORTS
     const musicAt = html.indexOf('>Music<');
     const filmAt = html.indexOf('>Film<');
     const sportsAt = html.indexOf('>Sports<');
-    expect(musicAt).toBeLessThan(filmAt);
-    expect(filmAt).toBeLessThan(sportsAt);
+    expect(filmAt).toBeLessThan(musicAt);
+    expect(musicAt).toBeLessThan(sportsAt);
   });
 
   it('renders the daily curve — points on the area, paired thin lines, all and 7d', () => {
@@ -525,7 +525,7 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     expect(html).not.toContain('>4 of 9<');
     // The Total row reconciles to the ledger.
     expect(html).toContain('data-testid="analytics-leaderboard-total"');
-    expect(html).toContain('$8,445,103,733.36');
+    expect(html).toContain('$147,770,400.00');
   });
 
   it('keeps counterparties out of the structural markup and renders the field of record in the game log', () => {
@@ -558,8 +558,8 @@ describe('AnalyticsSection — the live dev-seed render', () => {
     expect(sevenHtml).toContain('$21,326,400.00'); // 7d company reserve
     expect(sevenHtml).toContain('47'); // 7d runs
     expect(sevenHtml).toContain('$907,506.38'); // 7d avg run
-    expect(sevenHtml).not.toContain('$8,445,103,733.36');
-    expect(allHtml).toContain('$8,445,103,733.36');
+    expect(sevenHtml).not.toContain('$147,770,400.00');
+    expect(allHtml).toContain('$147,770,400.00');
     expect(allHtml).not.toContain('$42,652,800.00');
   });
 
@@ -572,7 +572,7 @@ describe('AnalyticsSection — the live dev-seed render', () => {
       />,
     );
     expect(html).toContain('demo-data-badge');
-    expect(html).toContain('$8,445,103,733.36'); // the 'all' window renders by default
+    expect(html).toContain('$147,770,400.00'); // the 'all' window renders by default
     expect(html).toContain('Company Analytics');
   });
 });

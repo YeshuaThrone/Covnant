@@ -439,7 +439,7 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
 
   it('pins the ALL-window KPI cards to the derivation totals exactly', () => {
     const html = renderView(allPayload);
-    expect(html).toContain('$8,445,103,733.36'); // creator paid — the ALL-window total
+    expect(html).toContain('$147,770,400.00'); // creator paid — the ALL-window total
     const kpiBlock = html.slice(
       html.indexOf('data-testid="creator-analytics-kpis"'),
       html.indexOf('data-testid="creator-analytics-trend"'),
@@ -447,7 +447,7 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(kpiBlock).toContain('100%'); // integer-safe share: the holder credits ARE the gross (zero dust)
     expect(kpiBlock).toContain('2'); // active payees
     expect(kpiBlock).toContain('119'); // runs paying creators
-    // The d256957 treatment — the full $8,445,103,733.36 renders un-truncated.
+    // The d256957 treatment — the full $147,770,400.00 renders un-truncated.
     expect(kpiBlock).toContain('tracking-tighter');
     expect(kpiBlock).not.toContain('truncate');
   });
@@ -469,7 +469,7 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
 
   it('pins the 30D window and its integer share exactly', () => {
     const html = renderView(monthPayload);
-    expect(html).toContain('$6,438,993,733.36'); // 30d creator paid
+    expect(html).toContain('$133,660,400.00'); // 30d creator paid
     const kpiBlock = html.slice(
       html.indexOf('data-testid="creator-analytics-kpis"'),
       html.indexOf('data-testid="creator-analytics-trend"'),
@@ -486,12 +486,12 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     expect(html).toContain('data-rank="2"');
     expect(html).toContain('Thrones Rights Group'); // the store-carried label of record
     expect(html).toContain('Yeshua Throne');
-    expect(html).toContain('$4,278,437,066.68'); // rank 1
-    expect(html).toContain('$4,166,666,666.68'); // rank 2
+    expect(html).toContain('$129,770,400.00'); // rank 1
+    expect(html).toContain('$18,000,000.00'); // rank 2
     const namedBefore = html.indexOf('Thrones Rights Group') < html.indexOf('Yeshua Throne');
     expect(namedBefore).toBe(true); // module order — rank ascending
     const totalBlock = html.slice(html.indexOf('data-testid="creator-analytics-leaderboard-total"'));
-    expect(totalBlock).toContain('$8,445,103,733.36'); // Σ leaders === creatorPaidCents (the module invariant)
+    expect(totalBlock).toContain('$147,770,400.00'); // Σ leaders === creatorPaidCents (the module invariant)
     expect(html.match(/data-testid="chart-sparkline"/g)?.length).toBe(2); // per-row momentum sparklines
     expect(html.match(/data-testid="chart-heat-cell"/g)?.length).toBeGreaterThan(0);
     // The opted-in native tooltips — per-point <title> elements carrying the
@@ -512,29 +512,29 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
       html.indexOf('data-testid="creator-analytics-leaders"'),
     );
     const order = [
-      'Spotify',
-      'Amazon Music',
-      'YouTube Music',
-      'Bandcamp',
       'Meridian Cinemas',
       'PGA Tour',
       'Ticketmaster',
+      'Spotify',
       'Nike',
+      'Amazon Music',
+      'YouTube Music',
       'Reader Platforms',
       'Broadcast Partners',
+      'Bandcamp',
       'Apple Podcasts',
       'Twitch',
       'TikTok',
     ];
     for (const brand of order) expect(sources).toContain(brand);
-    // Descending by credits, source name breaking the 200B tie.
+    // Descending by credits, source name breaking the 800M tie.
     let last = -1;
     for (const brand of order) {
       const at = sources.indexOf(brand);
       expect(at).toBeGreaterThan(last);
       last = at;
     }
-    expect(sources).toContain('$4,000,000,000.00'); // Spotify's 400,000,000,000 cents
+    expect(sources).toContain('$16,000,000.00'); // Spotify's 1,600,000,000 cents
     expect(html.match(/data-testid="chart-hbar-row"/g)?.length).toBe(13);
   });
 
@@ -547,23 +547,31 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
     // The two mono-eyebrow group labels render.
     expect(sources).toContain('Primary DSPs');
     expect(sources).toContain('Tail distribution');
-    // The deterministic 1/100 cut over the window's top source — four
-    // primary sources and nine tail sources on this seed.
+    // The deterministic 1/100 cut over the window's top source — eleven
+    // primary sources and the two micro-scale tail sources on this seed.
     const top = allPayload.sourceSplits[0]?.creatorCents ?? 0n;
     const expectedPrimary = allPayload.sourceSplits.filter((row) => row.creatorCents * 100n >= top);
     const expectedTail = allPayload.sourceSplits.filter((row) => row.creatorCents * 100n < top);
     expect(expectedPrimary.map((row) => row.source)).toEqual([
+      'Meridian Cinemas',
+      'PGA Tour',
+      'Ticketmaster',
       'Spotify',
+      'Nike',
       'Amazon Music',
       'YouTube Music',
+      'Reader Platforms',
+      'Broadcast Partners',
       'Bandcamp',
+      'Apple Podcasts',
     ]);
-    expect(expectedTail.length).toBe(9);
+    expect(expectedTail.length).toBe(2);
     const primaryBlock = sources.slice(sources.indexOf('Primary DSPs'), sources.indexOf('Tail distribution'));
     const tailBlock = sources.slice(sources.indexOf('Tail distribution'));
     expect(primaryBlock.match(/data-testid="chart-hbar-row"/g)?.length).toBe(expectedPrimary.length);
     expect(tailBlock.match(/data-testid="chart-hbar-row"/g)?.length).toBe(expectedTail.length);
-    // Spotify lands in the primary group; the TikTok/Twitch-scale tail lands in its own.
+    // The retuned seed's money concentrates above the cut; the two
+    // micro-scale sources land in the tail.
     expect(primaryBlock).toContain('Spotify');
     expect(tailBlock).toContain('TikTok');
     expect(tailBlock).toContain('Twitch');
@@ -598,10 +606,10 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
   it('switches the window and the values change with it', () => {
     const allHtml = renderView(allPayload);
     const sevenHtml = renderView(sevenPayload);
-    expect(allHtml).toContain('$8,445,103,733.36');
+    expect(allHtml).toContain('$147,770,400.00');
     expect(allHtml).not.toContain('$42,652,800.00');
     expect(sevenHtml).toContain('$42,652,800.00');
-    expect(sevenHtml).not.toContain('$8,445,103,733.36');
+    expect(sevenHtml).not.toContain('$147,770,400.00');
   });
 
   it('mounts through the section wrapper with the demo badge and the default window', () => {
@@ -613,7 +621,7 @@ describe('CreatorAnalyticsSection — the live dev-seed render', () => {
       />,
     );
     expect(html).toContain('demo-data-badge');
-    expect(html).toContain('$8,445,103,733.36'); // the ALL window renders by default
+    expect(html).toContain('$147,770,400.00'); // the ALL window renders by default
     expect(html).toContain('Creator Analytics');
   });
 
@@ -913,7 +921,7 @@ describe('CreatorAnalyticsSection — the growth modules over the live dev-seed'
     expect(html).toContain('data-testid="creator-analytics-markets-empty"');
     expect(html).toContain('No SDK-settled events in this window');
     // The ALL window renders the lone top-source signal with NO delta chip.
-    expect(html).toContain('Top source: Spotify');
+    expect(html).toContain('Top source: Meridian Cinemas');
     expect(html).not.toContain('data-testid="creator-analytics-signal-bps"');
   });
 
