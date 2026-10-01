@@ -236,6 +236,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // vocabulary; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0014_astra_traversal_vocabulary.sql',
+      // Spatial & Web3 identifier trigger branches (canon v25): the additive
+      // CREATE OR REPLACE on validate_global_identifier — a function-only
+      // change; still no DDL on universal_royalty_ledger — the referencing
+      // pin below holds.
+      '0015_spatial_web3_identifiers.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
