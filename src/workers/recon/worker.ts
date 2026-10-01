@@ -14,12 +14,19 @@
  * (npm run worker:recon) and under Vitest against the in-memory store.
  */
 
-import type { RoyaltyReconJobRecord } from "@/modules/recon/records";
+import type {
+  ReconJobResult,
+  RoyaltyReconJobRecord,
+} from "@/modules/recon/records";
 import type { Store } from "@/lib/server/store";
 import type { ParsedStatementLine } from "./records";
 import { calculateGuildResiduals } from "./guildResiduals";
 import { writeLinesToMatchQueue, type VaultLookup } from "./matchQueue";
 import { postMatchedLinesToHolding } from "./posting";
+import { qualifyImpressionLines } from "./podcast";
+import { postPodcastLinesToHolding } from "./podcastPosting";
+import { writePodcastLinesToMatchQueue } from "./podcastQueue";
+import { isPodcastProfileKind } from "./podcastProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -53,8 +60,16 @@ export interface ProcessedJob {
 }
 
 /** The completion result the worker writes — the spec's shape, plus the
- * activated canonical-posting seam's honest counts. */
-export interface ReconWorkerResult {
+ * activated canonical-posting seam's honest counts. The podcast lane adds
+ * its own block (absent on music/film lanes — the presence is the
+ * discriminator). */
+/**
+ * The completion result the worker writes — the record layer's
+ * `ReconJobResult` with the summary fields the worker always populates.
+ * Podcast lane counts ride the record's flat `podcast_*` fields (PR 10);
+ * non-podcast lanes leave them absent.
+ */
+export interface ReconWorkerResult extends ReconJobResult {
   events_written: number;
   matched: number;
   unmatched: number;
@@ -114,9 +129,66 @@ async function processJobBody(
 
   const matchedProfile = dispatchStatementProfile(content);
   if (matchedProfile !== null) {
+    // The podcast lane branches BEFORE the music path: its lines carry no
+    // music rights and its revenue passes the IAB qualification gates
+    // before any of it counts — a different pipeline, not a profile flavor.
+    if (isPodcastProfileKind(matchedProfile.kind)) {
+      return await parsePodcast(deps, job.ingest_id, matchedProfile, content);
+    }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
   return await parseThroughVisionEngine(deps, job.ingest_id, ingest.file_name, content);
+}
+
+/**
+ * The podcast lane (PR 10): IAB v2/v3 qualification → match_queue write →
+ * commission-aware posting. Qualification runs FIRST — bot filtering, the
+ * 24-hour single-IP dedup window, the 60-second audio threshold — so only
+ * qualified impressions and Channel C subscription rows reach the queue:
+ * a bot-filtered or deduped-out line was never an impression, and revenue
+ * that does not exist cannot count.
+ */
+async function parsePodcast(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const qualification = qualifyImpressionLines(lines);
+  const writable = [
+    ...qualification.qualified,
+    ...lines.filter(
+      (line) =>
+        line.podcastDetail?.revenueChannel === "channel_c_subscription",
+    ),
+  ];
+  const counts = await writePodcastLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    writable,
+    deps.vault,
+  );
+  const posting = await postPodcastLinesToHolding(
+    deps.store,
+    counts.lineOutcomes,
+    (deps.now ?? (() => new Date()))(),
+  );
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    podcast_written: counts.written,
+    podcast_replayed: counts.alreadyPresent,
+    podcast_held: counts.heldWritten,
+    podcast_bots_filtered: qualification.counts.botsFiltered,
+    podcast_duplicates_deduped: qualification.counts.duplicatesDeduped,
+    podcast_short_requests_rejected: qualification.counts.shortRequestsRejected,
+    podcast_commission_micros: posting.commissionMicrosDeducted.toString(),
+  };
 }
 
 /** The deterministic lane: profile parse + guild residuals + queue write. */

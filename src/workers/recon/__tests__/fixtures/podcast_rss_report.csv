@@ -1,0 +1,8 @@
+Report Date,RSS Feed ID,Episode GUID,Listener IP,User Agent,Ad Creative ID,Ad Slot,Placement Type,Revenue Channel,Sponsor Verified,Impressions,CPM,Flat Fee,Audio Requested (sec),Network Commission %,Show DOI,Monthly Recurring Amount,Currency
+2026-08-15T09:00:00Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.50,Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X),crtv-hostread-9,mid_roll,host_read,channel_b_host_read,yes,,,250.00,1500,,10.61982/covenant.show-001,,USD
+2026-08-15T09:00:10Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.51,Mozilla/5.0 (Android 14; Pixel 8),crtv-hostread-9,pre_roll,host_read,channel_b_host_read,no,,,180.00,900,,10.61982/covenant.show-001,,USD
+2026-08-01T00:00:00Z,urn:podcast:covenant:show-001,ep-2026-08-01-s,,,,,,,,,,,,,10.61982/covenant.show-001,4.99,USD
+2026-08-15T09:00:20Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.52,AppleCoreMedia/1.0.0,crtv-rss-a-1,mid_roll,dai,channel_a_dai,,1,10.00,,300,,10.61982/covenant.show-001,,USD
+2026-08-15T09:00:30Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.92,curl/8.0.1,crtv-rss-bot,mid_roll,dai,channel_a_dai,,1,10.00,,300,,10.61982/covenant.show-001,,USD
+2026-08-15T09:00:40Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.53,AppleCoreMedia/1.0.0,crtv-rss-a-2,mid_roll,dai,channel_a_dai,,1,10.00,,30,,10.61982/covenant.show-001,,USD
+2026-08-15T10:00:05Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.10,AppleCoreMedia/1.0.0,crtv-mid-100,mid_roll,dai,channel_a_dai,,1,12.00,,1800,,10.61982/covenant.show-001,,USD

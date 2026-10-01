@@ -47,7 +47,7 @@ export function reconEventId(ingestId: string, line: ParsedStatementLine): strin
  * is BOTH a parsed identifier kind (safe queue-row index) and a vault-
  * ingestible kind (safe findByIdentifier argument) — no assertion anywhere.
  */
-const LOOKUP_PRIORITY = ["ISRC", "ISWC", "UPC", "EIDR"] as const satisfies readonly (VaultExternalIdentifierKind &
+const LOOKUP_PRIORITY = ["ISRC", "ISWC", "UPC", "EIDR", "DOI"] as const satisfies readonly (VaultExternalIdentifierKind &
   ReconIdentifierKind)[];
 
 /**

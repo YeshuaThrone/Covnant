@@ -22,6 +22,7 @@
  */
 
 import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/identifiers";
+import { PODCAST_PROFILES } from "./podcastProfiles";
 import {
   optionalCell,
   parseStatementMoney,
@@ -116,6 +117,7 @@ function musicLine(
     usageNote: rightsPipeline,
     raw,
     guildResidual: null,
+    podcastDetail: null,
   };
 }
 
@@ -391,6 +393,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           usageNote: def.offTopNote,
           raw: def.header.map((column) => values.get(column) ?? ""),
           guildResidual: null,
+          podcastDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -508,6 +511,9 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   filmSvodProfile,
   filmTheatricalProfile,
   filmSalesAgentProfile,
+  // The podcast lane (PR 10) — dispatched through the same single opinion;
+  // the worker branches on the profile kind before the music machinery.
+  ...PODCAST_PROFILES,
 ];
 
 /**

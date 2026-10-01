@@ -67,6 +67,24 @@ export interface ReconJobResult {
   /** Matched lines whose post hit the per-source replay guard (409) —
    * counted no-ops, never double posts. */
   holding_replayed?: number;
+  /** Podcast lane (PR 10): qualified impressions written as countable
+   * `podcast:imp:` rows (plus Channel C subscription rows). */
+  podcast_written?: number;
+  /** Podcast lane: same-impression replays caught by the event-id guard. */
+  podcast_replayed?: number;
+  /** Podcast lane: sponsor-unverified host reads parked in `podcast:held:`
+   * quarantine — visible, never counted, never posted. */
+  podcast_held?: number;
+  /** Podcast lane: IAB rejections — bot-filtered lines. */
+  podcast_bots_filtered?: number;
+  /** Podcast lane: IAB rejections — duplicate downloads inside the
+   * 24-hour single-IP window. */
+  podcast_duplicates_deduped?: number;
+  /** Podcast lane: IAB rejections — audio requests under 60 seconds. */
+  podcast_short_requests_rejected?: number;
+  /** Podcast lane: commission deducted across the pass's posts, exact
+   * fixed-point micros as text (never a float). */
+  podcast_commission_micros?: string;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

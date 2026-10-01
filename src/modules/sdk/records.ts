@@ -21,7 +21,12 @@ export type RightsPipeline =
   | 'master_interactive';
 
 /** Statement file formats the ingest provenance records can hold. */
-export type StatementFormat = 'cwr' | 'ddex' | 'csv_statement';
+export type StatementFormat =
+  | 'cwr'
+  | 'ddex'
+  | 'csv_statement'
+  | 'dai_log'
+  | 'rss_report';
 
 /** Where an ingest's bytes came from. */
 export type StatementSource = 'statement' | 'manual';

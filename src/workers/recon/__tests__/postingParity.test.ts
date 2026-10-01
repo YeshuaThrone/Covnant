@@ -18,245 +18,16 @@
  * stores' claim semantics (earliest claimable, attempts increment).
  */
 import { describe, expect, it } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import { SqliteStore } from "@/lib/server/sqliteStore";
-import { SupabaseStore } from "@/lib/server/supabaseStore";
-import { RECON_STALE_CLAIM_MS, type Store } from "@/lib/server/store";
+import type { Store } from "@/lib/server/store";
 import type { ReconJobResult } from "@/modules/recon/records";
 import { runOnce } from "../worker";
 import type { VaultLookup } from "../matchQueue";
 
 import { loadFixture } from "./fixtures";
-
-type Row = Record<string, unknown>;
-
-interface FakeDbError {
-  message: string;
-  code: string;
-}
-
-const UNIQUE_VIOLATION: FakeDbError = {
-  message: 'duplicate key value violates unique constraint "match_queue_event_id_key"',
-  code: "23505",
-};
-
-/** The columns with a UNIQUE constraint on this path (migration 0007). */
-const UNIQUE_COLUMNS: Record<string, string[]> = {
-  match_queue: ["event_id"],
-};
-
-class FakeTable {
-  private rows: Row[] = [];
-  private nextInsertionOrder = 1;
-
-  /** The real tables carry the generated insertion_order identity column. */
-  insert(row: Row): Row {
-    const stored = { insertion_order: this.nextInsertionOrder++, ...row };
-    this.rows.push(stored);
-    return stored;
-  }
-
-  isUniqueViolation(row: Row): boolean {
-    return this.rows.some(
-      (existing) =>
-        row.event_id !== undefined &&
-        existing.event_id === row.event_id,
-    );
-  }
-
-  select(): Row[] {
-    return this.rows.map((row) => ({ ...row }));
-  }
-
-  update(patch: Row, filters: Array<[string, unknown]>): number {
-    let changed = 0;
-    for (let i = 0; i < this.rows.length; i++) {
-      if (matchesRow(this.rows[i], filters)) {
-        this.rows[i] = { ...this.rows[i], ...patch };
-        changed++;
-      }
-    }
-    return changed;
-  }
-
-  /** In-place claim transition for the rpc shim — the row keeps its identity. */
-  claimFirst(nowIso: string, engine: unknown): Row | null {
-    const staleCutoff = new Date(
-      new Date(nowIso).getTime() - RECON_STALE_CLAIM_MS,
-    ).toISOString();
-    const claimable = this.rows
-      .filter(
-        (row) =>
-          row.status === "pending" ||
-          (row.status === "processing" &&
-            typeof row.claimed_at === "string" &&
-            row.claimed_at < staleCutoff),
-      )
-      .sort((a, b) => {
-        const av = String(a.created_at);
-        const bv = String(b.created_at);
-        return av < bv ? -1 : av > bv ? 1 : 0;
-      });
-    const best = claimable[0];
-    if (best === undefined) return null;
-    const claimed = {
-      ...best,
-      status: "processing",
-      engine: engine ?? null,
-      claimed_at: nowIso,
-      started_at: (best.started_at as string | null) ?? nowIso,
-      attempts: Number(best.attempts) + 1,
-      updated_at: nowIso,
-    };
-    Object.assign(best, claimed);
-    return { ...best };
-  }
-}
-
-/** eq filters compare equality; an array value is an `.in()` membership set. */
-function matchesRow(row: Row, filters: Array<[string, unknown]>): boolean {
-  return filters.every(([column, value]) =>
-    Array.isArray(value) ? value.includes(row[column]) : row[column] === value,
-  );
-}
-
-interface FakeResult {
-  data: unknown;
-  error: FakeDbError | null;
-}
-
-class FakeQueryBuilder {
-  private filters: Array<[string, unknown]> = [];
-  private orders: Array<[string, boolean]> = [];
-  private limitCount: number | null = null;
-  private single = false;
-  private operation:
-    | { kind: "insert"; row: Row }
-    | { kind: "update"; patch: Row }
-    | { kind: "select" } = { kind: "select" };
-
-  constructor(
-    private readonly table: FakeTable,
-    private readonly tableName: string,
-  ) {}
-
-  insert(row: Row): this {
-    this.operation = { kind: "insert", row };
-    return this;
-  }
-
-  update(patch: Row): this {
-    this.operation = { kind: "update", patch };
-    return this;
-  }
-
-  select(): this {
-    return this;
-  }
-
-  eq(column: string, value: unknown): this {
-    this.filters.push([column, value]);
-    return this;
-  }
-
-  in(column: string, values: unknown[]): this {
-    this.filters.push([column, values]);
-    return this;
-  }
-
-  order(column: string, options?: { ascending?: boolean }): this {
-    this.orders.push([column, options?.ascending ?? true]);
-    return this;
-  }
-
-  limit(count: number): this {
-    this.limitCount = count;
-    return this;
-  }
-
-  maybeSingle(): this {
-    this.single = true;
-    return this;
-  }
-
-  /** The PostgREST builder is thenable — `await` resolves { data, error }. */
-  then<TResult1 = FakeResult, TResult2 = never>(
-    onFulfilled?: (value: FakeResult) => TResult1,
-    onRejected?: (reason: unknown) => TResult2,
-  ): Promise<TResult1 | TResult2> {
-    return Promise.resolve(this.execute()).then(onFulfilled, onRejected);
-  }
-
-  private execute(): FakeResult {
-    const op = this.operation;
-    if (op.kind === "insert") {
-      if (
-        (UNIQUE_COLUMNS[this.tableName] ?? []).includes("event_id") &&
-        this.table.isUniqueViolation(op.row)
-      ) {
-        return { data: null, error: UNIQUE_VIOLATION };
-      }
-      return { data: this.table.insert(op.row), error: null };
-    }
-    if (op.kind === "update") {
-      const changed = this.table.update(op.patch, this.filters);
-      if (changed === 0) return { data: null, error: null };
-      // Fall through: select returns the updated rows below.
-    }
-    const rows = this.table
-      .select()
-      .filter((row) => matchesRow(row, this.filters));
-    for (let i = this.orders.length - 1; i >= 0; i--) {
-      const [column, ascending] = this.orders[i];
-      rows.sort((a, b) => {
-        const av = a[column] as string | number;
-        const bv = b[column] as string | number;
-        if (av === bv) return 0;
-        const cmp = av < bv ? -1 : 1;
-        return ascending ? cmp : -cmp;
-      });
-    }
-    const limited = this.limitCount === null ? rows : rows.slice(0, this.limitCount);
-    if (this.single) {
-      return { data: limited[0] ?? null, error: null };
-    }
-    return { data: limited, error: null };
-  }
-}
-
-class FakeSupabaseClient {
-  private tables = new Map<string, FakeTable>();
-
-  private table(name: string): FakeTable {
-    let t = this.tables.get(name);
-    if (t === undefined) {
-      t = new FakeTable();
-      this.tables.set(name, t);
-    }
-    return t;
-  }
-
-  from(name: string): FakeQueryBuilder {
-    return new FakeQueryBuilder(this.table(name), name);
-  }
-
-  /** The migration-0011 claim RPC — the store's ONLY rpc on this path. */
-  async rpc(fn: string, args: Record<string, unknown>): Promise<FakeResult> {
-    if (fn !== "claim_royalty_recon_job") {
-      return {
-        data: null,
-        error: { message: `fake: rpc ${fn} not implemented`, code: "P0001" },
-      };
-    }
-    const claimed = this.table("royalty_recon_jobs").claimFirst(
-      String(args.p_now),
-      args.p_engine,
-    );
-    return { data: claimed, error: null };
-  }
-}
+import { makeFakeSupabaseStore } from "./fakeSupabase";
 
 // ---------------------------------------------------------------------------
 // Backend registry + the shared scenario.
@@ -266,10 +37,8 @@ const BACKENDS = [
   { name: "InMemoryStore", make: () => new InMemoryStore() },
   { name: "SqliteStore", make: () => new SqliteStore(":memory:") },
   {
-    // The fake implements the builder subset this path touches; the real
-    // SupabaseClient surface is far larger than the store uses.
     name: "SupabaseStore",
-    make: () => new SupabaseStore(new FakeSupabaseClient() as unknown as SupabaseClient),
+    make: () => makeFakeSupabaseStore(),
   },
 ] as const;
 

@@ -1,0 +1,14 @@
+Log Date,RSS Feed ID,Episode GUID,Listener IP,User Agent,Ad Creative ID,Ad Slot,Placement Type,Revenue Channel,Network Sold,Impressions,CPM,Audio Requested (sec),Network Commission %,Show DOI,Currency
+2026-08-15T10:00:05Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.10,AppleCoreMedia/1.0.0,crtv-mid-100,mid_roll,dai,channel_a_dai,yes,1,12.00,1800,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:12Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.11,AppleCoreMedia/1.0.0,crtv-pre-100,pre_roll,dai,channel_a_dai,yes,1,8.00,900,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:20Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,198.51.100.20,Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7),crtv-mid-200,mid_roll,dai,channel_a_dai,no,1,15.00,2400,,10.61982/covenant.show-001,USD
+2026-08-15T10:00:30Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.12,GoogleChrome/126.0.0.0,crtv-post-100,post_roll,dai,channel_a_dai,yes,1,10.00,600,25.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:35Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.90,PodcastBot/1.0 (research crawler),crtv-bot-1,mid_roll,dai,channel_a_dai,yes,1,12.00,1800,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:36Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.91,python-requests/2.31.0,crtv-bot-2,pre_roll,dai,channel_a_dai,yes,1,8.00,900,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:40Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.13,AppleCoreMedia/1.0.0,crtv-pre-100,pre_roll,dai,channel_a_dai,yes,1,8.00,60,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:45Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.14,Spotify/8.9.0,crtv-mid-100,mid_roll,dai,channel_a_dai,yes,1,12.00,45,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:05:05Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.10,AppleCoreMedia/1.0.0,crtv-mid-300,mid_roll,dai,channel_a_dai,yes,1,12.00,1800,40.00,10.61982/covenant.show-001,USD
+2026-08-15T14:00:12Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.11,AppleCoreMedia/1.0.0,crtv-pre-300,pre_roll,dai,channel_a_dai,yes,1,8.00,900,40.00,10.61982/covenant.show-001,USD
+2026-08-16T10:00:05Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.10,AppleCoreMedia/1.0.0,crtv-mid-400,mid_roll,dai,channel_a_dai,yes,1,12.00,1800,40.00,10.61982/covenant.show-001,USD
+2026-08-15T10:00:50Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.15,AppleCoreMedia/1.0.0,crtv-hostread-1,mid_roll,host_read,channel_b_host_read,no,1,30.00,1500,,10.61982/covenant.show-001,USD
+2026-08-15T10:00:05Z,urn:podcast:covenant:show-001,ep-2026-08-15-a,203.0.113.10,AppleCoreMedia/1.0.0,crtv-mid-500,pre_roll,dai,channel_a_dai,yes,1,8.00,1800,40.00,10.61982/covenant.show-001,USD
