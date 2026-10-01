@@ -65,6 +65,9 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingEngineRoyaltyEventRecord,
+  GamingItemSplitScheduleRecord,
+  GamingSplitPayoutRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -547,6 +550,62 @@ export interface Store {
     eventIdPrefixes: readonly string[],
   ): Promise<number>;
 
+  // --- Gaming engine-royalty accumulator + item splits (migration 0018, PR 12) ---
+
+  /**
+   * Writes one Epic-family gross contribution. UNIQUE on event_id — one
+   * contribution per queue event, ever; a duplicate insert throws the
+   * unique violation (the caller counts the replay as a no-op).
+   */
+  insertGamingEngineRoyaltyEvent(
+    row: Omit<GamingEngineRoyaltyEventRecord, 'id'>,
+  ): Promise<GamingEngineRoyaltyEventRecord>;
+
+  getGamingEngineRoyaltyEventByEventId(
+    eventId: string,
+  ): Promise<GamingEngineRoyaltyEventRecord | undefined>;
+
+  /**
+   * The accumulator's per-product annual state — the DERIVED sum of the
+   * product's contribution rows for the year (never a mutable counter, so
+   * replayed gross can never cross the $1M threshold twice). Micros as text.
+   * `platforms` is the accumulating FAMILY (Epic Games Store + Unreal
+   * Marketplace share one per-product line) — every platform in the list
+   * contributes to the sum.
+   */
+  sumGamingEngineRoyaltyGross(
+    platforms: readonly string[],
+    productId: string,
+    annualYear: number,
+  ): Promise<string>;
+
+  /**
+   * Writes one item's validated split schedule (one row per item — a
+   * re-registration replaces the row; the engine bumps the version).
+   */
+  upsertGamingItemSplitSchedule(
+    row: GamingItemSplitScheduleRecord,
+  ): Promise<GamingItemSplitScheduleRecord>;
+
+  getGamingItemSplitSchedule(
+    itemId: string,
+  ): Promise<GamingItemSplitScheduleRecord | undefined>;
+
+  /**
+   * Writes one per-item split payout routing. UNIQUE on source_event_id —
+   * one routing per funding event, ever; a duplicate insert throws the
+   * unique violation (the caller counts the replay as a no-op).
+   */
+  insertGamingSplitPayout(
+    row: Omit<GamingSplitPayoutRecord, 'id'>,
+  ): Promise<GamingSplitPayoutRecord>;
+
+  getGamingSplitPayoutBySourceEvent(
+    sourceEventId: string,
+  ): Promise<GamingSplitPayoutRecord | undefined>;
+
+  /** The item's payout routings, oldest first (created_at ASC, id tiebreak). */
+  listGamingSplitPayouts(itemId: string): Promise<GamingSplitPayoutRecord[]>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

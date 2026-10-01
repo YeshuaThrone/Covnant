@@ -78,6 +78,9 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingEngineRoyaltyEventRecord,
+  GamingItemSplitScheduleRecord,
+  GamingSplitPayoutRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -701,6 +704,46 @@ CREATE TABLE IF NOT EXISTS podcast_guest_bonus_accruals (
   holding_ledger_id TEXT,
   created_at TEXT NOT NULL
 );
+
+-- Gaming engine-royalty accumulator + item splits (PR 12) — the append-only
+-- contribution log IS the accumulator (its state is the derived SUM, so
+-- replayed gross can never cross the $1M threshold twice), schedules are one
+-- row per item, and payout routings are unique per funding event — the
+-- once-only replay guards. Splits/accruals jsonb pack as TEXT JSON (the
+-- waterfall discipline).
+CREATE TABLE IF NOT EXISTS gaming_engine_royalty_events (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  platform TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  annual_year INTEGER NOT NULL,
+  gross_micros TEXT NOT NULL,
+  engine_royalty_micros TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gaming_item_split_schedules (
+  item_id TEXT PRIMARY KEY,
+  asset_cbt_code TEXT,
+  splits TEXT NOT NULL,
+  resale_royalty_payee_id TEXT,
+  version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gaming_split_payouts (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL UNIQUE,
+  source_amount_cents INTEGER NOT NULL,
+  resale_royalty_payee_id TEXT,
+  resale_royalty_cents INTEGER NOT NULL,
+  split_version INTEGER NOT NULL,
+  accruals TEXT NOT NULL,
+  company_dust_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -843,6 +886,64 @@ function podcastEpisodeSplitAccrualFromDbRow(
   } catch (error) {
     throw new Error(
       `podcast_episode_split_accruals.accruals for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, accruals };
+}
+
+// --- Gaming (migration 0018, PR 12) — row projection helpers ---
+
+// The schedule splits and the per-payee payout arrays pack as TEXT JSON —
+// the waterfall's discipline. Unpacking is fail-closed: a corrupt mirror
+// throws rather than silently yielding an empty allocation.
+
+type GamingItemSplitScheduleDbRow = Omit<
+  GamingItemSplitScheduleRecord,
+  'splits'
+> & { splits: string };
+
+function gamingItemSplitScheduleToDbRow(
+  record: GamingItemSplitScheduleRecord,
+): GamingItemSplitScheduleDbRow {
+  return { ...record, splits: JSON.stringify(record.splits) };
+}
+
+function gamingItemSplitScheduleFromDbRow(
+  row: GamingItemSplitScheduleDbRow,
+): GamingItemSplitScheduleRecord {
+  let splits: GamingItemSplitScheduleRecord['splits'];
+  try {
+    splits = JSON.parse(row.splits) as GamingItemSplitScheduleRecord['splits'];
+  } catch (error) {
+    throw new Error(
+      `gaming_item_split_schedules.splits for ${row.item_id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, splits };
+}
+
+type GamingSplitPayoutDbRow = Omit<
+  GamingSplitPayoutRecord,
+  'accruals'
+> & { accruals: string };
+
+function gamingSplitPayoutToDbRow(
+  record: GamingSplitPayoutRecord,
+): GamingSplitPayoutDbRow {
+  return { ...record, accruals: JSON.stringify(record.accruals) };
+}
+
+function gamingSplitPayoutFromDbRow(
+  row: GamingSplitPayoutDbRow,
+): GamingSplitPayoutRecord {
+  let accruals: GamingSplitPayoutRecord['accruals'];
+  try {
+    accruals = JSON.parse(row.accruals) as GamingSplitPayoutRecord['accruals'];
+  } catch (error) {
+    throw new Error(
+      `gaming_split_payouts.accruals for ${row.id} is not valid JSON — SQLite mirror corrupt`,
       { cause: error },
     );
   }
@@ -1736,6 +1837,136 @@ export class SqliteStore implements Store {
       )
       .all(episodeId) as PodcastGuestBonusAccrualRecord[];
     return Promise.resolve(rows);
+  }
+
+  // --- Gaming engine-royalty accumulator + item splits (migration 0018, PR 12) ---
+
+  async insertGamingEngineRoyaltyEvent(
+    row: Omit<GamingEngineRoyaltyEventRecord, 'id'>,
+  ): Promise<GamingEngineRoyaltyEventRecord> {
+    // UNIQUE on event_id — one contribution per queue event, ever; a
+    // duplicate insert throws (better-sqlite3 surfaces the constraint
+    // violation) and the caller counts the replay as a no-op.
+    const record: GamingEngineRoyaltyEventRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO gaming_engine_royalty_events
+           (id, event_id, platform, product_id, annual_year, gross_micros, engine_royalty_micros, created_at)
+         VALUES (@id, @event_id, @platform, @product_id, @annual_year, @gross_micros, @engine_royalty_micros, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getGamingEngineRoyaltyEventByEventId(
+    eventId: string,
+  ): Promise<GamingEngineRoyaltyEventRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM gaming_engine_royalty_events WHERE event_id = ?`)
+      .get(eventId) as GamingEngineRoyaltyEventRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async sumGamingEngineRoyaltyGross(
+    platforms: readonly string[],
+    productId: string,
+    annualYear: number,
+  ): Promise<string> {
+    // The accumulator's state is the DERIVED sum of the contribution rows —
+    // never a mutable counter (replayed gross can never cross the $1M
+    // threshold twice). The family's platforms share one per-product line.
+    // BigInt addition over the text micros, exact.
+    const placeholders = platforms.map(() => '?').join(', ');
+    const rows = this.db
+      .prepare(
+        `SELECT gross_micros FROM gaming_engine_royalty_events
+         WHERE platform IN (${placeholders}) AND product_id = ? AND annual_year = ?`,
+      )
+      .all(...platforms, productId, annualYear) as Array<{ gross_micros: string }>;
+    let total = 0n;
+    for (const row of rows) {
+      total += BigInt(row.gross_micros);
+    }
+    return Promise.resolve(total.toString());
+  }
+
+  async upsertGamingItemSplitSchedule(
+    row: GamingItemSplitScheduleRecord,
+  ): Promise<GamingItemSplitScheduleRecord> {
+    // One schedule per item — INSERT ON CONFLICT replaces the row
+    // atomically (a re-registration after the lock check).
+    this.db
+      .prepare(
+        `INSERT INTO gaming_item_split_schedules
+           (item_id, asset_cbt_code, splits, resale_royalty_payee_id, version, created_at, updated_at)
+         VALUES (@item_id, @asset_cbt_code, @splits, @resale_royalty_payee_id, @version, @created_at, @updated_at)
+         ON CONFLICT(item_id) DO UPDATE SET
+           asset_cbt_code = excluded.asset_cbt_code,
+           splits = excluded.splits,
+           resale_royalty_payee_id = excluded.resale_royalty_payee_id,
+           version = excluded.version,
+           updated_at = excluded.updated_at`,
+      )
+      .run(gamingItemSplitScheduleToDbRow(row) as unknown as Record<string, unknown>);
+    return Promise.resolve(
+      gamingItemSplitScheduleFromDbRow(
+        this.db
+          .prepare(`SELECT * FROM gaming_item_split_schedules WHERE item_id = ?`)
+          .get(row.item_id) as GamingItemSplitScheduleDbRow,
+      ),
+    );
+  }
+
+  async getGamingItemSplitSchedule(
+    itemId: string,
+  ): Promise<GamingItemSplitScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM gaming_item_split_schedules WHERE item_id = ?`)
+      .get(itemId) as GamingItemSplitScheduleDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : gamingItemSplitScheduleFromDbRow(row),
+    );
+  }
+
+  async insertGamingSplitPayout(
+    row: Omit<GamingSplitPayoutRecord, 'id'>,
+  ): Promise<GamingSplitPayoutRecord> {
+    // UNIQUE on source_event_id: a duplicate insert throws (better-sqlite3
+    // surfaces the constraint violation) and the caller counts the replay
+    // as a no-op — one routing per funding event, ever.
+    const record: GamingSplitPayoutRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO gaming_split_payouts
+           (id, item_id, source_event_id, source_amount_cents, resale_royalty_payee_id, resale_royalty_cents, split_version, accruals, company_dust_cents, created_at)
+         VALUES (@id, @item_id, @source_event_id, @source_amount_cents, @resale_royalty_payee_id, @resale_royalty_cents, @split_version, @accruals, @company_dust_cents, @created_at)`,
+      )
+      .run(gamingSplitPayoutToDbRow(record) as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getGamingSplitPayoutBySourceEvent(
+    sourceEventId: string,
+  ): Promise<GamingSplitPayoutRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM gaming_split_payouts WHERE source_event_id = ?`)
+      .get(sourceEventId) as GamingSplitPayoutDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : gamingSplitPayoutFromDbRow(row),
+    );
+  }
+
+  async listGamingSplitPayouts(itemId: string): Promise<GamingSplitPayoutRecord[]> {
+    // Oldest first — routing order (rowid ASC is the strict tiebreak when
+    // created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM gaming_split_payouts
+         WHERE item_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(itemId) as GamingSplitPayoutDbRow[];
+    return Promise.resolve(rows.map(gamingSplitPayoutFromDbRow));
   }
 
   async sumVerifiedImpressionsByEpisode(

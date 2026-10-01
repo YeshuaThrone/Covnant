@@ -317,3 +317,97 @@ export type PodcastGuestBonusAccrualRecord = {
   holding_ledger_id: string | null;
   created_at: string;
 };
+
+// --- Gaming engine-royalty accumulator + item splits (PR 12, migration 0018) ---
+
+/**
+ * One Epic-family gross contribution to the per-product annual engine-
+ * royalty accumulator — append-only, UNIQUE on event_id (the queue event
+ * that contributed). The accumulator's state is the DERIVED sum of these
+ * rows (sumGamingEngineRoyaltyGross), never a mutable counter: a replayed
+ * ingest re-derives the same event_id and the UNIQUE constraint makes the
+ * contribution a counted no-op, so the $1M threshold can never be crossed
+ * twice by replayed gross. The recorded engine_royalty_micros is the line's
+ * own royalty AT CONTRIBUTION TIME — a replay that re-derives the queue row
+ * reuses the recorded value instead of recomputing against moved state.
+ * `platform` is the recon worker's GamingPlatform union (string here — the
+ * worker is the validated writer; the record column is text).
+ */
+export type GamingEngineRoyaltyEventRecord = {
+  id: string;
+  /** UNIQUE — the contributing queue event; one contribution, ever. */
+  event_id: string;
+  /** 'epic_games_store' | 'unreal_marketplace' — validated at the writer. */
+  platform: string;
+  /** The Epic product (App/Project ID) the accumulator is scoped to. */
+  product_id: string;
+  /** The accumulator's UTC annual year — the $1M threshold's bucket. */
+  annual_year: number;
+  /** The line's gross contribution, fixed-point micros as text. */
+  gross_micros: string;
+  /** The line's own engine royalty at contribution time, micros as text. */
+  engine_royalty_micros: string;
+  created_at: string;
+};
+
+/**
+ * One registered per-item split schedule — the gaming lane's per-contract
+ * routing (the founder gaming directive: a primary sale pays studio lead
+ * 50 / 3D modeler 30 / audio designer 20, configurable per contract). One
+ * row per item (`gaming_item_split_schedules`, migration 0018); the engine
+ * module (src/workers/recon/gamingSplits.ts) is the registration gate —
+ * rows are what passed it, keyed one schedule per item, monotonic version.
+ */
+export type GamingItemSplitScheduleRecord = {
+  item_id: string;
+  /** The vault asset the item maps to (matched_cbt_code), when known. */
+  asset_cbt_code: string | null;
+  /**
+   * The per-payee routing of a primary sale's net. share_bps must sum to
+   * EXACTLY 10000 (100.0000%) — validated at registration and re-validated
+   * at every accrual.
+   */
+  splits: import('@/lib/don/types').SplitPartyInput[];
+  /**
+   * The original-creator payee for the secondary-resale royalty (the 5-10%
+   * platform creator fee). Required when the item's contract enables
+   * secondary resale — a secondary line against a schedule without one
+   * fails the accrual, never silently unattributed money.
+   */
+  resale_royalty_payee_id: string | null;
+  /** Monotonic registration version — bumped on every accepted re-registration. */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One per-item split payout — the routing-decision record for ONE holding
+ * credit (unique on source_event_id: the queue event that funded it, the
+ * same id the holding credit carries as its journal ref). Written once per
+ * funding event, ever — a replayed ingest re-derives the same
+ * source_event_id and the UNIQUE constraint turns the replay into a counted
+ * no-op. On a secondary sale the recorded resale_royalty_cents routed to
+ * resale_royalty_payee_id OFF THE TOP and `accruals` route the remainder —
+ * allocations plus company dust equal the source amount exactly (the locked
+ * Don invariant). Integer cents; never a float.
+ */
+export type GamingSplitPayoutRecord = {
+  id: string;
+  item_id: string;
+  /** UNIQUE — the funding queue event; one payout routing, ever. */
+  source_event_id: string;
+  /** The line's creator net that was routed, integer cents. */
+  source_amount_cents: number;
+  /** The original-creator royalty routed off the top on secondary sales. */
+  resale_royalty_payee_id: string | null;
+  /** The royalty's integer cents (0 on primary sales). */
+  resale_royalty_cents: number;
+  /** The schedule version the accrual used. */
+  split_version: number;
+  /** The per-payee integer-cent accruals (floor shares, dust swept out). */
+  accruals: import('@/lib/don/types').AllocatedSplit[];
+  /** The integer-cent dust the sweep routed to the variance account. */
+  company_dust_cents: number;
+  created_at: string;
+};

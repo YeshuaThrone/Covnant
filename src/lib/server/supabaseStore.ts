@@ -73,6 +73,9 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingEngineRoyaltyEventRecord,
+  GamingItemSplitScheduleRecord,
+  GamingSplitPayoutRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -165,6 +168,14 @@ const TABLES = {
   podcastEpisodeSplitAccruals: 'podcast_episode_split_accruals',
   podcastGuestBonusDefinitions: 'podcast_guest_bonus_definitions',
   podcastGuestBonusAccruals: 'podcast_guest_bonus_accruals',
+  // Migration 0018 — the gaming engine-royalty accumulator + item splits
+  // (PR 12). The contribution log IS the accumulator (its state is the
+  // derived SUM, so replayed gross can never cross the $1M threshold
+  // twice); schedules are one validated routing per item; payout routings
+  // are unique per funding event — the once-only replay guards.
+  gamingEngineRoyaltyEvents: 'gaming_engine_royalty_events',
+  gamingItemSplitSchedules: 'gaming_item_split_schedules',
+  gamingSplitPayouts: 'gaming_split_payouts',
 } as const;
 
 /**
@@ -976,6 +987,133 @@ export class SupabaseStore implements Store {
     }
     return total;
   }
+
+  // --- Gaming engine-royalty accumulator + item splits (migration 0018, PR 12) ---
+
+  async insertGamingEngineRoyaltyEvent(
+    row: Omit<GamingEngineRoyaltyEventRecord, 'id'>,
+  ): Promise<GamingEngineRoyaltyEventRecord> {
+    // UNIQUE on event_id: a duplicate insert throws here (the same failure
+    // mode the canonical store exhibits) and the caller counts the replay
+    // as a no-op — one contribution per queue event, ever.
+    return this.oneStrict<GamingEngineRoyaltyEventRecord>(
+      this.client
+        .from(TABLES.gamingEngineRoyaltyEvents)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertGamingEngineRoyaltyEvent',
+    );
+  }
+
+  async getGamingEngineRoyaltyEventByEventId(
+    eventId: string,
+  ): Promise<GamingEngineRoyaltyEventRecord | undefined> {
+    return this.one<GamingEngineRoyaltyEventRecord>(
+      this.client
+        .from(TABLES.gamingEngineRoyaltyEvents)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getGamingEngineRoyaltyEventByEventId',
+    );
+  }
+
+  async sumGamingEngineRoyaltyGross(
+    platforms: readonly string[],
+    productId: string,
+    annualYear: number,
+  ): Promise<string> {
+    // The accumulator's state is the DERIVED sum of the contribution rows —
+    // never a mutable counter (replayed gross can never cross the $1M
+    // threshold twice). The family's platforms share one per-product line.
+    // BigInt addition over the text micros, exact.
+    const rows = await this.many<{ gross_micros: string }>(
+      this.client
+        .from(TABLES.gamingEngineRoyaltyEvents)
+        .select('gross_micros')
+        .in('platform', [...platforms])
+        .eq('product_id', productId)
+        .eq('annual_year', annualYear),
+      'sumGamingEngineRoyaltyGross',
+    );
+    let total = 0n;
+    for (const row of rows) {
+      total += BigInt(row.gross_micros);
+    }
+    return total.toString();
+  }
+
+  async upsertGamingItemSplitSchedule(
+    row: GamingItemSplitScheduleRecord,
+  ): Promise<GamingItemSplitScheduleRecord> {
+    // One schedule per item — the upsert targets the item_id key, so a
+    // re-registration after the lock check replaces the row atomically.
+    return this.oneStrict<GamingItemSplitScheduleRecord>(
+      this.client
+        .from(TABLES.gamingItemSplitSchedules)
+        .upsert(row, { onConflict: 'item_id' })
+        .select()
+        .maybeSingle(),
+      'upsertGamingItemSplitSchedule',
+    );
+  }
+
+  async getGamingItemSplitSchedule(
+    itemId: string,
+  ): Promise<GamingItemSplitScheduleRecord | undefined> {
+    return this.one<GamingItemSplitScheduleRecord>(
+      this.client
+        .from(TABLES.gamingItemSplitSchedules)
+        .select()
+        .eq('item_id', itemId)
+        .maybeSingle(),
+      'getGamingItemSplitSchedule',
+    );
+  }
+
+  async insertGamingSplitPayout(
+    row: Omit<GamingSplitPayoutRecord, 'id'>,
+  ): Promise<GamingSplitPayoutRecord> {
+    // UNIQUE on source_event_id: a duplicate insert throws here (the same
+    // failure mode the canonical store exhibits) and the caller counts the
+    // replay as a no-op — one routing per funding event, ever.
+    return this.oneStrict<GamingSplitPayoutRecord>(
+      this.client
+        .from(TABLES.gamingSplitPayouts)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertGamingSplitPayout',
+    );
+  }
+
+  async getGamingSplitPayoutBySourceEvent(
+    sourceEventId: string,
+  ): Promise<GamingSplitPayoutRecord | undefined> {
+    return this.one<GamingSplitPayoutRecord>(
+      this.client
+        .from(TABLES.gamingSplitPayouts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getGamingSplitPayoutBySourceEvent',
+    );
+  }
+
+  async listGamingSplitPayouts(itemId: string): Promise<GamingSplitPayoutRecord[]> {
+    // Oldest first — routing order (insertion_order ASC is the strict
+    // tiebreak when created_at ties).
+    return this.many<GamingSplitPayoutRecord>(
+      this.client
+        .from(TABLES.gamingSplitPayouts)
+        .select()
+        .eq('item_id', itemId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listGamingSplitPayouts',
+    );
+ }
 
   // --- BaaS transfers ---
 

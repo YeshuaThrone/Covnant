@@ -41,6 +41,11 @@ export const UNIQUE_COLUMNS: Record<string, string[][]> = {
     ["episode_id", "guest_payee_id", "milestone_kind", "threshold"],
   ],
   podcast_guest_bonus_accruals: [["event_id"]],
+  // Gaming lane (migration 0018): one accumulator contribution per queue
+  // event, one schedule per item, one payout routing per funding event.
+  gaming_engine_royalty_events: [["event_id"]],
+  gaming_item_split_schedules: [["item_id"]],
+  gaming_split_payouts: [["source_event_id"]],
 };
 
 export class FakeTable {

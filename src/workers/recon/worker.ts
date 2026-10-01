@@ -28,6 +28,10 @@ import { postPodcastLinesToHolding } from "./podcastPosting";
 import { writePodcastLinesToMatchQueue } from "./podcastQueue";
 import { runPodcastSplitBonusPass } from "@/modules/podcastSplits/accrual";
 import { isPodcastProfileKind } from "./podcastProfiles";
+import { runGamingSplitAccrualPass } from "./gamingAccrual";
+import { postGamingLinesToHolding } from "./gamingPosting";
+import { writeGamingLinesToMatchQueue } from "./gamingQueue";
+import { isGamingProfileKind } from "./gamingProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -136,6 +140,13 @@ async function processJobBody(
     if (isPodcastProfileKind(matchedProfile.kind)) {
       return await parsePodcast(deps, job.ingest_id, matchedProfile, content);
     }
+    // The gaming lane branches the same way: its lines are rights_type
+    // 'unknown' game/asset sales whose money passes the engine-royalty
+    // accumulator, the two-deduction net posting, and the per-item split
+    // accrual — never the music queue's split math.
+    if (isGamingProfileKind(matchedProfile.kind)) {
+      return await parseGaming(deps, job.ingest_id, matchedProfile, content);
+    }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
   return await parseThroughVisionEngine(deps, job.ingest_id, ingest.file_name, content);
@@ -201,6 +212,62 @@ async function parsePodcast(
     podcast_split_replays: splitsAndBonuses.splitReplays,
     podcast_bonus_accrued: splitsAndBonuses.bonusAccrued,
     podcast_bonus_replayed: splitsAndBonuses.bonusReplayed,
+  };
+}
+
+/**
+ * The gaming lane (PR 12): engine-royalty accumulator + match_queue write →
+ * two-deduction net posting → per-item split accrual. The accumulator runs
+ * at write time (its marginal window depends on the RECORDED contribution
+ * sequence); the posting pass deducts the queue row's recorded commission
+ * AND engine royalty before the creator net credits UNCLAIMED_HOLDING; the
+ * accrual pass routes that same net across the item's registered schedule —
+ * the resale royalty off the top on secondary sales, the schedule splits
+ * plus dust sweep on the remainder. Every pass is idempotent (replays are
+ * counted no-ops through the per-source UNIQUE guards).
+ */
+async function parseGaming(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeGamingLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+    deps.vault,
+    now,
+  );
+  const posting = await postGamingLinesToHolding(
+    deps.store,
+    counts.lineOutcomes,
+    now,
+  );
+  const accrual = await runGamingSplitAccrualPass(
+    deps.store,
+    counts.lineOutcomes,
+    now,
+  );
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    gaming_written: counts.written,
+    gaming_replayed: counts.alreadyPresent,
+    gaming_accumulator_gross_micros: counts.accumulatorGrossMicros.toString(),
+    gaming_engine_royalty_micros: posting.engineRoyaltyMicrosDeducted.toString(),
+    gaming_commission_micros: posting.commissionMicrosDeducted.toString(),
+    gaming_split_payouts: accrual.payouts,
+    gaming_split_replays: accrual.replays,
+    gaming_royalty_payouts: accrual.royaltiesPosted,
+    gaming_royalty_replays: accrual.royaltiesReplayed,
+    gaming_split_skipped_no_schedule: accrual.skippedNoSchedule,
   };
 }
 

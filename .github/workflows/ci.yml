@@ -123,6 +123,13 @@ jobs:
           # 0011-0016 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
+          # Gaming engine-royalty accumulator + item splits (Deep
+          # Royalties PR 12): the append-only engine-royalty contribution
+          # log, the per-item split schedules, and the per-funding-event
+          # payout routings — applied twice like 0011-0017 to prove
+          # idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
 
       - name: Assert the engine's exact columns exist
         env:

@@ -99,6 +99,7 @@ function makePodcastLine(
       impressions,
       commissionBps: null,
     },
+    gamingDetail: null,
   };
 }
 

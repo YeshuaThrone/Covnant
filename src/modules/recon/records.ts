@@ -94,6 +94,34 @@ export interface ReconJobResult {
   podcast_bonus_accrued?: number;
   /** Podcast lane: milestone crossings already accrued — counted no-ops. */
   podcast_bonus_replayed?: number;
+  /** Gaming lane (PR 12): gaming queue rows written (`gaming:line:` space). */
+  gaming_written?: number;
+  /** Gaming lane: same-row replays caught by the event-id guard. */
+  gaming_replayed?: number;
+  /** Gaming lane: Epic-family gross recorded into the per-product annual
+   * accumulator this pass (the threshold's denominator), exact micros text. */
+  gaming_accumulator_gross_micros?: string;
+  /** Gaming lane: engine royalty deducted across the pass's posts (the
+   * marginal 3.5% above the $1M annual per-product threshold), exact
+   * fixed-point micros as text (never a float). */
+  gaming_engine_royalty_micros?: string;
+  /** Gaming lane: platform commission deducted across the pass's posts,
+   * exact fixed-point micros as text (never a float). */
+  gaming_commission_micros?: string;
+  /** Gaming lane: per-item split payout routings written this pass — one
+   * per funding event (unique on source_event_id, the replay guard). */
+  gaming_split_payouts?: number;
+  /** Gaming lane: payout routings that already existed — counted no-ops. */
+  gaming_split_replays?: number;
+  /** Gaming lane: resale-royalty micro-payout credits posted this pass
+   * (the original creator's own holding credit per funding line + payee). */
+  gaming_royalty_payouts?: number;
+  /** Gaming lane: royalty credits whose post hit the per-source replay
+   * guard — counted no-ops. */
+  gaming_royalty_replays?: number;
+  /** Gaming lane: postable lines whose item has no registered schedule —
+   * honest skips (the credit releases through the manual-split path). */
+  gaming_split_skipped_no_schedule?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

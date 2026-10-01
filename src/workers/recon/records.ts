@@ -18,6 +18,7 @@ import type {
   MatchQueueAdSlot,
   MatchQueueRevenueChannel,
   MatchQueueRightsType,
+  MatchQueueSaleType,
   MatchQueueStatementSourceType,
   RightsPipeline,
 } from "@/modules/sdk/records";
@@ -36,7 +37,12 @@ export type StatementProfileKind =
   | "film_theatrical_box_office_csv"
   | "film_international_sales_agent_csv"
   | "podcast_dai_log_csv"
-  | "podcast_rss_report_csv";
+  | "podcast_rss_report_csv"
+  | "epic_games_sales_csv"
+  | "unity_asset_store_payout_csv"
+  | "roblox_devex_csv"
+  | "steamworks_sales_csv"
+  | "apple_vision_pro_payments_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -116,6 +122,71 @@ export interface PodcastLineDetail {
   readonly commissionBps: number | null;
 }
 
+/**
+ * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
+ * The Epic Games Store and Unreal Engine Marketplace share one engine-
+ * royalty accumulator scope (the Epic family) — the store cell discriminates
+ * the waiver; the other platforms carry their own commission bands.
+ */
+export type GamingPlatform =
+  | "epic_games_store"
+  | "unreal_marketplace"
+  | "unity_asset_store"
+  | "roblox"
+  | "steamworks"
+  | "apple_vision_pro";
+
+/**
+ * The gaming lane's per-line context (PR 12). Null on every non-gaming line
+ * — the field's PRESENCE is the lane discriminator, the same pattern as
+ * podcastDetail. All identity fields the lane's money math needs ride the
+ * line: the per-product annual engine-royalty accumulator needs the product
+ * key and the row's year, the split accruals need the item key, the DevEx
+ * converter needs the virtual-currency cells, and the commission
+ * reconciliation needs the validated band context.
+ */
+export interface GamingLineDetail {
+  /** The platform whose report the row came from (drives the commission
+   * band and the engine-royalty waiver). */
+  readonly platform: GamingPlatform;
+  /** The product/scope key the row reports — required on Epic-family rows
+   * (the per-product annual accumulator's scope), the catalog scope on the
+   * other platforms. */
+  readonly productId: string | null;
+  /** The product's display name (provenance). */
+  readonly productName: string | null;
+  /** The micro-transaction item key — the split schedule's scope unit
+   * (an avatar skin, a 3D prop, an expansion pass, an audio plugin). */
+  readonly itemId: string;
+  /** The item's display name (provenance). */
+  readonly itemName: string | null;
+  /** Primary sale or secondary resale — the resale royalty's trigger. */
+  readonly saleType: MatchQueueSaleType;
+  /** Platform commission as whole basis points — validated against the
+   * platform's band at parse time (Apple 15-30%, Steam 30, EGS 12, Unity
+   * 30, Roblox marketplace fee 30). */
+  readonly commissionBps: number;
+  /** True when the line bears the Unreal engine royalty (the accumulator's
+   * subject); false = waived (Epic Games Store sales) or not Epic family. */
+  readonly engineRoyaltySubject: boolean;
+  /** Secondary platform creator fee as whole basis points — required on
+   * secondary_resale lines (the 5-10% band), forbidden on primary lines. */
+  readonly resaleRoyaltyBps: number | null;
+  /** Platform virtual-currency denomination (Robux on Roblox DevEx rows);
+   * null on fiat-native rows. */
+  readonly virtualCurrencyCode: string | null;
+  /** Exact virtual amount as decimal text (never a float); null on
+   * fiat-native rows. */
+  readonly virtualAmount: string | null;
+  /** Fiat-per-virtual-unit exchange rate as exact decimal text — recorded
+   * on each conversion log row (the founder's rate-logging rule); null on
+   * fiat-native rows. */
+  readonly exchangeRate: string | null;
+  /** The row date's UTC year — the engine-royalty accumulator's annual
+   * bucket (per-product ANNUAL state). */
+  readonly annualYear: number;
+}
+
 /** One normalized statement line — the worker's parse vocabulary. */
 export interface ParsedStatementLine {
   /** 1-based data-row number within the statement (header excluded). */
@@ -153,6 +224,10 @@ export interface ParsedStatementLine {
   /** Podcast lane context (feed, ad slot, CPM, qualification inputs);
    * null on every non-podcast line — the presence IS the lane discriminator. */
   podcastDetail: PodcastLineDetail | null;
+  /** Gaming lane context (platform, product/item keys, sale type, validated
+   * commission band, DevEx conversion cells); null on every non-gaming line
+   * — the presence IS the lane discriminator. */
+  gamingDetail: GamingLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */
