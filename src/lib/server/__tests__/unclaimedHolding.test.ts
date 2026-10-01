@@ -869,14 +869,21 @@ describe("listRecoveryCandidates — the worker's quarantine vocabulary", () => 
 
     const report = await listRecoveryCandidates(store);
 
-    // Only OPEN + rights_type 'unknown' rows are candidates — matched,
-    // discarded, and classified (master/publishing) rows are not. Order
-    //-insensitive: equal created_at timestamps make candidate order
-    // implementation-defined across backends.
+    // Every OPEN row is a candidate — the pairing surface covers the
+    // canonical posting seam's matched master rows as well as rights-
+    // quarantined ones (the seam posts matched music money to holding, and
+    // the recovery report must see it). Non-open rows (matched, discarded)
+    // are never candidates. Order-insensitive: equal created_at timestamps
+    // make candidate order implementation-defined across backends.
     expect(report.candidates.map((c) => c.event.event_id).sort()).toEqual([
+      "evt-master-open",
       "evt-quarantined",
       "evt-quarantined-2",
     ]);
+    const masterOpen = report.candidates.find(
+      (c) => c.event.event_id === "evt-master-open",
+    );
+    expect(masterOpen?.held_cents).toBe(0); // present but holding nothing yet
     const quarantined1 = report.candidates.find(
       (c) => c.event.event_id === "evt-quarantined",
     );

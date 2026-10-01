@@ -81,6 +81,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       matched: 0,
       unmatched: 2,
       engine_used: null,
+      holding_posted: 0, // vault: null — nothing matched, nothing posted
+      holding_replayed: 0,
     });
 
     expect(processed?.job.status).toBe("completed");
@@ -116,6 +118,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       matched: 2, // both receipts hit the EIDR
       unmatched: 6, // holds carry no identifiers — honest, not guessed
       engine_used: null,
+      holding_posted: 0, // film lines are rights 'unknown' — waterfall lane
+      holding_replayed: 0,
     });
 
     const rows = (await store.listMatchQueueEntries(undefined, 500)).filter((row) =>
@@ -159,6 +163,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       matched: 0,
       unmatched: 0,
       engine_used: null,
+      holding_posted: 0,
+      holding_replayed: 0,
     });
     const rows = (await store.listMatchQueueEntries(undefined, 500)).filter((row) =>
       row.event_id.startsWith(`recon:${ingestId}:`),

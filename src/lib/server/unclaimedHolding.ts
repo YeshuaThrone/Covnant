@@ -558,7 +558,6 @@ export async function listRecoveryCandidates(
 ): Promise<RecoveryCandidateReport> {
   const held = await store.listUnclaimedHoldingCredits(limit);
   const open = await store.listMatchQueueEntries("open", limit);
-  const quarantined = open.filter((event) => event.rights_type === "unknown");
 
   const byEventId = new Map<string, LedgerTransactionRecord[]>();
   const unlinked: LedgerTransactionRecord[] = [];
@@ -572,7 +571,11 @@ export async function listRecoveryCandidates(
     byEventId.set(credit.line_item_id, paired);
   }
 
-  const candidates: RecoveryCandidate[] = quarantined.map((event) => {
+  // Every open event with held money is a recovery candidate — not just
+  // rights-'unknown' rows. Since the canonical posting seam activated,
+  // MATCHED music rows post holding credits too; filtering them out here
+  // would blind the recovery report to exactly the money the seam holds.
+  const candidates: RecoveryCandidate[] = open.map((event) => {
     const credits = byEventId.get(event.event_id) ?? [];
     return { event, credits, held_cents: sumHeldCents(credits) };
   });
