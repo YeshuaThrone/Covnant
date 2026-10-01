@@ -42,7 +42,16 @@ for _ in $(seq 1 120); do
     docker logs universal_registry_db 2>&1 | tail -40 >&2 || true
     exit 1
   fi
-  if docker exec universal_registry_db pg_isready -U registry_admin -d universal_registry >/dev/null 2>&1; then
+  # Readiness must require a REAL query against the target database, not
+  # pg_isready: during initdb Postgres runs a temp server on the unix socket
+  # and pg_isready exits 0 ("accepting connections") against ANY server,
+  # including one that still lacks the target database — the loop then exits
+  # false-ready and the acceptance suite below dies on a missing relation.
+  # `SELECT 1` fails throughout the init window and only succeeds once the
+  # real server has universal_registry. (pg_isready would also answer for a
+  # not-yet-created role, so the probe uses the container's actual superuser
+  # — POSTGRES_USER=registry_admin; there is no `postgres` role here.)
+  if docker exec universal_registry_db psql -U registry_admin -d universal_registry -c 'SELECT 1' >/dev/null 2>&1; then
     ready=1
     break
   fi
