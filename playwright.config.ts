@@ -23,6 +23,14 @@ export default defineConfig({
     timeout: 120_000,
     // The dashboard e2e runs against the deterministic dev-seed store —
     // an explicit opt-in flag, never the default data path.
-    env: { ...process.env, DON_DEV_SEED: '1' },
+    //
+    // The seeded preview is also PASSWORDLESS by contract (gate.ts's J1
+    // carve-out: `!password && DON_DEV_SEED === '1'`), so strip
+    // ADMIN_DASHBOARD_PASSWORD from the inherited env. CI exports it at the
+    // job level for the isolated-server admin tests (e2e/admin.spec.ts spins
+    // up its own passworded server); letting it leak into this shared server
+    // configured a secret here, closed the carve-out, and failed the
+    // seeded-console specs (admin.spec.ts:140/:149) on every CI run.
+    env: { ...process.env, DON_DEV_SEED: '1', ADMIN_DASHBOARD_PASSWORD: '' },
   },
 });
