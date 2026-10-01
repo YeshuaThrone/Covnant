@@ -107,6 +107,11 @@ jobs:
           # prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
+          # Spatial & Web3 identifier branches (canon v25): the additive
+          # CREATE OR REPLACE on the trigger — applied twice like 0011-0014
+          # to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -279,6 +284,35 @@ jobs:
           reject_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'INVALID_AAT_CODE'")
           [ "$reject_map" = "0" ] || { echo "validate_global_identifier did NOT reject a malformed code"; exit 1; }
           echo "OK: the trigger rejects a malformed code"
+          # Canon v25 (spatial & Web3): the four new trigger branches.
+          # Founder H3 example accepted; UPPERCASE VC UUID REJECTED at the
+          # DB — the flagged TS/SQL drift (TS /i accepts, SQL is stricter);
+          # single-segment DID accepted; multi-colon DID rejected; ETH
+          # address accepted.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777771-7777-7777-7777-777777777771', 'SPATIAL', 'H3_INDEX', '8928308280fffff')" >/dev/null 2>&1 || true
+          h3_map=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'H3_INDEX'")
+          [ "$h3_map" = "1" ] || { echo "founder H3 example REJECTED — the v25 spatial branches are missing"; exit 1; }
+          echo "OK: canon v25 H3 example accepted"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777772-7777-7777-7777-777777777772', 'WEB3', 'W3C_VC_ID', 'urn:uuid:123E4567-E89B-12D3-A456-426614174000')" >/dev/null 2>&1 || true
+          bad_vc=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'W3C_VC_ID'")
+          [ "$bad_vc" = "0" ] || { echo "UPPERCASE VC UUID ACCEPTED at the DB — the SQL branch must stay case-strict pending the founder ruling"; exit 1; }
+          echo "OK: W3C_VC_ID rejects an uppercase uuid at the DB (the stricter gate)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777773-7777-7777-7777-777777777773', 'WEB3', 'DID_URI', 'did:key:z6MkhaXgBZDvotFkS3b1S8m1P2L4oRiZwTt1jGJ1')" >/dev/null 2>&1 || true
+          good_did=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'DID_URI' and primary_code_value like 'did:key%'")
+          [ "$good_did" = "1" ] || { echo "single-segment DID REJECTED — the DID_URI branch is broken"; exit 1; }
+          echo "OK: DID_URI accepts a single-segment method-specific id"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777774-7777-7777-7777-777777777774', 'WEB3', 'DID_URI', 'did:web:org:path')" >/dev/null 2>&1 || true
+          bad_did=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_value = 'did:web:org:path'")
+          [ "$bad_did" = "0" ] || { echo "multi-colon DID ACCEPTED — the single-segment DID shape must stay verbatim"; exit 1; }
+          echo "OK: DID_URI rejects multi-colon method-specific ids"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777775-7777-7777-7777-777777777775', 'WEB3', 'ETH_ADDRESS', '0x71C7656EC7ab88b098defB751B7401B5f6d8976F')" >/dev/null 2>&1 || true
+          good_eth=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'ETH_ADDRESS'")
+          [ "$good_eth" = "1" ] || { echo "ETH address REJECTED — the ETH_ADDRESS branch is broken"; exit 1; }
+          echo "OK: ETH_ADDRESS accepts a 40-hex address"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into universal_identity_map (entity_id, vertical_category, primary_code_type, primary_code_value) values ('77777776-7777-7777-7777-777777777776', 'MUSIC', 'NOT_A_TYPE', 'whatever')" >/dev/null 2>&1 || true
+          unknown_type=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from universal_identity_map where primary_code_type = 'NOT_A_TYPE'")
+          [ "$unknown_type" = "0" ] || { echo "UNREGISTERED TYPE ACCEPTED — the fail-closed ELSE is missing"; exit 1; }
+          echo "OK: the fail-closed ELSE rejects unregistered types"
 
           # The UCT credential vault (migration 0013, PR 5): the vault
           # table's inventory, RLS, and the two guarded invariants — the
@@ -308,6 +342,69 @@ jobs:
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
           bash supabase/tests/0012_docker_harness.sh
+
+  identifier-engine:
+    # Canon v16: the founder's ingestion suite runs against a REAL
+    # PostgreSQL with the validate_global_identifier trigger active, plus
+    # Redis for the v22 sliding-window limiter. Skipped locally without
+    # TEST_DATABASE_URL — always green here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: universal_registry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply identity migrations (0012 + 0015)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Supabase-auth shim (test-only, never shipped as a migration):
+          # the identity migrations grant to the Supabase service_role,
+          # which vanilla Postgres lacks. Mirrors the schema job shim.
+          psql -h localhost -U postgres -d universal_registry_test -v ON_ERROR_STOP=1 <<'SQL'
+            do $$ begin
+              if not exists (select from pg_roles where rolname = 'service_role') then
+                create role service_role nologin;
+              end if;
+            end $$;
+          SQL
+          psql -h localhost -U postgres -d universal_registry_test -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
+          psql -h localhost -U postgres -d universal_registry_test -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
+
+      - name: Integration suite against real PostgreSQL + Redis
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/universal_registry_test
+          REDIS_URL: redis://localhost:6379
+        run: npx vitest run src/app/api/v1/identifiers/batch-ingest/__tests__/route.integration.test.ts
 
   e2e:
     runs-on: ubuntu-latest
