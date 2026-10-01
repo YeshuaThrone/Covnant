@@ -246,6 +246,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // per-receipt records; still no DDL on universal_royalty_ledger —
       // the referencing pin below holds.
       '0016_film_waterfall_engine.sql',
+      // Podcast episode splits + guest milestone bonuses (Deep Royalties
+      // PR 11): the per-episode split schedule/accrual ledger + the guest
+      // bonus definition/accrual ledger; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0017_podcast_episode_splits.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

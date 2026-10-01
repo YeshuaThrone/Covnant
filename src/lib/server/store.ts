@@ -65,6 +65,10 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  PodcastEpisodeSplitAccrualRecord,
+  PodcastEpisodeSplitScheduleRecord,
+  PodcastGuestBonusAccrualRecord,
+  PodcastGuestBonusDefinitionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -464,6 +468,84 @@ export interface Store {
   listFilmWaterfallDistributions(
     filmId: string,
   ): Promise<FilmWaterfallDistributionRecord[]>;
+
+  // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
+
+  /**
+   * Writes one episode's validated split schedule (one row per episode —
+   * a re-registration replaces the row; the engine bumps the version).
+   */
+  upsertPodcastEpisodeSplitSchedule(
+    row: PodcastEpisodeSplitScheduleRecord,
+  ): Promise<PodcastEpisodeSplitScheduleRecord>;
+
+  getPodcastEpisodeSplitSchedule(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitScheduleRecord | undefined>;
+
+  /**
+   * Writes one per-holder split accrual. UNIQUE on source_event_id — one
+   * accrual per funding event, ever; a duplicate insert throws the unique
+   * violation (the caller counts the replay as a no-op).
+   */
+  insertPodcastEpisodeSplitAccrual(
+    row: Omit<PodcastEpisodeSplitAccrualRecord, 'id'>,
+  ): Promise<PodcastEpisodeSplitAccrualRecord>;
+
+  getPodcastEpisodeSplitAccrualBySourceEvent(
+    sourceEventId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord | undefined>;
+
+  /** The episode's accruals, oldest first (routing order). */
+  listPodcastEpisodeSplitAccruals(
+    episodeId: string,
+  ): Promise<PodcastEpisodeSplitAccrualRecord[]>;
+
+  /** Registers one guest bonus definition (composite-unique per episode/guest/kind/threshold). */
+  insertPodcastGuestBonusDefinition(
+    row: PodcastGuestBonusDefinitionRecord,
+  ): Promise<PodcastGuestBonusDefinitionRecord>;
+
+  listPodcastGuestBonusDefinitions(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusDefinitionRecord[]>;
+
+  /**
+   * Writes one crossed-milestone record. UNIQUE on event_id (the
+   * content-derived `podcast:bonus:` id) — the once-only arbiter; a
+   * duplicate insert throws the unique violation.
+   */
+  insertPodcastGuestBonusAccrual(
+    row: Omit<PodcastGuestBonusAccrualRecord, 'id'>,
+  ): Promise<PodcastGuestBonusAccrualRecord>;
+
+  /** Flips an accrual 'accrued' → 'posted' once its holding credit landed. */
+  markPodcastGuestBonusAccrualPosted(
+    id: string,
+    holdingLedgerId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord | undefined>;
+
+  /**
+   * Drops an accrual whose holding post was refused (retryable) — the film
+   * routing decision's lifecycle. The milestone may fire again on retry.
+   */
+  deletePodcastGuestBonusAccrual(id: string): Promise<void>;
+
+  listPodcastGuestBonusAccruals(
+    episodeId: string,
+  ): Promise<PodcastGuestBonusAccrualRecord[]>;
+
+  /**
+   * The episode's LIFETIME verified impression total over the queue's
+   * `podcast:imp:`/`podcast:sub:` rows (the prefixes select the milestone
+   * kind's audience definition). Rows whose payload does not name the
+   * episode contribute nothing. A truncated scan under-counts — milestones
+   * under-fire and money stays held (fail-closed), never over-pays.
+   */
+  sumVerifiedImpressionsByEpisode(
+    episodeId: string,
+    eventIdPrefixes: readonly string[],
+  ): Promise<number>;
 
 
   // --- BaaS transfers ---
