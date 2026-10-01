@@ -263,6 +263,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // tech setup amortization schedule/consumption lines; still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0020_vtuber_agency_holdback_states.sql',
+      // Derivative asset royalty cascade (Deep Royalties PR 16): the
+      // per-edge royalty contract table (parent_asset_id dependency edges,
+      // constrained royalty_bps, self-edge check); still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0021_derivative_royalty_cascade.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -141,6 +141,11 @@ jobs:
           # idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
+          # Derivative asset royalty cascade (Deep Royalties PR 16): the
+          # per-edge royalty contract table — applied twice like 0011-0020
+          # to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -498,6 +503,34 @@ jobs:
           bad_index=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from vtuber_tech_setup_amortization_lines where line_index < 0")
           [ "$bad_index" = "0" ] || { echo "NEGATIVE LINE INDEX ACCEPTED by the check constraint"; exit 1; }
           echo "OK: vtuber_tech_setup_amortization_lines index check rejects negative lines"
+
+          # Derivative asset royalty cascade (migration 0021, Deep Royalties
+          # PR 16): the per-edge royalty contract table's inventory, RLS
+          # deny-all, and the check-constrained vocabularies.
+          assert_cols derivative_royalty_edges id asset_id parent_asset_id upstream_creator_payee_id upstream_creator_payee_name royalty_bps created_at insertion_order
+          rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='derivative_royalty_edges'")
+          [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on derivative_royalty_edges"; exit 1; }
+          echo "OK: derivative_royalty_edges has RLS enabled"
+          # A self-edge is a malformed tree at the DDL — the allocator's
+          # path-based cycle detection only ever sees longer loops.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into derivative_royalty_edges (asset_id, parent_asset_id, upstream_creator_payee_id, upstream_creator_payee_name, royalty_bps) values ('mod_self_probe', 'mod_self_probe', 'payee_1', 'Payee', 100)" >/dev/null 2>&1 || true
+          self_edge=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from derivative_royalty_edges where asset_id = parent_asset_id")
+          [ "$self_edge" = "0" ] || { echo "SELF-EDGE ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: derivative_royalty_edges self-edge check rejects a self-edge"
+          # The royalty fraction is a safe fraction: more than the whole
+          # sale (bps > 10000) must be refused at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into derivative_royalty_edges (asset_id, parent_asset_id, upstream_creator_payee_id, upstream_creator_payee_name, royalty_bps) values ('mod_bps_probe', 'mesh_bps_probe', 'payee_1', 'Payee', 10001)" >/dev/null 2>&1 || true
+          greedy_bps=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from derivative_royalty_edges where royalty_bps > 10000")
+          [ "$greedy_bps" = "0" ] || { echo "ROYALTY BPS ABOVE 10000 ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: derivative_royalty_edges royalty_bps check rejects more than the whole sale"
+          # One contract per (edge, payee): the replay surface is the
+          # UNIQUE triple, a duplicate registration throws 23505.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into derivative_royalty_edges (asset_id, parent_asset_id, upstream_creator_payee_id, upstream_creator_payee_name, royalty_bps) values ('mod_dup_probe', 'mesh_dup_probe', 'payee_1', 'Payee', 100)" >/dev/null 2>&1
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into derivative_royalty_edges (asset_id, parent_asset_id, upstream_creator_payee_id, upstream_creator_payee_name, royalty_bps) values ('mod_dup_probe', 'mesh_dup_probe', 'payee_1', 'Payee', 150)" >/dev/null 2>&1 || true
+          dup_edges=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from derivative_royalty_edges where asset_id = 'mod_dup_probe'")
+          [ "$dup_edges" = "1" ] || { echo "DUPLICATE CONTRACT ACCEPTED by the UNIQUE triple"; exit 1; }
+          echo "OK: derivative_royalty_edges UNIQUE triple rejects duplicate contracts"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
