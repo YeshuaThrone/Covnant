@@ -14,6 +14,7 @@ import {
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
+  vtuberHoldbackGlAccount,
   waterfallTierGlAccount,
   type VaultBucket,
 } from "@/modules/don/constants";
@@ -162,6 +163,27 @@ export function esportsPoolEscrowDebit(batch: string, amountCents: number): GlLe
 export function esportsPoolEscrowCredit(batch: string, amountCents: number): GlLegInput {
   return {
     account: esportsPoolEscrowGlAccount(batch),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// VTuber agency licensing holdback (PR 15): the per-agency holdback
+// obligation account. A locked talent-income receipt posts a credit here
+// against an FBO debit; the verified release debits it against the agency
+// deduction stack and talent routing legs — never a vault bucket, never the
+// dust payee's account, never any earlier holdback state's account.
+export function vtuberHoldbackDebit(agencyId: string, amountCents: number): GlLegInput {
+  return {
+    account: vtuberHoldbackGlAccount(agencyId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function vtuberHoldbackCredit(agencyId: string, amountCents: number): GlLegInput {
+  return {
+    account: vtuberHoldbackGlAccount(agencyId),
     debit_cents: 0,
     credit_cents: amountCents,
   };

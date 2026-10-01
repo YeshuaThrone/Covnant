@@ -258,6 +258,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // referencing pin below holds.
       '0018_gaming_fee_parser_devex.sql',
       '0019_gaming_cashout_states.sql',
+      // VTuber agency holdbacks + tax withholding verification (Deep
+      // Royalties PR 15): the tax-withholding verification state and the
+      // tech setup amortization schedule/consumption lines; still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0020_vtuber_agency_holdback_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

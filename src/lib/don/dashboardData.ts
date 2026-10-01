@@ -150,6 +150,8 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   gaming_cashout_release: 'Game payout released',
   esports_pool_escrow_post: 'Esports prize pool locked',
   esports_pool_escrow_release: 'Esports prize pool released',
+  vtuber_holdback_post: 'Avatar IP licensing holdback locked',
+  vtuber_holdback_release: 'Avatar IP licensing holdback released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

@@ -73,6 +73,37 @@ export function esportsPoolEscrowGlAccount(batch: string): string {
   return `esports_prize_pool_escrow:${batch}`;
 }
 
+// VTuber agency licensing holdback (PR 15, founder VTuber directive): a
+// managed talent's income locks in the PER-AGENCY holdback until the
+// verified release runs the agency deduction stack — management fee (the
+// 20–40% band), 3D model rigging and avatar IP licensing holdbacks, tech
+// setup amortization — before net income releases to the talent. The lock
+// is PER-AGENCY — the payee and GL account carry the agency id the way the
+// film escrow carries the film id — because the agency contract, the
+// deduction stack, and the amortization schedules are all per-agency
+// program. Deliberately NOT 'platform', NOT the unclaimed holding sentinel,
+// NOT the film/gaming/esports prefixes: managed talent income is distinct
+// from company dust, from every creator vault, from unallocated recon
+// funds, and from every other escrow state, in payee, GL account, and
+// ledger kind, so no query can fold one into another.
+export const VTUBER_HOLDBACK_PAYEE_PREFIX = "vtuber_holdback";
+export function vtuberHoldbackPayeeId(agencyId: string): string {
+  return `${VTUBER_HOLDBACK_PAYEE_PREFIX}:${agencyId}`;
+}
+export function vtuberHoldbackPayeeName(agencyId: string): string {
+  return `Avatar IP Licensing Holdback — ${agencyId}`;
+}
+export function vtuberHoldbackGlAccount(agencyId: string): string {
+  return `avatar_ip_licensing_holdback:${agencyId}`;
+}
+
+// The agency management fee band (PR 15): the founder directive caps the
+// automated agency management deduction at 20–40% of the gross — below 20%
+// under-recovers the agency program, above 40% exceeds the mandate; the
+// allocator refuses anything outside the band. Whole basis points.
+export const VTUBER_MANAGEMENT_FEE_MIN_BPS = 2_000;
+export const VTUBER_MANAGEMENT_FEE_MAX_BPS = 4_000;
+
 // The film waterfall's tier accounts (PR 9 ledger states; the sequential
 // cascade allocator itself is the film waterfall engine). Tiers 0 through 4
 // each get a plain account; tier 5 — the net profit pool — is locked 50/50:
@@ -153,6 +184,13 @@ export const JOURNAL_KINDS = [
   // platform payee. Additive only.
   "esports_pool_escrow_post",
   "esports_pool_escrow_release",
+  // VTuber agency licensing holdback (PR 15): a managed talent's income
+  // locks in the per-agency holdback (post), then the verified release runs
+  // the agency deduction stack — management fee, rigging and licensing
+  // holdbacks, tech setup amortization — before net income releases to the
+  // talent. Additive only.
+  "vtuber_holdback_post",
+  "vtuber_holdback_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

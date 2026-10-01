@@ -74,6 +74,9 @@ import type {
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
   PodcastGuestBonusDefinitionRecord,
+  VtuberTaxWithholdingVerificationRecord,
+  VtuberTechSetupAmortizationLineRecord,
+  VtuberTechSetupAmortizationScheduleRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -697,6 +700,72 @@ export interface Store {
    * other list seam. Mirrors listVirtualCurrencyCashoutCredits.
    */
   listEsportsPoolEscrowCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  // --- VTuber agency licensing holdbacks + tax verification (migration 0020, PR 15) ---
+
+  /**
+   * The locked VTuber holdback receipts — ledger rows with kind AND status
+   * 'avatar_ip_licensing_holdback' (a released receipt leaves the listing —
+   * its status is 'settled'), newest first, bounded like every other list
+   * seam. Mirrors listEsportsPoolEscrowCredits.
+   */
+  listAvatarIpHoldbackCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * Compare-and-set release lock for one VTuber holdback receipt: flips ONE
+   * row from status 'avatar_ip_licensing_holdback' to 'settled' and returns
+   * it; reads undefined when the row is absent or no longer locked (the
+   * concurrent release loser). The conditional read IS the CAS — the
+   * film-escrow/gaming-cashout/esports precedent. The flip happens BEFORE
+   * any deduction-stack routing (insert-as-lock), so a crash mid-release
+   * fails toward "nothing moved twice".
+   */
+  settleAvatarIpHoldback(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Writes one payee's tax-withholding verification for one tax year —
+   * UNIQUE on (payee_id, tax_year); a re-verification replaces the row
+   * (the studio-KYC upsert precedent, at year scope).
+   */
+  upsertVtuberTaxWithholdingVerification(
+    row: VtuberTaxWithholdingVerificationRecord,
+  ): Promise<VtuberTaxWithholdingVerificationRecord>;
+
+  getVtuberTaxWithholdingVerification(
+    payeeId: string,
+    taxYear: number,
+  ): Promise<VtuberTaxWithholdingVerificationRecord | undefined>;
+
+  /**
+   * Writes one tech-setup amortization schedule (the immutable contract).
+   * UNIQUE on schedule_ref — a duplicate insert throws the unique
+   * violation.
+   */
+  insertVtuberTechSetupAmortizationSchedule(
+    row: Omit<VtuberTechSetupAmortizationScheduleRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord>;
+
+  getVtuberTechSetupAmortizationScheduleByRef(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationScheduleRecord | undefined>;
+
+  /**
+   * Appends one consumed amortization line. UNIQUE on
+   * (schedule_ref, line_index) — the insert-as-lock consume arbiter; a
+   * concurrent consume of the same line throws the unique violation (the
+   * caller re-derives the next line index and retries).
+   */
+  insertVtuberTechSetupAmortizationLine(
+    row: Omit<VtuberTechSetupAmortizationLineRecord, 'id'>,
+  ): Promise<VtuberTechSetupAmortizationLineRecord>;
+
+  /** The schedule's consumed lines, oldest first (line_index ASC). */
+  listVtuberTechSetupAmortizationLines(
+    scheduleRef: string,
+  ): Promise<VtuberTechSetupAmortizationLineRecord[]>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

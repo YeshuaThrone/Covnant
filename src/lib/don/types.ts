@@ -102,6 +102,12 @@ export const LEDGER_STATUSES = [
   // remittance locked into the batch's waterfall escrow until the verified
   // release runs the sequential recoupment waterfall (status → 'settled').
   "esports_prize_pool_pending",
+  // VTuber agency licensing holdback (PR 15): a managed talent's income
+  // locked in the per-agency holdback until the verified release runs the
+  // agency deduction stack — agency management (20–40%), 3D model rigging
+  // and avatar IP licensing holdbacks, tech setup amortization — before net
+  // income releases to the talent (status → 'settled').
+  "avatar_ip_licensing_holdback",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -135,6 +141,12 @@ export const LEDGER_KINDS = [
   // 'esports_prize_pool_pending' with status 'settled'), the same division
   // PR 7, PR 9, and PR 13 use.
   "esports_prize_pool_pending",
+  // VTuber agency licensing holdback (PR 15): a managed talent's income
+  // locked in the per-agency holdback until the verified release runs the
+  // agency deduction stack. Kind marks WHAT the row is for its whole life
+  // (a released receipt stays kind 'avatar_ip_licensing_holdback' with
+  // status 'settled'), the same division PR 7, PR 9, PR 13, and PR 14 use.
+  "avatar_ip_licensing_holdback",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
