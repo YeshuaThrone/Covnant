@@ -35,6 +35,7 @@ function filmLine(micros: bigint, period: string): ParsedStatementLine {
     usageNote: "test receipt",
     raw: [],
     guildResidual: null,
+    podcastDetail: null,
   };
 }
 

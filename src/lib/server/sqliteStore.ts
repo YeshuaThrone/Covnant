@@ -744,19 +744,40 @@ type DistributorConnectionRow = DistributorConnectionRecord;
  * better-sqlite3 binds numbers, strings, bigints, buffers, and null only —
  * boolean record fields ride as 0/1 on write and restore on read.
  */
-type MatchQueueSqliteRow = Omit<MatchQueueRecord, 'unclaimed_identifier_hold'> & {
+type MatchQueueSqliteRow = Omit<
+  MatchQueueRecord,
+  'unclaimed_identifier_hold' | 'network_sold' | 'is_cover_version' | 'foreign_tax_withheld'
+> & {
   unclaimed_identifier_hold: 0 | 1;
+  network_sold: 0 | 1 | null;
+  is_cover_version: 0 | 1 | null;
+  foreign_tax_withheld: 0 | 1 | null;
 };
+
+const booleanToSqlite = (value: boolean | null): 0 | 1 | null =>
+  value === null ? null : value ? 1 : 0;
+
+const booleanFromSqlite = (value: 0 | 1 | null): boolean | null =>
+  value === null ? null : value === 1;
 
 function matchQueueToSqliteRow(record: MatchQueueRecord): MatchQueueSqliteRow {
   return {
     ...record,
     unclaimed_identifier_hold: record.unclaimed_identifier_hold ? 1 : 0,
+    network_sold: booleanToSqlite(record.network_sold),
+    is_cover_version: booleanToSqlite(record.is_cover_version),
+    foreign_tax_withheld: booleanToSqlite(record.foreign_tax_withheld),
   };
 }
 
 function matchQueueFromSqliteRow(row: MatchQueueSqliteRow): MatchQueueRecord {
-  return { ...row, unclaimed_identifier_hold: row.unclaimed_identifier_hold === 1 };
+  return {
+    ...row,
+    unclaimed_identifier_hold: row.unclaimed_identifier_hold === 1,
+    network_sold: booleanFromSqlite(row.network_sold),
+    is_cover_version: booleanFromSqlite(row.is_cover_version),
+    foreign_tax_withheld: booleanFromSqlite(row.foreign_tax_withheld),
+  };
 }
 
 export class SqliteStore implements Store {

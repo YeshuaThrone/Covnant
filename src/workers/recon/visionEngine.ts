@@ -159,6 +159,7 @@ function validateVisionLine(
       usageNote: "vision engine normalized row (PDF/image statement)",
       raw: [],
       guildResidual: null,
+      podcastDetail: null,
     },
   };
 }

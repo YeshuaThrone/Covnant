@@ -14,6 +14,9 @@
  */
 
 import type {
+  MatchQueueAdPlacementType,
+  MatchQueueAdSlot,
+  MatchQueueRevenueChannel,
   MatchQueueRightsType,
   MatchQueueStatementSourceType,
   RightsPipeline,
@@ -31,14 +34,16 @@ export type StatementProfileKind =
   | "film_vod_csv"
   | "film_svod_csv"
   | "film_theatrical_box_office_csv"
-  | "film_international_sales_agent_csv";
+  | "film_international_sales_agent_csv"
+  | "podcast_dai_log_csv"
+  | "podcast_rss_report_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
  * (src/lib/covnant/vault.ts VAULT_EXTERNAL_IDENTIFIER_KINDS), so a parsed
  * identifier can always be cross-referenced against cbt_assets.
  */
-export type ReconIdentifierKind = "ISRC" | "ISWC" | "UPC" | "EIDR";
+export type ReconIdentifierKind = "ISRC" | "ISWC" | "UPC" | "EIDR" | "DOI";
 
 export type ReconIdentifiers = Partial<Record<ReconIdentifierKind, string>>;
 
@@ -58,6 +63,57 @@ export interface GuildResidualTag {
   /** Residual basis: the statement line's gross, in 1e-8 micros as text. */
   base_micros: string;
   obligation_micros: string;
+}
+
+/**
+ * The podcast lane's per-line context (PR 10, founder podcast directive +
+ * multi-feed directive patch). Null on every non-podcast line — the field's
+ * PRESENCE is the lane discriminator, so the worker never guesses a line's
+ * vertical from its profile name alone. All identity fields needed for IAB
+ * v2/v3 qualification ride the line: the bot filter needs the user agent,
+ * the 24-hour single-IP dedup needs listener ip + feed + episode, and the
+ * 60-second audio threshold needs the request's audio seconds.
+ */
+export interface PodcastLineDetail {
+  /** The audio feed the line maps to — the deduplication scope unit. */
+  readonly rssFeedId: string;
+  /** The episode's feed-level GUID. */
+  readonly episodeId: string;
+  /** The ad creative (or sponsor campaign) the line reports — required on
+   * impression-bearing lines: the cross-feed fingerprint discriminates
+   * distinct ad units within one qualified download. Null on subscription. */
+  readonly adCreativeId: string | null;
+  /** Normalized listener IP (the IAB dedup key component); required on
+   * impression-bearing lines, null on subscription lines. */
+  readonly listenerIp: string | null;
+  /** Raw user agent (bot filtering); null on subscription lines. */
+  readonly userAgent: string | null;
+  /** ISO 8601 audio/ad request timestamp — the dedup window's input. */
+  readonly requestedAt: Date;
+  /** The revenue lane this line earned in — Channel A/B/C tagging. */
+  readonly revenueChannel: MatchQueueRevenueChannel;
+  /** Pod position for ad lines; null for subscription lines. */
+  readonly adSlot: MatchQueueAdSlot | null;
+  /** Delivery method — independent of the revenue lane (host-read copy can
+   * be served through DAI insertion); required on ad lines, null on
+   * subscription lines. */
+  readonly adPlacementType: MatchQueueAdPlacementType | null;
+  /** Network-sold inventory flag; required on DAI lines (the commission's
+   * trigger), null when not applicable. */
+  readonly networkSold: boolean | null;
+  /** Host-read sponsor verification — revenue recognizes only on true;
+   * false parks the line in the podcast-held quarantine id space. */
+  readonly sponsorVerified: boolean | null;
+  /** The audio request's seconds — the 60-second threshold's input;
+   * required on impression-bearing lines, null on subscription lines. */
+  readonly audioSeconds: number | null;
+  /** CPM as exact 1e-8 micros — required on DAI programmatic lines. */
+  readonly cpmMicros: bigint | null;
+  /** The line's ad impression count (per-request logs report 1). */
+  readonly impressions: number | null;
+  /** Network commission as whole basis points — validated into the
+   * 2000-4000 contract band at parse time on network-sold inventory. */
+  readonly commissionBps: number | null;
 }
 
 /** One normalized statement line — the worker's parse vocabulary. */
@@ -94,6 +150,9 @@ export interface ParsedStatementLine {
   usageNote: string;
   raw: readonly string[];
   guildResidual: GuildResidualTag | null;
+  /** Podcast lane context (feed, ad slot, CPM, qualification inputs);
+   * null on every non-podcast line — the presence IS the lane discriminator. */
+  podcastDetail: PodcastLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

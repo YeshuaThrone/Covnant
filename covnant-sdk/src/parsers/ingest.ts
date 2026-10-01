@@ -24,8 +24,15 @@ import type { StatementFile } from '../nodes/collection-node';
 import { SdkMalformedInputError } from '../nodes/errors';
 import { parseStatementFile } from './statement-parser';
 
-/** The store-side statement formats of the statement_ingests table (PR 3). */
-export type StoreStatementFormat = 'ddex' | 'cwr' | 'csv_statement';
+/** The store-side statement formats of the statement_ingests table (PR 3;
+ * PR 10 adds the podcast ingest formats — they enter the store directly
+ * through the app's ingest route, not the SDK's wire parser). */
+export type StoreStatementFormat =
+  | 'ddex'
+  | 'cwr'
+  | 'csv_statement'
+  | 'dai_log'
+  | 'rss_report';
 
 /** Maps a statement wire format onto the store's ingest-format vocabulary. */
 export function statementFormatToStoreFormat(

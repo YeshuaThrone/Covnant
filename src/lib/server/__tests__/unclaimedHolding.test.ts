@@ -81,6 +81,7 @@ function filmLine(overrides: Partial<ParsedStatementLine> = {}): ParsedStatement
     usageNote: "",
     raw: ["raw"],
     guildResidual: null,
+    podcastDetail: null,
     ...overrides,
   };
 }

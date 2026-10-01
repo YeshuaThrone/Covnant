@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers seven profiles in dispatch order", () => {
+  it("registers nine profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -35,6 +35,8 @@ describe("profile registry", () => {
       "film_svod_csv",
       "film_theatrical_box_office_csv",
       "film_international_sales_agent_csv",
+      "podcast_dai_log_csv",
+      "podcast_rss_report_csv",
     ]);
   });
 
