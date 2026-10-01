@@ -47,8 +47,13 @@ test.describe('The Don dashboard home — desktop', () => {
     await expect(page.getByTestId('account-card-available-balance')).toContainText('$3,300,000.00');
     await expect(page.getByTestId('account-card-available-balance')).toHaveClass(/text-right/);
     await expect(page.getByTestId('account-card-pending-balance')).toContainText('$650,000.00');
-    await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$1,000,000,000.00');
-    await expect(page.getByTestId('accounts-view-all')).toHaveAttribute('href', '/ledger');
+    // Reserve — the seeded settlements' organic 24% backup withholding,
+    // derived from the run table (founder ruling 2026-10-01: the former $1B
+    // locked reserve was mock data — the dashboard shows the real state).
+    await expect(page.getByTestId('account-card-reserve-balance')).toContainText('$4,320,000.00');
+    // The View all button is REMOVED (founder directive 2026-09-22: the
+    // Master Ledger & Settlement History surface is a backend data page).
+    await expect(page.getByTestId('accounts-view-all')).toHaveCount(0);
 
     // Payout tiles — the sandbox rail vocabulary, in-flight + settled pairs.
     await expect(page.getByTestId('payout-tile')).toHaveCount(4);

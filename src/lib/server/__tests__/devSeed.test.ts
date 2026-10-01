@@ -10,10 +10,12 @@
  * THE FOUNDER'S INTEGRITY TEST (rendered here as store-level assertions):
  * the portfolio amounts are CONSTRUCTED through the real settlement engine
  * and read back from the store —
- *   reserve   100,000,000,000 — Σ 24% backup withholding credited to the
+ *   reserve      432,000,000 — Σ 24% backup withholding credited to the
  *               creator's reserve bucket by calculateUdrSplits (no verified
  *               TIN/W-9 → locked semantic #4; the YTD and tax-escrow rows
- *               are the engine's own receipts).
+ *               are the engine's own receipts). Founder ruling 2026-10-01:
+ *               the former $1B locked reserve was mock data — the seed's
+ *               reserve is whatever this real path produces.
  *   pending      65,000,000 — the two in-flight payout holds (payouts move
  *               available → pending; payout.settled clears pending).
  *   available   330,000,000 — the released residual after four payout holds.
@@ -141,11 +143,11 @@ describe('bootDevSeedStore — the seeded content', () => {
     expect(vault!.reserve_balance).toBe(DEV_SEED_TARGETS.reserve_cents);
 
     // The withholding receipts — the engine's own records of the reserve
-    // construction: YTD gross is Σ creator allocations (416,666,666,668) and
-    // YTD withheld is the reserve itself (100,000,000,000 at 24%).
+    // construction: YTD gross is Σ creator allocations (1,800,000,000) and
+    // YTD withheld is the reserve itself (432,000,000 at 24%).
     const ytd = await store.getCreatorYtd(DEV_SEED_CREATOR.payee_id, 2026);
     expect(ytd).toBeDefined();
-    expect(ytd!.gross_cents).toBe(416_666_666_668);
+    expect(ytd!.gross_cents).toBe(1_800_000_000);
     expect(ytd!.withheld_cents).toBe(DEV_SEED_TARGETS.reserve_cents);
 
     // The tax-escrow rows — one per seeded settlement run, summing to the
@@ -185,8 +187,9 @@ describe('bootDevSeedStore — the seeded content', () => {
     expect(holds.filter((hold) => hold?.status === 'settled')).toHaveLength(2);
 
     // The tax profile — UNVERIFIED on purpose: it is what drives the 24%
-    // backup withholding that builds the $1,000,000,000 reserve (locked
-    // semantic #4). The readiness panel honestly shows the TODO.
+    // backup withholding that builds the reserve through the real engine
+    // path (no locked target — founder ruling 2026-10-01). The readiness
+    // panel honestly shows the TODO.
     const profile = await store.getCreatorTaxProfile(DEV_SEED_CREATOR.payee_id);
     expect(profile?.tin_verified).toBe(0);
     expect(profile?.w9_on_file).toBe(0);
@@ -337,7 +340,7 @@ describe('bootDevSeedStore — the intelligence widening (per-entity journal his
     // widening — the trend stays five points, the total exact.
     const music = await entityIntelligence('TPL-MUS-001', store);
     expect(music?.trend).toHaveLength(5);
-    expect(music?.cleared).toBe(833_333_333_336n);
+    expect(music?.cleared).toBe(3_600_000_000n);
     expect(music?.cohort).toEqual({ rank: 1n, of: 1n });
   });
 });

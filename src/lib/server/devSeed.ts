@@ -29,17 +29,23 @@
  * `rh_yeshua_throne_don`, KYC-approved, bank-linked, PROVISIONED on the
  * sandbox rail.
  *
- * PORTFOLIO (founder-locked targets, integer cents):
- *   available   330,000,000           ($3,300,000.00)
- *   pending      65,000,000           ($650,000.00)
- *   reserve   100,000,000,000       ($1,000,000,000.00)
+ * PORTFOLIO (integer cents):
+ *   available   330,000,000           ($3,300,000.00)   — founder-locked
+ *   pending      65,000,000           ($650,000.00)     — founder-locked
+ *   reserve      432,000,000         ($4,320,000.00)   — ORGANIC: the five
+ *     creator runs' real 24% backup withholding. Founder ruling
+ *     2026-10-01: the former founder-locked $1B reserve was MOCK data —
+ *     no fabricated balance may render on the bank home dashboard, so the
+ *     reserve target is DERIVED from the run table below and can never
+ *     present as a hand-picked figure.
  *
  * HOW each amount is produced (the founder's integrity test — all real
  * paths, asserted at seed time):
  *   RESERVE — five `calculateUdrSplits` runs (settle: false) whose creator
  *   allocation is backup-withheld at 24% because the seeded tax profile has
  *   no verified TIN/W-9 (locked semantic #4); calculateUdrSplits credits
- *   each withheld amount to the creator's reserve vault bucket.
+ *   each withheld amount to the creator's reserve vault bucket. The reserve
+ *   is whatever that real path produces — never a locked target.
  *   PENDING — the same runs credit the creator's post-withholding net to
  *   the pending bucket (non-settle credits land in pending); the pending
  *   bucket is then moved to available by ONE `releaseVaultPending`, and
@@ -76,12 +82,8 @@ export const DEV_SEED_CREATOR: SessionCreator = {
 /** The persona's seeded identity tag (rendered on demo identity surfaces only). */
 export const DEV_SEED_UCT = 'UCT-US-2026-8C4F1E7A-A9';
 
-/** The founder-locked portfolio targets the seed must land on, exactly. */
-export const DEV_SEED_TARGETS = {
-  available_cents: 330_000_000,
-  pending_cents: 65_000_000,
-  reserve_cents: 100_000_000_000,
-} as const;
+/** The settled pending bucket released to available (Σ post-withholding nets). */
+const RELEASED_NET_CENTS = 1_368_000_000;
 
 /**
  * The env flag — explicit, off by default, documented in .env.example. On
@@ -178,9 +180,6 @@ const SEED_INSTANTS = {
 const CREATOR_BPS = 5_000;
 const LABEL_BPS = 5_000;
 
-/** The settled pending bucket released to available (Σ post-withholding nets). */
-const RELEASED_NET_CENTS = 316_666_666_668;
-
 /**
  * The seeded royalty runs — the founder persona's five music-platform
  * settlements plus the generation-4 multi-industry runs (the athlete
@@ -196,8 +195,8 @@ const RELEASED_NET_CENTS = 316_666_666_668;
  * and the demo-data badge discloses all of it.
  *
  * The two totals that matter for the persona's vault:
- *   Σ creator allocations = 416,666,666,668
- *   Σ withheld (24% of each allocation, no verified TIN) = 100,000,000,000
+ *   Σ creator allocations = 4 × 400,000,000 + 200,000,000 = 1,800,000,000
+ *   Σ withheld (24% of each allocation, no verified TIN) = 432,000,000
  */
 /** One seeded settlement — the shape both run tables share. */
 interface SeedRun {
@@ -212,11 +211,11 @@ interface SeedRun {
 
 const SEED_RUNS: ReadonlyArray<SeedRun> = [
   // The music-platform settlement story (the persona's five runs).
-  { source: 'Spotify', period: '2026-08', at: SEED_INSTANTS.spotify_aug, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 200_000_000_000, withCreator: true },
-  { source: 'YouTube Music', period: '2026-08', at: SEED_INSTANTS.youtube_aug, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 200_000_000_000, withCreator: true },
-  { source: 'Amazon Music', period: '2026-08', at: SEED_INSTANTS.amazon_aug, workId: 'TPL-MUS-001', workTitle: 'Sovereign Season', gross: 200_000_000_000, withCreator: true },
-  { source: 'Spotify', period: '2026-09', at: SEED_INSTANTS.spotify_sep, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 200_000_000_000, withCreator: true },
-  { source: 'Bandcamp', period: '2026-09', at: SEED_INSTANTS.bandcamp, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 33_333_333_336, withCreator: true },
+  { source: 'Spotify', period: '2026-08', at: SEED_INSTANTS.spotify_aug, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 800_000_000, withCreator: true },
+  { source: 'YouTube Music', period: '2026-08', at: SEED_INSTANTS.youtube_aug, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 800_000_000, withCreator: true },
+  { source: 'Amazon Music', period: '2026-08', at: SEED_INSTANTS.amazon_aug, workId: 'TPL-MUS-001', workTitle: 'Sovereign Season', gross: 800_000_000, withCreator: true },
+  { source: 'Spotify', period: '2026-09', at: SEED_INSTANTS.spotify_sep, workId: 'TPL-MUS-001', workTitle: 'Midnight Clear', gross: 800_000_000, withCreator: true },
+  { source: 'Bandcamp', period: '2026-09', at: SEED_INSTANTS.bandcamp, workId: 'TPL-MUS-001', workTitle: 'Gold Hours', gross: 400_000_000, withCreator: true },
   // The generation-4 multi-industry runs (demo-disclosed, canon-plausible:
   // the athlete guarantee, the tournament purse, the stream yield, the
   // social yield, the sponsorship deal).
@@ -409,6 +408,21 @@ function expectedAllocation(gross: number): bigint {
 function expectedWithheld(allocation: bigint): bigint {
   return allocation * 2_400n / 10_000n;
 }
+
+/**
+ * The founder-locked portfolio targets the seed must land on, exactly.
+ * Available and pending are the founder's locked figures. The reserve is
+ * NOT locked — it is the five creator runs' organic 24% backup withholding,
+ * DERIVED from the run table (founder ruling 2026-10-01: the former $1B
+ * locked reserve was mock data; no fabricated balance may remain).
+ */
+export const DEV_SEED_TARGETS = {
+  available_cents: 330_000_000,
+  pending_cents: 65_000_000,
+  reserve_cents: SEED_RUNS
+    .filter((run) => run.withCreator)
+    .reduce((sum, run) => sum + Number(expectedWithheld(expectedAllocation(run.gross))), 0),
+} as const;
 
 /**
  * Seed the two pre-cleared Sync Library demo works plus one CBT asset that
@@ -703,13 +717,13 @@ async function seedStore(store: InMemoryStore): Promise<void> {
   // 3) The two HISTORICAL payouts — held, then settled (pending cleared).
   const rtpResult = await payoutFromVault(
     store,
-    { payee_id: payee.payee_id, amount_cents: 200_000_000_000, rail: 'rtp' },
+    { payee_id: payee.payee_id, amount_cents: 600_000_000, rail: 'rtp' },
     new Date(SEED_INSTANTS.payout_rtp),
   );
   if (!rtpResult.ok) throw new Error(`dev seed: rtp payout failed: ${rtpResult.code}`);
   const achResult = await payoutFromVault(
     store,
-    { payee_id: payee.payee_id, amount_cents: 116_271_666_668, rail: 'ach' },
+    { payee_id: payee.payee_id, amount_cents: 373_000_000, rail: 'ach' },
     new Date(SEED_INSTANTS.payout_ach),
   );
   if (!achResult.ok) throw new Error(`dev seed: ach payout failed: ${achResult.code}`);

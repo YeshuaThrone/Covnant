@@ -533,9 +533,9 @@ describe('creatorAnalytics — the real 119-run dev-seed pins', () => {
   it('pins the ALL-window creator-paid total, the gross, and the run counts exactly', async () => {
     const payload = await readPayload(seeded, null);
     // Σ holder credits over every royalty journal — the same total the
-    // company tab pins as its ALL-window cleared figure ($8,445,103,733.36).
-    expect(payload.creatorPaidCents).toBe(844_510_373_336n);
-    expect(payload.grossClearedCents).toBe(844_510_373_336n); // zero dust in the seed
+    // company tab pins as its ALL-window cleared figure ($147,770,400.00).
+    expect(payload.creatorPaidCents).toBe(14_777_040_000n);
+    expect(payload.grossClearedCents).toBe(14_777_040_000n); // zero dust in the seed
     expect(payload.runsPaying).toBe(119);
     expect(payload.activePayees).toBe(2);
     expect(payload.trend).toHaveLength(35); // 2026-08-20 → 2026-09-23
@@ -550,9 +550,9 @@ describe('creatorAnalytics — the real 119-run dev-seed pins', () => {
       ['rh_thrones_label_don', 'Thrones Rights Group', 1, 119, '2026-09-23'],
       ['rh_yeshua_throne_don', 'Yeshua Throne', 2, 5, '2026-09-07'], // the music runs' last clearing day
     ]);
-    expect(payload.leaders[0]?.creditsCents).toBe(427_843_706_668n);
+    expect(payload.leaders[0]?.creditsCents).toBe(12_977_040_000n);
     // The persona's side — exactly the seed's stated Σ creator allocations.
-    expect(payload.leaders[1]?.creditsCents).toBe(416_666_666_668n);
+    expect(payload.leaders[1]?.creditsCents).toBe(1_800_000_000n);
     expect(
       payload.leaders.reduce((sum, row) => sum + row.creditsCents, 0n),
     ).toBe(payload.creatorPaidCents);
@@ -566,16 +566,16 @@ describe('creatorAnalytics — the real 119-run dev-seed pins', () => {
   it('pins the platform-source grouping exactly — all thirteen sources of record', async () => {
     const payload = await readPayload(seeded, null);
     expect(payload.sourceSplits).toEqual([
-      { source: 'Spotify', creatorCents: 400_000_000_000n, runs: 2 },
-      { source: 'Amazon Music', creatorCents: 200_000_000_000n, runs: 1 }, // the 200B tie — source name breaks it
-      { source: 'YouTube Music', creatorCents: 200_000_000_000n, runs: 1 },
-      { source: 'Bandcamp', creatorCents: 33_333_333_336n, runs: 1 },
       { source: 'Meridian Cinemas', creatorCents: 3_922_000_000n, runs: 36 },
       { source: 'PGA Tour', creatorCents: 2_425_000_000n, runs: 5 },
       { source: 'Ticketmaster', creatorCents: 2_389_600_000n, runs: 25 },
+      { source: 'Spotify', creatorCents: 1_600_000_000n, runs: 2 },
       { source: 'Nike', creatorCents: 872_000_000n, runs: 10 },
+      { source: 'Amazon Music', creatorCents: 800_000_000n, runs: 1 },
+      { source: 'YouTube Music', creatorCents: 800_000_000n, runs: 1 }, // the 800M tie — source name breaks it
       { source: 'Reader Platforms', creatorCents: 676_000_000n, runs: 18 },
       { source: 'Broadcast Partners', creatorCents: 627_000_000n, runs: 5 },
+      { source: 'Bandcamp', creatorCents: 400_000_000n, runs: 1 },
       { source: 'Apple Podcasts', creatorCents: 243_960_000n, runs: 5 },
       { source: 'Twitch', creatorCents: 18_720_000n, runs: 5 },
       { source: 'TikTok', creatorCents: 2_760_000n, runs: 5 },
@@ -598,14 +598,14 @@ describe('creatorAnalytics — the real 119-run dev-seed pins', () => {
     expect(week.leaders[0]?.payeeId).toBe('rh_thrones_label_don');
 
     const month = await readPayload(seeded, 30);
-    expect(month.creatorPaidCents).toBe(643_899_373_336n); // everything but the pre-08-25 densifier days
+    expect(month.creatorPaidCents).toBe(13_366_040_000n); // everything but the pre-08-25 densifier days
     expect(month.runsPaying).toBe(106);
     expect(month.trend).toHaveLength(30);
     expect(month.activePayees).toBe(2);
 
     const quarter = await readPayload(seeded, 90);
     // The seed's whole span fits inside 90 days — the quarter reads the ALL totals.
-    expect(quarter.creatorPaidCents).toBe(844_510_373_336n);
+    expect(quarter.creatorPaidCents).toBe(14_777_040_000n);
     expect(quarter.runsPaying).toBe(119);
     expect(quarter.trend).toHaveLength(90);
     expect(quarter.activePayees).toBe(2);

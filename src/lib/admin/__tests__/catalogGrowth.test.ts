@@ -475,8 +475,8 @@ describe('catalogGrowthFlows — the real dev-seed pins', () => {
     expect(payload.actionSignals).toEqual([
       {
         kind: 'top-source',
-        headline: 'Top source: Spotify',
-        subjectLabel: 'Spotify',
+        headline: 'Top source: Meridian Cinemas',
+        subjectLabel: 'Meridian Cinemas',
         basisPoints: null,
       },
     ]);
