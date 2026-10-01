@@ -85,6 +85,7 @@ import type {
   VtuberTaxWithholdingVerificationRecord,
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
+  DerivativeRoyaltyEdgeRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -198,6 +199,9 @@ const TABLES = {
   vtuberTaxWithholdingVerifications: 'vtuber_tax_withholding_verifications',
   vtuberTechSetupAmortizationSchedules: 'vtuber_tech_setup_amortization_schedules',
   vtuberTechSetupAmortizationLines: 'vtuber_tech_setup_amortization_lines',
+  // Migration 0021 — the derivative cascade's per-edge fractional royalty
+  // contracts over the parent_asset_id dependency tree (PR 16).
+  derivativeRoyaltyEdges: 'derivative_royalty_edges',
 } as const;
 
 /**
@@ -1424,6 +1428,38 @@ export class SupabaseStore implements Store {
         .order('line_index', { ascending: true })
         .order('insertion_order', { ascending: true }),
       'listVtuberTechSetupAmortizationLines',
+    );
+  }
+
+  // --- Derivative asset royalty cascade (migration 0021, PR 16) ---
+
+  async insertDerivativeRoyaltyEdge(
+    row: Omit<DerivativeRoyaltyEdgeRecord, 'id'>,
+  ): Promise<DerivativeRoyaltyEdgeRecord> {
+    // UNIQUE on (asset_id, parent_asset_id, upstream_creator_payee_id): a
+    // duplicate registration throws here (the same failure mode the
+    // canonical store exhibits).
+    return this.oneStrict<DerivativeRoyaltyEdgeRecord>(
+      this.client
+        .from(TABLES.derivativeRoyaltyEdges)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertDerivativeRoyaltyEdge',
+    );
+  }
+
+  async getDerivativeRoyaltyEdgesByAsset(assetId: string): Promise<DerivativeRoyaltyEdgeRecord[]> {
+    // created_at ASC with the insertion-order tiebreak — the deterministic
+    // reservation order (the walk's per-node lookup).
+    return this.many<DerivativeRoyaltyEdgeRecord>(
+      this.client
+        .from(TABLES.derivativeRoyaltyEdges)
+        .select()
+        .eq('asset_id', assetId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'getDerivativeRoyaltyEdgesByAsset',
     );
   }
 

@@ -89,6 +89,7 @@ import type {
   VtuberTaxWithholdingVerificationRecord,
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
+  DerivativeRoyaltyEdgeRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -185,6 +186,8 @@ export class InMemoryStore implements Store {
   private vtuberTechSetupAmortizationSchedules: VtuberTechSetupAmortizationScheduleRecord[] =
     [];
   private vtuberTechSetupAmortizationLines: VtuberTechSetupAmortizationLineRecord[] = [];
+  // Insertion-ordered — the cascade walk's reservation order (0021).
+  private derivativeRoyaltyEdges: DerivativeRoyaltyEdgeRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -1091,6 +1094,35 @@ export class InMemoryStore implements Store {
       .filter((row) => row.schedule_ref === scheduleRef)
       .sort((a, b) => a.line_index - b.line_index);
   }
+
+  // --- Derivative asset royalty cascade (0021, PR 16) ---
+
+  async insertDerivativeRoyaltyEdge(
+    row: Omit<DerivativeRoyaltyEdgeRecord, 'id'>,
+  ): Promise<DerivativeRoyaltyEdgeRecord> {
+    // UNIQUE on (asset_id, parent_asset_id, upstream_creator_payee_id) — a
+    // duplicate registration throws the unique violation (the replay surface).
+    if (
+      this.derivativeRoyaltyEdges.some(
+        (existing) =>
+          existing.asset_id === row.asset_id &&
+          existing.parent_asset_id === row.parent_asset_id &&
+          existing.upstream_creator_payee_id === row.upstream_creator_payee_id,
+      )
+    ) {
+      uniqueViolation('derivative_royalty_edges.asset_id,parent_asset_id,upstream_creator_payee_id');
+    }
+    const record: DerivativeRoyaltyEdgeRecord = { ...row, id: randomUUID() };
+    this.derivativeRoyaltyEdges.push(record);
+    return record;
+  }
+
+  async getDerivativeRoyaltyEdgesByAsset(assetId: string): Promise<DerivativeRoyaltyEdgeRecord[]> {
+    // Insertion order — the deterministic reservation order (the array IS
+    // the insertion_order identity column's local mirror).
+    return this.derivativeRoyaltyEdges.filter((row) => row.asset_id === assetId);
+  }
+
 
   async sumVerifiedImpressionsByEpisode(
     episodeId: string,

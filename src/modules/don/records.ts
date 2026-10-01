@@ -563,3 +563,30 @@ export type VtuberTechSetupAmortizationLineRecord = {
   deducted_at: string;
   created_at: string;
 };
+
+/**
+ * One per-edge fractional royalty contract over the parent_asset_id
+ * dependency tree (migration 0021) — the derivative cascade's input
+ * registry. When the child asset sells (first sale or secondary
+ * marketplace resale), the allocator's depth-first walk pays this edge's
+ * upstream creator floor(royalty_bps * sale_gross / 10000) integer cents
+ * BEFORE the downstream modder's net is computed. UNIQUE on
+ * (asset_id, parent_asset_id, upstream_creator_payee_id): a duplicate
+ * registration throws the unique violation; distinct payees may hold
+ * distinct fractions on one edge (co-holders).
+ */
+export type DerivativeRoyaltyEdgeRecord = {
+  id: string;
+  /** The derivative (child) asset the contract hangs off — the walk's start. */
+  asset_id: string;
+  /** The upstream asset this derivative builds on (mesh, texture, script, ...). */
+  parent_asset_id: string;
+  /** The upstream creator the edge pays — the sovereign payee identity. */
+  upstream_creator_payee_id: string;
+  /** The payee's display name of record at registration (the contract row carries it). */
+  upstream_creator_payee_name: string;
+  /** The edge's fraction of a downstream sale gross, basis points (0 < bps <= 10000). */
+  royalty_bps: number;
+  created_at: string;
+};
+

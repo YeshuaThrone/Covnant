@@ -90,6 +90,7 @@ import type {
   VtuberTaxWithholdingVerificationRecord,
   VtuberTechSetupAmortizationLineRecord,
   VtuberTechSetupAmortizationScheduleRecord,
+  DerivativeRoyaltyEdgeRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -820,6 +821,27 @@ CREATE TABLE IF NOT EXISTS vtuber_tech_setup_amortization_lines (
   created_at TEXT NOT NULL,
   UNIQUE (schedule_ref, line_index)
 );
+
+-- Derivative asset royalty cascade (PR 16) — the per-edge fractional
+-- royalty contracts over the parent_asset_id dependency tree. The
+-- allocator's depth-first walk reads this table per node; insertion order
+-- (rowid) is the deterministic reservation order. A self-edge is refused
+-- here; longer cycles refuse at plan time (fail-closed).
+CREATE TABLE IF NOT EXISTS derivative_royalty_edges (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL,
+  parent_asset_id TEXT NOT NULL,
+  upstream_creator_payee_id TEXT NOT NULL,
+  upstream_creator_payee_name TEXT NOT NULL,
+  royalty_bps INTEGER NOT NULL CHECK (royalty_bps > 0 AND royalty_bps <= 10000),
+  created_at TEXT NOT NULL,
+  UNIQUE (asset_id, parent_asset_id, upstream_creator_payee_id),
+  CHECK (asset_id <> parent_asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_derivative_royalty_edges_asset
+  ON derivative_royalty_edges (asset_id);
+CREATE INDEX IF NOT EXISTS idx_derivative_royalty_edges_parent
+  ON derivative_royalty_edges (parent_asset_id);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -2399,6 +2421,39 @@ export class SqliteStore implements Store {
          ORDER BY line_index ASC, rowid ASC`,
         )
         .all(scheduleRef) as VtuberTechSetupAmortizationLineRecord[],
+    );
+  }
+
+
+  // --- Derivative asset royalty cascade (0021, PR 16) ---
+
+  async insertDerivativeRoyaltyEdge(
+    row: Omit<DerivativeRoyaltyEdgeRecord, 'id'>,
+  ): Promise<DerivativeRoyaltyEdgeRecord> {
+    // UNIQUE on (asset_id, parent_asset_id, upstream_creator_payee_id) — a
+    // duplicate registration throws (better-sqlite3 surfaces the constraint
+    // violation — the replay surface).
+    const record: DerivativeRoyaltyEdgeRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO derivative_royalty_edges
+           (id, asset_id, parent_asset_id, upstream_creator_payee_id, upstream_creator_payee_name, royalty_bps, created_at)
+         VALUES (@id, @asset_id, @parent_asset_id, @upstream_creator_payee_id, @upstream_creator_payee_name, @royalty_bps, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getDerivativeRoyaltyEdgesByAsset(assetId: string): Promise<DerivativeRoyaltyEdgeRecord[]> {
+    // Insertion order (rowid ASC) — the deterministic reservation order.
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM derivative_royalty_edges
+         WHERE asset_id = ?
+         ORDER BY rowid ASC`,
+        )
+        .all(assetId) as DerivativeRoyaltyEdgeRecord[],
     );
   }
 
