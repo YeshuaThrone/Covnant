@@ -76,6 +76,10 @@ import type {
   VaultDisputeRecord,
 } from '@/modules/don/records';
 import type {
+  FilmWaterfallDefinitionRecord,
+  FilmWaterfallDistributionRecord,
+} from '@/modules/don/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -615,6 +619,30 @@ CREATE TABLE IF NOT EXISTS universal_royalty_ledger (
   metadata TEXT,
   created_at TEXT NOT NULL
 );
+
+-- The film waterfall engine (migration 0016, PR 8) — the registered deal
+-- (one definition jsonb per film asset) and the routing-decision record
+-- (the per-leg detail that makes shortfall carry honest). jsonb columns
+-- pack as TEXT JSON — the store-seam discipline the recon queue's result
+-- column uses.
+CREATE TABLE IF NOT EXISTS film_waterfall_definitions (
+  film_id TEXT PRIMARY KEY,
+  definition TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS film_waterfall_distributions (
+  id TEXT PRIMARY KEY,
+  film_id TEXT NOT NULL,
+  escrow_ledger_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL,
+  fdg_bypass_cents INTEGER NOT NULL,
+  legs TEXT NOT NULL,
+  tier_allocations TEXT NOT NULL,
+  unpaid_total_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -642,6 +670,67 @@ function reconJobFromDbRow(row: ReconJobDbRow): RoyaltyReconJobRecord {
     }
   }
   return { ...row, result };
+}
+
+// --- The film waterfall engine (migration 0016, PR 8) — row projection helpers ---
+//
+// The definition jsonb and the per-leg routing arrays pack as TEXT JSON —
+// the recon queue's result-column discipline. Unpacking is fail-closed: a
+// corrupt mirror throws rather than silently yielding an empty deal.
+
+type FilmWaterfallDefinitionDbRow = Omit<FilmWaterfallDefinitionRecord, 'definition'> & {
+  definition: string;
+};
+
+function filmWaterfallDefinitionFromDbRow(row: FilmWaterfallDefinitionDbRow): FilmWaterfallDefinitionRecord {
+  let definition: FilmWaterfallDefinitionRecord['definition'];
+  try {
+    definition = JSON.parse(row.definition) as FilmWaterfallDefinitionRecord['definition'];
+  } catch (error) {
+    throw new Error(
+      `film_waterfall_definitions.definition for ${row.film_id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, definition };
+}
+
+type FilmWaterfallDistributionDbRow = Omit<
+  FilmWaterfallDistributionRecord,
+  'legs' | 'tier_allocations'
+> & { legs: string; tier_allocations: string };
+
+function filmWaterfallDistributionToDbRow(
+  record: FilmWaterfallDistributionRecord,
+): FilmWaterfallDistributionDbRow {
+  return {
+    ...record,
+    legs: JSON.stringify(record.legs),
+    tier_allocations: JSON.stringify(record.tier_allocations),
+  };
+}
+
+function filmWaterfallDistributionFromDbRow(
+  row: FilmWaterfallDistributionDbRow,
+): FilmWaterfallDistributionRecord {
+  const unpack = <T>(json: string, column: string): T => {
+    try {
+      return JSON.parse(json) as T;
+    } catch (error) {
+      throw new Error(
+        `film_waterfall_distributions.${column} for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+        { cause: error },
+      );
+    }
+  };
+  return {
+    ...row,
+    legs: unpack<FilmWaterfallDistributionRecord['legs']>(row.legs, 'legs'),
+    tier_allocations: unpack<FilmWaterfallDistributionRecord['tier_allocations']>(
+      row.tier_allocations,
+      'tier_allocations',
+    ),
+  };
 }
 
 // --- The UCT credential vault (migration 0013) — row projection helpers ---
@@ -1235,6 +1324,113 @@ export class SqliteStore implements Store {
       )
       .get(`film_escrow:${filmId}`) as { gross_cents: number };
     return Promise.resolve(row.gross_cents);
+  }
+
+  // --- Film waterfall engine (migration 0016, PR 8) ---
+
+  async upsertFilmWaterfallDefinition(
+    row: FilmWaterfallDefinitionRecord,
+  ): Promise<FilmWaterfallDefinitionRecord> {
+    // One definition per film asset — INSERT ON CONFLICT replaces the row
+    // atomically (a re-registration after the lock check).
+    this.db
+      .prepare(
+        `INSERT INTO film_waterfall_definitions (film_id, definition, created_at, updated_at)
+         VALUES (@film_id, @definition, @created_at, @updated_at)
+         ON CONFLICT(film_id) DO UPDATE SET
+           definition = excluded.definition,
+           updated_at = excluded.updated_at`,
+      )
+      .run({
+        film_id: row.film_id,
+        definition: JSON.stringify(row.definition),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      } satisfies FilmWaterfallDefinitionDbRow);
+    return Promise.resolve(
+      filmWaterfallDefinitionFromDbRow(
+        this.db
+          .prepare(`SELECT * FROM film_waterfall_definitions WHERE film_id = ?`)
+          .get(row.film_id) as FilmWaterfallDefinitionDbRow,
+      ),
+    );
+  }
+
+  async getFilmWaterfallDefinition(
+    filmId: string,
+  ): Promise<FilmWaterfallDefinitionRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM film_waterfall_definitions WHERE film_id = ?`)
+      .get(filmId) as FilmWaterfallDefinitionDbRow | undefined;
+    return Promise.resolve(row === undefined ? undefined : filmWaterfallDefinitionFromDbRow(row));
+  }
+
+  async insertFilmWaterfallDistribution(
+    row: Omit<FilmWaterfallDistributionRecord, 'id'>,
+  ): Promise<FilmWaterfallDistributionRecord> {
+    // UNIQUE on escrow_ledger_id: a duplicate insert throws (better-sqlite3
+    // surfaces the constraint violation) and the caller recovers by reading
+    // the existing row — one routing decision per released receipt.
+    const record: FilmWaterfallDistributionRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO film_waterfall_distributions
+           (id, film_id, escrow_ledger_id, status, fdg_bypass_cents, legs, tier_allocations, unpaid_total_cents, created_at)
+         VALUES (@id, @film_id, @escrow_ledger_id, @status, @fdg_bypass_cents, @legs, @tier_allocations, @unpaid_total_cents, @created_at)`,
+      )
+      .run(
+        filmWaterfallDistributionToDbRow(record) as unknown as Record<string, unknown>,
+      );
+    return Promise.resolve(record);
+  }
+
+  async getFilmWaterfallDistributionByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM film_waterfall_distributions WHERE escrow_ledger_id = ?`,
+      )
+      .get(escrowLedgerId) as FilmWaterfallDistributionDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : filmWaterfallDistributionFromDbRow(row),
+    );
+  }
+
+  async updateFilmWaterfallDistributionStatus(
+    id: string,
+    status: FilmWaterfallDistributionRecord['status'],
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    this.db
+      .prepare(`UPDATE film_waterfall_distributions SET status = ? WHERE id = ?`)
+      .run(status, id);
+    const row = this.db
+      .prepare(`SELECT * FROM film_waterfall_distributions WHERE id = ?`)
+      .get(id) as FilmWaterfallDistributionDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : filmWaterfallDistributionFromDbRow(row),
+    );
+  }
+
+  async deleteFilmWaterfallDistribution(id: string): Promise<void> {
+    this.db
+      .prepare(`DELETE FROM film_waterfall_distributions WHERE id = ?`)
+      .run(id);
+  }
+
+  async listFilmWaterfallDistributions(
+    filmId: string,
+  ): Promise<FilmWaterfallDistributionRecord[]> {
+    // Oldest first — the cumulative paid state folds in routing order
+    // (rowid ASC is the strict tiebreak when created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM film_waterfall_distributions
+         WHERE film_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(filmId) as FilmWaterfallDistributionDbRow[];
+    return Promise.resolve(rows.map(filmWaterfallDistributionFromDbRow));
   }
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {

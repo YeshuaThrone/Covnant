@@ -71,6 +71,10 @@ import type {
   VaultDisputeRecord,
 } from '@/modules/don/records';
 import type {
+  FilmWaterfallDefinitionRecord,
+  FilmWaterfallDistributionRecord,
+} from '@/modules/don/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -143,6 +147,11 @@ const TABLES = {
   assets: 'cbt_assets',
   creatorProfiles: 'creator_profiles',
   syncLicensePurchases: 'sync_license_purchases',
+  // Migration 0016 — the film waterfall engine (PR 8). The definition is ONE
+  // validated deal per film asset (jsonb); the distributions are the
+  // routing-decision record (the honest shortfall carry).
+  filmWaterfallDefinitions: 'film_waterfall_definitions',
+  filmWaterfallDistributions: 'film_waterfall_distributions',
 } as const;
 
 /** The designated self-serve identity registry row (signup route header). */
@@ -649,6 +658,106 @@ export class SupabaseStore implements Store {
       'sumFilmGrossReceiptCents',
     );
     return rows.reduce((total, row) => total + row.amount_cents, 0);
+  }
+
+  // --- Film waterfall engine (migration 0016, PR 8) ---
+
+  async upsertFilmWaterfallDefinition(
+    row: FilmWaterfallDefinitionRecord,
+  ): Promise<FilmWaterfallDefinitionRecord> {
+    // One definition per film asset — the upsert targets the film_id key, so
+    // a re-registration after the lock check replaces the row atomically.
+    return this.oneStrict<FilmWaterfallDefinitionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDefinitions)
+        .upsert(row, { onConflict: 'film_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFilmWaterfallDefinition',
+    );
+  }
+
+  async getFilmWaterfallDefinition(
+    filmId: string,
+  ): Promise<FilmWaterfallDefinitionRecord | undefined> {
+    return this.one<FilmWaterfallDefinitionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDefinitions)
+        .select()
+        .eq('film_id', filmId)
+        .maybeSingle(),
+      'getFilmWaterfallDefinition',
+    );
+  }
+
+  async insertFilmWaterfallDistribution(
+    row: Omit<FilmWaterfallDistributionRecord, 'id'>,
+  ): Promise<FilmWaterfallDistributionRecord> {
+    // UNIQUE on escrow_ledger_id: a duplicate insert throws here (the same
+    // failure mode the canonical store exhibits) and the caller recovers by
+    // reading the existing row — one routing decision per released receipt.
+    return this.oneStrict<FilmWaterfallDistributionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDistributions)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertFilmWaterfallDistribution',
+    );
+  }
+
+  async getFilmWaterfallDistributionByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    return this.one<FilmWaterfallDistributionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDistributions)
+        .select()
+        .eq('escrow_ledger_id', escrowLedgerId)
+        .maybeSingle(),
+      'getFilmWaterfallDistributionByEscrow',
+    );
+  }
+
+  async updateFilmWaterfallDistributionStatus(
+    id: string,
+    status: FilmWaterfallDistributionRecord['status'],
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    return this.one<FilmWaterfallDistributionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDistributions)
+        .update({ status })
+        .eq('id', id)
+        .select()
+        .maybeSingle(),
+      'updateFilmWaterfallDistributionStatus',
+    );
+  }
+
+  async deleteFilmWaterfallDistribution(id: string): Promise<void> {
+    const { error } = await this.client
+      .from(TABLES.filmWaterfallDistributions)
+      .delete()
+      .eq('id', id);
+    if (error) {
+      throw new Error(`deleteFilmWaterfallDistribution: ${error.message} (code ${error.code})`);
+    }
+  }
+
+  async listFilmWaterfallDistributions(
+    filmId: string,
+  ): Promise<FilmWaterfallDistributionRecord[]> {
+    // Oldest first — the cumulative paid state folds in routing order
+    // (insertion_order ASC is the strict tiebreak when created_at ties).
+    return this.many<FilmWaterfallDistributionRecord>(
+      this.client
+        .from(TABLES.filmWaterfallDistributions)
+        .select()
+        .eq('film_id', filmId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listFilmWaterfallDistributions',
+    );
   }
 
   // --- BaaS transfers ---

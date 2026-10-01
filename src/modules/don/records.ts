@@ -168,3 +168,46 @@ export type SplitReversalRecord = {
   journal_id: string;
   created_at: string;
 };
+
+// --- Film waterfall engine (PR 8, Deep Royalties) ---
+
+/**
+ * One registered film waterfall — the deal as verified at the cross-reference,
+ * stored jsonb on `film_waterfall_definitions` (migration 0016), one row per
+ * film asset. The `definition` field is the typed WaterfallDefinition the
+ * waterfall module validates; the store projects the jsonb at the boundary
+ * (the sync_license_purchases.metadata precedent).
+ */
+export type FilmWaterfallDefinitionRecord = {
+  film_id: string;
+  definition: import('@/modules/waterfall/engine').FilmWaterfallDefinition;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FilmWaterfallDistributionStatus = 'routed' | 'applied';
+
+/**
+ * One routing decision on a released escrow receipt — the state that makes
+ * shortfall carry honest. Inserted status 'routed' BEFORE the release moves
+ * money (insert-as-lock, the payout-reversal precedent), flipped to 'applied'
+ * when the release succeeds, DELETED when the release refuses (retryable).
+ * Cumulative per-leg paid — the waterfall router's carry input — sums the
+ * per-leg detail over APPLIED rows only. Unique on escrow_ledger_id: one
+ * routing decision per released receipt, ever.
+ */
+export type FilmWaterfallDistributionRecord = {
+  id: string;
+  film_id: string;
+  escrow_ledger_id: string;
+  status: FilmWaterfallDistributionStatus;
+  /** The First Dollar Gross bypass the routing took off the top, integer cents. */
+  fdg_bypass_cents: number;
+  /** The per-leg routing detail (the router's leg outcomes), stored jsonb. */
+  legs: import('@/modules/waterfall/engine').WaterfallLegRouting[];
+  /** The per-tier totals the release applied, stored jsonb. */
+  tier_allocations: import('@/modules/waterfall/engine').WaterfallTierAllocation[];
+  /** The honest carry this routing reported, integer cents. */
+  unpaid_total_cents: number;
+  created_at: string;
+};

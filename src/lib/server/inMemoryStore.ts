@@ -75,6 +75,10 @@ import type {
   VaultDisputeRecord,
 } from '@/modules/don/records';
 import type {
+  FilmWaterfallDefinitionRecord,
+  FilmWaterfallDistributionRecord,
+} from '@/modules/don/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -155,6 +159,12 @@ export class InMemoryStore implements Store {
   private creatorUcts = new Map<string, CreatorUctRecord>();
   private syncCatalog = new Map<string, SyncCatalogItemRecord>();
   private syncPurchases = new Map<string, SyncLicensePurchaseRecord>();
+  // --- The film waterfall engine (migration 0016, PR 8) ---
+  // One registered deal per film asset (the Map key), and the insertion-ordered
+  // distribution array — the routing-decision record. UNIQUE on escrow_ledger_id
+  // is enforced on insert, matching the database backends.
+  private filmWaterfallDefinitions = new Map<string, FilmWaterfallDefinitionRecord>();
+  private filmWaterfallDistributions: FilmWaterfallDistributionRecord[] = [];
 
   /**
    * The tier-universe royalty ledger (universal_royalty_ledger) — read-side
@@ -514,6 +524,78 @@ export class InMemoryStore implements Store {
           ? total + row.amount_cents
           : total,
       0,
+    );
+  }
+
+  // --- Film waterfall engine (migration 0016, PR 8) ---
+
+  async upsertFilmWaterfallDefinition(
+    row: FilmWaterfallDefinitionRecord,
+  ): Promise<FilmWaterfallDefinitionRecord> {
+    // One definition per film asset — the Map key IS film_id, so a
+    // re-registration after the lock check replaces the row.
+    this.filmWaterfallDefinitions.set(row.film_id, row);
+    return row;
+  }
+
+  async getFilmWaterfallDefinition(
+    filmId: string,
+  ): Promise<FilmWaterfallDefinitionRecord | undefined> {
+    return this.filmWaterfallDefinitions.get(filmId);
+  }
+
+  async insertFilmWaterfallDistribution(
+    row: Omit<FilmWaterfallDistributionRecord, 'id'>,
+  ): Promise<FilmWaterfallDistributionRecord> {
+    // UNIQUE on escrow_ledger_id — one routing decision per released receipt,
+    // the same failure mode the database enforces.
+    if (
+      this.filmWaterfallDistributions.some(
+        (existing) => existing.escrow_ledger_id === row.escrow_ledger_id,
+      )
+    ) {
+      uniqueViolation('film_waterfall_distributions.escrow_ledger_id');
+    }
+    const record: FilmWaterfallDistributionRecord = { ...row, id: randomUUID() };
+    // Array push = the database's insertion_order — the cumulative-paid
+    // fold's routing order for rows sharing a created_at.
+    this.filmWaterfallDistributions.push(record);
+    return record;
+  }
+
+  async getFilmWaterfallDistributionByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    return this.filmWaterfallDistributions.find(
+      (row) => row.escrow_ledger_id === escrowLedgerId,
+    );
+  }
+
+  async updateFilmWaterfallDistributionStatus(
+    id: string,
+    status: FilmWaterfallDistributionRecord['status'],
+  ): Promise<FilmWaterfallDistributionRecord | undefined> {
+    const row = this.filmWaterfallDistributions.find((candidate) => candidate.id === id);
+    if (row === undefined) return undefined;
+    row.status = status;
+    return row;
+  }
+
+  async deleteFilmWaterfallDistribution(id: string): Promise<void> {
+    this.filmWaterfallDistributions = this.filmWaterfallDistributions.filter(
+      (row) => row.id !== id,
+    );
+  }
+
+  async listFilmWaterfallDistributions(
+    filmId: string,
+  ): Promise<FilmWaterfallDistributionRecord[]> {
+    // Oldest first — the cumulative paid state folds in routing order
+    // (the array's push order IS insertion_order for created_at ties).
+    return sortByTime(
+      this.filmWaterfallDistributions.filter((row) => row.film_id === filmId),
+      (row) => row.created_at,
+      'asc',
     );
   }
 
