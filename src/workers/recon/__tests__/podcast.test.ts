@@ -72,6 +72,7 @@ function impLine(
     raw: [],
     guildResidual: null,
     podcastDetail: detail,
+    gamingDetail: null,
     ...lineOverrides,
   };
 }

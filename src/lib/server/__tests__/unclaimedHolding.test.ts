@@ -82,6 +82,7 @@ function filmLine(overrides: Partial<ParsedStatementLine> = {}): ParsedStatement
     raw: ["raw"],
     guildResidual: null,
     podcastDetail: null,
+    gamingDetail: null,
     ...overrides,
   };
 }

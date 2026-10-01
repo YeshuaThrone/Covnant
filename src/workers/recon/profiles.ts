@@ -23,6 +23,7 @@
 
 import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/identifiers";
 import { PODCAST_PROFILES } from "./podcastProfiles";
+import { GAMING_PROFILES } from "./gamingProfiles";
 import {
   optionalCell,
   parseStatementMoney,
@@ -118,6 +119,7 @@ function musicLine(
     raw,
     guildResidual: null,
     podcastDetail: null,
+    gamingDetail: null,
   };
 }
 
@@ -394,6 +396,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           raw: def.header.map((column) => values.get(column) ?? ""),
           guildResidual: null,
           podcastDetail: null,
+          gamingDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -514,6 +517,10 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // The podcast lane (PR 10) — dispatched through the same single opinion;
   // the worker branches on the profile kind before the music machinery.
   ...PODCAST_PROFILES,
+  // The gaming lane (PR 12) — same dispatch opinion; the worker branches on
+  // the profile kind before the music machinery (commission bands, the
+  // engine-royalty accumulator, and the DevEx converter are gaming-only).
+  ...GAMING_PROFILES,
 ];
 
 /**

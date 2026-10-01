@@ -129,6 +129,7 @@ describe("isPostableLine — the seam's subject rule", () => {
     raw: ["raw"],
     guildResidual: null,
     podcastDetail: null,
+    gamingDetail: null,
     ...overrides,
   });
 

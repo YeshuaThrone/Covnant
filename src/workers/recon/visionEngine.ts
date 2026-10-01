@@ -160,6 +160,7 @@ function validateVisionLine(
       raw: [],
       guildResidual: null,
       podcastDetail: null,
+      gamingDetail: null,
     },
   };
 }
