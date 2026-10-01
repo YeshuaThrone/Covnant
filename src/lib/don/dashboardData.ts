@@ -146,6 +146,8 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   film_escrow_post: 'Film receipt escrowed',
   film_escrow_release: 'Film escrow released',
   film_net_points: 'Net points paid',
+  gaming_cashout_post: 'Game payout escrowed',
+  gaming_cashout_release: 'Game payout released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
@@ -173,6 +175,11 @@ const INFLOW_KINDS: ReadonlySet<JournalKind> = new Set<JournalKind>([
   // vaults from the producer pool.
   'film_escrow_release',
   'film_net_points',
+  // Gaming cashout release (PR 13): the holder-facing legs are the
+  // clearance-gated creator-credit vault CREDITs; the batch's dust sweep
+  // credits the company payee. The post kind faces no vault — its credit
+  // side is the platform's cashout-pending GL account — so it stays out.
+  'gaming_cashout_release',
 ]);
 
 /** The entry_hash short form — the leading hash characters, display-safe. */

@@ -78,9 +78,11 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
   GamingSplitPayoutRecord,
+  GamingStudioKycRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -744,6 +746,36 @@ CREATE TABLE IF NOT EXISTS gaming_split_payouts (
   company_dust_cents INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- Gaming cashout states (PR 13) — the durable DevEx conversion logs hold
+-- until the platform's fiat settlement completes (the release path reads a
+-- batch's logs and refuses while any is pending), and one KYC verification
+-- state per studio payee backs the gaming payout gate's studio/team read.
+-- team_members jsonb packs as TEXT JSON (the waterfall discipline).
+CREATE TABLE IF NOT EXISTS gaming_devex_conversion_logs (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  line_event_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  denomination TEXT NOT NULL,
+  virtual_amount TEXT NOT NULL,
+  exchange_rate TEXT NOT NULL,
+  fiat_net_cents INTEGER NOT NULL,
+  settlement_batch_ref TEXT NOT NULL,
+  status TEXT NOT NULL,
+  settled_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gaming_studio_kyc_verifications (
+  id TEXT PRIMARY KEY,
+  studio_payee_id TEXT NOT NULL UNIQUE,
+  studio_kyc_status TEXT NOT NULL,
+  team_members TEXT NOT NULL,
+  contract_ref TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -948,6 +980,28 @@ function gamingSplitPayoutFromDbRow(
     );
   }
   return { ...row, accruals };
+}
+
+type GamingStudioKycDbRow = Omit<
+  GamingStudioKycRecord,
+  'team_members'
+> & { team_members: string };
+
+function gamingStudioKycToDbRow(record: GamingStudioKycRecord): GamingStudioKycDbRow {
+  return { ...record, team_members: JSON.stringify(record.team_members) };
+}
+
+function gamingStudioKycFromDbRow(row: GamingStudioKycDbRow): GamingStudioKycRecord {
+  let teamMembers: GamingStudioKycRecord['team_members'];
+  try {
+    teamMembers = JSON.parse(row.team_members) as GamingStudioKycRecord['team_members'];
+  } catch (error) {
+    throw new Error(
+      `gaming_studio_kyc_verifications.team_members for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, team_members: teamMembers };
 }
 
 // --- The UCT credential vault (migration 0013) — row projection helpers ---
@@ -1967,6 +2021,137 @@ export class SqliteStore implements Store {
       )
       .all(itemId) as GamingSplitPayoutDbRow[];
     return Promise.resolve(rows.map(gamingSplitPayoutFromDbRow));
+  }
+
+  // --- Gaming cashout states: DevEx conversion logs + studio KYC (migration 0019, PR 13) ---
+
+  async listVirtualCurrencyCashoutCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'virtual_currency_cashout_pending' AND status = 'virtual_currency_cashout_pending'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleVirtualCurrencyCashout(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS. changes = 0
+    // means the row is absent or no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'virtual_currency_cashout_pending'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  async insertGamingDevexConversionLog(
+    row: Omit<GamingDevexConversionLogRecord, 'id'>,
+  ): Promise<GamingDevexConversionLogRecord> {
+    // UNIQUE on event_id — one conversion log per funding line, ever; a
+    // duplicate insert throws (better-sqlite3 surfaces the constraint
+    // violation) and the caller counts the replay as a no-op.
+    const record: GamingDevexConversionLogRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO gaming_devex_conversion_logs
+           (id, event_id, line_event_id, platform, denomination, virtual_amount, exchange_rate, fiat_net_cents, settlement_batch_ref, status, settled_at, created_at)
+         VALUES (@id, @event_id, @line_event_id, @platform, @denomination, @virtual_amount, @exchange_rate, @fiat_net_cents, @settlement_batch_ref, @status, @settled_at, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getGamingDevexConversionLogByEventId(
+    eventId: string,
+  ): Promise<GamingDevexConversionLogRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM gaming_devex_conversion_logs WHERE event_id = ?`)
+      .get(eventId) as GamingDevexConversionLogRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async listGamingDevexConversionLogsByBatch(
+    batchRef: string,
+  ): Promise<GamingDevexConversionLogRecord[]> {
+    // Oldest first — write order (rowid ASC is the strict tiebreak when
+    // created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM gaming_devex_conversion_logs
+         WHERE settlement_batch_ref = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(batchRef) as GamingDevexConversionLogRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async settleGamingDevexConversionLogsByBatch(
+    batchRef: string,
+    settledAt: string,
+  ): Promise<number> {
+    // The status predicate is the CAS at batch scope: only PENDING rows
+    // flip, already-settled rows are untouched, and the count is the honest
+    // report of what this call settled.
+    const result = this.db
+      .prepare(
+        `UPDATE gaming_devex_conversion_logs
+         SET status = 'fiat_settled', settled_at = ?
+         WHERE settlement_batch_ref = ? AND status = 'pending_fiat_settlement'`,
+      )
+      .run(settledAt, batchRef);
+    return Promise.resolve(result.changes);
+  }
+
+  async upsertGamingStudioKyc(
+    row: GamingStudioKycRecord,
+  ): Promise<GamingStudioKycRecord> {
+    // One verification state per studio payee — INSERT ON CONFLICT replaces
+    // the row atomically (a re-verification after the lock check).
+    this.db
+      .prepare(
+        `INSERT INTO gaming_studio_kyc_verifications
+           (id, studio_payee_id, studio_kyc_status, team_members, contract_ref, created_at, updated_at)
+         VALUES (@id, @studio_payee_id, @studio_kyc_status, @team_members, @contract_ref, @created_at, @updated_at)
+         ON CONFLICT(studio_payee_id) DO UPDATE SET
+           id = excluded.id,
+           studio_kyc_status = excluded.studio_kyc_status,
+           team_members = excluded.team_members,
+           contract_ref = excluded.contract_ref,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(gamingStudioKycToDbRow(row) as unknown as Record<string, unknown>);
+    return Promise.resolve(
+      gamingStudioKycFromDbRow(
+        this.db
+          .prepare(`SELECT * FROM gaming_studio_kyc_verifications WHERE studio_payee_id = ?`)
+          .get(row.studio_payee_id) as GamingStudioKycDbRow,
+      ),
+    );
+  }
+
+  async getGamingStudioKyc(
+    studioPayeeId: string,
+  ): Promise<GamingStudioKycRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM gaming_studio_kyc_verifications WHERE studio_payee_id = ?`)
+      .get(studioPayeeId) as GamingStudioKycDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : gamingStudioKycFromDbRow(row),
+    );
   }
 
   async sumVerifiedImpressionsByEpisode(

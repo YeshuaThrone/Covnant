@@ -65,9 +65,11 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
   GamingSplitPayoutRecord,
+  GamingStudioKycRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -606,6 +608,71 @@ export interface Store {
 
   /** The item's payout routings, oldest first (created_at ASC, id tiebreak). */
   listGamingSplitPayouts(itemId: string): Promise<GamingSplitPayoutRecord[]>;
+
+  // --- Gaming cashout states: DevEx conversion logs + studio KYC (migration 0019, PR 13) ---
+
+  /**
+   * The held gaming cashout receipts — kind AND status
+   * 'virtual_currency_cashout_pending', newest first. Released rows and
+   * ordinary royalty rows never appear.
+   */
+  listVirtualCurrencyCashoutCredits(
+    limit?: number,
+  ): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * Compare-and-set release lock for one gaming cashout receipt: flips ONE
+   * row from status 'virtual_currency_cashout_pending' to 'settled' and
+   * returns it; reads undefined when the row is absent or no longer locked
+   * (the concurrent release loser). The conditional read IS the CAS — the
+   * unclaimed-holding/film-escrow precedent.
+   */
+  settleVirtualCurrencyCashout(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Writes one durable DevEx conversion log. UNIQUE on event_id (the
+   * content-derived `gaming:devex:` id) — the once-only replay arbiter; a
+   * duplicate insert throws the unique violation (the caller counts the
+   * replay as a no-op).
+   */
+  insertGamingDevexConversionLog(
+    row: Omit<GamingDevexConversionLogRecord, 'id'>,
+  ): Promise<GamingDevexConversionLogRecord>;
+
+  getGamingDevexConversionLogByEventId(
+    eventId: string,
+  ): Promise<GamingDevexConversionLogRecord | undefined>;
+
+  /** The batch's conversion logs, oldest first (the release path's read). */
+  listGamingDevexConversionLogsByBatch(
+    batchRef: string,
+  ): Promise<GamingDevexConversionLogRecord[]>;
+
+  /**
+   * Flips EVERY 'pending_fiat_settlement' log of one payout batch to
+   * 'fiat_settled' (the platform's fiat settlement completed) and returns
+   * the count flipped. The batch's already-settled logs are untouched.
+   */
+  settleGamingDevexConversionLogsByBatch(
+    batchRef: string,
+    settledAt: string,
+  ): Promise<number>;
+
+  /**
+   * Writes one studio's KYC verification state (one row per studio payee —
+   * a re-verification replaces the row; the TypeScript validator is the
+   * registration gate).
+   */
+  upsertGamingStudioKyc(
+    row: GamingStudioKycRecord,
+  ): Promise<GamingStudioKycRecord>;
+
+  getGamingStudioKyc(
+    studioPayeeId: string,
+  ): Promise<GamingStudioKycRecord | undefined>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

@@ -28,6 +28,7 @@ import { TARGET_UNITS } from '@/lib/splits/shared';
 import type { CovenantBlockAsset, SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import type { PayeeRole, RoyaltyLineItemInput, SplitCalculateInput, SplitPartyInput } from '@/lib/don/types';
 import { calculateUdrSplits, type SplitCalculateSuccess } from '@/lib/server/udrSplits';
+import { isUniqueViolation } from '@/lib/server/uniqueViolation';
 import type { Store } from '@/lib/server/store';
 import type { SyncLicensePurchaseRecord } from '@/modules/sdk/records';
 import type { SyncLicensePurchaseRequest } from '../../../covnant-sdk/src/contracts/syncLibraryMarketplace';
@@ -151,11 +152,7 @@ function tierSplitsFromPool(
 }
 
 /** The UNIQUE-violation shapes the three backends surface (never swallowed). */
-function isUniqueViolation(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('23505') || message.includes('UNIQUE constraint failed') ||
-    message.toLowerCase().includes('unique violation');
-}
+export { isUniqueViolation };
 
 /**
  * Settles one sync license purchase through the locked chain. Everything

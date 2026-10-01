@@ -73,9 +73,11 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
   GamingSplitPayoutRecord,
+  GamingStudioKycRecord,
   PodcastEpisodeSplitAccrualRecord,
   PodcastEpisodeSplitScheduleRecord,
   PodcastGuestBonusAccrualRecord,
@@ -176,6 +178,13 @@ const TABLES = {
   gamingEngineRoyaltyEvents: 'gaming_engine_royalty_events',
   gamingItemSplitSchedules: 'gaming_item_split_schedules',
   gamingSplitPayouts: 'gaming_split_payouts',
+  // Migration 0019 — the gaming cashout states (PR 13). The durable DevEx
+  // conversion logs hold until the platform's fiat settlement completes
+  // (the release path reads a batch's logs and refuses while any is
+  // pending); one KYC verification state per studio payee backs the gaming
+  // payout gate's studio/team read.
+  gamingDevexConversionLogs: 'gaming_devex_conversion_logs',
+  gamingStudioKycVerifications: 'gaming_studio_kyc_verifications',
 } as const;
 
 /**
@@ -1114,6 +1123,135 @@ export class SupabaseStore implements Store {
       'listGamingSplitPayouts',
     );
  }
+
+  // --- Gaming cashout states: DevEx conversion logs + studio KYC (migration 0019, PR 13) ---
+
+  async listVirtualCurrencyCashoutCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'virtual_currency_cashout_pending')
+        .eq('status', 'virtual_currency_cashout_pending')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listVirtualCurrencyCashoutCredits',
+    );
+  }
+
+  async settleVirtualCurrencyCashout(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The status predicate in the UPDATE's WHERE is the CAS: PostgREST
+    // matches the row only while it is still locked, so the concurrent
+    // release loser gets zero rows back (maybeSingle → undefined).
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'virtual_currency_cashout_pending')
+        .select()
+        .maybeSingle(),
+      'settleVirtualCurrencyCashout',
+    );
+  }
+
+  async insertGamingDevexConversionLog(
+    row: Omit<GamingDevexConversionLogRecord, 'id'>,
+  ): Promise<GamingDevexConversionLogRecord> {
+    // UNIQUE on event_id: a duplicate insert throws here (the same failure
+    // mode the canonical store exhibits) and the caller counts the replay
+    // as a no-op — one conversion log per funding line, ever.
+    return this.oneStrict<GamingDevexConversionLogRecord>(
+      this.client
+        .from(TABLES.gamingDevexConversionLogs)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertGamingDevexConversionLog',
+    );
+  }
+
+  async getGamingDevexConversionLogByEventId(
+    eventId: string,
+  ): Promise<GamingDevexConversionLogRecord | undefined> {
+    return this.one<GamingDevexConversionLogRecord>(
+      this.client
+        .from(TABLES.gamingDevexConversionLogs)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getGamingDevexConversionLogByEventId',
+    );
+  }
+
+  async listGamingDevexConversionLogsByBatch(
+    batchRef: string,
+  ): Promise<GamingDevexConversionLogRecord[]> {
+    // Oldest first — write order (insertion_order ASC is the strict
+    // tiebreak when created_at ties).
+    return this.many<GamingDevexConversionLogRecord>(
+      this.client
+        .from(TABLES.gamingDevexConversionLogs)
+        .select()
+        .eq('settlement_batch_ref', batchRef)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listGamingDevexConversionLogsByBatch',
+    );
+  }
+
+  async settleGamingDevexConversionLogsByBatch(
+    batchRef: string,
+    settledAt: string,
+  ): Promise<number> {
+    // The status predicate in the UPDATE's WHERE is the batch-scope CAS:
+    // only PENDING rows flip, already-settled rows are untouched, and the
+    // returned row count is the honest report of what this call settled.
+    const settled = await this.many<GamingDevexConversionLogRecord>(
+      this.client
+        .from(TABLES.gamingDevexConversionLogs)
+        .update({ status: 'fiat_settled', settled_at: settledAt })
+        .eq('settlement_batch_ref', batchRef)
+        .eq('status', 'pending_fiat_settlement')
+        .select(),
+      'settleGamingDevexConversionLogsByBatch',
+    );
+    return settled.length;
+  }
+
+  async upsertGamingStudioKyc(
+    row: GamingStudioKycRecord,
+  ): Promise<GamingStudioKycRecord> {
+    // One verification state per studio payee — the upsert targets the
+    // studio_payee_id key, so a re-verification replaces the row atomically.
+    return this.oneStrict<GamingStudioKycRecord>(
+      this.client
+        .from(TABLES.gamingStudioKycVerifications)
+        .upsert(row, { onConflict: 'studio_payee_id' })
+        .select()
+        .maybeSingle(),
+      'upsertGamingStudioKyc',
+    );
+  }
+
+  async getGamingStudioKyc(
+    studioPayeeId: string,
+  ): Promise<GamingStudioKycRecord | undefined> {
+    return this.one<GamingStudioKycRecord>(
+      this.client
+        .from(TABLES.gamingStudioKycVerifications)
+        .select()
+        .eq('studio_payee_id', studioPayeeId)
+        .maybeSingle(),
+      'getGamingStudioKyc',
+    );
+  }
 
   // --- BaaS transfers ---
 

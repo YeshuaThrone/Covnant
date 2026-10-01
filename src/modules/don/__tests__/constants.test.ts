@@ -70,6 +70,8 @@ describe('don constants', () => {
       'film_escrow_post',
       'film_escrow_release',
       'film_net_points',
+      'gaming_cashout_post',
+      'gaming_cashout_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

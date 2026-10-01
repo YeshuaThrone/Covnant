@@ -9,6 +9,7 @@ import {
   GL_ACCOUNT_FBO_CASH,
   GL_ACCOUNT_UNCLAIMED_HOLDING,
   filmEscrowGlAccount,
+  gamingCashoutGlAccount,
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
@@ -117,6 +118,27 @@ export function filmEscrowDebit(filmId: string, amountCents: number): GlLegInput
 export function filmEscrowCredit(filmId: string, amountCents: number): GlLegInput {
   return {
     account: filmEscrowGlAccount(filmId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Gaming cashout pending (PR 13): the per-platform cashout obligation
+// account. A locked payout batch posts a credit here against an FBO debit;
+// the verified release debits it against the creator-credit legs — never a
+// vault bucket, never the dust payee's account, never the unclaimed holding
+// account, never the film escrow account.
+export function gamingCashoutDebit(platform: string, amountCents: number): GlLegInput {
+  return {
+    account: gamingCashoutGlAccount(platform),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function gamingCashoutCredit(platform: string, amountCents: number): GlLegInput {
+  return {
+    account: gamingCashoutGlAccount(platform),
     debit_cents: 0,
     credit_cents: amountCents,
   };
