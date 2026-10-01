@@ -597,6 +597,60 @@ export class SupabaseStore implements Store {
     );
   }
 
+  // --- Film waterfall escrow (PR 9) ---
+
+  async listFilmEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'escrow_waterfall_pending')
+        .eq('status', 'escrow_waterfall_pending')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listFilmEscrowCredits',
+    );
+  }
+
+  async settleFilmEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The status predicate in the UPDATE's WHERE is the CAS: PostgREST
+    // matches the row only while it is still locked, so the concurrent
+    // release loser gets zero rows back (maybeSingle → undefined).
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'escrow_waterfall_pending')
+        .select()
+        .maybeSingle(),
+      'settleFilmEscrow',
+    );
+  }
+
+  async sumFilmGrossReceiptCents(filmId: string): Promise<number> {
+    // Gross receipts count EVERY escrow receipt row for the film, held or
+    // released — money is received when it locks, not when it releases. The
+    // per-film payee id (film_escrow:{filmId}) is the grouping key; the
+    // amount column is fetched alone and summed exactly (never a page of
+    // full rows).
+    const rows = await this.many<{ amount_cents: number }>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select('amount_cents')
+        .eq('kind', 'escrow_waterfall_pending')
+        .eq('payee_id', `film_escrow:${filmId}`),
+      'sumFilmGrossReceiptCents',
+    );
+    return rows.reduce((total, row) => total + row.amount_cents, 0);
+  }
+
   // --- BaaS transfers ---
 
   async insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord> {
