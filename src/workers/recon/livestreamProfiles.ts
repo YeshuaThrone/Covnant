@@ -271,6 +271,7 @@ function livestreamLine(
     gamingDetail: null,
     livestreamDetail: detail,
     webtoonDetail: null,
+    merchDetail: null,
   };
 }
 

@@ -79,6 +79,9 @@ describe('don constants', () => {
       'translation_localization_post',
       'translation_localization_release',
       'ip_option_release',
+      // The merch collaboration release (PR 22, the founder merchandise
+      // directive): the recoup-then-split settlement's journal kind.
+      'merch_collab_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

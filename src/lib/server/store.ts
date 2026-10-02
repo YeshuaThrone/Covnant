@@ -92,6 +92,14 @@ import type {
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
+  MerchCogsLotRecord,
+  MerchCogsConsumptionRecord,
+  MerchCollabAgreementRecord,
+  MerchCollabPoolClass,
+  MerchCollabRecoupmentApplicationRecord,
+  MerchDesignerRoyaltyTierRecord,
+  MerchDesignerRoyaltyBillingRecord,
+  MerchConsignmentSettlementRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -1059,6 +1067,109 @@ export interface Store {
     payeeId: string,
     workId: string,
   ): Promise<PublishingIpRightsVerificationRecord | undefined>;
+
+  // --- Merch COGS + the brand collaboration waterfall (PR 22, migration 0026) ---
+
+  /**
+   * Registers one production lot of record: the batch's unit count and
+   * per-unit production cost. UNIQUE on (sku_id, lot_ref) — a
+   * re-registered lot throws the unique violation (the replay surface).
+   */
+  insertMerchCogsLot(row: Omit<MerchCogsLotRecord, 'id'>): Promise<MerchCogsLotRecord>;
+
+  /**
+   * One sku's production lots in FIFO order (created_at ASC, lot_ref
+   * ASC): the consumption walk's source of truth.
+   */
+  listMerchCogsLots(skuId: string): Promise<MerchCogsLotRecord[]>;
+
+  /**
+   * Writes one FIFO consumption of record: the append-only amortization
+   * truth. UNIQUE on (lot_id, source_event_id) — a replayed fulfillment
+   * event throws the unique violation, never double-amortizes. UNIQUE on
+   * (lot_id, units_consumed_before) — the insert-as-lock position
+   * arbiter; a concurrent consumer that loses the position throws.
+   */
+  insertMerchCogsConsumption(
+    row: Omit<MerchCogsConsumptionRecord, 'id'>,
+  ): Promise<MerchCogsConsumptionRecord>;
+
+  /**
+   * One lot's consumption lines, oldest position first
+   * (units_consumed_before ASC): the derived remaining-units truth.
+   */
+  listMerchCogsConsumptions(lotId: string): Promise<MerchCogsConsumptionRecord[]>;
+
+  /**
+   * Registers (or replaces) the collaboration agreement of record for one
+   * sku — upsert on sku_id: a re-registered agreement replaces the row
+   * atomically (the option-agreement precedent).
+   */
+  upsertMerchCollabAgreement(
+    row: Omit<MerchCollabAgreementRecord, 'id'>,
+  ): Promise<MerchCollabAgreementRecord>;
+
+  /** One sku's collaboration agreement of record. */
+  getMerchCollabAgreement(skuId: string): Promise<MerchCollabAgreementRecord | undefined>;
+
+  /**
+   * Writes one overhead-recoupment application of record: the append-only
+   * recovery ledger over the agreement's two pools. UNIQUE on
+   * (agreement_id, pool_class, source_event_id) — a replayed settlement
+   * throws the unique violation, never double-recoups. UNIQUE on
+   * (agreement_id, pool_class, recouped_before_cents) — the
+   * insert-as-lock position arbiter.
+   */
+  insertMerchCollabRecoupmentApplication(
+    row: Omit<MerchCollabRecoupmentApplicationRecord, 'id'>,
+  ): Promise<MerchCollabRecoupmentApplicationRecord>;
+
+  /**
+   * One agreement's recoupment applications for one pool class, oldest
+   * position first (recouped_before_cents ASC): the derived recovery
+   * truth.
+   */
+  listMerchCollabRecoupmentApplications(
+    agreementId: string,
+    poolClass: MerchCollabPoolClass,
+  ): Promise<MerchCollabRecoupmentApplicationRecord[]>;
+
+  /**
+   * Registers (or replaces) the designer royalty tier of record for one
+   * sku — upsert on sku_id (the option-agreement precedent). The tier is
+   * the state of record at fulfillment processing time; billings price
+   * from this row, never retroactively.
+   */
+  upsertMerchDesignerRoyaltyTier(
+    row: Omit<MerchDesignerRoyaltyTierRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyTierRecord>;
+
+  /** One sku's designer royalty tier of record. */
+  getMerchDesignerRoyaltyTier(skuId: string): Promise<MerchDesignerRoyaltyTierRecord | undefined>;
+
+  /**
+   * Writes one designer royalty billing of record — the per-unit royalty
+   * billed directly to one order fulfillment event. UNIQUE on
+   * (source_event_id, sku_id) — a replayed fulfillment event throws the
+   * unique violation, never double-bills.
+   */
+  insertMerchDesignerRoyaltyBilling(
+    row: Omit<MerchDesignerRoyaltyBillingRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyBillingRecord>;
+
+  /**
+   * Writes one consignment settlement of record — the durable shrinkage
+   * reconciliation. UNIQUE on event_id — a re-shipped report throws the
+   * unique violation (the replay surface).
+   */
+  insertMerchConsignmentSettlement(
+    row: Omit<MerchConsignmentSettlementRecord, 'id'>,
+  ): Promise<MerchConsignmentSettlementRecord>;
+
+  /** One consignment settlement by its content-derived event id. */
+  getMerchConsignmentSettlementByEventId(
+    eventId: string,
+  ): Promise<MerchConsignmentSettlementRecord | undefined>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

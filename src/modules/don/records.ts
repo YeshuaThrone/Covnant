@@ -961,3 +961,177 @@ export type IpOptionAuthorAllocationRecord = {
   allocation_bps: number;
   created_at: string;
 };
+
+// --- Merch COGS + the brand collaboration waterfall (PR 22, migration 0026) ---
+
+/**
+ * The merchandise production batch of record (migration 0026) — one row per
+ * production run of one sku: the units the run produced and each unit's
+ * production cost. The FIFO engine amortizes lots oldest-first
+ * (created_at, then lot_ref); `cogs_per_unit_cents` is the lot's OWN
+ * per-unit cost, because production batches of one sku price differently —
+ * the amortization is keyed on sku_id AND cogs_per_unit. UNIQUE per
+ * (sku_id, lot_ref): a re-registered lot is the unique violation, never a
+ * double registration.
+ */
+export type MerchCogsLotRecord = {
+  id: string;
+  sku_id: string;
+  lot_ref: string;
+  units_produced: number;
+  cogs_per_unit_cents: number;
+  created_at: string;
+};
+
+/**
+ * One FIFO COGS consumption (migration 0026) — the append-only amortization
+ * truth, the webtoon localization amortization line's discipline (0024) at
+ * unit scope. UNIQUE per (lot_id, source_event_id): a replayed fulfillment
+ * event is the unique violation, never a double amortization. UNIQUE per
+ * (lot_id, units_consumed_before): the POSITION lock — the insert-as-lock
+ * arbiter (the PR 12 accumulator / PR 99 amortization discipline) — so two
+ * concurrent consumers of one lot compute the same position and exactly one
+ * wins it; the loser re-derives from the append-only truth.
+ */
+export type MerchCogsConsumptionRecord = {
+  id: string;
+  lot_id: string;
+  /** The fulfillment event's content-derived event id — the replay guard. */
+  source_event_id: string;
+  /** The lot's consumed-units position the instant before this consumption. */
+  units_consumed_before: number;
+  units_consumed: number;
+  /** The lot's per-unit cost at consumption — recorded, never recomputed. */
+  cogs_per_unit_cents: number;
+  /** units_consumed × cogs_per_unit_cents — the exact integer amortization. */
+  amortized_cents: number;
+  created_at: string;
+};
+
+/**
+ * The brand-collaboration deal of record (migration 0026) — one per sku
+ * (upsert on sku_id, the option-agreement precedent). Names the
+ * manufacturing party (the waterfall's first-priority recovery holder),
+ * the brand, and the collaborating artist with a basis-point split of the
+ * post-recoupment remainder, plus the fronted overhead amounts — blank
+ * sourcing and screen printing — recouped 100% before any profit split.
+ */
+export type MerchCollabAgreementRecord = {
+  id: string;
+  /** The merch sku the collaboration deal covers. */
+  sku_id: string;
+  manufacturer_payee_id: string;
+  manufacturer_payee_name: string;
+  brand_payee_id: string;
+  brand_payee_name: string;
+  artist_payee_id: string;
+  artist_payee_name: string;
+  /** The artist's split of the post-recoupment remainder, basis points (0..10000). */
+  artist_split_bps: number;
+  /** The fronted blank-sourcing overhead — the step-one pool of record. */
+  blank_sourcing_cents: number;
+  /** The fronted screen-printing overhead — the step-one pool of record. */
+  screen_printing_cents: number;
+  /** The signed collaboration agreement the terms were extracted from. */
+  agreement_ref: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The collab overhead-recoupment pool class of record — the two fronted
+ * manufacturing pools the waterfall's step one recoups 100% to the
+ * manufacturing party, blank sourcing before screen printing.
+ */
+export const MERCH_COLLAB_POOL_CLASSES = [
+  "blank_sourcing",
+  "screen_printing",
+] as const;
+export type MerchCollabPoolClass = (typeof MERCH_COLLAB_POOL_CLASSES)[number];
+
+/**
+ * One overhead-recoupment application (migration 0026) — the append-only
+ * recovery ledger over a collab agreement's two pools, the 0024 pool
+ * discipline at agreement scope. UNIQUE per (agreement_id, pool_class,
+ * source_event_id): a replayed settlement is the unique violation, never a
+ * double recovery. UNIQUE per (agreement_id, pool_class,
+ * recouped_before_cents): the POSITION lock — the insert-as-lock arbiter.
+ * The applications' sum is the pool's running recovery, derived — never a
+ * second mutable counter.
+ */
+export type MerchCollabRecoupmentApplicationRecord = {
+  id: string;
+  agreement_id: string;
+  pool_class: MerchCollabPoolClass;
+  /** The settlement release's content-derived event id — the replay guard. */
+  source_event_id: string;
+  /** The pool's recouped position the instant before this application. */
+  recouped_before_cents: number;
+  applied_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * The design-IP royalty tier of record (migration 0026) — one per sku
+ * (upsert on sku_id). The guest designer's flat per-unit royalty — e.g.
+ * 350 cents per garment — is the state of record at fulfillment
+ * processing time; billings price fulfillment events from this row, never
+ * retroactively.
+ */
+export type MerchDesignerRoyaltyTierRecord = {
+  id: string;
+  sku_id: string;
+  designer_payee_id: string;
+  designer_payee_name: string;
+  royalty_per_unit_cents: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One designer royalty billing (migration 0026) — the per-unit royalty
+ * billed DIRECTLY to an order fulfillment event. One append-only row per
+ * (source_event_id, sku_id): a replayed fulfillment event is the unique
+ * violation, never a double billing. The tier FK guards the billing's
+ * precondition (text → text unique, type-matched): a billing cannot exist
+ * for a sku with no registered tier.
+ */
+export type MerchDesignerRoyaltyBillingRecord = {
+  id: string;
+  /** The fulfillment event's content-derived event id — the replay guard. */
+  source_event_id: string;
+  sku_id: string;
+  designer_payee_id: string;
+  designer_payee_name: string;
+  units_billed: number;
+  royalty_per_unit_cents: number;
+  /** units_billed × royalty_per_unit_cents — the exact integer billing. */
+  billed_cents: number;
+  created_at: string;
+};
+
+/**
+ * The wholesale consignment payout row of record (migration 0026) — the
+ * durable shrinkage reconciliation. One row per content-derived payout
+ * event (UNIQUE on event_id: a re-shipped report replays as the unique
+ * violation, never a double settlement). The report's own arithmetic must
+ * reconcile exactly (gross − commission − shrinkage = net payout) before
+ * the row exists — a report whose rows do not reconcile is rejected whole.
+ */
+export type MerchConsignmentSettlementRecord = {
+  id: string;
+  event_id: string;
+  period: string;
+  location: string;
+  sku_id: string;
+  units_sold: number;
+  gross_cents: number;
+  commission_cents: number;
+  /** The shrinkage/loss allowance OFFSET against the net payout. */
+  shrinkage_allowance_cents: number;
+  net_payout_cents: number;
+  currency: string;
+  created_at: string;
+};
+

@@ -171,6 +171,14 @@ jobs:
           # twice like 0011-0024 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
+          # Merch COGS + collaboration waterfall (PR 22, founder merchandise
+          # directive): the FIFO production lots and append-only
+          # consumptions, the collaboration agreements and recoupment
+          # applications, the designer royalty tiers and billings, and the
+          # consignment settlements — applied twice like 0011-0025 to prove
+          # idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -803,6 +811,82 @@ jobs:
           verif_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from publishing_ip_rights_verifications where payee_id = 'ip_probe_payee'")
           [ "$verif_rows" = "1" ] || { echo "SECOND VERIFICATION ROW ACCEPTED for one (payee, work)"; exit 1; }
           echo "OK: publishing_ip_rights_verifications UNIQUE pair keeps one state of record per (payee, work)"
+
+          # Merch COGS + collaboration waterfall (migration 0026, PR 22, the
+          # founder merchandise directive): the seven production/FIFO/
+          # collaboration/royalty/consignment tables' inventory, RLS
+          # deny-all on all seven, the guarded FKs, the position-lock and
+          # replay uniques, and the check-constrained vocabularies.
+          assert_cols merch_cogs_lots id sku_id lot_ref units_produced cogs_per_unit_cents created_at
+          assert_cols merch_cogs_consumptions id lot_id source_event_id units_consumed_before units_consumed cogs_per_unit_cents amortized_cents created_at
+          assert_cols merch_collab_agreements id sku_id manufacturer_payee_id manufacturer_payee_name brand_payee_id brand_payee_name artist_payee_id artist_payee_name artist_split_bps blank_sourcing_cents screen_printing_cents agreement_ref created_at updated_at
+          assert_cols merch_collab_recoupment_applications id agreement_id pool_class source_event_id recouped_before_cents applied_cents remaining_cents created_at
+          assert_cols merch_designer_royalty_tiers id sku_id designer_payee_id designer_payee_name royalty_per_unit_cents created_at updated_at
+          assert_cols merch_designer_royalty_billings id source_event_id sku_id designer_payee_id designer_payee_name units_billed royalty_per_unit_cents billed_cents created_at
+          assert_cols merch_consignment_settlements id event_id period location sku_id units_sold gross_cents commission_cents shrinkage_allowance_cents net_payout_cents currency created_at
+          for table in merch_cogs_lots merch_cogs_consumptions merch_collab_agreements merch_collab_recoupment_applications merch_designer_royalty_tiers merch_designer_royalty_billings merch_consignment_settlements; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the seven merch tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.merch_cogs_consumptions'::regclass and conname = 'merch_cogs_consumptions_lot_fk'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK merch_cogs_consumptions_lot_fk"; exit 1; }
+          echo "OK: merch_cogs_consumptions_lot_fk exists"
+          # The FK MUST reject a FIFO consumption against a lot that never
+          # landed — the insert is expected to fail.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_cogs_consumptions (lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents) values ('00000000-0000-0000-0000-00000000dead', 'evt_merch_fk_probe', 0, 1, 650, 650)" >/dev/null 2>&1 || true
+          orphan_cons=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_cogs_consumptions where source_event_id = 'evt_merch_fk_probe'")
+          [ "$orphan_cons" = "0" ] || { echo "ORPHAN FIFO CONSUMPTION ACCEPTED — the lot FK is missing"; exit 1; }
+          echo "OK: merch_cogs_consumptions lot FK rejects unknown lots"
+          # FIFO discipline as DDL: one consumption per (lot, event) — a
+          # replayed fulfillment event is the UNIQUE, never a double
+          # amortization — and one position per (lot, units_consumed_before):
+          # a second event claiming the same position loses the insert-as-lock.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_cogs_lots (id, sku_id, lot_ref, units_produced, cogs_per_unit_cents) values ('00000000-0000-0000-0000-0000000026a1', 'SKU-FIFO-PROBE', 'LOT-A', 10, 650)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_cogs_consumptions (lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents) values ('00000000-0000-0000-0000-0000000026a1', 'evt_fifo_probe_1', 0, 2, 650, 1300)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_cogs_consumptions (lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents) values ('00000000-0000-0000-0000-0000000026a1', 'evt_fifo_probe_1', 0, 2, 650, 1300)" >/dev/null 2>&1 || true
+          dup_cons=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_cogs_consumptions where source_event_id = 'evt_fifo_probe_1'")
+          [ "$dup_cons" = "1" ] || { echo "DUPLICATE FIFO CONSUMPTION ACCEPTED by the UNIQUE pair"; exit 1; }
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_cogs_consumptions (lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents) values ('00000000-0000-0000-0000-0000000026a1', 'evt_fifo_probe_2', 0, 3, 650, 1950)" >/dev/null 2>&1 || true
+          pos_lock=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_cogs_consumptions where source_event_id = 'evt_fifo_probe_2'")
+          [ "$pos_lock" = "0" ] || { echo "SECOND EVENT CLAIMED THE SAME LOT POSITION — the insert-as-lock unique is missing"; exit 1; }
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_cogs_consumptions (lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents) values ('00000000-0000-0000-0000-0000000026a1', 'evt_fifo_probe_2', 2, 3, 650, 1950)"
+          echo "OK: merch_cogs_consumptions replay + position-lock uniques enforce FIFO"
+          # The recoupment vocabulary is exactly the two overhead pools, and
+          # one application holds a pool position: a second application
+          # claiming the same (agreement, pool, position) loses the lock.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_collab_agreements (sku_id, manufacturer_payee_id, manufacturer_payee_name, brand_payee_id, brand_payee_name, artist_payee_id, artist_payee_name, artist_split_bps, blank_sourcing_cents, screen_printing_cents, agreement_ref) values ('SKU-POOL-PROBE', 'mfg_merch_probe', 'Probe Mfg', 'brand_merch_probe', 'Probe Brand', 'artist_merch_probe', 'Probe Artist', 5000, 100000, 50000, 'AGR-MERCH-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_collab_recoupment_applications (agreement_id, pool_class, source_event_id, recouped_before_cents, applied_cents, remaining_cents) select id, 'merch', 'evt_pool_probe_0', 0, 100, 99900 from merch_collab_agreements where sku_id = 'SKU-POOL-PROBE'" >/dev/null 2>&1 || true
+          bad_pool=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_collab_recoupment_applications where source_event_id = 'evt_pool_probe_0'")
+          [ "$bad_pool" = "0" ] || { echo "UNKNOWN RECOUPMENT POOL ACCEPTED by the class check"; exit 1; }
+          echo "OK: merch_collab_recoupment_applications pool check rejects unknown pools"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_collab_recoupment_applications (agreement_id, pool_class, source_event_id, recouped_before_cents, applied_cents, remaining_cents) select id, 'blank_sourcing', 'evt_pool_probe_1', 0, 100, 99900 from merch_collab_agreements where sku_id = 'SKU-POOL-PROBE'"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_collab_recoupment_applications (agreement_id, pool_class, source_event_id, recouped_before_cents, applied_cents, remaining_cents) select id, 'blank_sourcing', 'evt_pool_probe_2', 0, 100, 99900 from merch_collab_agreements where sku_id = 'SKU-POOL-PROBE'" >/dev/null 2>&1 || true
+          dup_pool=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_collab_recoupment_applications where agreement_id = (select id from merch_collab_agreements where sku_id = 'SKU-POOL-PROBE') and recouped_before_cents = 0")
+          [ "$dup_pool" = "1" ] || { echo "SECOND APPLICATION CLAIMED THE SAME POOL POSITION — the insert-as-lock unique is missing"; exit 1; }
+          echo "OK: merch_collab_recoupment_applications position lock enforces one application per pool position"
+          # The designer royalty billing FK guards the tier of record: a
+          # billing for a sku with no tier refuses at the DDL; with a tier,
+          # the UNIQUE (source_event_id, sku_id) replays as one row.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_designer_royalty_billings (source_event_id, sku_id, designer_payee_id, designer_payee_name, units_billed, royalty_per_unit_cents, billed_cents) values ('evt_tier_fk_probe', 'SKU-NO-TIER', 'des_merch_probe', 'Probe Designer', 2, 350, 700)" >/dev/null 2>&1 || true
+          orphan_bill=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_designer_royalty_billings where source_event_id = 'evt_tier_fk_probe'")
+          [ "$orphan_bill" = "0" ] || { echo "ORPHAN ROYALTY BILLING ACCEPTED — the tier FK is missing"; exit 1; }
+          echo "OK: merch_designer_royalty_billings tier FK rejects untiered skus"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_designer_royalty_tiers (sku_id, designer_payee_id, designer_payee_name, royalty_per_unit_cents) values ('SKU-TIER-PROBE', 'des_merch_probe', 'Probe Designer', 350)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_designer_royalty_billings (source_event_id, sku_id, designer_payee_id, designer_payee_name, units_billed, royalty_per_unit_cents, billed_cents) values ('evt_tier_probe', 'SKU-TIER-PROBE', 'des_merch_probe', 'Probe Designer', 2, 350, 700)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_designer_royalty_billings (source_event_id, sku_id, designer_payee_id, designer_payee_name, units_billed, royalty_per_unit_cents, billed_cents) values ('evt_tier_probe', 'SKU-TIER-PROBE', 'des_merch_probe', 'Probe Designer', 2, 350, 700)" >/dev/null 2>&1 || true
+          dup_bill=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_designer_royalty_billings where source_event_id = 'evt_tier_probe'")
+          [ "$dup_bill" = "1" ] || { echo "DUPLICATE ROYALTY BILLING ACCEPTED by the UNIQUE pair"; exit 1; }
+          echo "OK: merch_designer_royalty_billings replay unique rejects a re-billed fulfillment event"
+          # The consignment settlement replay guard: a re-shipped payout
+          # report is the UNIQUE event_id, never a double settlement.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_consignment_settlements (event_id, period, location, sku_id, units_sold, gross_cents, commission_cents, shrinkage_allowance_cents, net_payout_cents, currency) values ('evt_consignment_probe', '2026-09', 'store-42', 'SKU-CONS-PROBE', 3, 22500, 3375, 225, 18900, 'USD')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_consignment_settlements (event_id, period, location, sku_id, units_sold, gross_cents, commission_cents, shrinkage_allowance_cents, net_payout_cents, currency) values ('evt_consignment_probe', '2026-09', 'store-42', 'SKU-CONS-PROBE', 3, 22500, 3375, 225, 18900, 'USD')" >/dev/null 2>&1 || true
+          dup_settle=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_consignment_settlements where event_id = 'evt_consignment_probe'")
+          [ "$dup_settle" = "1" ] || { echo "DUPLICATE CONSIGNMENT SETTLEMENT ACCEPTED by the UNIQUE event_id"; exit 1; }
+          echo "OK: merch_consignment_settlements UNIQUE event_id rejects a replayed payout report"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

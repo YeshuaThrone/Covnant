@@ -1,0 +1,4 @@
+Fulfillment Date,Order ID,Platform,UPC,SKU,Units,Gross Customer Price,Printing Cost Per Unit,Split Share %,Currency
+2026-08-06,POD-771,printful,023456789012,SKU-POSTER-MAP,1,30.00,9.50,50,USD
+2026-08-07,POD-772,gelato,023456789012,SKU-MUG-CLAY,1,17.99,6.25,33.33,USD
+2026-08-08,POD-773,printful,088888888888,SKU-TEE-WASHED,1,28.00,8.00,50,USD

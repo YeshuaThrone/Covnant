@@ -128,6 +128,7 @@ describe("isPostableLine — the seam's subject rule", () => {
     usageNote: "",
     raw: ["raw"],
     guildResidual: null,
+    merchDetail: null,
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: null,

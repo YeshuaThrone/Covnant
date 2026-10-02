@@ -163,6 +163,7 @@ function validateVisionLine(
       gamingDetail: null,
       livestreamDetail: null,
       webtoonDetail: null,
+      merchDetail: null,
     },
   };
 }

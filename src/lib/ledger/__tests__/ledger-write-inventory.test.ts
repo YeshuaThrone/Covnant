@@ -294,6 +294,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // verification state; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0025_ip_option_agreements_author_cascade.sql',
+      // Merch COGS + collaboration waterfall (PR 22, the founder merchandise
+      // directive): the FIFO production lots and append-only consumptions,
+      // the collaboration agreements and recoupment applications, the
+      // designer royalty tiers and billings, and the consignment
+      // settlements; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0026_merch_cogs_collaboration_waterfall.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

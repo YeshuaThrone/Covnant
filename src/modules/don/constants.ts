@@ -263,6 +263,14 @@ export const JOURNAL_KINDS = [
   // commission derives from the remainder only), the residual author's net
   // last. Additive only.
   "ip_option_release",
+  // The merch COGS + collaboration waterfall (PR 22): a held merch
+  // settlement released through the founder-ordered waterfall — the FIFO
+  // production-debt amortization and the two overhead recoupment pools to
+  // the manufacturing party FIRST, then the contracted artist/brand
+  // split. Credits in the journal move through the payout gate; every
+  // leg lands through the canonical posting seam with the destination
+  // fail-closed.
+  "merch_collab_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

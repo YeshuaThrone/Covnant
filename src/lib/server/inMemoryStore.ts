@@ -104,6 +104,14 @@ import type {
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
+  MerchCogsLotRecord,
+  MerchCogsConsumptionRecord,
+  MerchCollabAgreementRecord,
+  MerchCollabPoolClass,
+  MerchCollabRecoupmentApplicationRecord,
+  MerchDesignerRoyaltyTierRecord,
+  MerchDesignerRoyaltyBillingRecord,
+  MerchConsignmentSettlementRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -215,6 +223,13 @@ export class InMemoryStore implements Store {
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
   private publishingIpRightsVerifications: PublishingIpRightsVerificationRecord[] = [];
+  private merchCogsLots: MerchCogsLotRecord[] = [];
+  private merchCogsConsumptions: MerchCogsConsumptionRecord[] = [];
+  private merchCollabAgreements: MerchCollabAgreementRecord[] = [];
+  private merchCollabRecoupmentApplications: MerchCollabRecoupmentApplicationRecord[] = [];
+  private merchDesignerRoyaltyTiers: MerchDesignerRoyaltyTierRecord[] = [];
+  private merchDesignerRoyaltyBillings: MerchDesignerRoyaltyBillingRecord[] = [];
+  private merchConsignmentSettlements: MerchConsignmentSettlementRecord[] = [];
   // Film multi-territory withholding log + territory envelopes (0023, PR 18).
   private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
   private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
@@ -1588,6 +1603,188 @@ export class InMemoryStore implements Store {
     return this.publishingIpRightsVerifications.find(
       (candidate) => candidate.payee_id === payeeId && candidate.work_id === workId,
     );
+  }
+
+  // --- Merch COGS + the brand collaboration waterfall (PR 22, migration 0026) ---
+
+  async insertMerchCogsLot(row: Omit<MerchCogsLotRecord, 'id'>): Promise<MerchCogsLotRecord> {
+    // UNIQUE on (sku_id, lot_ref) — a re-registered lot throws the unique
+    // violation (the replay surface).
+    if (
+      this.merchCogsLots.some(
+        (existing) => existing.sku_id === row.sku_id && existing.lot_ref === row.lot_ref,
+      )
+    ) {
+      uniqueViolation('merch_cogs_lots.sku_id,lot_ref');
+    }
+    const record: MerchCogsLotRecord = { ...row, id: randomUUID() };
+    this.merchCogsLots.push(record);
+    return record;
+  }
+
+  async listMerchCogsLots(skuId: string): Promise<MerchCogsLotRecord[]> {
+    // FIFO order — created_at ASC, then lot_ref ASC (the deterministic tie).
+    return this.merchCogsLots
+      .filter((row) => row.sku_id === skuId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) || a.lot_ref.localeCompare(b.lot_ref),
+      );
+  }
+
+  async insertMerchCogsConsumption(
+    row: Omit<MerchCogsConsumptionRecord, 'id'>,
+  ): Promise<MerchCogsConsumptionRecord> {
+    // UNIQUE on (lot_id, source_event_id) — a replayed fulfillment event is
+    // the unique violation, never a double amortization. UNIQUE on
+    // (lot_id, units_consumed_before) — the insert-as-lock position
+    // arbiter: a concurrent consumer that loses the position throws.
+    if (
+      this.merchCogsConsumptions.some(
+        (existing) =>
+          existing.lot_id === row.lot_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('merch_cogs_consumptions.lot_id,source_event_id');
+    }
+    if (
+      this.merchCogsConsumptions.some(
+        (existing) =>
+          existing.lot_id === row.lot_id &&
+          existing.units_consumed_before === row.units_consumed_before,
+      )
+    ) {
+      uniqueViolation('merch_cogs_consumptions.lot_id,units_consumed_before');
+    }
+    const record: MerchCogsConsumptionRecord = { ...row, id: randomUUID() };
+    this.merchCogsConsumptions.push(record);
+    return record;
+  }
+
+  async listMerchCogsConsumptions(lotId: string): Promise<MerchCogsConsumptionRecord[]> {
+    return this.merchCogsConsumptions
+      .filter((row) => row.lot_id === lotId)
+      .sort((a, b) => a.units_consumed_before - b.units_consumed_before);
+  }
+
+  async upsertMerchCollabAgreement(
+    row: Omit<MerchCollabAgreementRecord, 'id'>,
+  ): Promise<MerchCollabAgreementRecord> {
+    // One agreement of record per sku — upsert replaces the row atomically.
+    const existingIndex = this.merchCollabAgreements.findIndex(
+      (candidate) => candidate.sku_id === row.sku_id,
+    );
+    const record: MerchCollabAgreementRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.merchCollabAgreements[existingIndex] = record;
+    } else {
+      this.merchCollabAgreements.push(record);
+    }
+    return record;
+  }
+
+  async getMerchCollabAgreement(skuId: string): Promise<MerchCollabAgreementRecord | undefined> {
+    return this.merchCollabAgreements.find((candidate) => candidate.sku_id === skuId);
+  }
+
+  async insertMerchCollabRecoupmentApplication(
+    row: Omit<MerchCollabRecoupmentApplicationRecord, 'id'>,
+  ): Promise<MerchCollabRecoupmentApplicationRecord> {
+    // UNIQUE on (agreement_id, pool_class, source_event_id) — a replayed
+    // settlement is the unique violation, never a double recovery. UNIQUE
+    // on (agreement_id, pool_class, recouped_before_cents) — the
+    // insert-as-lock position arbiter.
+    if (
+      this.merchCollabRecoupmentApplications.some(
+        (existing) =>
+          existing.agreement_id === row.agreement_id &&
+          existing.pool_class === row.pool_class &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('merch_collab_recoupment_applications.agreement_id,pool_class,source_event_id');
+    }
+    if (
+      this.merchCollabRecoupmentApplications.some(
+        (existing) =>
+          existing.agreement_id === row.agreement_id &&
+          existing.pool_class === row.pool_class &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('merch_collab_recoupment_applications.agreement_id,pool_class,recouped_before_cents');
+    }
+    const record: MerchCollabRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.merchCollabRecoupmentApplications.push(record);
+    return record;
+  }
+
+  async listMerchCollabRecoupmentApplications(
+    agreementId: string,
+    poolClass: MerchCollabPoolClass,
+  ): Promise<MerchCollabRecoupmentApplicationRecord[]> {
+    return this.merchCollabRecoupmentApplications
+      .filter((row) => row.agreement_id === agreementId && row.pool_class === poolClass)
+      .sort((a, b) => a.recouped_before_cents - b.recouped_before_cents);
+  }
+
+  async upsertMerchDesignerRoyaltyTier(
+    row: Omit<MerchDesignerRoyaltyTierRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyTierRecord> {
+    // One tier of record per sku — upsert replaces the row atomically.
+    const existingIndex = this.merchDesignerRoyaltyTiers.findIndex(
+      (candidate) => candidate.sku_id === row.sku_id,
+    );
+    const record: MerchDesignerRoyaltyTierRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.merchDesignerRoyaltyTiers[existingIndex] = record;
+    } else {
+      this.merchDesignerRoyaltyTiers.push(record);
+    }
+    return record;
+  }
+
+  async getMerchDesignerRoyaltyTier(
+    skuId: string,
+  ): Promise<MerchDesignerRoyaltyTierRecord | undefined> {
+    return this.merchDesignerRoyaltyTiers.find((candidate) => candidate.sku_id === skuId);
+  }
+
+  async insertMerchDesignerRoyaltyBilling(
+    row: Omit<MerchDesignerRoyaltyBillingRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyBillingRecord> {
+    // UNIQUE on (source_event_id, sku_id) — a replayed fulfillment event is
+    // the unique violation, never a double billing.
+    if (
+      this.merchDesignerRoyaltyBillings.some(
+        (existing) =>
+          existing.source_event_id === row.source_event_id && existing.sku_id === row.sku_id,
+      )
+    ) {
+      uniqueViolation('merch_designer_royalty_billings.source_event_id,sku_id');
+    }
+    const record: MerchDesignerRoyaltyBillingRecord = { ...row, id: randomUUID() };
+    this.merchDesignerRoyaltyBillings.push(record);
+    return record;
+  }
+
+  async insertMerchConsignmentSettlement(
+    row: Omit<MerchConsignmentSettlementRecord, 'id'>,
+  ): Promise<MerchConsignmentSettlementRecord> {
+    // UNIQUE on event_id — a re-shipped report is the unique violation
+    // (the replay surface).
+    if (this.merchConsignmentSettlements.some((existing) => existing.event_id === row.event_id)) {
+      uniqueViolation('merch_consignment_settlements.event_id');
+    }
+    const record: MerchConsignmentSettlementRecord = { ...row, id: randomUUID() };
+    this.merchConsignmentSettlements.push(record);
+    return record;
+  }
+
+  async getMerchConsignmentSettlementByEventId(
+    eventId: string,
+  ): Promise<MerchConsignmentSettlementRecord | undefined> {
+    return this.merchConsignmentSettlements.find((candidate) => candidate.event_id === eventId);
   }
 
 

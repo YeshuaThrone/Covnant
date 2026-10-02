@@ -155,6 +155,7 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   translation_localization_post: 'Translation royalty escrowed',
   translation_localization_release: 'Translation escrow released',
   ip_option_release: 'Adaptation option fee released',
+  merch_collab_release: 'Merch collaboration settlement released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
