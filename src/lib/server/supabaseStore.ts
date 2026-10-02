@@ -90,6 +90,13 @@ import type {
   DerivativeRoyaltyEdgeRecord,
   SampleClearanceEdgeRecord,
   CompositionPublisherRecord,
+  WebtoonStudioSplitRoleRecord,
+  WebtoonLocalizationContractRecord,
+  WebtoonLocalizationCostScheduleRecord,
+  WebtoonLocalizationCostLineRecord,
+  WebtoonRecoupmentPoolRecord,
+  WebtoonRecoupmentPoolClass,
+  WebtoonRecoupmentApplicationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -208,6 +215,19 @@ const TABLES = {
   derivativeRoyaltyEdges: 'derivative_royalty_edges',
   sampleClearanceEdges: 'sample_clearance_edges',
   compositionPublishers: 'composition_publishers',
+  // Migration 0024 — the webtoon studio split registry + per-language
+  // translation cascades (PR 20). Roles are the per-series production
+  // contract; contracts key each foreign-language feed; the cost
+  // schedule/lines are the VTuber amortization discipline; the pools +
+  // applications carry the print-advance/digital-coin isolation (pool
+  // UNIQUE per (series, class), applications UNIQUE per (pool, source
+  // event) — the replay guard).
+  webtoonStudioSplitRoles: 'webtoon_studio_split_roles',
+  webtoonLocalizationContracts: 'webtoon_localization_contracts',
+  webtoonLocalizationCostSchedules: 'webtoon_localization_cost_schedules',
+  webtoonLocalizationCostLines: 'webtoon_localization_cost_lines',
+  webtoonRecoupmentPools: 'webtoon_recoupment_pools',
+  webtoonRecoupmentApplications: 'webtoon_recoupment_applications',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -1656,6 +1676,243 @@ export class SupabaseStore implements Store {
         .order('created_at', { ascending: true })
         .order('insertion_order', { ascending: true }),
       'listCompositionPublishers',
+    );
+  }
+
+  // --- Webtoon studio splits + translation cascades (PR 20, migration 0024) ---
+
+  async insertWebtoonStudioSplitRole(
+    row: Omit<WebtoonStudioSplitRoleRecord, 'id'>,
+  ): Promise<WebtoonStudioSplitRoleRecord> {
+    // UNIQUE on (series_id, role_group, payee_id): a duplicate registration
+    // throws here (the same failure mode the canonical store exhibits).
+    return this.oneStrict<WebtoonStudioSplitRoleRecord>(
+      this.client
+        .from(TABLES.webtoonStudioSplitRoles)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertWebtoonStudioSplitRole',
+    );
+  }
+
+  async listWebtoonStudioSplitRoles(seriesId: string): Promise<WebtoonStudioSplitRoleRecord[]> {
+    // created_at ASC with the insertion-order tiebreak — the deterministic
+    // allocation order within each role group.
+    return this.many<WebtoonStudioSplitRoleRecord>(
+      this.client
+        .from(TABLES.webtoonStudioSplitRoles)
+        .select()
+        .eq('series_id', seriesId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listWebtoonStudioSplitRoles',
+    );
+  }
+
+  async upsertWebtoonLocalizationContract(
+    row: Omit<WebtoonLocalizationContractRecord, 'id'>,
+  ): Promise<WebtoonLocalizationContractRecord> {
+    // One localizer of record per (series, language) feed — the upsert
+    // targets the composite key, so a re-registered contract replaces the
+    // row atomically (the studio-KYC precedent).
+    return this.oneStrict<WebtoonLocalizationContractRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationContracts)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'series_id,language_code' })
+        .select()
+        .maybeSingle(),
+      'upsertWebtoonLocalizationContract',
+    );
+  }
+
+  async getWebtoonLocalizationContract(
+    seriesId: string,
+    languageCode: string,
+  ): Promise<WebtoonLocalizationContractRecord | undefined> {
+    return this.one<WebtoonLocalizationContractRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationContracts)
+        .select()
+        .eq('series_id', seriesId)
+        .eq('language_code', languageCode)
+        .maybeSingle(),
+      'getWebtoonLocalizationContract',
+    );
+  }
+
+  async insertWebtoonLocalizationCostSchedule(
+    row: Omit<WebtoonLocalizationCostScheduleRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostScheduleRecord> {
+    // UNIQUE on schedule_ref — the business key the release resolves by.
+    return this.oneStrict<WebtoonLocalizationCostScheduleRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationCostSchedules)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertWebtoonLocalizationCostSchedule',
+    );
+  }
+
+  async getWebtoonLocalizationCostScheduleByRef(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostScheduleRecord | undefined> {
+    return this.one<WebtoonLocalizationCostScheduleRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationCostSchedules)
+        .select()
+        .eq('schedule_ref', scheduleRef)
+        .maybeSingle(),
+      'getWebtoonLocalizationCostScheduleByRef',
+    );
+  }
+
+  async insertWebtoonLocalizationCostLine(
+    row: Omit<WebtoonLocalizationCostLineRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostLineRecord> {
+    // UNIQUE per (schedule_ref, line_index) — the insert-as-lock consume
+    // arbiter; a concurrent consume of the same period throws and the
+    // caller re-derives the next line.
+    return this.oneStrict<WebtoonLocalizationCostLineRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationCostLines)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertWebtoonLocalizationCostLine',
+    );
+  }
+
+  async listWebtoonLocalizationCostLines(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostLineRecord[]> {
+    // Line index order — the deterministic consumption order.
+    return this.many<WebtoonLocalizationCostLineRecord>(
+      this.client
+        .from(TABLES.webtoonLocalizationCostLines)
+        .select()
+        .eq('schedule_ref', scheduleRef)
+        .order('line_index', { ascending: true }),
+      'listWebtoonLocalizationCostLines',
+    );
+  }
+
+  async upsertWebtoonRecoupmentPool(
+    row: Omit<WebtoonRecoupmentPoolRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentPoolRecord> {
+    // One pool of record per (series, class) — the upsert targets the
+    // composite key, so re-registering an advance replaces the row
+    // atomically.
+    return this.oneStrict<WebtoonRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.webtoonRecoupmentPools)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'series_id,pool_class' })
+        .select()
+        .maybeSingle(),
+      'upsertWebtoonRecoupmentPool',
+    );
+  }
+
+  async getWebtoonRecoupmentPool(
+    seriesId: string,
+    poolClass: WebtoonRecoupmentPoolClass,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    return this.one<WebtoonRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.webtoonRecoupmentPools)
+        .select()
+        .eq('series_id', seriesId)
+        .eq('pool_class', poolClass)
+        .maybeSingle(),
+      'getWebtoonRecoupmentPool',
+    );
+  }
+
+  async insertWebtoonRecoupmentApplication(
+    row: Omit<WebtoonRecoupmentApplicationRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id): a replayed application throws
+    // here — the once-only replay guard, never a double recovery. UNIQUE
+    // per (pool_id, recouped_before_cents): the POSITION lock (the
+    // insert-as-lock arbiter).
+    return this.oneStrict<WebtoonRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.webtoonRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertWebtoonRecoupmentApplication',
+    );
+  }
+
+  async listWebtoonRecoupmentApplications(
+    poolId: string,
+  ): Promise<WebtoonRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return this.many<WebtoonRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.webtoonRecoupmentApplications)
+        .select()
+        .eq('pool_id', poolId)
+        .order('created_at', { ascending: true }),
+      'listWebtoonRecoupmentApplications',
+    );
+  }
+
+  async listTranslationLocalizationEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // Newest first — the release path's discovery order (the holdback
+    // list's convention mirrored for a deterministic settle walk).
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'translation_localization_pending')
+        .eq('status', 'translation_localization_pending')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      'listTranslationLocalizationEscrowCredits',
+    );
+  }
+
+  async settleTranslationLocalizationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The same CAS as the film-escrow/gaming-cashout/holdback settles,
+    // scoped to the escrow lock state only.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'translation_localization_pending')
+        .select()
+        .maybeSingle(),
+      'settleTranslationLocalizationEscrow',
+    );
+  }
+
+  async updateWebtoonRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: WebtoonRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    // The pool CAS: one conditional update scoped to the 'active' state —
+    // changes=0 (no returned row) means the pool is absent or already
+    // recouped; either way this call lost the race.
+    return this.one<WebtoonRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.webtoonRecoupmentPools)
+        .update({ recouped_cents: recoupedCents, status, updated_at: updatedAt })
+        .eq('id', id)
+        .eq('status', 'active')
+        .select()
+        .maybeSingle(),
+      'updateWebtoonRecoupmentPoolProgress',
     );
   }
 

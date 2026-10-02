@@ -82,6 +82,13 @@ import type {
   DerivativeRoyaltyEdgeRecord,
   SampleClearanceEdgeRecord,
   CompositionPublisherRecord,
+  WebtoonStudioSplitRoleRecord,
+  WebtoonLocalizationContractRecord,
+  WebtoonLocalizationCostScheduleRecord,
+  WebtoonLocalizationCostLineRecord,
+  WebtoonRecoupmentPoolRecord,
+  WebtoonRecoupmentPoolClass,
+  WebtoonRecoupmentApplicationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -886,6 +893,123 @@ export interface Store {
    * pool routes in.
    */
   listCompositionPublishers(compositionId: string): Promise<CompositionPublisherRecord[]>;
+
+  // --- Webtoon studio splits + translation cascades (PR 20, migration 0024) ---
+
+  /**
+   * Register one studio split role of record: the series' production split
+   * schedule, per (series, role_group, payee). A duplicate registration
+   * throws the unique violation (the replay surface).
+   */
+  insertWebtoonStudioSplitRole(
+    row: Omit<WebtoonStudioSplitRoleRecord, 'id'>,
+  ): Promise<WebtoonStudioSplitRoleRecord>;
+
+  /**
+   * One series' studio split roles, oldest first (created_at ASC,
+   * insertion_order ASC): the deterministic allocation order within each
+   * role group.
+   */
+  listWebtoonStudioSplitRoles(seriesId: string): Promise<WebtoonStudioSplitRoleRecord[]>;
+
+  /**
+   * Register (or replace) the localization contract of record for one
+   * (series, language) feed — upsert on the composite key: a re-registered
+   * contract replaces the row atomically (the studio-KYC precedent).
+   */
+  upsertWebtoonLocalizationContract(
+    row: Omit<WebtoonLocalizationContractRecord, 'id'>,
+  ): Promise<WebtoonLocalizationContractRecord>;
+
+  /** One (series, language) feed's localization contract of record. */
+  getWebtoonLocalizationContract(
+    seriesId: string,
+    languageCode: string,
+  ): Promise<WebtoonLocalizationContractRecord | undefined>;
+
+  /** Register a localization cost amortization schedule (migration 0024). */
+  insertWebtoonLocalizationCostSchedule(
+    row: Omit<WebtoonLocalizationCostScheduleRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostScheduleRecord>;
+
+  /** Resolve an amortization schedule by its business key. */
+  getWebtoonLocalizationCostScheduleByRef(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostScheduleRecord | undefined>;
+
+  /**
+   * Append one consumed amortization line. UNIQUE per (schedule_ref,
+   * line_index): a concurrent release consuming one period twice throws the
+   * unique violation (the insert-as-lock guard).
+   */
+  insertWebtoonLocalizationCostLine(
+    row: Omit<WebtoonLocalizationCostLineRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostLineRecord>;
+
+  /** One schedule's consumed lines, line_index ASC — the consumed periods. */
+  listWebtoonLocalizationCostLines(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostLineRecord[]>;
+
+  /**
+   * Register (or replace) one recoupment pool of record per (series, class)
+   * — upsert on the composite key: re-registering an advance replaces the
+   * row atomically.
+   */
+  upsertWebtoonRecoupmentPool(
+    row: Omit<WebtoonRecoupmentPoolRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentPoolRecord>;
+
+  /** One (series, class) pool of record — the isolation rule's subject. */
+  getWebtoonRecoupmentPool(
+    seriesId: string,
+    poolClass: WebtoonRecoupmentPoolClass,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined>;
+
+  /**
+   * Append one recoupment application. UNIQUE per (pool_id,
+   * source_event_id): a replayed application throws the unique violation,
+   * never a double recovery.
+   */
+  insertWebtoonRecoupmentApplication(
+    row: Omit<WebtoonRecoupmentApplicationRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentApplicationRecord>;
+
+  /** One pool's applications, created_at ASC — the running recovery. */
+  listWebtoonRecoupmentApplications(poolId: string): Promise<WebtoonRecoupmentApplicationRecord[]>;
+
+  /**
+   * THE pool CAS: advances a pool's running recovery and flips status when
+   * the recovery completes — only from the 'active' state. Undefined = the
+   * pool is absent or no longer active (the caller lost the race to the
+   * completing application). The append-only application rows stay the
+   * replay arbiter; this counter is the derived read.
+   */
+  updateWebtoonRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: WebtoonRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined>;
+
+  /**
+   * The locked translation-localization escrow receipts (kind AND status
+   * 'translation_localization_pending'), newest first — the release path's
+   * discovery surface.
+   */
+  listTranslationLocalizationEscrowCredits(
+    limit?: number,
+  ): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * THE CAS settle: flips a locked translation-localization escrow receipt
+   * to 'settled' only from the lock state. Undefined = the row is absent or
+   * no longer locked — the caller lost the race (or replayed).
+   */
+  settleTranslationLocalizationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

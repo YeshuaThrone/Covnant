@@ -734,3 +734,153 @@ export type CompositionPublisherRecord = {
   share_bps: number;
   created_at: string;
 };
+
+/**
+ * One studio split role of record (migration 0024) — the webtoon production
+ * split schedule's input registry. The series' net (post-translation)
+ * divides across the three role groups, each inside its founder band:
+ * original creator & storywriter 30-40%, line artist & inker 20-30%,
+ * colorist & background artist 10-15%. One row per (series, group, payee):
+ * a group may carry several payees — the group's band constrains the
+ * group's TOTAL. UNIQUE on (series_id, role_group, payee_id).
+ */
+export type WebtoonStudioSplitRoleRecord = {
+  id: string;
+  /** The series the schedule pays — a cbt_assets identity. */
+  series_id: string;
+  /** Which founder band this role rides. */
+  role_group: "original_creator_storywriter" | "line_artist_inker" | "colorist_background";
+  /** The payee the group's allocation routes to — the sovereign identity. */
+  payee_id: string;
+  /** The payee's display name of record at registration. */
+  payee_name: string;
+  /** This payee's share of the studio pool, basis points (0 < bps <= 10000); the group's total is Σ its members' bps, band-checked. */
+  share_bps: number;
+  /** The production contract the split was extracted from (of record). */
+  contract_ref: string;
+  created_at: string;
+};
+
+/**
+ * The localization contract of record (migration 0024) — one per
+ * (series, language) feed. Keys the per-language cascade: the localizer is
+ * paid FIRST (flat fee per chapter or fractional rev share of the feed
+ * gross), then the studio splits, then the primary author's net. UNIQUE on
+ * (series_id, language_code): one localizer of record per language feed.
+ */
+export type WebtoonLocalizationContractRecord = {
+  id: string;
+  /** The series whose foreign feed this contract governs. */
+  series_id: string;
+  /** The language feed's code (the match_queue.language_code vocabulary). */
+  language_code: string;
+  /** The localizer of record — the sovereign payee identity. */
+  localizer_payee_id: string;
+  /** The payee's display name of record at registration. */
+  localizer_payee_name: string;
+  /** `flat_fee` pays per_chapter_flat_fee_cents; `rev_share` pays rev_share_bps. */
+  fee_mode: "flat_fee" | "rev_share";
+  /** The per-chapter flat fee, integer cents — flat_fee mode only. */
+  per_chapter_flat_fee_cents: number;
+  /** The feed's revenue share, basis points — rev_share mode only. */
+  rev_share_bps: number;
+  /** The localization agreement the terms were extracted from (of record). */
+  contract_ref: string;
+  created_at: string;
+};
+
+/**
+ * The localization cost amortization schedule of record (migration 0024) —
+ * the immutable contract. One per (series, language) feed; the consumed
+ * LINES (webtoon_localization_cost_lines) are append-only and unique per
+ * (schedule_ref, line_index) — the VTuber tech-setup amortization
+ * discipline. A foreign feed's royalty releases only as the schedule's
+ * deterministic lines amortize.
+ */
+export type WebtoonLocalizationCostScheduleRecord = {
+  id: string;
+  /** The business key the release resolves the schedule by. */
+  schedule_ref: string;
+  series_id: string;
+  language_code: string;
+  /** The total localization cost, integer cents. */
+  total_cost_cents: number;
+  /** How many deterministic amortization periods the cost divides into. */
+  amortization_periods: number;
+  /** The localization invoice/agreement of record. */
+  cost_agreement_ref: string;
+  created_at: string;
+};
+
+/**
+ * One consumed amortization line (migration 0024) — the append-only
+ * consumption ledger. UNIQUE per (schedule_ref, line_index): the
+ * insert-as-lock guard against a concurrent release consuming one period
+ * twice.
+ */
+export type WebtoonLocalizationCostLineRecord = {
+  id: string;
+  schedule_ref: string;
+  /** The zero-based period this line consumes. */
+  line_index: number;
+  /** The integer cents this line recovered. */
+  amount_cents: number;
+  /** The escrow release that consumed the line. */
+  released_in_ledger_id: string;
+  created_at: string;
+};
+
+/**
+ * The recoupment pool class — the ISOLATION rule's two sides (PR 20). A
+ * print advance recoups ONLY from print-edition revenue; digital chapter
+ * coin unlock revenue recoups ONLY its own pool. Cross-class application is
+ * refused — the film cross-collateralization firewall's per-asset form.
+ */
+export type WebtoonRecoupmentPoolClass = "print_advance" | "digital_coin_unlock";
+
+/**
+ * One recoupment pool of record (migration 0024) — one advance per
+ * (series, class). The pool is a LIABILITY: advance_cents is what the
+ * platform fronted, recouped_cents the running recovery, status flips to
+ * 'recouped' when the recovery completes.
+ */
+export type WebtoonRecoupmentPoolRecord = {
+  id: string;
+  series_id: string;
+  pool_class: WebtoonRecoupmentPoolClass;
+  /** The fronted advance, integer cents. */
+  advance_cents: number;
+  /** The running recovery, integer cents (<= advance_cents). */
+  recouped_cents: number;
+  currency: string;
+  /** 'active' until the advance fully recoups, then 'recouped'. */
+  status: "active" | "recouped";
+  /** The print edition / coin program agreement of record. */
+  advance_agreement_ref: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One recoupment application (migration 0024) — the append-only recovery
+ * ledger. UNIQUE per (pool_id, source_event_id): a replayed application is
+ * the unique violation, never a double recovery. UNIQUE per
+ * (pool_id, recouped_before_cents): the POSITION lock — the insert-as-lock
+ * arbiter (the PR 12 accumulator / PR 99 amortization discipline) — so two
+ * concurrent applications of one pool compute the same running position and
+ * exactly one wins it; the loser re-derives from the append-only truth.
+ */
+export type WebtoonRecoupmentApplicationRecord = {
+  id: string;
+  pool_id: string;
+  pool_class: WebtoonRecoupmentPoolClass;
+  /** The revenue feed's content-derived event id — the replay guard. */
+  source_event_id: string;
+  /** The pool's recouped_cents the instant before this application — the position. */
+  recouped_before_cents: number;
+  /** The integer cents of revenue applied this application. */
+  applied_cents: number;
+  /** The integer cents of the pool still open after this application. */
+  remaining_cents: number;
+  created_at: string;
+};

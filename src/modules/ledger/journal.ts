@@ -14,6 +14,7 @@ import {
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
+  translationLocalizationGlAccount,
   vtuberHoldbackGlAccount,
   waterfallTierGlAccount,
   type VaultBucket,
@@ -184,6 +185,33 @@ export function vtuberHoldbackDebit(agencyId: string, amountCents: number): GlLe
 export function vtuberHoldbackCredit(agencyId: string, amountCents: number): GlLegInput {
   return {
     account: vtuberHoldbackGlAccount(agencyId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Translation/localization escrow legs (PR 20): the per-series-per-language
+// lock account — a foreign feed's royalty receipt credits it at post; the
+// verified release's cascade debits it as the money routes.
+export function translationLocalizationDebit(
+  seriesId: string,
+  languageCode: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: translationLocalizationGlAccount(seriesId, languageCode),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function translationLocalizationCredit(
+  seriesId: string,
+  languageCode: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: translationLocalizationGlAccount(seriesId, languageCode),
     debit_cents: 0,
     credit_cents: amountCents,
   };

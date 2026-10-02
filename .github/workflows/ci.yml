@@ -158,6 +158,13 @@ jobs:
           # applied twice like 0011-0022 to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
+          # Webtoon studio splits + translation cascades (Deep Royalties
+          # PR 20): the studio split registry, per-language localization
+          # contracts, cost amortization schedule/lines, and the isolated
+          # recoupment pools/applications — applied twice like 0011-0023
+          # to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -679,6 +686,63 @@ jobs:
           bad_status=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from film_territory_distributions where territory_code = 'UK'")
           [ "$bad_status" = "0" ] || { echo "BAD ENVELOPE STATUS ACCEPTED by the check constraint"; exit 1; }
           echo "OK: film_territory_distributions status check rejects off-lifecycle states"
+
+          # Webtoon studio splits + per-language translation cascades
+          # (migration 0024, Deep Royalties PR 20): the six contract-ledger
+          # tables' inventory, RLS deny-all, the guarded pool FK, and the
+          # check-constrained vocabularies.
+          assert_cols webtoon_studio_split_roles id series_id role_group payee_id payee_name share_bps contract_ref created_at insertion_order
+          assert_cols webtoon_localization_contracts id series_id language_code localizer_payee_id localizer_payee_name fee_mode per_chapter_flat_fee_cents rev_share_bps contract_ref created_at
+          assert_cols webtoon_localization_cost_schedules id schedule_ref series_id language_code total_cost_cents amortization_periods cost_agreement_ref created_at
+          assert_cols webtoon_localization_cost_lines id schedule_ref line_index amount_cents released_in_ledger_id created_at
+          assert_cols webtoon_recoupment_pools id series_id pool_class advance_cents recouped_cents currency status advance_agreement_ref created_at updated_at
+          assert_cols webtoon_recoupment_applications id pool_id pool_class source_event_id applied_cents remaining_cents created_at
+          for table in webtoon_studio_split_roles webtoon_localization_contracts webtoon_localization_cost_schedules webtoon_localization_cost_lines webtoon_recoupment_pools webtoon_recoupment_applications; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the six webtoon split/cascade tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.webtoon_recoupment_applications'::regclass and conname = 'webtoon_recoupment_applications_pool_id_fkey'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK webtoon_recoupment_applications_pool_id_fkey"; exit 1; }
+          echo "OK: webtoon_recoupment_applications pool FK exists"
+          # The FK MUST reject an application routed against a pool that
+          # never landed — the insert is expected to fail.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into webtoon_recoupment_applications (pool_id, pool_class, source_event_id, applied_cents, remaining_cents) values ('00000000-0000-0000-0000-000000000024', 'print_advance', 'wt:recoup:no-such-event', 100, 900)" >/dev/null 2>&1 || true
+          orphan_app=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_recoupment_applications where source_event_id = 'wt:recoup:no-such-event'")
+          [ "$orphan_app" = "0" ] || { echo "ORPHAN RECOUPMENT APPLICATION ACCEPTED — the pool FK is missing"; exit 1; }
+          echo "OK: webtoon_recoupment_applications pool FK rejects unrouted applications"
+          # The role vocabulary is exactly the three production groups:
+          # anything else refuses at the DDL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into webtoon_studio_split_roles (series_id, role_group, payee_id, payee_name, share_bps, contract_ref) values ('wt_split_probe', 'assistant', 'payee_1', 'Payee', 1000, 'AGR-SPLIT-PROBE')" >/dev/null 2>&1 || true
+          bad_group=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_studio_split_roles where series_id = 'wt_split_probe'")
+          [ "$bad_group" = "0" ] || { echo "FOREIGN ROLE GROUP ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: webtoon_studio_split_roles role_group check rejects outside the three groups"
+          # One role of record per (series, group, payee), ever: the
+          # UNIQUE triple refuses a duplicate registration (23505).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into webtoon_studio_split_roles (series_id, role_group, payee_id, payee_name, share_bps, contract_ref) values ('wt_split_probe', 'original_creator_storywriter', 'payee_1', 'Payee', 3500, 'AGR-SPLIT-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into webtoon_studio_split_roles (series_id, role_group, payee_id, payee_name, share_bps, contract_ref) values ('wt_split_probe', 'original_creator_storywriter', 'payee_1', 'Payee', 3600, 'AGR-SPLIT-PROBE')" >/dev/null 2>&1 || true
+          dup_roles=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_studio_split_roles where series_id = 'wt_split_probe'")
+          [ "$dup_roles" = "1" ] || { echo "DUPLICATE SPLIT ROLE ACCEPTED by the UNIQUE triple"; exit 1; }
+          echo "OK: webtoon_studio_split_roles UNIQUE triple rejects duplicate roles"
+          # One localizer of record per (series, language): a
+          # re-registered contract REPLACES the row (the upsert surface),
+          # never a second row for one feed.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into webtoon_localization_contracts (series_id, language_code, localizer_payee_id, localizer_payee_name, fee_mode, per_chapter_flat_fee_cents, rev_share_bps, contract_ref) values ('wt_loc_probe', 'es', 'loc_probe_1', 'Probe Localizer', 'flat_fee', 2500, 0, 'AGR-LOC-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into webtoon_localization_contracts (series_id, language_code, localizer_payee_id, localizer_payee_name, fee_mode, per_chapter_flat_fee_cents, rev_share_bps, contract_ref) values ('wt_loc_probe', 'es', 'loc_probe_2', 'Probe Localizer 2', 'rev_share', 0, 1500, 'AGR-LOC-PROBE-2') on conflict (series_id, language_code) do update set localizer_payee_id = excluded.localizer_payee_id, fee_mode = excluded.fee_mode, per_chapter_flat_fee_cents = excluded.per_chapter_flat_fee_cents, rev_share_bps = excluded.rev_share_bps, contract_ref = excluded.contract_ref"
+          loc_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_localization_contracts where series_id = 'wt_loc_probe'")
+          [ "$loc_rows" = "1" ] || { echo "SECOND LOCALIZER ROW ACCEPTED for one (series, language) feed"; exit 1; }
+          echo "OK: webtoon_localization_contracts UNIQUE pair keeps one localizer of record per feed"
+          # One recoupment pool of record per (series, class): the
+          # print-advance pool and the digital-coin pool coexist ISOLATED
+          # (two rows), but a duplicate within one class refuses.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into webtoon_recoupment_pools (series_id, pool_class, advance_cents, currency, status, advance_agreement_ref) values ('wt_pool_probe', 'print_advance', 100000, 'USD', 'active', 'AGR-PRINT-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into webtoon_recoupment_pools (series_id, pool_class, advance_cents, currency, status, advance_agreement_ref) values ('wt_pool_probe', 'digital_coin_unlock', 50000, 'USD', 'active', 'AGR-COIN-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into webtoon_recoupment_pools (series_id, pool_class, advance_cents, currency, status, advance_agreement_ref) values ('wt_pool_probe', 'print_advance', 75000, 'USD', 'active', 'AGR-PRINT-PROBE-2')" >/dev/null 2>&1 || true
+          pool_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_recoupment_pools where series_id = 'wt_pool_probe'")
+          [ "$pool_rows" = "2" ] || { echo "RECOUPMENT POOL ISOLATION BROKEN — expected one print + one coin pool"; exit 1; }
+          echo "OK: webtoon_recoupment_pools UNIQUE pair keeps print and coin pools isolated"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
