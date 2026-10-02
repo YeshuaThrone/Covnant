@@ -154,6 +154,7 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   vtuber_holdback_release: 'Avatar IP licensing holdback released',
   translation_localization_post: 'Translation royalty escrowed',
   translation_localization_release: 'Translation escrow released',
+  ip_option_release: 'Adaptation option fee released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

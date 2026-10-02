@@ -256,6 +256,13 @@ export const JOURNAL_KINDS = [
   // only.
   "translation_localization_post",
   "translation_localization_release",
+  // IP adaptation optioning (PR 21): a work's option fee posts to
+  // UNCLAIMED_HOLDING through the canonical seam (no new post kind), then
+  // the verified release runs the author-first option cascade — the
+  // author's IP allocations reserved before the agency's commission (the
+  // commission derives from the remainder only), the residual author's net
+  // last. Additive only.
+  "ip_option_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

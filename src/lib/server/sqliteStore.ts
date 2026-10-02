@@ -102,6 +102,9 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  IpOptionAgreementRecord,
+  IpOptionAuthorAllocationRecord,
+  PublishingIpRightsVerificationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -981,6 +984,51 @@ CREATE TABLE IF NOT EXISTS webtoon_recoupment_applications (
 );
 CREATE INDEX IF NOT EXISTS idx_webtoon_recoupment_applications_pool
   ON webtoon_recoupment_applications (pool_id);
+
+-- IP adaptation optioning (migration 0025, PR 21). The option agreement of
+-- record per work (upsert on work_id), the ordered author-side IP
+-- allocations (the author-first reservation order — rowid ASC is this
+-- backend's insertion_order), and the durable ip_rights_cleared
+-- verification state the publishing payout gate reads (one row per
+-- (payee, work), upsert on the pair).
+CREATE TABLE IF NOT EXISTS ip_option_agreements (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL UNIQUE,
+  author_payee_id TEXT NOT NULL,
+  author_payee_name TEXT NOT NULL,
+  agency_payee_id TEXT NOT NULL,
+  agency_payee_name TEXT NOT NULL,
+  agency_commission_bps INTEGER NOT NULL CHECK (agency_commission_bps >= 0 AND agency_commission_bps <= 10000),
+  option_deal_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ip_option_author_allocations (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  payee_name TEXT NOT NULL,
+  allocation_bps INTEGER NOT NULL CHECK (allocation_bps > 0 AND allocation_bps <= 10000),
+  created_at TEXT NOT NULL,
+  UNIQUE (work_id, payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ip_option_author_allocations_work
+  ON ip_option_author_allocations (work_id);
+
+CREATE TABLE IF NOT EXISTS publishing_ip_rights_verifications (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  work_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'cleared', 'failed')),
+  evidence_ref TEXT,
+  cleared_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, work_id)
+);
+CREATE INDEX IF NOT EXISTS idx_publishing_ip_rights_verifications_work
+  ON publishing_ip_rights_verifications (work_id);
 
 -- Film multi-territory withholding + cross-collateralization firewall
 -- (migration 0023, PR 18). The withholding log is the per-line,
@@ -2957,6 +3005,106 @@ export class SqliteStore implements Store {
       .run(settledAt, id);
     if (result.changes === 0) return undefined;
     return this.getLedgerTransaction(id);
+  }
+
+  // --- IP adaptation optioning (PR 21, migration 0025) ---
+
+  async upsertIpOptionAgreement(
+    row: Omit<IpOptionAgreementRecord, 'id'>,
+  ): Promise<IpOptionAgreementRecord> {
+    // One agreement of record per work — INSERT ON CONFLICT replaces the
+    // row atomically (the localization-contract precedent).
+    const record: IpOptionAgreementRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO ip_option_agreements
+           (id, work_id, author_payee_id, author_payee_name, agency_payee_id, agency_payee_name, agency_commission_bps, option_deal_ref, created_at, updated_at)
+         VALUES (@id, @work_id, @author_payee_id, @author_payee_name, @agency_payee_id, @agency_payee_name, @agency_commission_bps, @option_deal_ref, @created_at, @updated_at)
+         ON CONFLICT(work_id) DO UPDATE SET
+           id = excluded.id,
+           author_payee_id = excluded.author_payee_id,
+           author_payee_name = excluded.author_payee_name,
+           agency_payee_id = excluded.agency_payee_id,
+           agency_payee_name = excluded.agency_payee_name,
+           agency_commission_bps = excluded.agency_commission_bps,
+           option_deal_ref = excluded.option_deal_ref,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getIpOptionAgreement(workId: string): Promise<IpOptionAgreementRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM ip_option_agreements WHERE work_id = ?`)
+        .get(workId) as IpOptionAgreementRecord | undefined,
+    );
+  }
+
+  async insertIpOptionAuthorAllocation(
+    row: Omit<IpOptionAuthorAllocationRecord, 'id'>,
+  ): Promise<IpOptionAuthorAllocationRecord> {
+    // UNIQUE on (work_id, payee_id) — a duplicate registration throws the
+    // unique violation (the replay surface).
+    const record: IpOptionAuthorAllocationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO ip_option_author_allocations
+           (id, work_id, payee_id, payee_name, allocation_bps, created_at)
+         VALUES (@id, @work_id, @payee_id, @payee_name, @allocation_bps, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listIpOptionAuthorAllocations(workId: string): Promise<IpOptionAuthorAllocationRecord[]> {
+    // Insertion order (rowid ASC) — the deterministic author-first
+    // reservation order.
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ip_option_author_allocations WHERE work_id = ? ORDER BY rowid ASC`,
+        )
+        .all(workId) as IpOptionAuthorAllocationRecord[],
+    );
+  }
+
+  async upsertPublishingIpRightsVerification(
+    row: Omit<PublishingIpRightsVerificationRecord, 'id'>,
+  ): Promise<PublishingIpRightsVerificationRecord> {
+    // One verification state per (payee, work) — INSERT ON CONFLICT
+    // replaces the row atomically (the studio-KYC precedent, at work scope).
+    const record: PublishingIpRightsVerificationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO publishing_ip_rights_verifications
+           (id, payee_id, work_id, state, evidence_ref, cleared_at, created_at, updated_at)
+         VALUES (@id, @payee_id, @work_id, @state, @evidence_ref, @cleared_at, @created_at, @updated_at)
+         ON CONFLICT(payee_id, work_id) DO UPDATE SET
+           id = excluded.id,
+           state = excluded.state,
+           evidence_ref = excluded.evidence_ref,
+           cleared_at = excluded.cleared_at,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getPublishingIpRightsVerification(
+    payeeId: string,
+    workId: string,
+  ): Promise<PublishingIpRightsVerificationRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM publishing_ip_rights_verifications WHERE payee_id = ? AND work_id = ?`,
+        )
+        .get(payeeId, workId) as PublishingIpRightsVerificationRecord | undefined,
+    );
   }
 
   async upsertVtuberTaxWithholdingVerification(

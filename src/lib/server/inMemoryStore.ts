@@ -101,6 +101,9 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  IpOptionAgreementRecord,
+  IpOptionAuthorAllocationRecord,
+  PublishingIpRightsVerificationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -208,6 +211,10 @@ export class InMemoryStore implements Store {
   private webtoonLocalizationCostLines: WebtoonLocalizationCostLineRecord[] = [];
   private webtoonRecoupmentPools: WebtoonRecoupmentPoolRecord[] = [];
   private webtoonRecoupmentApplications: WebtoonRecoupmentApplicationRecord[] = [];
+  // Migration 0025 — the IP option contract + author-first cascade state.
+  private ipOptionAgreements: IpOptionAgreementRecord[] = [];
+  private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
+  private publishingIpRightsVerifications: PublishingIpRightsVerificationRecord[] = [];
   // Film multi-territory withholding log + territory envelopes (0023, PR 18).
   private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
   private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
@@ -1511,6 +1518,76 @@ export class InMemoryStore implements Store {
     row.status = 'settled';
     row.settled_at = settledAt;
     return row;
+  }
+
+  // --- IP adaptation optioning (PR 21, migration 0025) ---
+
+  async upsertIpOptionAgreement(
+    row: Omit<IpOptionAgreementRecord, 'id'>,
+  ): Promise<IpOptionAgreementRecord> {
+    // One agreement of record per work — upsert replaces the row atomically.
+    const existingIndex = this.ipOptionAgreements.findIndex(
+      (candidate) => candidate.work_id === row.work_id,
+    );
+    const record: IpOptionAgreementRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.ipOptionAgreements[existingIndex] = record;
+    } else {
+      this.ipOptionAgreements.push(record);
+    }
+    return record;
+  }
+
+  async getIpOptionAgreement(workId: string): Promise<IpOptionAgreementRecord | undefined> {
+    return this.ipOptionAgreements.find((candidate) => candidate.work_id === workId);
+  }
+
+  async insertIpOptionAuthorAllocation(
+    row: Omit<IpOptionAuthorAllocationRecord, 'id'>,
+  ): Promise<IpOptionAuthorAllocationRecord> {
+    // UNIQUE on (work_id, payee_id) — a duplicate registration throws the
+    // unique violation (the replay surface).
+    if (
+      this.ipOptionAuthorAllocations.some(
+        (existing) => existing.work_id === row.work_id && existing.payee_id === row.payee_id,
+      )
+    ) {
+      uniqueViolation('ip_option_author_allocations.work_id,payee_id');
+    }
+    const record: IpOptionAuthorAllocationRecord = { ...row, id: randomUUID() };
+    this.ipOptionAuthorAllocations.push(record);
+    return record;
+  }
+
+  async listIpOptionAuthorAllocations(workId: string): Promise<IpOptionAuthorAllocationRecord[]> {
+    // Insertion order — the deterministic author-first reservation order.
+    return this.ipOptionAuthorAllocations.filter((row) => row.work_id === workId);
+  }
+
+  async upsertPublishingIpRightsVerification(
+    row: Omit<PublishingIpRightsVerificationRecord, 'id'>,
+  ): Promise<PublishingIpRightsVerificationRecord> {
+    // One verification state per (payee, work) — upsert replaces the row
+    // atomically (the studio-KYC precedent, at work scope).
+    const existingIndex = this.publishingIpRightsVerifications.findIndex(
+      (candidate) => candidate.payee_id === row.payee_id && candidate.work_id === row.work_id,
+    );
+    const record: PublishingIpRightsVerificationRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.publishingIpRightsVerifications[existingIndex] = record;
+    } else {
+      this.publishingIpRightsVerifications.push(record);
+    }
+    return record;
+  }
+
+  async getPublishingIpRightsVerification(
+    payeeId: string,
+    workId: string,
+  ): Promise<PublishingIpRightsVerificationRecord | undefined> {
+    return this.publishingIpRightsVerifications.find(
+      (candidate) => candidate.payee_id === payeeId && candidate.work_id === workId,
+    );
   }
 
 

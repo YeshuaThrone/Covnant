@@ -89,6 +89,9 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  IpOptionAgreementRecord,
+  IpOptionAuthorAllocationRecord,
+  PublishingIpRightsVerificationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -1010,6 +1013,52 @@ export interface Store {
     id: string,
     settledAt: string,
   ): Promise<LedgerTransactionRecord | undefined>;
+
+  // --- IP adaptation optioning (PR 21, migration 0025) ---
+
+  /**
+   * Registers (or replaces) the option agreement of record for one work —
+   * upsert on work_id: a re-registered agreement replaces the row
+   * atomically (the localization-contract precedent).
+   */
+  upsertIpOptionAgreement(
+    row: Omit<IpOptionAgreementRecord, 'id'>,
+  ): Promise<IpOptionAgreementRecord>;
+
+  /** One work's option agreement of record. */
+  getIpOptionAgreement(workId: string): Promise<IpOptionAgreementRecord | undefined>;
+
+  /**
+   * Registers one author-side IP allocation of record: the ring-fenced
+   * share of the option fee reserved before any agency commission. UNIQUE
+   * on (work_id, payee_id) — a duplicate registration throws the unique
+   * violation (the replay surface).
+   */
+  insertIpOptionAuthorAllocation(
+    row: Omit<IpOptionAuthorAllocationRecord, 'id'>,
+  ): Promise<IpOptionAuthorAllocationRecord>;
+
+  /**
+   * One work's author IP allocations, oldest first (created_at ASC,
+   * insertion_order ASC): the deterministic author-first reservation order.
+   */
+  listIpOptionAuthorAllocations(workId: string): Promise<IpOptionAuthorAllocationRecord[]>;
+
+  /**
+   * Writes one payee's IP-rights verification for one work — UNIQUE on
+   * (payee_id, work_id); a re-verification replaces the row atomically
+   * (the studio-KYC upsert precedent, at work scope). Only an explicit
+   * 'cleared' state passes the publishing payout gate.
+   */
+  upsertPublishingIpRightsVerification(
+    row: Omit<PublishingIpRightsVerificationRecord, 'id'>,
+  ): Promise<PublishingIpRightsVerificationRecord>;
+
+  /** One payee's IP-rights verification state for one work. */
+  getPublishingIpRightsVerification(
+    payeeId: string,
+    workId: string,
+  ): Promise<PublishingIpRightsVerificationRecord | undefined>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;

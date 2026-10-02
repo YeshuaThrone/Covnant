@@ -97,6 +97,9 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  IpOptionAgreementRecord,
+  IpOptionAuthorAllocationRecord,
+  PublishingIpRightsVerificationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -228,6 +231,15 @@ const TABLES = {
   webtoonLocalizationCostLines: 'webtoon_localization_cost_lines',
   webtoonRecoupmentPools: 'webtoon_recoupment_pools',
   webtoonRecoupmentApplications: 'webtoon_recoupment_applications',
+  // Migration 0025 — the IP adaptation option contract + author-first
+  // cascade state (PR 21). The agreement is the option deal of record per
+  // work (upsert on work_id); the author-side allocations are the ordered,
+  // ring-fenced shares reserved before any agency commission (UNIQUE per
+  // (work, payee)); the verifications carry the durable ip_rights_cleared
+  // state the publishing payout gate reads (UNIQUE per (payee, work)).
+  ipOptionAgreements: 'ip_option_agreements',
+  ipOptionAuthorAllocations: 'ip_option_author_allocations',
+  publishingIpRightsVerifications: 'publishing_ip_rights_verifications',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -1913,6 +1925,95 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'updateWebtoonRecoupmentPoolProgress',
+    );
+  }
+
+  // --- IP adaptation optioning (PR 21, migration 0025) ---
+
+  async upsertIpOptionAgreement(
+    row: Omit<IpOptionAgreementRecord, 'id'>,
+  ): Promise<IpOptionAgreementRecord> {
+    // One agreement of record per work — the upsert targets work_id, so a
+    // re-registered agreement replaces the row atomically (the
+    // localization-contract precedent).
+    return this.oneStrict<IpOptionAgreementRecord>(
+      this.client
+        .from(TABLES.ipOptionAgreements)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'work_id' })
+        .select()
+        .maybeSingle(),
+      'upsertIpOptionAgreement',
+    );
+  }
+
+  async getIpOptionAgreement(workId: string): Promise<IpOptionAgreementRecord | undefined> {
+    return this.one<IpOptionAgreementRecord>(
+      this.client
+        .from(TABLES.ipOptionAgreements)
+        .select()
+        .eq('work_id', workId)
+        .maybeSingle(),
+      'getIpOptionAgreement',
+    );
+  }
+
+  async insertIpOptionAuthorAllocation(
+    row: Omit<IpOptionAuthorAllocationRecord, 'id'>,
+  ): Promise<IpOptionAuthorAllocationRecord> {
+    // UNIQUE on (work_id, payee_id) — a duplicate registration throws the
+    // unique violation (the replay surface).
+    return this.oneStrict<IpOptionAuthorAllocationRecord>(
+      this.client
+        .from(TABLES.ipOptionAuthorAllocations)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertIpOptionAuthorAllocation',
+    );
+  }
+
+  async listIpOptionAuthorAllocations(workId: string): Promise<IpOptionAuthorAllocationRecord[]> {
+    // created_at ASC with the insertion-order tiebreak — the deterministic
+    // author-first reservation order.
+    return this.many<IpOptionAuthorAllocationRecord>(
+      this.client
+        .from(TABLES.ipOptionAuthorAllocations)
+        .select()
+        .eq('work_id', workId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listIpOptionAuthorAllocations',
+    );
+  }
+
+  async upsertPublishingIpRightsVerification(
+    row: Omit<PublishingIpRightsVerificationRecord, 'id'>,
+  ): Promise<PublishingIpRightsVerificationRecord> {
+    // One verification state per (payee, work) — the upsert targets the
+    // pair, so a re-verification replaces the row atomically (the
+    // studio-KYC precedent, at work scope).
+    return this.oneStrict<PublishingIpRightsVerificationRecord>(
+      this.client
+        .from(TABLES.publishingIpRightsVerifications)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'payee_id,work_id' })
+        .select()
+        .maybeSingle(),
+      'upsertPublishingIpRightsVerification',
+    );
+  }
+
+  async getPublishingIpRightsVerification(
+    payeeId: string,
+    workId: string,
+  ): Promise<PublishingIpRightsVerificationRecord | undefined> {
+    return this.one<PublishingIpRightsVerificationRecord>(
+      this.client
+        .from(TABLES.publishingIpRightsVerifications)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('work_id', workId)
+        .maybeSingle(),
+      'getPublishingIpRightsVerification',
     );
   }
 

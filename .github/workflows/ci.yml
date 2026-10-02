@@ -165,6 +165,12 @@ jobs:
           # to prove idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
+          # IP adaptation optioning (Deep Royalties PR 21): the option
+          # agreement of record, the ordered author-side IP allocations,
+          # and the durable ip_rights_cleared verification state — applied
+          # twice like 0011-0024 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -743,6 +749,60 @@ jobs:
           pool_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from webtoon_recoupment_pools where series_id = 'wt_pool_probe'")
           [ "$pool_rows" = "2" ] || { echo "RECOUPMENT POOL ISOLATION BROKEN — expected one print + one coin pool"; exit 1; }
           echo "OK: webtoon_recoupment_pools UNIQUE pair keeps print and coin pools isolated"
+
+          # IP adaptation optioning (migration 0025, Deep Royalties PR 21):
+          # the option agreement of record, the ordered author-side IP
+          # allocations, and the durable ip_rights_cleared verification
+          # state — inventory, RLS deny-all, the guarded allocation FK, and
+          # the check-constrained vocabularies.
+          assert_cols ip_option_agreements id work_id author_payee_id author_payee_name agency_payee_id agency_payee_name agency_commission_bps option_deal_ref created_at updated_at
+          assert_cols ip_option_author_allocations id work_id payee_id payee_name allocation_bps created_at insertion_order
+          assert_cols publishing_ip_rights_verifications id payee_id work_id state evidence_ref cleared_at created_at updated_at
+          for table in ip_option_agreements ip_option_author_allocations publishing_ip_rights_verifications; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the three ip-option tables have RLS enabled"
+          fk_exists=$(psql -h localhost -U postgres -d covnant_check -tAc \
+            "select count(*) from pg_constraint where conrelid = 'public.ip_option_author_allocations'::regclass and conname = 'ip_option_author_allocations_work_fk'")
+          [ "$fk_exists" = "1" ] || { echo "MISSING FK ip_option_author_allocations_work_fk"; exit 1; }
+          echo "OK: ip_option_author_allocations agreement FK exists"
+          # The FK MUST reject an allocation against an option agreement
+          # that never landed — the insert is expected to fail.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ip_option_author_allocations (work_id, payee_id, payee_name, allocation_bps) values ('ip_no_such_work', 'ip_alloc_probe_1', 'Probe Holder', 4000)" >/dev/null 2>&1 || true
+          orphan_alloc=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ip_option_author_allocations where work_id = 'ip_no_such_work'")
+          [ "$orphan_alloc" = "0" ] || { echo "ORPHAN IP ALLOCATION ACCEPTED — the agreement FK is missing"; exit 1; }
+          echo "OK: ip_option_author_allocations agreement FK rejects unregistered works"
+          # One option agreement of record per work: a re-registered
+          # agreement REPLACES the row (the upsert surface), never a second
+          # row for one work.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ip_option_agreements (work_id, author_payee_id, author_payee_name, agency_payee_id, agency_payee_name, agency_commission_bps, option_deal_ref) values ('ip_agreement_probe', 'ip_author_probe', 'Probe Author', 'ip_agency_probe', 'Probe Agency', 1000, 'AGR-OPTION-PROBE')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ip_option_agreements (work_id, author_payee_id, author_payee_name, agency_payee_id, agency_payee_name, agency_commission_bps, option_deal_ref) values ('ip_agreement_probe', 'ip_author_probe_2', 'Probe Author 2', 'ip_agency_probe_2', 'Probe Agency 2', 1500, 'AGR-OPTION-PROBE-2') on conflict (work_id) do update set author_payee_id = excluded.author_payee_id, agency_payee_id = excluded.agency_payee_id, agency_commission_bps = excluded.agency_commission_bps, option_deal_ref = excluded.option_deal_ref, updated_at = now()"
+          agreement_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ip_option_agreements where work_id = 'ip_agreement_probe'")
+          [ "$agreement_rows" = "1" ] || { echo "SECOND OPTION AGREEMENT ROW ACCEPTED for one work"; exit 1; }
+          echo "OK: ip_option_agreements UNIQUE(work_id) keeps one option deal of record per work"
+          # One IP allocation of record per (work, payee), ever: the UNIQUE
+          # pair refuses a duplicate registration (the replay surface).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ip_option_author_allocations (work_id, payee_id, payee_name, allocation_bps) values ('ip_agreement_probe', 'ip_alloc_probe', 'Probe Co-holder', 2000)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ip_option_author_allocations (work_id, payee_id, payee_name, allocation_bps) values ('ip_agreement_probe', 'ip_alloc_probe', 'Probe Co-holder', 2500)" >/dev/null 2>&1 || true
+          dup_allocs=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ip_option_author_allocations where work_id = 'ip_agreement_probe' and payee_id = 'ip_alloc_probe'")
+          [ "$dup_allocs" = "1" ] || { echo "DUPLICATE IP ALLOCATION ACCEPTED by the UNIQUE pair"; exit 1; }
+          echo "OK: ip_option_author_allocations UNIQUE pair rejects duplicate registrations"
+          # The verification vocabulary is exactly the three gate states:
+          # anything else refuses at the DDL (the VTuber state-check probe,
+          # at work scope).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into publishing_ip_rights_verifications (payee_id, work_id, state) values ('ip_probe_payee', 'ip_agreement_probe', 'approved')" >/dev/null 2>&1 || true
+          bad_state=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from publishing_ip_rights_verifications where payee_id = 'ip_probe_payee'")
+          [ "$bad_state" = "0" ] || { echo "BAD IP-RIGHTS STATE ACCEPTED by the check constraint"; exit 1; }
+          echo "OK: publishing_ip_rights_verifications state check rejects bad values"
+          # One verification state per (payee, work): a re-verification
+          # REPLACES the row (the upsert surface), never a second row.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into publishing_ip_rights_verifications (payee_id, work_id, state, evidence_ref, cleared_at) values ('ip_probe_payee', 'ip_agreement_probe', 'pending', null, null)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into publishing_ip_rights_verifications (payee_id, work_id, state, evidence_ref, cleared_at) values ('ip_probe_payee', 'ip_agreement_probe', 'cleared', 'EVID-IP-PROBE', now()) on conflict (payee_id, work_id) do update set state = excluded.state, evidence_ref = excluded.evidence_ref, cleared_at = excluded.cleared_at, updated_at = now()"
+          verif_rows=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from publishing_ip_rights_verifications where payee_id = 'ip_probe_payee'")
+          [ "$verif_rows" = "1" ] || { echo "SECOND VERIFICATION ROW ACCEPTED for one (payee, work)"; exit 1; }
+          echo "OK: publishing_ip_rights_verifications UNIQUE pair keeps one state of record per (payee, work)"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
