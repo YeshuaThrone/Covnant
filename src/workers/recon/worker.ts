@@ -44,6 +44,10 @@ import { isMerchProfileKind } from "./merchProfiles";
 import { writeAiLinesToMatchQueue } from "./aiQueue";
 import { postAiLinesToHolding } from "./aiPosting";
 import { isAiProfileKind } from "./aiProfiles";
+import { writeBookLinesToMatchQueue } from "./booksQueue";
+import { postBookNetsToHolding } from "./booksPosting";
+import { isBookProfileKind } from "./booksProfiles";
+import { runBookEditorialSplitPass } from "@/lib/server/bookEditorialCascade";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -193,6 +197,16 @@ async function processJobBody(
     // deduction.
     if (isAiProfileKind(matchedProfile.kind)) {
       return await parseAi(deps, matchedProfile, content);
+    }
+    // The book lane branches the same way (PR 26): its rows are the
+    // publishing senders' ISBN-identified royalty events whose money runs
+    // the POD print deduction (keyed on isbn + format_type), the e-book
+    // agency tiers, and the magazine cuts — then the durable sequential
+    // advance recoupment and editorial split cascade. Never the music
+    // queue's split math, the gaming accumulator, the livestream escrow,
+    // the webtoon conversions, the merch COGS deduction, or the AI split.
+    if (isBookProfileKind(matchedProfile.kind)) {
+      return await parseBooks(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -489,6 +503,61 @@ async function parseAi(
     ai_voice_licensing_micros: posting.voiceLicensingMicros.toString(),
     ai_pool_royalty_micros: posting.poolRoyaltyMicros.toString(),
     ai_pool_dust_micros: posting.poolDustMicros.toString(),
+  };
+}
+
+/**
+ * The book/magazine lane (PR 26): strict-profile parse → match_queue write
+ * (ISBN cross-reference, recorded deduction legs, net computed once at
+ * write time) → holding posting (matched money only; negative-net and
+ * zero-net rows stay visible quarantines) → the editorial split pass —
+ * sequential advance recoupment through the row's OWN pool class (the
+ * isolation firewall) and post-clearance split accruals (percentage
+ * standard splits, anthology pro-rata, magazine flat/percentage cuts).
+ * Every pass is idempotent (replays are counted no-ops through the
+ * per-source UNIQUE guards); a pass failure throws — the job fails with
+ * its row-scoped reason and a retry heals idempotently.
+ */
+async function parseBooks(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeBookLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+    deps.vault,
+  );
+  const posting = await postBookNetsToHolding(deps.store, counts, now);
+  const splits = await runBookEditorialSplitPass(deps.store, counts, now);
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    book_written: counts.written,
+    book_replayed: counts.alreadyPresent,
+    book_matched: counts.matched,
+    book_unmatched: counts.unmatched,
+    book_held_negative_net: counts.heldNegativeNet,
+    book_zero_net: counts.zeroNet,
+    book_print_deduction_micros: counts.printDeductionMicros.toString(),
+    book_holding_posted: posting.posted,
+    book_holding_replayed: posting.alreadyPosted,
+    book_recoupments_applied: splits.recoupmentsApplied,
+    book_recoupments_replayed: splits.recoupmentsReplayed,
+    book_recoupment_applied_cents: splits.recoupmentAppliedCents,
+    book_recoupment_excess_cents: splits.recoupmentExcessCents,
+    book_split_accruals: splits.splitAccruals,
+    book_split_accruals_replayed: splits.splitAccrualsReplayed,
+    book_skipped_no_pool: splits.skippedNoPool + splits.skippedCurrencyMismatch,
+    book_skipped_no_schedule: splits.skippedNoSchedule,
   };
 }
 

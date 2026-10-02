@@ -89,6 +89,11 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  BookEditorialSplitScheduleRecord,
+  BookRecoupmentPoolRecord,
+  BookRecoupmentPoolClass,
+  BookRecoupmentApplicationRecord,
+  BookEditorialSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1185,6 +1190,73 @@ export interface Store {
     status: WebtoonRecoupmentPoolRecord['status'],
     updatedAt: string,
   ): Promise<WebtoonRecoupmentPoolRecord | undefined>;
+
+  /**
+   * The book editorial split schedule of record per title_key (PR 26,
+   * migration 0030) — upsert on the key: a re-registration keeps the row's
+   * identity and increments its version (the cascade builds the row from
+   * the existing record; the store replaces it atomically).
+   */
+  upsertBookEditorialSplitSchedule(
+    row: BookEditorialSplitScheduleRecord,
+  ): Promise<BookEditorialSplitScheduleRecord>;
+
+  /** One schedule of record — the split pass's gate. */
+  getBookEditorialSplitSchedule(
+    titleKey: string,
+  ): Promise<BookEditorialSplitScheduleRecord | undefined>;
+
+  /**
+   * Append one sequential recoupment pool. UNIQUE per (isbn, pool_class,
+   * sequence_no): a re-registered sequence slot throws the unique
+   * violation, never a silent duplicate.
+   */
+  insertBookRecoupmentPool(
+    row: Omit<BookRecoupmentPoolRecord, 'id'>,
+  ): Promise<BookRecoupmentPoolRecord>;
+
+  /** One title+class pool sequence, sequence_no ASC — the recoupment order. */
+  listBookRecoupmentPools(
+    isbn: string,
+    poolClass: BookRecoupmentPoolClass,
+  ): Promise<BookRecoupmentPoolRecord[]>;
+
+  /**
+   * THE pool CAS: advances a pool's running recovery and flips status when
+   * the recovery completes — only from the 'active' state. Undefined = the
+   * pool is absent or no longer active (the caller lost the race to the
+   * completing application). The append-only application rows stay the
+   * replay arbiter; this counter is the derived read.
+   */
+  updateBookRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: BookRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<BookRecoupmentPoolRecord | undefined>;
+
+  /**
+   * Append one book recoupment application. UNIQUE per (pool_id,
+   * source_event_id) — the replay guard; UNIQUE per (pool_id,
+   * recouped_before_cents) — the position lock (the webtoon discipline).
+   */
+  insertBookRecoupmentApplication(
+    row: Omit<BookRecoupmentApplicationRecord, 'id'>,
+  ): Promise<BookRecoupmentApplicationRecord>;
+
+  /** One pool's applications, created_at ASC — the running recovery. */
+  listBookRecoupmentApplications(
+    poolId: string,
+  ): Promise<BookRecoupmentApplicationRecord[]>;
+
+  /**
+   * Append one executed editorial split. UNIQUE per source_event_id: a
+   * replayed accrual throws the unique violation, never a double
+   * designation.
+   */
+  insertBookEditorialSplitAccrual(
+    row: Omit<BookEditorialSplitAccrualRecord, 'id'>,
+  ): Promise<BookEditorialSplitAccrualRecord>;
 
   /**
    * The locked translation-localization escrow receipts (kind AND status

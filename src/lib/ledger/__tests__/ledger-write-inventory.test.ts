@@ -319,6 +319,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // DDL on universal_royalty_ledger — the referencing pin below
       // holds.
       '0029_ai_dispute_freeze_consent_likeness_gates.sql',
+      // Book/magazine recoupment pools + editorial split ledger (PR 26,
+      // the founder publishing directive): the sequential advance
+      // recoupment pools/applications, the editorial split schedules, and
+      // the split accruals; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0030_book_recoupment_editorial_splits.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

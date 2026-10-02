@@ -54,6 +54,10 @@ export type StatementProfileKind =
   | "webtoon_coin_payout_csv"
   | "webtoon_reader_log_csv"
   | "kenp_page_read_pool_csv"
+  | "book_pod_print_csv"
+  | "book_ebook_agency_csv"
+  | "book_magazine_csv"
+  | "book_audiobook_sales_csv"
   | "shopify_dtc_dump_csv"
   | "pod_fulfillment_dump_csv"
   | "wholesale_consignment_payout_csv"
@@ -66,9 +70,10 @@ export type StatementProfileKind =
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
  * (src/lib/covnant/vault.ts VAULT_EXTERNAL_IDENTIFIER_KINDS), so a parsed
- * identifier can always be cross-referenced against cbt_assets.
+ * identifier can always be cross-referenced against cbt_assets. ISBN joins
+ * with PR 26's book lane — the publishing identity the book reports key on.
  */
-export type ReconIdentifierKind = "ISRC" | "ISWC" | "UPC" | "EIDR" | "DOI";
+export type ReconIdentifierKind = "ISRC" | "ISWC" | "UPC" | "EIDR" | "DOI" | "ISBN";
 
 export type ReconIdentifiers = Partial<Record<ReconIdentifierKind, string>>;
 
@@ -511,6 +516,93 @@ export type AiLineDetail =
     };
 
 /**
+ * The book lane's per-line context (PR 26, founder publishing directive).
+ * Null on every non-book line — the field's PRESENCE is the lane
+ * discriminator, the same pattern as podcastDetail/…/aiDetail. Every row
+ * carries the ISBN identity (the addendum 9 isbn column's intended
+ * purpose) and the recorded money legs its net math consumes; the five
+ * kinds are the directive's four money models plus the audiobook feed.
+ */
+export type BookLineDetail =
+  | {
+      /** A physical POD print sale (Amazon KDP / IngramSpark) — the print
+       * deduction equation's subject, keyed on isbn + format_type. */
+      readonly kind: "print_sale";
+      readonly platform: "amazon_kdp" | "ingram_spark";
+      readonly isbn: string;
+      /** The bound format the print row reports — the deduction key. */
+      readonly formatType: "paperback" | "hardcover";
+      /** The sender's order/invoice reference — the event identity half. */
+      readonly orderId: string;
+      readonly units: number;
+      /** Exact micros text, recorded verbatim (the founder's rate-logging
+       * rule): the line's gross retail and its deduction legs. */
+      readonly grossRetailMicros: string;
+      readonly printingCostPerUnitMicros: string;
+      readonly distributionFeeMicros: string;
+      /** Whole basis points, validated into the 40–55% wholesale band. */
+      readonly channelDiscountBps: number;
+      readonly period: string;
+    }
+  | {
+      /** An e-book agency sale (KDP / Draft2Digital / Apple Books / Kobo) —
+       * the 70/35 tier's subject. */
+      readonly kind: "ebook_sale";
+      readonly platform:
+        | "amazon_kdp"
+        | "draft2digital"
+        | "apple_books"
+        | "kobo";
+      readonly isbn: string;
+      readonly orderId: string;
+      readonly units: number;
+      /** The row's recorded list price — the tier's key, exact micros text. */
+      readonly listPriceMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** A digital magazine single-issue sale (Zinio / Substack) — the flat
+       * per-issue editorial cuts' issue context. */
+      readonly kind: "magazine_issue";
+      readonly platform: "zinio" | "substack";
+      /** The magazine's issue identity — the editorial schedule's key. */
+      readonly magazineId: string;
+      readonly issueId: string;
+      /** The sender's own sale-event id — the event identity. */
+      readonly eventId: string;
+      readonly units: number;
+      /** Exact micros text — the line's gross, recorded verbatim. */
+      readonly grossMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** A magazine subscription funding row (Zinio / Substack) — the
+       * percentage editorial cuts' funding events. */
+      readonly kind: "magazine_subscription";
+      readonly platform: "zinio" | "substack";
+      readonly magazineId: string;
+      readonly issueId: string;
+      readonly eventId: string;
+      readonly units: number;
+      readonly grossMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** An audiobook unit sale (Amazon KDP's audiobook rows) — the
+       * isolated audiobook pool's royalty feed. */
+      readonly kind: "audiobook_sale";
+      readonly platform: "amazon_kdp";
+      readonly isbn: string;
+      readonly orderId: string;
+      readonly units: number;
+      /** The row's recorded per-unit royalty rate and its gross product,
+       * exact micros text (the founder's rate-logging rule). */
+      readonly royaltyPerUnitMicros: string;
+      readonly grossMicros: string;
+      readonly period: string;
+    };
+
+/**
  * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
  * The Epic Games Store and Unreal Engine Marketplace share one engine-
  * royalty accumulator scope (the Epic family) — the store cell discriminates
@@ -632,14 +724,20 @@ export interface ParsedStatementLine {
    * the lane discriminator. */
   merchDetail: MerchLineDetail | null;
 
-  /**
-   * The AI lane's per-line context (metered usage unit/quantity, the model
+  /** The AI lane's per-line context (metered usage unit/quantity, the model
    * attribution key, the voice-actor direct-routing cells, the contributor
    * weights and pool cells) — null on every non-AI line; the field's
    * PRESENCE is the lane discriminator. Populates the addendum 8/9
    * columns' intended purpose.
    */
   aiDetail: AiLineDetail | null;
+
+  /** Book lane context (ISBN identity, print deduction legs, agency tier
+   * cells, magazine issue/subscription identities, audiobook royalty
+   * cells); null on every non-book line — the presence IS the lane
+   * discriminator. Optional so the other lanes' constructors and the
+   * existing test literals stay honest without naming an absent lane. */
+  bookDetail?: BookLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */
