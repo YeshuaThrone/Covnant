@@ -38,6 +38,7 @@ function filmLine(micros: bigint, period: string): ParsedStatementLine {
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
   };
 }
 

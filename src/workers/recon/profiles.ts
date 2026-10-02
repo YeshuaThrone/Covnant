@@ -25,6 +25,7 @@ import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/ident
 import { PODCAST_PROFILES } from "./podcastProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
+import { WEBTOON_PROFILES } from "./webtoonProfiles";
 import {
   optionalCell,
   parseStatementMoney,
@@ -122,6 +123,7 @@ function musicLine(
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
   };
 }
 
@@ -400,6 +402,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           podcastDetail: null,
           gamingDetail: null,
           livestreamDetail: null,
+          webtoonDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -529,6 +532,11 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // currency converter, the 95/5 Kick split, and the prize-pool escrow are
   // livestream-only).
   ...LIVESTREAM_PROFILES,
+  // The webtoon lane (PR 19) — same dispatch opinion; the worker branches
+  // on the profile kind before the music machinery (the coin conversion,
+  // the layered store/platform shares, the KENP pool math, and the
+  // monthly-pass dedup are webtoon-only).
+  ...WEBTOON_PROFILES,
 ];
 
 /**

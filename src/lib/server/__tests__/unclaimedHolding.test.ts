@@ -84,6 +84,7 @@ function filmLine(overrides: Partial<ParsedStatementLine> = {}): ParsedStatement
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
     ...overrides,
   };
 }

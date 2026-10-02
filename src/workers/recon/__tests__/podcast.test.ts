@@ -74,6 +74,7 @@ function impLine(
     podcastDetail: detail,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
     ...lineOverrides,
   };
 }

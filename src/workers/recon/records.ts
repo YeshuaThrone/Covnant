@@ -50,7 +50,10 @@ export type StatementProfileKind =
   | "kick_livestream_payouts_csv"
   | "tiktok_live_livestream_payouts_csv"
   | "streamlabs_streamelements_alerts_csv"
-  | "esports_tournament_prize_pool_csv";
+  | "esports_tournament_prize_pool_csv"
+  | "webtoon_coin_payout_csv"
+  | "webtoon_reader_log_csv"
+  | "kenp_page_read_pool_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -202,6 +205,85 @@ export interface LivestreamLineDetail {
 }
 
 /**
+ * The webtoon lane's platform vocabulary (PR 19, founder webtoon +
+ * serialized-publishing directive) — the three webtoon-family senders plus
+ * Amazon KDP (the KENP page-read pool's report).
+ */
+export type WebtoonLanePlatform =
+  | "webtoon"
+  | "tapas"
+  | "kakaopage"
+  | "amazon_kdp";
+
+/** What one webtoon-lane row reports — the lane's row-kind discriminator. */
+export type WebtoonRowKind = "reader_log" | "coin_payout" | "kenp_pool";
+
+/** The reader-log access types (PR 19) — monthly_pass is the all-access
+ * subscription read (the double-dip claim's subject); fast_pass and
+ * paid_coin_unlock are coin-money reads. */
+export type WebtoonAccessType =
+  | "paid_coin_unlock"
+  | "fast_pass"
+  | "monthly_pass";
+
+/**
+ * The webtoon lane's per-line context (PR 19). Null on every non-webtoon
+ * line — the field's PRESENCE is the lane discriminator, the same pattern
+ * as podcastDetail/gamingDetail/livestreamDetail. The deduplication needs
+ * the reading-event identity (platform, series, chapter, reader, period),
+ * the conversion needs the recorded virtual-currency cells, and the KENP
+ * pool math needs the pages and the period's recorded rate.
+ */
+export interface WebtoonLineDetail {
+  /** What the row reports — the conversion/dedup math's discriminator. */
+  readonly kind: WebtoonRowKind;
+  /** The platform whose report the row came from (the bounded vocabulary
+   * above — validated at parse time). */
+  readonly platform: WebtoonLanePlatform;
+  /** The series the row reports — required on reader_log and coin_payout
+   * rows (the reading-event identity); the KDP Title ID on kenp_pool rows
+   * (it keys the pool event id). */
+  readonly seriesId: string | null;
+  /** The chapter the row reports — required on reader_log and coin_payout
+   * rows, null on KENP pool rows. */
+  readonly chapterId: string | null;
+  /** The reader whose read the row reports — required on reader_log and
+   * coin_payout rows (the double-dip dedup key), null on KENP pool rows. */
+  readonly readerId: string | null;
+  /** The row's access type — required on reader_log and coin_payout rows,
+   * null on KENP pool rows. A monthly_pass row in a coin PAYOUT report is
+   * a hostile row (a pass read is never pay-per-chapter coin money). */
+  readonly accessType: WebtoonAccessType | null;
+  /** The coin denomination (WEBTOON_COINS or TAPAS_INK, validated at
+   * parse); null on reader_log and KENP rows. */
+  readonly coinDenomination: string | null;
+  /** Exact coin amount as decimal text (never a float), verbatim; null on
+   * non-coin rows. */
+  readonly coinAmount: string | null;
+  /** The APPLIED fiat-per-unit rate as exact decimal text — RECORDED per
+   * row (the founder's rate-logging rule): fiat per coin on coin_payout
+   * rows, fiat per KENP page on kenp_pool rows; verbatim, never a
+   * recomputation. */
+  readonly exchangeRate: string | null;
+  /** The Apple/Google App Store cut as whole basis points — required on
+   * coin_payout rows (the pinned 3000), null elsewhere. */
+  readonly appStoreCutBps: number | null;
+  /** The platform split as whole basis points — required on coin_payout
+   * rows (the 3000-5000 band), null elsewhere. */
+  readonly platformSplitBps: number | null;
+  /** The row's page count — required on kenp_pool and reader_log rows,
+   * null on coin_payout rows. */
+  readonly pagesRead: number | null;
+  /** The row's UTC period bucket, `YYYY-MM` — the reading-event
+   * fingerprint's period component and the KENP pool period (the Global
+   * Fund's rate applies per period). */
+  readonly period: string;
+  /** The KDP marketplace (amazon.com, amazon.co.uk, ...) — required on
+   * kenp_pool rows (the rate-consistency scope), null elsewhere. */
+  readonly marketplace: string | null;
+}
+
+/**
  * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
  * The Epic Games Store and Unreal Engine Marketplace share one engine-
  * royalty accumulator scope (the Epic family) — the store cell discriminates
@@ -312,6 +394,11 @@ export interface ParsedStatementLine {
    * null on every non-livestream line — the presence IS the lane
    * discriminator. */
   livestreamDetail: LivestreamLineDetail | null;
+  /** Webtoon lane context (row kind, reading-event identity, coin
+   * denomination/amount, recorded rate, layered shares, KENP pages);
+   * null on every non-webtoon line — the presence IS the lane
+   * discriminator. */
+  webtoonDetail: WebtoonLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

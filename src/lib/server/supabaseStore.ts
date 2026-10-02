@@ -2314,6 +2314,19 @@ export class SupabaseStore implements Store {
     );
   }
 
+  async getMatchQueueEntryByEventId(
+    eventId: string,
+  ): Promise<MatchQueueRecord | undefined> {
+    return this.one<MatchQueueRecord>(
+      this.client
+        .from(TABLES.matchQueue)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getMatchQueueEntryByEventId',
+    );
+  }
+
   async listMatchQueueEntries(
     status?: MatchQueueRecord['status'],
     limit: number = DEFAULT_LIST_SHOWS_LIMIT,

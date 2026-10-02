@@ -3624,6 +3624,17 @@ export class SqliteStore implements Store {
     );
   }
 
+  async getMatchQueueEntryByEventId(
+    eventId: string,
+  ): Promise<MatchQueueRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM match_queue WHERE event_id = ?`)
+      .get(eventId) as MatchQueueSqliteRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : matchQueueFromSqliteRow(row),
+    );
+  }
+
   async listMatchQueueEntries(
     status?: MatchQueueRecord['status'],
     limit: number = DEFAULT_LIST_SHOWS_LIMIT,

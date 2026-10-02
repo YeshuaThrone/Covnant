@@ -131,6 +131,7 @@ describe("isPostableLine — the seam's subject rule", () => {
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
     ...overrides,
   });
 

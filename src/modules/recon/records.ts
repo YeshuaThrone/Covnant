@@ -144,6 +144,38 @@ export interface ReconJobResult {
   /** Livestream lane: integer cents locked into esports batch escrows this
    * pass. */
   livestream_prize_pool_locked_cents?: number;
+  /** Webtoon lane: queue rows written this pass (claims, consumption
+   * facts, money rows, KENP pool rows). */
+  webtoon_written?: number;
+  /** Webtoon lane: same-row replays caught by the event-id guard. */
+  webtoon_replayed?: number;
+  /** Webtoon lane: reader-log monthly-pass claims written this pass — the
+   * dedup's first movers (a claim quarantines any later pay-per-chapter
+   * payout row for the same reading event). */
+  webtoon_pass_claims?: number;
+  /** Webtoon lane: pay-per-chapter payout rows quarantined by a pass
+   * claim this pass (the founder's double-dip rule — visible, never
+   * posted, never counted as revenue). */
+  webtoon_pass_deduped?: number;
+  /** Webtoon lane: pass reads whose reading event was already paid as a
+   * coin payout (the payout landed first) — honestly visible, never
+   * double-counted. */
+  webtoon_paid_as_coin?: number;
+  /** Webtoon lane: durable virtual-currency conversion logs written this
+   * pass (coin-payout rows — the founder's rate-logging rule, made durable
+   * before any fiat movement posts). */
+  webtoon_conversions_logged?: number;
+  /** Webtoon lane: conversion logs that already existed — counted no-ops. */
+  webtoon_conversions_replayed?: number;
+  /** Webtoon lane: the pinned Apple/Google App Store cut deducted across
+   * the pass's posts, exact fixed-point micros as text (never a float). */
+  webtoon_store_cut_micros?: string;
+  /** Webtoon lane: the platform 30-50% split deducted across the pass's
+   * posts, exact fixed-point micros as text (never a float). */
+  webtoon_platform_split_micros?: string;
+  /** Webtoon lane: integer cents posted for KENP page-read pool rows this
+   * pass (pages × the period's recorded Global Fund rate). */
+  webtoon_kenp_payout_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

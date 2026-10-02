@@ -101,6 +101,7 @@ function makePodcastLine(
     },
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
   };
 }
 
