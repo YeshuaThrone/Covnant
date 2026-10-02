@@ -88,6 +88,15 @@ describe('don constants', () => {
       'merch_reserve_dispatch',
       'merch_reserve_drawdown',
       'merch_returns_reserve_release',
+      // The foreign-tax hold + book returns reserve (PR 27, the founder
+      // publishing directive): the straight-into-freeze posting journal,
+      // the gated dispatch/drawdown/window-release journals for the
+      // per-ISBN reserve, and the book print net's post-offset release.
+      'foreign_tax_hold_post',
+      'book_reserve_dispatch',
+      'book_reserve_drawdown',
+      'book_returns_reserve_release',
+      'book_print_net_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

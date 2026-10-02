@@ -136,6 +136,26 @@ export const LEDGER_STATUSES = [
   // constraint), so the state extends the existing ledger contract in
   // place.
   "unauthorized_training_hold",
+  // FOREIGN_TAX_HOLD (PR 27, the founder publishing directive): a FOREIGN
+  // print royalty's unclaimed-holding leg FREEZES here, keyed on the sale
+  // territory's country code (the scope stamp
+  // 'foreign_tax_hold:{country_code}:{tax_year}' in split_run_id — the PR 25
+  // scope discipline), until a VERIFIED withholding tax credit of record
+  // lands for that country and tax year — treaty evidence, for example a
+  // US-UK treaty credit. Fail-closed before that: the ONLY exit is the
+  // verified release sweep, and the standing unclaimed-holding release
+  // refuses a frozen leg outright. Kind never changes (kind marks WHAT the
+  // row is — still 'unclaimed_holding' money; status carries the state
+  // machine). No migration: ledger_transactions.status is free text (0006
+  // has no check constraint), so the state extends the existing ledger
+  // contract in place.
+  "foreign_tax_hold",
+  // Book returns reserve (PR 27, the founder publishing directive): the
+  // 15–20% of a physical print allocation held per ISBN for the 90–120 day
+  // returns window. Publisher returns and chargebacks draw it down
+  // position-locked, and the verified release after the window settles the
+  // remainder to the beneficiary of record (status → 'settled').
+  "book_returns_reserve",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -188,6 +208,12 @@ export const LEDGER_KINDS = [
   // 'merch_returns_reserve' with status 'settled'), the same division PR 7,
   // PR 9, PR 13, PR 14, PR 15, and PR 20 use.
   "merch_returns_reserve",
+  // Book returns reserve (PR 27): the 15–20% of a physical print allocation
+  // held per ISBN for the 90–120 day returns window. Kind marks WHAT the row
+  // is for its whole life (a released or fully-drawn reserve stays kind
+  // 'book_returns_reserve' with status 'settled'), the same division PR 7,
+  // PR 9, PR 13, PR 14, PR 15, PR 20, and PR 23 use.
+  "book_returns_reserve",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

@@ -119,6 +119,12 @@ import type {
   MerchConsignmentSettlementRecord,
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
+  WithholdingTaxCreditVerificationRecord,
+  IsbnRightsVerificationRecord,
+  BookReturnsReservePolicyRecord,
+  BookReserveDrawdownRecord,
+  BookReturnChargebackRecord,
+  BookChargebackOffsetApplicationRecord,
   MerchFulfillmentTrackingRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
@@ -128,6 +134,7 @@ import type {
   AiDatasetDeprecationRecord,
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
+import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 import type {
   MatchQueueRecord,
   MatchQueueResolution,
@@ -265,6 +272,13 @@ export class InMemoryStore implements Store {
   private merchReturnReservePolicies: MerchReturnReservePolicyRecord[] = [];
   private merchFulfillmentTrackings: MerchFulfillmentTrackingRecord[] = [];
   private merchReserveDrawdowns: MerchReserveDrawdownRecord[] = [];
+  // Foreign tax hold + book returns reserve state (0031, PR 27).
+  private withholdingTaxCreditVerifications: WithholdingTaxCreditVerificationRecord[] = [];
+  private isbnRightsVerifications: IsbnRightsVerificationRecord[] = [];
+  private bookReturnsReservePolicies: BookReturnsReservePolicyRecord[] = [];
+  private bookReserveDrawdowns: BookReserveDrawdownRecord[] = [];
+  private bookReturnChargebacks: BookReturnChargebackRecord[] = [];
+  private bookChargebackOffsetApplications: BookChargebackOffsetApplicationRecord[] = [];
   // Film multi-territory withholding log + territory envelopes (0023, PR 18).
   private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
   private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
@@ -2331,6 +2345,256 @@ export class InMemoryStore implements Store {
     row.status = 'settled';
     row.settled_at = settledAt;
     return row;
+  }
+
+  // --- Foreign tax hold + book returns reserve (PR 27, migration 0031) ---
+
+  async listForeignTaxHolds(limit: number = DEFAULT_LIST_SHOWS_LIMIT): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue: a thawed leg leaves the listing (its
+    // status returned to 'unclaimed_holding'). Newest first.
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) => row.kind === 'unclaimed_holding' && row.status === 'foreign_tax_hold',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async thawForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The THAW CAS sweep — the VERIFIED withholding credit's ledger leg:
+    // ONLY the scope's 'foreign_tax_hold' legs return to holding. A re-run
+    // is an honest no-op (the already-thawed legs no longer match).
+    let thawed = 0;
+    for (const row of this.ledgerTransactions) {
+      if (
+        row.kind === 'unclaimed_holding' &&
+        row.status === 'foreign_tax_hold' &&
+        row.split_run_id === taxHoldScope
+      ) {
+        row.status = 'unclaimed_holding';
+        thawed += 1;
+      }
+    }
+    return thawed;
+  }
+
+  async freezeForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The FREEZE CAS sweep — the foreign-tax-hold lane's ledger leg: ONLY
+    // the scope's still-held legs enter the freeze. A re-applied hold is a
+    // counted no-op (the already-frozen legs no longer match).
+    let frozen = 0;
+    for (const row of this.ledgerTransactions) {
+      if (
+        row.kind === 'unclaimed_holding' &&
+        row.status === 'unclaimed_holding' &&
+        row.split_run_id === taxHoldScope
+      ) {
+        row.status = 'foreign_tax_hold';
+        frozen += 1;
+      }
+    }
+    return frozen;
+  }
+
+  async upsertWithholdingTaxCreditVerification(
+    row: Omit<WithholdingTaxCreditVerificationRecord, 'id'>,
+  ): Promise<WithholdingTaxCreditVerificationRecord> {
+    // One verification of record per (country_code, tax_year) — upsert
+    // replaces the row atomically (the evidence upgrade converges).
+    const existingIndex = this.withholdingTaxCreditVerifications.findIndex(
+      (candidate) => candidate.country_code === row.country_code && candidate.tax_year === row.tax_year,
+    );
+    const record: WithholdingTaxCreditVerificationRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.withholdingTaxCreditVerifications[existingIndex] = record;
+    } else {
+      this.withholdingTaxCreditVerifications.push(record);
+    }
+    return record;
+  }
+
+  async getWithholdingTaxCreditVerification(
+    countryCode: string,
+    taxYear: number,
+  ): Promise<WithholdingTaxCreditVerificationRecord | undefined> {
+    return this.withholdingTaxCreditVerifications.find(
+      (candidate) => candidate.country_code === countryCode && candidate.tax_year === taxYear,
+    );
+  }
+
+  async upsertIsbnRightsVerification(
+    row: Omit<IsbnRightsVerificationRecord, 'id'>,
+  ): Promise<IsbnRightsVerificationRecord> {
+    // One verification of record per isbn — upsert replaces the row
+    // atomically (the option-agreement precedent).
+    const existingIndex = this.isbnRightsVerifications.findIndex(
+      (candidate) => candidate.isbn === row.isbn,
+    );
+    const record: IsbnRightsVerificationRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.isbnRightsVerifications[existingIndex] = record;
+    } else {
+      this.isbnRightsVerifications.push(record);
+    }
+    return record;
+  }
+
+  async getIsbnRightsVerification(isbn: string): Promise<IsbnRightsVerificationRecord | undefined> {
+    return this.isbnRightsVerifications.find((candidate) => candidate.isbn === isbn);
+  }
+
+  async upsertBookReturnsReservePolicy(
+    row: Omit<BookReturnsReservePolicyRecord, 'id'>,
+  ): Promise<BookReturnsReservePolicyRecord> {
+    // One policy of record per isbn — upsert replaces the row atomically.
+    const existingIndex = this.bookReturnsReservePolicies.findIndex(
+      (candidate) => candidate.isbn === row.isbn,
+    );
+    const record: BookReturnsReservePolicyRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.bookReturnsReservePolicies[existingIndex] = record;
+    } else {
+      this.bookReturnsReservePolicies.push(record);
+    }
+    return record;
+  }
+
+  async getBookReturnsReservePolicy(isbn: string): Promise<BookReturnsReservePolicyRecord | undefined> {
+    return this.bookReturnsReservePolicies.find((candidate) => candidate.isbn === isbn);
+  }
+
+  async listBookReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) => row.kind === 'book_returns_reserve' && row.status === 'book_returns_reserve',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async listBookReturnsReserveCreditsByIsbn(isbn: string): Promise<LedgerTransactionRecord[]> {
+    // EVERY state of the ISBN's reserves, oldest first — the FIFO draw
+    // ordering and the gate's window derivation (a settled reserve still
+    // proves its period ran).
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) => row.kind === 'book_returns_reserve' && row.payee_id === bookReturnsReservePayeeId(isbn),
+      ),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async settleBookReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'book_returns_reserve') return undefined;
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async insertBookReserveDrawdown(
+    row: Omit<BookReserveDrawdownRecord, 'id'>,
+  ): Promise<BookReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter: a concurrent drawdown that loses the
+    // position throws.
+    if (
+      this.bookReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('book_reserve_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.bookReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('book_reserve_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: BookReserveDrawdownRecord = { ...row, id: randomUUID() };
+    this.bookReserveDrawdowns.push(record);
+    return record;
+  }
+
+  async listBookReserveDrawdowns(reserveLedgerId: string): Promise<BookReserveDrawdownRecord[]> {
+    return this.bookReserveDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort((a, b) => a.drawn_before_cents - b.drawn_before_cents);
+  }
+
+  async insertBookReturnChargeback(
+    row: Omit<BookReturnChargebackRecord, 'id'>,
+  ): Promise<BookReturnChargebackRecord> {
+    // UNIQUE on event_id — a re-shipped chargeback event is the unique
+    // violation (the replay surface).
+    if (this.bookReturnChargebacks.some((existing) => existing.event_id === row.event_id)) {
+      uniqueViolation('book_return_chargebacks.event_id');
+    }
+    const record: BookReturnChargebackRecord = { ...row, id: randomUUID() };
+    this.bookReturnChargebacks.push(record);
+    return record;
+  }
+
+  async listBookReturnChargebacksByIsbn(isbn: string): Promise<BookReturnChargebackRecord[]> {
+    return this.bookReturnChargebacks
+      .filter((row) => row.isbn === isbn)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  async insertBookChargebackOffsetApplication(
+    row: Omit<BookChargebackOffsetApplicationRecord, 'id'>,
+  ): Promise<BookChargebackOffsetApplicationRecord> {
+    // UNIQUE on (chargeback_id, holding_ledger_id) — a replayed release is
+    // the unique violation, never a double offset. UNIQUE on
+    // (chargeback_id, offset_before_cents) — the insert-as-lock position
+    // arbiter: exactly one release wins an offset's next running position.
+    if (
+      this.bookChargebackOffsetApplications.some(
+        (existing) =>
+          existing.chargeback_id === row.chargeback_id &&
+          existing.holding_ledger_id === row.holding_ledger_id,
+      )
+    ) {
+      uniqueViolation('book_chargeback_offset_applications.chargeback_id,holding_ledger_id');
+    }
+    if (
+      this.bookChargebackOffsetApplications.some(
+        (existing) =>
+          existing.chargeback_id === row.chargeback_id &&
+          existing.offset_before_cents === row.offset_before_cents,
+      )
+    ) {
+      uniqueViolation('book_chargeback_offset_applications.chargeback_id,offset_before_cents');
+    }
+    const record: BookChargebackOffsetApplicationRecord = { ...row, id: randomUUID() };
+    this.bookChargebackOffsetApplications.push(record);
+    return record;
+  }
+
+  async listBookChargebackOffsetApplications(
+    chargebackId: string,
+  ): Promise<BookChargebackOffsetApplicationRecord[]> {
+    return this.bookChargebackOffsetApplications
+      .filter((row) => row.chargeback_id === chargebackId)
+      .sort((a, b) => a.offset_before_cents - b.offset_before_cents);
   }
 
 

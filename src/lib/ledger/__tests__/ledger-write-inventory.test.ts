@@ -325,6 +325,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // the split accruals; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0030_book_recoupment_editorial_splits.sql',
+      // Foreign-tax hold + book returns reserve (PR 27, the founder
+      // publishing directive): the withholding-tax-credit and ISBN-rights
+      // verification states, the founder-banded per-ISBN reserve policy,
+      // the position-locked reserve drawdowns, the publisher return
+      // chargebacks, and the chargeback offset applications; still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0031_foreign_tax_hold_book_returns_reserve.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

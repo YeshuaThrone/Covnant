@@ -121,6 +121,12 @@ import type {
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
   MerchFulfillmentTrackingRecord,
+  WithholdingTaxCreditVerificationRecord,
+  IsbnRightsVerificationRecord,
+  BookReturnsReservePolicyRecord,
+  BookReserveDrawdownRecord,
+  BookReturnChargebackRecord,
+  BookChargebackOffsetApplicationRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
   AiTrainingDisputeRecord,
@@ -146,6 +152,7 @@ import {
   type UniversalRoyaltyLedgerRow,
 } from '@/lib/server/territorySettlement';
 import { podcastEpisodeIdOfQueueRow } from '@/modules/podcastSplits/engine';
+import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shows (
@@ -1427,6 +1434,96 @@ CREATE TABLE IF NOT EXISTS film_territory_distributions (
 );
 CREATE INDEX IF NOT EXISTS idx_film_territory_distributions_film
   ON film_territory_distributions (film_id);
+
+-- Foreign tax hold + book returns reserve (migration 0031, PR 27). The
+-- withholding-tax-credit verification of record per (country_code,
+-- tax_year) and the ISBN rights verification of record per isbn — the
+-- fail-closed evidence states the foreign-tax-hold release and the
+-- publishing payout gate read; the per-ISBN founder-banded returns-reserve
+-- policy; the append-only reserve drawdown truth (the 0027 position-lock
+-- discipline at ISBN scope); the publisher return chargebacks of record;
+-- and the append-only offset applications that recover an outstanding
+-- chargeback from an incoming POD net balance before author payouts
+-- release.
+CREATE TABLE IF NOT EXISTS withholding_tax_credit_verifications (
+  id TEXT PRIMARY KEY,
+  country_code TEXT NOT NULL,
+  tax_year INTEGER NOT NULL CHECK (tax_year > 1900),
+  state TEXT NOT NULL CHECK (state IN ('pending', 'verified', 'failed')),
+  treaty_ref TEXT,
+  evidence_ref TEXT,
+  verified_by TEXT,
+  verified_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (country_code, tax_year)
+);
+
+CREATE TABLE IF NOT EXISTS isbn_rights_verifications (
+  id TEXT PRIMARY KEY,
+  isbn TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'verified', 'failed')),
+  evidence_ref TEXT,
+  verified_by TEXT,
+  verified_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS book_returns_reserve_policies (
+  id TEXT PRIMARY KEY,
+  isbn TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 1500 AND reserve_rate_bps <= 2000),
+  reserve_window_days INTEGER NOT NULL CHECK (reserve_window_days >= 90 AND reserve_window_days <= 120),
+  beneficiary_payee_id TEXT NOT NULL,
+  beneficiary_payee_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS book_reserve_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('publisher_return', 'chargeback')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL CHECK (drawn_before_cents >= 0),
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  FOREIGN KEY (reserve_ledger_id) REFERENCES ledger_transactions (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_book_reserve_drawdowns_reserve
+  ON book_reserve_drawdowns (reserve_ledger_id);
+
+CREATE TABLE IF NOT EXISTS book_return_chargebacks (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  isbn TEXT NOT NULL,
+  chargeback_class TEXT NOT NULL CHECK (chargeback_class IN ('publisher_return', 'chargeback')),
+  chargeback_cents INTEGER NOT NULL CHECK (chargeback_cents > 0),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_book_return_chargebacks_isbn
+  ON book_return_chargebacks (isbn);
+
+CREATE TABLE IF NOT EXISTS book_chargeback_offset_applications (
+  id TEXT PRIMARY KEY,
+  chargeback_id TEXT NOT NULL,
+  holding_ledger_id TEXT NOT NULL,
+  offset_before_cents INTEGER NOT NULL CHECK (offset_before_cents >= 0),
+  applied_cents INTEGER NOT NULL CHECK (applied_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (chargeback_id, holding_ledger_id),
+  UNIQUE (chargeback_id, offset_before_cents),
+  FOREIGN KEY (chargeback_id) REFERENCES book_return_chargebacks (id) ON DELETE CASCADE,
+  FOREIGN KEY (holding_ledger_id) REFERENCES ledger_transactions (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_book_chargeback_offset_applications_chargeback
+  ON book_chargeback_offset_applications (chargeback_id);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -4313,6 +4410,286 @@ export class SqliteStore implements Store {
       .run(settledAt, id);
     if (result.changes === 0) return undefined;
     return this.getLedgerTransaction(id);
+  }
+
+  // --- Foreign tax hold + book returns reserve (PR 27, migration 0031) ---
+
+  async listForeignTaxHolds(limit: number = DEFAULT_LIST_SHOWS_LIMIT): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue — a thawed leg leaves the listing.
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'unclaimed_holding' AND status = 'foreign_tax_hold'
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async thawForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The THAW CAS sweep — the VERIFIED withholding credit's ledger leg:
+    // ONLY the scope's 'foreign_tax_hold' legs return to holding. A re-run
+    // is an honest no-op (the already-thawed legs no longer match).
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'unclaimed_holding'
+         WHERE kind = 'unclaimed_holding' AND status = 'foreign_tax_hold'
+           AND split_run_id = ?`,
+      )
+      .run(taxHoldScope);
+    return Promise.resolve(result.changes);
+  }
+
+  async freezeForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The FREEZE CAS sweep — the foreign-tax-hold lane's ledger leg: ONLY
+    // the scope's still-held legs enter the freeze. A re-applied hold is a
+    // counted no-op (the already-frozen legs no longer match).
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'foreign_tax_hold'
+         WHERE kind = 'unclaimed_holding' AND status = 'unclaimed_holding'
+           AND split_run_id = ?`,
+      )
+      .run(taxHoldScope);
+    return Promise.resolve(result.changes);
+  }
+
+  async upsertWithholdingTaxCreditVerification(
+    row: Omit<WithholdingTaxCreditVerificationRecord, 'id'>,
+  ): Promise<WithholdingTaxCreditVerificationRecord> {
+    // One verification of record per (country_code, tax_year) — the ON
+    // CONFLICT upsert replaces the evidence state atomically (the upgrade
+    // pending → verified converges).
+    const record: WithholdingTaxCreditVerificationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO withholding_tax_credit_verifications
+           (id, country_code, tax_year, state, treaty_ref, evidence_ref, verified_by, verified_at, created_at, updated_at)
+         VALUES (@id, @country_code, @tax_year, @state, @treaty_ref, @evidence_ref, @verified_by, @verified_at, @created_at, @updated_at)
+         ON CONFLICT (country_code, tax_year) DO UPDATE SET
+           state = excluded.state,
+           treaty_ref = excluded.treaty_ref,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           verified_at = excluded.verified_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getWithholdingTaxCreditVerification(
+    countryCode: string,
+    taxYear: number,
+  ): Promise<WithholdingTaxCreditVerificationRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM withholding_tax_credit_verifications WHERE country_code = ? AND tax_year = ?`,
+        )
+        .get(countryCode, taxYear) as WithholdingTaxCreditVerificationRecord | undefined,
+    );
+  }
+
+  async upsertIsbnRightsVerification(
+    row: Omit<IsbnRightsVerificationRecord, 'id'>,
+  ): Promise<IsbnRightsVerificationRecord> {
+    // One verification of record per isbn — the ON CONFLICT upsert replaces
+    // the evidence state atomically.
+    const record: IsbnRightsVerificationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO isbn_rights_verifications
+           (id, isbn, state, evidence_ref, verified_by, verified_at, created_at, updated_at)
+         VALUES (@id, @isbn, @state, @evidence_ref, @verified_by, @verified_at, @created_at, @updated_at)
+         ON CONFLICT (isbn) DO UPDATE SET
+           state = excluded.state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           verified_at = excluded.verified_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getIsbnRightsVerification(isbn: string): Promise<IsbnRightsVerificationRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM isbn_rights_verifications WHERE isbn = ?`)
+        .get(isbn) as IsbnRightsVerificationRecord | undefined,
+    );
+  }
+
+  async upsertBookReturnsReservePolicy(
+    row: Omit<BookReturnsReservePolicyRecord, 'id'>,
+  ): Promise<BookReturnsReservePolicyRecord> {
+    // One policy of record per isbn — the ON CONFLICT upsert replaces the
+    // money terms atomically (the option-agreement precedent).
+    const record: BookReturnsReservePolicyRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_returns_reserve_policies
+           (id, isbn, reserve_rate_bps, reserve_window_days, beneficiary_payee_id, beneficiary_payee_name, created_at, updated_at)
+         VALUES (@id, @isbn, @reserve_rate_bps, @reserve_window_days, @beneficiary_payee_id, @beneficiary_payee_name, @created_at, @updated_at)
+         ON CONFLICT (isbn) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           reserve_window_days = excluded.reserve_window_days,
+           beneficiary_payee_id = excluded.beneficiary_payee_id,
+           beneficiary_payee_name = excluded.beneficiary_payee_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getBookReturnsReservePolicy(isbn: string): Promise<BookReturnsReservePolicyRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM book_returns_reserve_policies WHERE isbn = ?`)
+        .get(isbn) as BookReturnsReservePolicyRecord | undefined,
+    );
+  }
+
+  async listBookReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'book_returns_reserve' AND status = 'book_returns_reserve'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async listBookReturnsReserveCreditsByIsbn(isbn: string): Promise<LedgerTransactionRecord[]> {
+    // EVERY state of the ISBN's reserves, oldest first — the FIFO draw
+    // ordering and the gate's window derivation (a settled reserve still
+    // proves its period ran).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'book_returns_reserve' AND payee_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(bookReturnsReservePayeeId(isbn)) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleBookReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS. changes = 0
+    // means the row is absent or no longer held; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'book_returns_reserve'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  async insertBookReserveDrawdown(
+    row: Omit<BookReserveDrawdownRecord, 'id'>,
+  ): Promise<BookReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter: a concurrent drawdown that loses
+    // the position throws.
+    const record: BookReserveDrawdownRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_reserve_drawdowns
+           (id, reserve_ledger_id, drawdown_class, source_event_id, drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (@id, @reserve_ledger_id, @drawdown_class, @source_event_id, @drawn_before_cents, @drawn_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listBookReserveDrawdowns(reserveLedgerId: string): Promise<BookReserveDrawdownRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM book_reserve_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY drawn_before_cents ASC`,
+        )
+        .all(reserveLedgerId) as BookReserveDrawdownRecord[],
+    );
+  }
+
+  async insertBookReturnChargeback(
+    row: Omit<BookReturnChargebackRecord, 'id'>,
+  ): Promise<BookReturnChargebackRecord> {
+    // UNIQUE on event_id — a re-shipped chargeback event is the unique
+    // violation (the replay surface).
+    const record: BookReturnChargebackRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_return_chargebacks
+           (id, event_id, isbn, chargeback_class, chargeback_cents, currency, created_at)
+         VALUES (@id, @event_id, @isbn, @chargeback_class, @chargeback_cents, @currency, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listBookReturnChargebacksByIsbn(isbn: string): Promise<BookReturnChargebackRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM book_return_chargebacks
+         WHERE isbn = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(isbn) as BookReturnChargebackRecord[],
+    );
+  }
+
+  async insertBookChargebackOffsetApplication(
+    row: Omit<BookChargebackOffsetApplicationRecord, 'id'>,
+  ): Promise<BookChargebackOffsetApplicationRecord> {
+    // UNIQUE on (chargeback_id, holding_ledger_id) — a replayed release is
+    // the unique violation, never a double offset. UNIQUE on
+    // (chargeback_id, offset_before_cents) — the insert-as-lock position
+    // arbiter: exactly one release wins an offset's next running position.
+    const record: BookChargebackOffsetApplicationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_chargeback_offset_applications
+           (id, chargeback_id, holding_ledger_id, offset_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @chargeback_id, @holding_ledger_id, @offset_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listBookChargebackOffsetApplications(
+    chargebackId: string,
+  ): Promise<BookChargebackOffsetApplicationRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM book_chargeback_offset_applications
+         WHERE chargeback_id = ?
+         ORDER BY offset_before_cents ASC`,
+        )
+        .all(chargebackId) as BookChargebackOffsetApplicationRecord[],
+    );
   }
 
   async getVtuberTaxWithholdingVerification(
