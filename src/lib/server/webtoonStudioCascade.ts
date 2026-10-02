@@ -117,6 +117,7 @@ import {
 import type {
   CompanyDustRecord,
   TaxEscrowRecord,
+  WebtoonLocalizationContractRecord,
   WebtoonLocalizationCostScheduleRecord,
   WebtoonRecoupmentApplicationRecord,
   WebtoonRecoupmentPoolClass,
@@ -606,6 +607,19 @@ export function buildWebtoonTranslationCascadePlan(
 // line absorbing the integer-cent remainder.
 // ---------------------------------------------------------------------------
 
+/** The fee terms a release derives from the localization contract of record. */
+function localizationFee(
+  contract: WebtoonLocalizationContractRecord,
+): WebtoonLocalizationFee {
+  return contract.fee_mode === "flat_fee"
+    ? {
+        mode: "flat_fee",
+        per_chapter_flat_fee_cents: contract.per_chapter_flat_fee_cents,
+        chapter_count: 1, // One release amortizes one chapter's fee application.
+      }
+    : { mode: "rev_share", rev_share_bps: contract.rev_share_bps };
+}
+
 export function buildWebtoonLocalizationAmortizationLine(
   totalCostCents: number,
   amortizationPeriods: number,
@@ -1009,7 +1023,9 @@ export async function releaseTranslationLocalizationEscrow(
 
   // THE cascade plan — built over what is actually HELD (the escrow row's
   // amount of record, less the cost-recovery line), with the localizer and
-  // the fee terms from the contract of record.
+  // the fee terms from the contract of record. Reassignable: the post-CAS
+  // drift handler below rebuilds it when a concurrent consume moves the
+  // schedule's line.
   const roles = await store.listWebtoonStudioSplitRoles(feed.seriesId);
   const planned = buildWebtoonTranslationCascadePlan({
     feed_net_cents: row.amount_cents - amortizationCandidateCents,
@@ -1017,62 +1033,73 @@ export async function releaseTranslationLocalizationEscrow(
       payee_id: contract.localizer_payee_id,
       payee_name: contract.localizer_payee_name,
     },
-    fee:
-      contract.fee_mode === "flat_fee"
-        ? {
-            mode: "flat_fee",
-            per_chapter_flat_fee_cents: contract.per_chapter_flat_fee_cents,
-            chapter_count: 1, // One release amortizes one chapter's fee application.
-          }
-        : { mode: "rev_share", rev_share_bps: contract.rev_share_bps },
+    fee: localizationFee(contract),
     author_payee_id: input.author_payee_id,
     author_payee_name: input.author_payee_name,
     roles,
   });
   if (!planned.ok) return planned;
-  const plan = planned.value;
+  let plan: WebtoonTranslationCascadePlan = planned.value;
 
   // The clearance gate — every credited payee rides the SAME fail-closed
   // payout compliance gate as a Lithic dispatch, on the PUBLISHING vertical
   // (ip_rights_cleared — the founder canon; the state source resolves the
   // durable verification state). The platform house payee holds no KYC
-  // record by design and is skipped.
+  // record by design and is skipped. Runs before the CAS on the candidate
+  // plan, and again on any post-CAS rebuild (the drift handler below).
   const verticalStateSource = getVerticalComplianceStateSource();
-  const gatedParties: Array<{ payee_id: string; payee_name: string }> = [
-    ...(plan.localizer.royalty_cents > 0
-      ? [{ payee_id: plan.localizer.payee_id, payee_name: plan.localizer.payee_name }]
-      : []),
-    ...plan.studio.groups.flatMap((group) =>
-      group.members.map((member) => ({
-        payee_id: member.payee_id,
-        payee_name: member.payee_name,
-      })),
-    ),
-    ...(plan.studio.author.net_cents > 0
-      ? [{ payee_id: plan.studio.author.payee_id, payee_name: plan.studio.author.payee_name }]
-      : []),
-  ];
-  for (const party of gatedParties) {
-    if (party.payee_id === COMPANY_VARIANCE_PAYEE_ID) continue;
-    const kycStatus = await resolveCreatorKycStatus(store, party.payee_id);
-    const verticalState = await verticalStateSource({
-      payeeId: party.payee_id,
-      vertical: WEBTOON_CASCADE_VERTICAL,
-    });
-    const compliance = evaluatePayoutCompliance({
-      operatorSettlementApproved: input.operator_settlement_approved,
-      kycStatus,
-      verticalState,
-    });
-    if (!compliance.ok) {
-      return {
-        ok: false,
-        status: 403,
-        code: compliance.code,
-        message: `Translation cascade release refused for payee "${party.payee_id}": ${compliance.message}`,
-      };
+  const runComplianceGate = async (
+    cascadePlan: WebtoonTranslationCascadePlan,
+  ): Promise<WebtoonCascadeFailure | null> => {
+    const gatedParties: Array<{ payee_id: string; payee_name: string }> = [
+      ...(cascadePlan.localizer.royalty_cents > 0
+        ? [
+            {
+              payee_id: cascadePlan.localizer.payee_id,
+              payee_name: cascadePlan.localizer.payee_name,
+            },
+          ]
+        : []),
+      ...cascadePlan.studio.groups.flatMap((group) =>
+        group.members.map((member) => ({
+          payee_id: member.payee_id,
+          payee_name: member.payee_name,
+        })),
+      ),
+      ...(cascadePlan.studio.author.net_cents > 0
+        ? [
+            {
+              payee_id: cascadePlan.studio.author.payee_id,
+              payee_name: cascadePlan.studio.author.payee_name,
+            },
+          ]
+        : []),
+    ];
+    for (const party of gatedParties) {
+      if (party.payee_id === COMPANY_VARIANCE_PAYEE_ID) continue;
+      const kycStatus = await resolveCreatorKycStatus(store, party.payee_id);
+      const verticalState = await verticalStateSource({
+        payeeId: party.payee_id,
+        vertical: WEBTOON_CASCADE_VERTICAL,
+      });
+      const compliance = evaluatePayoutCompliance({
+        operatorSettlementApproved: input.operator_settlement_approved,
+        kycStatus,
+        verticalState,
+      });
+      if (!compliance.ok) {
+        return {
+          ok: false,
+          status: 403,
+          code: compliance.code,
+          message: `Translation cascade release refused for payee "${party.payee_id}": ${compliance.message}`,
+        };
+      }
     }
-  }
+    return null;
+  };
+  const gateFailure = await runComplianceGate(plan);
+  if (gateFailure !== null) return gateFailure;
 
   // The CAS wins BEFORE any money moves (the conditional settle): the
   // concurrent release loser reads undefined here and refuses with the
@@ -1093,10 +1120,9 @@ export async function releaseTranslationLocalizationEscrow(
 
   // The amortization line consumes AFTER the CAS win (a gate refusal or a
   // lost CAS must never consume a schedule line). The cap is the escrow's
-  // amount of record; the consumed line's applied cents are what the plan
-  // already routed (the candidate is deterministic — a concurrent consume
-  // of ANOTHER receipt on the same schedule advances the line this release
-  // gets, and the plan's zero-balance tripwire below refuses a mismatch).
+  // amount of record; the drift handler below re-syncs the routing when a
+  // concurrent release on the SAME schedule moved the line between the
+  // candidate read and this CAS win.
   let amortization: TranslationEscrowReleaseSuccess["value"]["amortization"] = null;
   if (schedule !== undefined && input.amortization_schedule_ref !== null) {
     const consumed = await consumeNextLocalizationLine(
@@ -1119,6 +1145,32 @@ export async function releaseTranslationLocalizationEscrow(
       computed_cents: consumed.consumption.computed_cents,
       applied_cents: Math.min(consumed.consumption.computed_cents, row.amount_cents),
     };
+    // The drift handler — a concurrent release on the SAME schedule may have
+    // consumed a line between the candidate read and this CAS win. The
+    // consumed line is the recovery's authority: route its APPLIED amount
+    // (never the stale pre-CAS candidate) and rebuild the cascade over the
+    // true post-recovery remainder, re-running the fail-closed gate past the
+    // CAS. A refusal here leaves the settled receipt with nothing routed —
+    // the visible alarm (the same shape as the consume-failure refusal
+    // above); the common no-race path is untouched (applied === candidate).
+    if (consumed.consumption.applied_cents !== amortizationCandidateCents) {
+      amortizationCandidateCents = consumed.consumption.applied_cents;
+      const rebuilt = buildWebtoonTranslationCascadePlan({
+        feed_net_cents: row.amount_cents - amortizationCandidateCents,
+        localizer: {
+          payee_id: contract.localizer_payee_id,
+          payee_name: contract.localizer_payee_name,
+        },
+        fee: localizationFee(contract),
+        author_payee_id: input.author_payee_id,
+        author_payee_name: input.author_payee_name,
+        roles,
+      });
+      if (!rebuilt.ok) return rebuilt;
+      plan = rebuilt.value;
+      const regateFailure = await runComplianceGate(plan);
+      if (regateFailure !== null) return regateFailure;
+    }
   }
 
   // The routing, in the founder's mandated order. Every branch conserves
