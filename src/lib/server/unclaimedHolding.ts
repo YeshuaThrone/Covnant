@@ -47,6 +47,7 @@ import { applyWithholding } from "@/modules/compliance/engine";
 import {
   evaluatePayoutCompliance,
   getVerticalComplianceStateSource,
+  resolveAiVerticalComplianceState,
   resolveCreatorKycStatus,
   type AssetVertical,
 } from "@/modules/compliance/payoutGate";
@@ -274,6 +275,18 @@ export async function releaseUnclaimedHolding(
       message: `Ledger transaction ${row.id} is kind "${row.kind}" — only unclaimed holding credits release here.`,
     };
   }
+  if (row.status === "unauthorized_training_hold") {
+    // THE DISPUTE FREEZE (PR 25): the leg is frozen by an active IP
+    // attribution dispute against the training dataset. The ONLY exit is
+    // the verified resolution path (the dispute's CAS resolution → the
+    // thaw sweep) — a release attempt never unfreezes.
+    return {
+      ok: false,
+      status: 403,
+      code: "unauthorized_training_hold",
+      message: `Holding credit ${row.id} is frozen in unauthorized_training_hold — an IP attribution dispute against the training dataset is active. Thaw runs only through the verified resolution path.`,
+    };
+  }
   if (row.status !== "unclaimed_holding") {
     return {
       ok: false,
@@ -320,10 +333,20 @@ export async function releaseUnclaimedHolding(
   for (const party of allocation.splits) {
     if (party.payee_id === COMPANY_VARIANCE_PAYEE_ID) continue;
     const kycStatus = await resolveCreatorKycStatus(store, party.payee_id);
-    const verticalState = await verticalStateSource({
+    let verticalState = await verticalStateSource({
       payeeId: party.payee_id,
       vertical: input.vertical,
     });
+    if (verticalState === null && input.vertical === "ai") {
+      // The AI vertical's fallback (PR 25): when the request-scoped source
+      // has no state for the payee, resolve from the payout-gate states of
+      // record (migration 0029) — fail-closed on absent (null stays null)
+      // and on 'unknown' (maps to false, the specific condition refuses).
+      verticalState = await resolveAiVerticalComplianceState(
+        store,
+        party.payee_id,
+      );
+    }
     const compliance = evaluatePayoutCompliance({
       operatorSettlementApproved: input.operator_settlement_approved,
       kycStatus,

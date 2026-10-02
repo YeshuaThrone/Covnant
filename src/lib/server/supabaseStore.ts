@@ -113,6 +113,11 @@ import type {
   MerchFulfillmentTrackingRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
+  AiTrainingDisputeRecord,
+  AiTrainingDisputeStatus,
+  AiPayoutGateStateRecord,
+  AiDatasetDeprecationRecord,
+  AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -280,6 +285,14 @@ const TABLES = {
   // terms of record and the unattributed pool's fallback inputs.
   aiModelSplitTerms: 'ai_model_split_terms',
   aiModelContributions: 'ai_model_contributions',
+  // Migration 0029 (PR 25) — the AI training dispute freeze, the AI
+  // payout-gate states, the dataset deprecations, and the allocation
+  // archives that retire historical attributions without touching the
+  // append-only ledger rows.
+  aiTrainingDisputes: 'ai_training_disputes',
+  aiPayoutGateStates: 'ai_payout_gate_states',
+  aiDatasetDeprecations: 'ai_dataset_deprecations',
+  aiDatasetAllocationArchives: 'ai_dataset_allocation_archives',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -1546,6 +1559,249 @@ export class SupabaseStore implements Store {
         .eq('ai_model_id', aiModelId)
         .order('created_at', { ascending: true }),
       'listAiModelContributions',
+    );
+  }
+
+  // --- AI training dispute freeze + payout gate states + dataset
+  // --- deprecations (migration 0029, PR 25)
+
+  async insertAiTrainingDispute(
+    row: Omit<AiTrainingDisputeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiTrainingDisputeRecord> {
+    // UNIQUE per (ai_model_id, dataset_version, rights_holder_payee_id) —
+    // a re-filed dispute surfaces the unique violation (23505); the
+    // caller recovers by reading the existing row.
+    const now = new Date().toISOString();
+    return this.oneStrict<AiTrainingDisputeRecord>(
+      this.client
+        .from(TABLES.aiTrainingDisputes)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: now, updated_at: now })
+        .select()
+        .maybeSingle(),
+      'insertAiTrainingDispute',
+    );
+  }
+
+  async getAiTrainingDispute(
+    id: string,
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    return this.one<AiTrainingDisputeRecord>(
+      this.client
+        .from(TABLES.aiTrainingDisputes)
+        .select()
+        .eq('id', id)
+        .maybeSingle(),
+      'getAiTrainingDispute',
+    );
+  }
+
+  async listAiTrainingDisputes(
+    status?: AiTrainingDisputeStatus,
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<AiTrainingDisputeRecord[]> {
+    // Newest first (created_at DESC, id DESC as the strict tiebreak).
+    let query = this.client
+      .from(TABLES.aiTrainingDisputes)
+      .select()
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (status !== undefined) {
+      query = query.eq('status', status);
+    }
+    return this.many<AiTrainingDisputeRecord>(
+      query,
+      'listAiTrainingDisputes',
+    );
+  }
+
+  async resolveAiTrainingDispute(
+    id: string,
+    resolution: {
+      resolution_notes: string | null;
+      resolved_by: string;
+      resolved_at: string;
+    },
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    // THE VERIFIED RESOLUTION PATH's CAS — the UPDATE's WHERE pins
+    // status = 'filed': only the first resolver wins, the concurrent
+    // resolution loser reads undefined. PostgREST's .select() returns the
+    // rows the original filters matched (empty = not the winner).
+    const resolved = await this.many<AiTrainingDisputeRecord>(
+      this.client
+        .from(TABLES.aiTrainingDisputes)
+        .update({
+          status: 'resolved',
+          resolution_notes: resolution.resolution_notes,
+          resolved_by: resolution.resolved_by,
+          resolved_at: resolution.resolved_at,
+          updated_at: resolution.resolved_at,
+        })
+        .eq('id', id)
+        .eq('status', 'filed')
+        .select(),
+      'resolveAiTrainingDispute',
+    );
+    return resolved[0];
+  }
+
+  async freezeUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The FREEZE CAS sweep — the batch-settlement precedent: the status
+    // predicate in the UPDATE's WHERE only flips still-held legs of the
+    // model's ingest scope, and the returned row count is the honest
+    // report of what this call froze (a re-file's sweep is a no-op).
+    const frozen = await this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'unauthorized_training_hold' })
+        .eq('split_run_id', modelLedgerScope)
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'unclaimed_holding')
+        .select(),
+      'freezeUnauthorizedTrainingHolds',
+    );
+    return frozen.length;
+  }
+
+  async thawUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The THAW CAS sweep — the verified resolution's ledger leg: ONLY the
+    // scope's 'unauthorized_training_hold' legs return to holding.
+    const thawed = await this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'unclaimed_holding' })
+        .eq('split_run_id', modelLedgerScope)
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'unauthorized_training_hold')
+        .select(),
+      'thawUnauthorizedTrainingHolds',
+    );
+    return thawed.length;
+  }
+
+  async listUnauthorizedTrainingHolds(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue — a thawed leg leaves the listing.
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'unauthorized_training_hold')
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(limit),
+      'listUnauthorizedTrainingHolds',
+    );
+  }
+
+  async upsertAiPayoutGateState(
+    row: Omit<AiPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiPayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    const now = new Date().toISOString();
+    return this.oneStrict<AiPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.aiPayoutGateStates)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), created_at: now, updated_at: now },
+          { onConflict: 'payee_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertAiPayoutGateState',
+    );
+  }
+
+  async getAiPayoutGateState(
+    payeeId: string,
+  ): Promise<AiPayoutGateStateRecord | undefined> {
+    return this.one<AiPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.aiPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .maybeSingle(),
+      'getAiPayoutGateState',
+    );
+  }
+
+  async insertAiDatasetDeprecation(
+    row: Omit<AiDatasetDeprecationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiDatasetDeprecationRecord> {
+    // UNIQUE per (ai_model_id, dataset_version) — a re-deprecation
+    // surfaces the unique violation; the caller recovers by reading the row.
+    const now = new Date().toISOString();
+    return this.oneStrict<AiDatasetDeprecationRecord>(
+      this.client
+        .from(TABLES.aiDatasetDeprecations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: now, updated_at: now })
+        .select()
+        .maybeSingle(),
+      'insertAiDatasetDeprecation',
+    );
+  }
+
+  async getAiDatasetDeprecation(
+    aiModelId: string,
+    datasetVersion: string,
+  ): Promise<AiDatasetDeprecationRecord | undefined> {
+    return this.one<AiDatasetDeprecationRecord>(
+      this.client
+        .from(TABLES.aiDatasetDeprecations)
+        .select()
+        .eq('ai_model_id', aiModelId)
+        .eq('dataset_version', datasetVersion)
+        .maybeSingle(),
+      'getAiDatasetDeprecation',
+    );
+  }
+
+  async listAiDatasetDeprecationsByModel(
+    aiModelId: string,
+  ): Promise<AiDatasetDeprecationRecord[]> {
+    // Oldest first — the posting pass's halt set reads the history in order.
+    return this.many<AiDatasetDeprecationRecord>(
+      this.client
+        .from(TABLES.aiDatasetDeprecations)
+        .select()
+        .eq('ai_model_id', aiModelId)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true }),
+      'listAiDatasetDeprecationsByModel',
+    );
+  }
+
+  async insertAiDatasetAllocationArchive(
+    row: Omit<AiDatasetAllocationArchiveRecord, 'id'>,
+  ): Promise<AiDatasetAllocationArchiveRecord> {
+    // UNIQUE per (deprecation_id, ledger_transaction_id) — a re-run
+    // deprecation converges, never double-archives. The referenced ledger
+    // row is NOT touched (the append-only trail stays intact).
+    return this.oneStrict<AiDatasetAllocationArchiveRecord>(
+      this.client
+        .from(TABLES.aiDatasetAllocationArchives)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertAiDatasetAllocationArchive',
+    );
+  }
+
+  async listAiDatasetAllocationArchives(
+    deprecationId: string,
+  ): Promise<AiDatasetAllocationArchiveRecord[]> {
+    // Oldest first — the archival order of record.
+    return this.many<AiDatasetAllocationArchiveRecord>(
+      this.client
+        .from(TABLES.aiDatasetAllocationArchives)
+        .select()
+        .eq('deprecation_id', deprecationId)
+        .order('archived_at', { ascending: true })
+        .order('id', { ascending: true }),
+      'listAiDatasetAllocationArchives',
     );
   }
 

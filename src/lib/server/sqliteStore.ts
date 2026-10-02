@@ -118,6 +118,11 @@ import type {
   MerchFulfillmentTrackingRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
+  AiTrainingDisputeRecord,
+  AiTrainingDisputeStatus,
+  AiPayoutGateStateRecord,
+  AiDatasetDeprecationRecord,
+  AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -828,6 +833,65 @@ CREATE TABLE IF NOT EXISTS ai_model_contributions (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (ai_model_id, contributor_payee_id)
+);
+
+-- AI training dispute freeze + payout gate states + dataset deprecations
+-- (0029, PR 25): the dispute of record (UNIQUE per model+version+payee —
+-- a re-filed claim converges), the AI payout-gate states the release
+-- gate reads fail-closed (UNIQUE per payee), the dataset deprecations of
+-- record (UNIQUE per model+version), and the allocation archives that
+-- retire historical attributions WITHOUT touching the append-only
+-- ledger rows (UNIQUE per deprecation+ledger row — a re-run converges).
+CREATE TABLE IF NOT EXISTS ai_training_disputes (
+  id TEXT PRIMARY KEY,
+  ai_model_id TEXT NOT NULL,
+  dataset_version TEXT NOT NULL,
+  rights_holder_payee_id TEXT NOT NULL,
+  rights_holder_payee_name TEXT NOT NULL,
+  dispute_basis TEXT NOT NULL,
+  status TEXT NOT NULL,
+  resolution_notes TEXT,
+  resolved_by TEXT,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (ai_model_id, dataset_version, rights_holder_payee_id)
+);
+
+CREATE TABLE IF NOT EXISTS ai_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL UNIQUE,
+  ai_model_id TEXT,
+  ai_training_consent_state TEXT NOT NULL,
+  synthetic_voice_likeness_state TEXT NOT NULL,
+  verified_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_dataset_deprecations (
+  id TEXT PRIMARY KEY,
+  ai_model_id TEXT NOT NULL,
+  dataset_version TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  rights_holder_payee_id TEXT,
+  rights_holder_payee_name TEXT,
+  deprecated_at TEXT NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (ai_model_id, dataset_version)
+);
+
+CREATE TABLE IF NOT EXISTS ai_dataset_allocation_archives (
+  id TEXT PRIMARY KEY,
+  deprecation_id TEXT NOT NULL,
+  ledger_transaction_id TEXT NOT NULL,
+  contributor_payee_id TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  archived_at TEXT NOT NULL,
+  UNIQUE (deprecation_id, ledger_transaction_id)
 );
 
 CREATE TABLE IF NOT EXISTS gaming_studio_kyc_verifications (
@@ -2995,6 +3059,255 @@ export class SqliteStore implements Store {
          ORDER BY created_at ASC, rowid ASC`,
       )
       .all(aiModelId) as AiModelContributionRecord[];
+    return Promise.resolve(rows);
+  }
+
+  // --- AI training dispute freeze + payout gate states + dataset
+  // --- deprecations (migration 0029, PR 25)
+
+  async insertAiTrainingDispute(
+    row: Omit<AiTrainingDisputeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiTrainingDisputeRecord> {
+    // UNIQUE per (ai_model_id, dataset_version, rights_holder_payee_id) —
+    // a re-filed dispute surfaces the unique violation; the caller
+    // recovers by reading the existing row.
+    const now = new Date().toISOString();
+    const record: AiTrainingDisputeRecord = { ...row, id: randomUUID(), created_at: now, updated_at: now };
+    this.db
+      .prepare(
+        `INSERT INTO ai_training_disputes
+           (id, ai_model_id, dataset_version, rights_holder_payee_id, rights_holder_payee_name,
+            dispute_basis, status, resolution_notes, resolved_by, resolved_at, created_at, updated_at)
+         VALUES (@id, @ai_model_id, @dataset_version, @rights_holder_payee_id, @rights_holder_payee_name,
+            @dispute_basis, @status, @resolution_notes, @resolved_by, @resolved_at, @created_at, @updated_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getAiTrainingDispute(
+    id: string,
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM ai_training_disputes WHERE id = ?`)
+      .get(id) as AiTrainingDisputeRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async listAiTrainingDisputes(
+    status?: AiTrainingDisputeStatus,
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<AiTrainingDisputeRecord[]> {
+    // Newest first (created_at DESC, rowid DESC as the strict tiebreak).
+    const rows = (
+      status === undefined
+        ? this.db
+            .prepare(
+              `SELECT * FROM ai_training_disputes
+               ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+            )
+            .all(limit)
+        : this.db
+            .prepare(
+              `SELECT * FROM ai_training_disputes
+               WHERE status = ?
+               ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+            )
+            .all(status, limit)
+    ) as AiTrainingDisputeRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async resolveAiTrainingDispute(
+    id: string,
+    resolution: {
+      resolution_notes: string | null;
+      resolved_by: string;
+      resolved_at: string;
+    },
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    // THE VERIFIED RESOLUTION PATH's CAS — the single conditional UPDATE
+    // flips ONE filed row; changes === 0 means unknown id or an already-
+    // resolved dispute (the concurrent resolution loser reads undefined).
+    const result = this.db
+      .prepare(
+        `UPDATE ai_training_disputes
+         SET status = 'resolved', resolution_notes = ?, resolved_by = ?,
+             resolved_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'filed'`,
+      )
+      .run(
+        resolution.resolution_notes,
+        resolution.resolved_by,
+        resolution.resolved_at,
+        resolution.resolved_at,
+        id,
+      );
+    if (result.changes !== 1) {
+      return Promise.resolve(undefined);
+    }
+    return this.getAiTrainingDispute(id);
+  }
+
+  async freezeUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The FREEZE CAS sweep — one conditional statement over the model's
+    // ingest scope; `changes` is the count of legs THIS call froze. The
+    // status predicate is the CAS: already-frozen, released, and settled
+    // legs are untouched (a re-file's sweep is a counted no-op).
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'unauthorized_training_hold'
+         WHERE kind = 'unclaimed_holding' AND status = 'unclaimed_holding'
+           AND split_run_id = ?`,
+      )
+      .run(modelLedgerScope);
+    return Promise.resolve(result.changes);
+  }
+
+  async thawUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The THAW CAS sweep — the verified resolution's ledger leg: ONLY the
+    // scope's 'unauthorized_training_hold' legs return to holding.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'unclaimed_holding'
+         WHERE kind = 'unclaimed_holding' AND status = 'unauthorized_training_hold'
+           AND split_run_id = ?`,
+      )
+      .run(modelLedgerScope);
+    return Promise.resolve(result.changes);
+  }
+
+  async listUnauthorizedTrainingHolds(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue — a thawed leg leaves the listing.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM ledger_transactions
+         WHERE kind = 'unclaimed_holding' AND status = 'unauthorized_training_hold'
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(limit) as LedgerTransactionRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async upsertAiPayoutGateState(
+    row: Omit<AiPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiPayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    const now = new Date().toISOString();
+    const record: AiPayoutGateStateRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO ai_payout_gate_states
+           (id, payee_id, ai_model_id, ai_training_consent_state, synthetic_voice_likeness_state,
+            verified_by, created_at, updated_at)
+         VALUES (@id, @payee_id, @ai_model_id, @ai_training_consent_state, @synthetic_voice_likeness_state,
+            @verified_by, @created_at, @updated_at)
+         ON CONFLICT (payee_id) DO UPDATE SET
+           ai_model_id = excluded.ai_model_id,
+           ai_training_consent_state = excluded.ai_training_consent_state,
+           synthetic_voice_likeness_state = excluded.synthetic_voice_likeness_state,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getAiPayoutGateState(
+    payeeId: string,
+  ): Promise<AiPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM ai_payout_gate_states WHERE payee_id = ?`)
+      .get(payeeId) as AiPayoutGateStateRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async insertAiDatasetDeprecation(
+    row: Omit<AiDatasetDeprecationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiDatasetDeprecationRecord> {
+    // UNIQUE per (ai_model_id, dataset_version) — a re-deprecation
+    // surfaces the unique violation; the caller recovers by reading the row.
+    const now = new Date().toISOString();
+    const record: AiDatasetDeprecationRecord = { ...row, id: randomUUID(), created_at: now, updated_at: now };
+    this.db
+      .prepare(
+        `INSERT INTO ai_dataset_deprecations
+           (id, ai_model_id, dataset_version, reason, rights_holder_payee_id,
+            rights_holder_payee_name, deprecated_at, notes, created_at, updated_at)
+         VALUES (@id, @ai_model_id, @dataset_version, @reason, @rights_holder_payee_id,
+            @rights_holder_payee_name, @deprecated_at, @notes, @created_at, @updated_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getAiDatasetDeprecation(
+    aiModelId: string,
+    datasetVersion: string,
+  ): Promise<AiDatasetDeprecationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM ai_dataset_deprecations
+         WHERE ai_model_id = ? AND dataset_version = ?`,
+      )
+      .get(aiModelId, datasetVersion) as AiDatasetDeprecationRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async listAiDatasetDeprecationsByModel(
+    aiModelId: string,
+  ): Promise<AiDatasetDeprecationRecord[]> {
+    // Oldest first — the posting pass's halt set reads the history in order.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM ai_dataset_deprecations
+         WHERE ai_model_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(aiModelId) as AiDatasetDeprecationRecord[];
+    return Promise.resolve(rows);
+  }
+
+  async insertAiDatasetAllocationArchive(
+    row: Omit<AiDatasetAllocationArchiveRecord, 'id'>,
+  ): Promise<AiDatasetAllocationArchiveRecord> {
+    // UNIQUE per (deprecation_id, ledger_transaction_id) — a re-run
+    // deprecation converges, never double-archives. The referenced ledger
+    // row is NOT touched (the append-only trail stays intact).
+    const record: AiDatasetAllocationArchiveRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO ai_dataset_allocation_archives
+           (id, deprecation_id, ledger_transaction_id, contributor_payee_id,
+            amount_cents, currency, archived_at)
+         VALUES (@id, @deprecation_id, @ledger_transaction_id, @contributor_payee_id,
+            @amount_cents, @currency, @archived_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listAiDatasetAllocationArchives(
+    deprecationId: string,
+  ): Promise<AiDatasetAllocationArchiveRecord[]> {
+    // Oldest first — the archival order of record.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM ai_dataset_allocation_archives
+         WHERE deprecation_id = ?
+         ORDER BY archived_at ASC, rowid ASC`,
+      )
+      .all(deprecationId) as AiDatasetAllocationArchiveRecord[];
     return Promise.resolve(rows);
   }
 

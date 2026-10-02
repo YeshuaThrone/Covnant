@@ -117,6 +117,11 @@ import type {
   MerchFulfillmentTrackingRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
+  AiTrainingDisputeRecord,
+  AiTrainingDisputeStatus,
+  AiPayoutGateStateRecord,
+  AiDatasetDeprecationRecord,
+  AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -211,6 +216,12 @@ export class InMemoryStore implements Store {
   // record and the unattributed pool's fallback inputs.
   private aiModelSplitTerms = new Map<string, AiModelSplitTermsRecord>();
   private aiModelContributions = new Map<string, AiModelContributionRecord>();
+  // --- AI training dispute freeze + payout gate states + dataset
+  // --- deprecations (migration 0029, PR 25)
+  private aiTrainingDisputes: AiTrainingDisputeRecord[] = [];
+  private aiPayoutGateStates = new Map<string, AiPayoutGateStateRecord>();
+  private aiDatasetDeprecations = new Map<string, AiDatasetDeprecationRecord>();
+  private aiDatasetAllocationArchives: AiDatasetAllocationArchiveRecord[] = [];
   // --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) ---
   private vtuberTaxWithholdingVerifications = new Map<
     string,
@@ -1172,6 +1183,218 @@ export class InMemoryStore implements Store {
     return [...this.aiModelContributions.values()].filter(
       (row) => row.ai_model_id === aiModelId,
     );
+  }
+
+  // --- AI training dispute freeze + payout gate states + dataset
+  // --- deprecations (migration 0029, PR 25)
+
+  async insertAiTrainingDispute(
+    row: Omit<AiTrainingDisputeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiTrainingDisputeRecord> {
+    // UNIQUE per (ai_model_id, dataset_version, rights_holder_payee_id) —
+    // a re-filed dispute throws the unique violation; the caller recovers
+    // by reading the existing row (the filing is never a second fact).
+    const duplicate = this.aiTrainingDisputes.find(
+      (existing) =>
+        existing.ai_model_id === row.ai_model_id &&
+        existing.dataset_version === row.dataset_version &&
+        existing.rights_holder_payee_id === row.rights_holder_payee_id,
+    );
+    if (duplicate !== undefined) {
+      uniqueViolation(
+        'ai_training_disputes.ai_model_id,dataset_version,rights_holder_payee_id',
+      );
+    }
+    const now = new Date().toISOString();
+    const record: AiTrainingDisputeRecord = { ...row, id: randomUUID(), created_at: now, updated_at: now };
+    this.aiTrainingDisputes.push(record);
+    return record;
+  }
+
+  async getAiTrainingDispute(
+    id: string,
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    return this.aiTrainingDisputes.find((row) => row.id === id);
+  }
+
+  async listAiTrainingDisputes(
+    status?: AiTrainingDisputeStatus,
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<AiTrainingDisputeRecord[]> {
+    // Newest first (created_at DESC, insertion order as tiebreak).
+    const rows = sortByTime(
+      this.aiTrainingDisputes,
+      (row) => row.created_at,
+      'desc',
+    );
+    return (status === undefined
+      ? rows
+      : rows.filter((row) => row.status === status)
+    ).slice(0, limit);
+  }
+
+  async resolveAiTrainingDispute(
+    id: string,
+    resolution: {
+      resolution_notes: string | null;
+      resolved_by: string;
+      resolved_at: string;
+    },
+  ): Promise<AiTrainingDisputeRecord | undefined> {
+    // The CAS: flips ONE row from 'filed' to 'resolved' in a single
+    // conditional step — a concurrent resolution loser reads undefined.
+    const row = this.aiTrainingDisputes.find((candidate) => candidate.id === id);
+    if (row === undefined || row.status !== 'filed') {
+      return undefined;
+    }
+    row.status = 'resolved';
+    row.resolution_notes = resolution.resolution_notes;
+    row.resolved_by = resolution.resolved_by;
+    row.resolved_at = resolution.resolved_at;
+    row.updated_at = resolution.resolved_at;
+    return row;
+  }
+
+  async freezeUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The FREEZE CAS sweep — flips EVERY held leg of the model's ingest
+    // scope; the status predicate is the CAS (already-frozen, released,
+    // and settled legs are untouched — a re-file's sweep is a no-op).
+    let frozen = 0;
+    for (const row of this.ledgerTransactions) {
+      if (
+        row.kind === 'unclaimed_holding' &&
+        row.status === 'unclaimed_holding' &&
+        row.split_run_id === modelLedgerScope
+      ) {
+        row.status = 'unauthorized_training_hold';
+        frozen += 1;
+      }
+    }
+    return frozen;
+  }
+
+  async thawUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number> {
+    // The THAW CAS sweep — the verified resolution's ledger leg: ONLY
+    // 'unauthorized_training_hold' legs of the scope return to holding.
+    let thawed = 0;
+    for (const row of this.ledgerTransactions) {
+      if (
+        row.kind === 'unclaimed_holding' &&
+        row.status === 'unauthorized_training_hold' &&
+        row.split_run_id === modelLedgerScope
+      ) {
+        row.status = 'unclaimed_holding';
+        thawed += 1;
+      }
+    }
+    return thawed;
+  }
+
+  async listUnauthorizedTrainingHolds(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue: a thawed leg leaves the listing (its
+    // status returned to 'unclaimed_holding'). Newest first.
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'unclaimed_holding' &&
+          row.status === 'unauthorized_training_hold',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async upsertAiPayoutGateState(
+    row: Omit<AiPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiPayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    const now = new Date().toISOString();
+    const existing = this.aiPayoutGateStates.get(row.payee_id);
+    const record: AiPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.aiPayoutGateStates.set(row.payee_id, record);
+    return record;
+  }
+
+  async getAiPayoutGateState(
+    payeeId: string,
+  ): Promise<AiPayoutGateStateRecord | undefined> {
+    return this.aiPayoutGateStates.get(payeeId);
+  }
+
+  async insertAiDatasetDeprecation(
+    row: Omit<AiDatasetDeprecationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiDatasetDeprecationRecord> {
+    // UNIQUE per (ai_model_id, dataset_version) — a re-deprecation throws
+    // the unique violation; the caller recovers by reading the row.
+    const key = `${row.ai_model_id}\u0000${row.dataset_version}`;
+    if (this.aiDatasetDeprecations.has(key)) {
+      uniqueViolation('ai_dataset_deprecations.ai_model_id,dataset_version');
+    }
+    const now = new Date().toISOString();
+    const record: AiDatasetDeprecationRecord = { ...row, id: randomUUID(), created_at: now, updated_at: now };
+    this.aiDatasetDeprecations.set(key, record);
+    return record;
+  }
+
+  async getAiDatasetDeprecation(
+    aiModelId: string,
+    datasetVersion: string,
+  ): Promise<AiDatasetDeprecationRecord | undefined> {
+    return this.aiDatasetDeprecations.get(`${aiModelId}\u0000${datasetVersion}`);
+  }
+
+  async listAiDatasetDeprecationsByModel(
+    aiModelId: string,
+  ): Promise<AiDatasetDeprecationRecord[]> {
+    // Oldest first (created_at ASC, insertion order as tiebreak) — the
+    // posting pass's halt set reads the deprecation history in order.
+    return sortByTime(
+      [...this.aiDatasetDeprecations.values()].filter(
+        (row) => row.ai_model_id === aiModelId,
+      ),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertAiDatasetAllocationArchive(
+    row: Omit<AiDatasetAllocationArchiveRecord, 'id'>,
+  ): Promise<AiDatasetAllocationArchiveRecord> {
+    // UNIQUE per (deprecation_id, ledger_transaction_id) — a re-run
+    // deprecation converges, never double-archives. The referenced ledger
+    // row is NOT touched here or anywhere (the append-only trail stays
+    // intact); this row is the retirement record.
+    if (
+      this.aiDatasetAllocationArchives.some(
+        (existing) =>
+          existing.deprecation_id === row.deprecation_id &&
+          existing.ledger_transaction_id === row.ledger_transaction_id,
+      )
+    ) {
+      uniqueViolation(
+        'ai_dataset_allocation_archives.deprecation_id,ledger_transaction_id',
+      );
+    }
+    const record: AiDatasetAllocationArchiveRecord = { ...row, id: randomUUID() };
+    this.aiDatasetAllocationArchives.push(record);
+    return record;
+  }
+
+  async listAiDatasetAllocationArchives(
+    deprecationId: string,
+  ): Promise<AiDatasetAllocationArchiveRecord[]> {
+    // Oldest first — the archival order of record.
+    return this.aiDatasetAllocationArchives
+      .filter((row) => row.deprecation_id === deprecationId)
+      .sort((a, b) => Date.parse(a.archived_at) - Date.parse(b.archived_at));
   }
 
   async upsertGamingStudioKyc(

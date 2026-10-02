@@ -312,6 +312,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // and the contributor dataset-token-weight registry; still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0028_ai_model_registry.sql',
+      // AI training dispute freeze + payout gate states + dataset
+      // deprecations (PR 25, the founder AI directive + the tokenization
+      // patch): the dispute of record, the payout-gate state tri-states,
+      // the deprecation registry, and the allocation archives; still no
+      // DDL on universal_royalty_ledger — the referencing pin below
+      // holds.
+      '0029_ai_dispute_freeze_consent_likeness_gates.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

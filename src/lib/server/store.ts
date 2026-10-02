@@ -105,7 +105,11 @@ import type {
   MerchConsignmentSettlementRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
-  AiContributorClass,
+  AiTrainingDisputeRecord,
+  AiTrainingDisputeStatus,
+  AiPayoutGateStateRecord,
+  AiDatasetDeprecationRecord,
+  AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -787,6 +791,148 @@ export interface Store {
   listAiModelContributions(
     aiModelId: string,
   ): Promise<AiModelContributionRecord[]>;
+
+  // --- AI training dispute freeze + payout gate states + dataset
+  // --- deprecations (migration 0029, PR 25)
+
+  /**
+   * Files one rights holder's IP attribution dispute against a model's
+   * training dataset version. UNIQUE on
+   * (ai_model_id, dataset_version, rights_holder_payee_id) — a re-filed
+   * dispute throws the unique violation and the caller recovers by
+   * reading the existing row (the quarantine-once precedent); the filing
+   * is never a second freeze fact.
+   */
+  insertAiTrainingDispute(
+    row: Omit<AiTrainingDisputeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiTrainingDisputeRecord>;
+
+  /** One dispute by id, or undefined when the id is unknown. */
+  getAiTrainingDispute(id: string): Promise<AiTrainingDisputeRecord | undefined>;
+
+  /**
+   * The disputes, newest first (created_at DESC, insertion order as
+   * tiebreak), bounded like every other list seam. status filters when
+   * present ('filed' = the active-freeze work queue, 'resolved' = the
+   * resolution history); absent = all of them.
+   */
+  listAiTrainingDisputes(
+    status?: AiTrainingDisputeStatus,
+    limit?: number,
+  ): Promise<AiTrainingDisputeRecord[]>;
+
+  /**
+   * THE VERIFIED RESOLUTION PATH's write — the CAS that ends a dispute:
+   * flips ONE row from status 'filed' to 'resolved' (with the resolution
+   * notes, the resolving operator, and resolved_at) in a single
+   * conditional statement. Returns the resolved row only when THIS call
+   * won the transition; undefined when the id is unknown OR the dispute
+   * is already resolved — the concurrent resolution loser reads exactly
+   * that. The only other writer allowed to thaw frozen legs reads this
+   * CAS first: there is no path from 'unauthorized_training_hold' back
+   * to a releasable state that does not run through a resolved dispute.
+   */
+  resolveAiTrainingDispute(
+    id: string,
+    resolution: {
+      resolution_notes: string | null;
+      resolved_by: string;
+      resolved_at: string;
+    },
+  ): Promise<AiTrainingDisputeRecord | undefined>;
+
+  /**
+   * The FREEZE CAS sweep — flips EVERY held unclaimed-holding leg of one
+   * model's ingest scope (split_run_id = the model scope) from status
+   * 'unclaimed_holding' to 'unauthorized_training_hold' in one
+   * conditional statement, and returns the count of legs this call
+   * froze. The status predicate is the CAS: already-frozen, released,
+   * and settled legs are untouched (a re-filed dispute's sweep is a
+   * counted no-op), and legs outside the scope — another model's legs,
+   * voice-licensing legs (never model-scoped) — never match.
+   */
+  freezeUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number>;
+
+  /**
+   * The THAW CAS sweep — the verified resolution's ledger leg: flips
+   * EVERY leg of one model's ingest scope from status
+   * 'unauthorized_training_hold' back to 'unclaimed_holding' in one
+   * conditional statement, and returns the count of legs this call
+   * thawed. Called ONLY after the dispute's resolution CAS won (the
+   * training-dispute module is this method's only caller): a frozen leg
+   * has exactly one exit.
+   */
+  thawUnauthorizedTrainingHolds(modelLedgerScope: string): Promise<number>;
+
+  /**
+   * The frozen-leg work queue: ledger rows with kind 'unclaimed_holding'
+   * AND status 'unauthorized_training_hold' (a thawed leg leaves the
+   * listing — its status returns to 'unclaimed_holding'), newest first,
+   * bounded like every other list seam.
+   */
+  listUnauthorizedTrainingHolds(
+    limit?: number,
+  ): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * Upserts one payee's AI payout-gate states (migration 0029) — UNIQUE
+   * per payee_id; a re-recording converges (the newest state governs the
+   * next dispatch).
+   */
+  upsertAiPayoutGateState(
+    row: Omit<AiPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiPayoutGateStateRecord>;
+
+  /**
+   * One payee's AI payout-gate states of record; undefined when the
+   * payee has none — the fail-closed absent state (the gate refuses).
+   */
+  getAiPayoutGateState(
+    payeeId: string,
+  ): Promise<AiPayoutGateStateRecord | undefined>;
+
+  /**
+   * Writes one dataset version's deprecation of record. UNIQUE on
+   * (ai_model_id, dataset_version) — a re-deprecation throws the unique
+   * violation and the caller recovers by reading the existing row; the
+   * archival sweep that follows re-runs idempotently.
+   */
+  insertAiDatasetDeprecation(
+    row: Omit<
+      AiDatasetDeprecationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AiDatasetDeprecationRecord>;
+
+  /** One (model, dataset version) deprecation of record; undefined when active. */
+  getAiDatasetDeprecation(
+    aiModelId: string,
+    datasetVersion: string,
+  ): Promise<AiDatasetDeprecationRecord | undefined>;
+
+  /**
+   * The model's deprecations of record, oldest first (created_at ASC,
+   * insertion order as tiebreak) — the posting pass's halt set.
+   */
+  listAiDatasetDeprecationsByModel(
+    aiModelId: string,
+  ): Promise<AiDatasetDeprecationRecord[]>;
+
+  /**
+   * Archives one historical allocation of a deprecated dataset version.
+   * UNIQUE on (deprecation_id, ledger_transaction_id) — a re-run
+   * deprecation converges, never double-archives. The referenced ledger
+   * row is NOT touched here or anywhere: the append-only trail stays
+   * intact; this row is the retirement record.
+   */
+  insertAiDatasetAllocationArchive(
+    row: Omit<AiDatasetAllocationArchiveRecord, 'id'>,
+  ): Promise<AiDatasetAllocationArchiveRecord>;
+
+  /** One deprecation's archived allocations, oldest first. */
+  listAiDatasetAllocationArchives(
+    deprecationId: string,
+  ): Promise<AiDatasetAllocationArchiveRecord[]>;
 
   /**
    * Writes one studio's KYC verification state (one row per studio payee —

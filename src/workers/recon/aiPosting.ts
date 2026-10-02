@@ -30,6 +30,10 @@
  *                           pool royalty, distributed pro-rata by the
  *                           registered dataset token weights
  *
+ * The model's legs (all but voice) stamp split_run_id = `ai:model:{modelId}`
+ * — the queryable ingest scope the dispute-freeze sweep reads (PR 25);
+ * the content-derived leg event ids stay the per-row identity.
+ *
  * FAIL-CLOSED, the locked discipline:
  * - the match_queue rows were written BEFORE this pass (a posting failure
  *   never drops the event — the rows stay open, a retry heals
@@ -39,6 +43,10 @@
  *   fee legs of an unpriced event would misrepresent it as processed);
  * - the same whole-event hold when an unattributed event's model registry
  *   resolves to no contributors (a contract with no registered pool);
+ * - a training pool whose dataset version has a deprecation of record
+ *   HALTS the deprecated allocations (the withdrawing rights holder's
+ *   share — or every contributor's, when the deprecation names no payee)
+ *   into the visible variance dust — conservation holds exactly;
  * - blended attribution legs are fail-closed against the nested split's
  *   contributor pool — their sum can never dilute the provider fee or the
  *   developer split; a violating log throws and fails the job;
@@ -63,6 +71,7 @@ import { CanonicalPostingError, microsToWholeCents } from "./posting";
 import type { ParsedStatementLine } from "./records";
 import type { AiLineOutcome } from "./aiQueue";
 import {
+  AI_POOL_SENDER_SPACE,
   aiAttributionLegEventId,
   aiDeveloperLegEventId,
   aiFeeLegEventId,
@@ -73,12 +82,14 @@ import {
   aiVoiceLicensingEventId,
   blendedAttributionLegs,
   distributeContributorPool,
+  haltDeprecatedAllocations,
   meteredUsageRevenueMicros,
   nestedDerivativeSplitPlan,
   parseAiQuantity,
   type AiNestedSplitTerms,
   type AiPoolAllocation,
 } from "./ai";
+import { aiModelLedgerScope, listFrozenAiModelIds } from "./aiDisputes";
 
 /** Posting counts for one AI ingest — the completion report's AI block. */
 export interface AiPostingCounts {
@@ -151,6 +162,9 @@ function termsOfRecord(record: {
  * One leg's post through the canonical seam — the exact replay/guard
  * discipline the other lanes run, parameterized by the leg's own event id
  * (each leg is its own quarantine record; the 409 guard is per source id).
+ * `modelScope` stamps the leg's ingest scope (split_run_id) — the
+ * queryable linkage the dispute-freeze sweep reads (null for the voice
+ * legs, which are never model-scoped money).
  */
 async function postLeg(
   store: Store,
@@ -159,6 +173,7 @@ async function postLeg(
   currency: string,
   now: Date,
   counts: AiPostingCounts,
+  modelScope: string | null,
 ): Promise<void> {
   let posted: UnclaimedHoldingPostSuccess | UnclaimedHoldingFailure;
   try {
@@ -176,9 +191,10 @@ async function postLeg(
         amount_cents: amountCents,
         currency,
         source: { type: "match_queue", event_id: eventId },
-        // No split_run_id — the ingest linkage rides the leg's
-        // content-derived event id; no id space may be conflated.
-        split_run_id: null,
+        // The model's ingest scope — the dispute-freeze sweep's linkage
+        // (ai:model:{modelId}); the per-leg content-derived event id stays
+        // the row identity. Voice legs pass null: never model-scoped.
+        split_run_id: modelScope,
       },
       now,
     );
@@ -350,6 +366,7 @@ async function postInferenceEvent(
   // The nested split's ordered legs — fee off the top, then the
   // developer's and pool's shares of the remainder, then the operator's
   // exact complement. Each posts as its own quarantined credit.
+  const modelScope = aiModelLedgerScope(group.modelId);
   await postLeg(
     store,
     aiFeeLegEventId(senderSpace, group.modelId, group.usageEventId),
@@ -357,6 +374,7 @@ async function postInferenceEvent(
     currency,
     now,
     counts,
+    modelScope,
   );
   counts.feeMicros += plan.baseProviderFeeMicros;
   await postLeg(
@@ -366,6 +384,7 @@ async function postInferenceEvent(
     currency,
     now,
     counts,
+    modelScope,
   );
   counts.developerMicros += plan.fineTunerSplitMicros;
   await postLeg(
@@ -375,6 +394,7 @@ async function postInferenceEvent(
     currency,
     now,
     counts,
+    modelScope,
   );
   counts.operatorMicros += plan.modelOperatorMarginMicros;
 
@@ -392,6 +412,7 @@ async function postInferenceEvent(
       currency,
       now,
       counts,
+      modelScope,
     );
     counts.attributionMicros += leg.amountMicros;
   }
@@ -403,6 +424,7 @@ async function postInferenceEvent(
       currency,
       now,
       counts,
+      modelScope,
     );
     counts.poolDustMicros += poolDustMicros;
   }
@@ -411,6 +433,8 @@ async function postInferenceEvent(
 /** One training pool's distribution group — the file's declared royalty. */
 interface TrainingPoolGroup {
   readonly poolEventId: string;
+  /** The model the attribution log reports (all rows share it). */
+  readonly modelId: string;
   readonly poolRoyaltyMicros: string;
   readonly currency: string;
   readonly rows: readonly Extract<
@@ -432,6 +456,13 @@ export async function postAiLinesToHolding(
   now: Date,
 ): Promise<AiPostingCounts> {
   const counts = zeroedCounts();
+  // The dispute freeze (PR 25): the models with an ACTIVE training
+  // dispute. Their legs still post — the money lands on the ledger,
+  // visibly — but every leg of a frozen model's scope re-freezes below,
+  // so new accruals during a dispute land in the hold state, never in a
+  // releasable one.
+  const frozenModels = await listFrozenAiModelIds(store);
+  const scopedModels = new Set<string>();
 
   // The voice legs — each event's licensing fee routes directly to the
   // voice actor of record, its own identity space, never pooled. Every
@@ -459,6 +490,7 @@ export async function postAiLinesToHolding(
       outcome.line.currency,
       now,
       counts,
+      null,
     );
     counts.voiceLicensingMicros += feeMicros;
   }
@@ -469,6 +501,7 @@ export async function postAiLinesToHolding(
   // re-attempts; the 409 guard is the dedup arbiter (retry healing).
   const events = groupInferenceEvents(outcomes);
   for (const group of events.values()) {
+    scopedModels.add(group.modelId);
     await postInferenceEvent(store, group, now, counts);
   }
 
@@ -487,6 +520,7 @@ export async function postAiLinesToHolding(
     if (existing === undefined) {
       pools.set(key, {
         poolEventId: detail.poolEventId,
+        modelId: detail.modelId,
         poolRoyaltyMicros: detail.poolRoyaltyMicros,
         currency: outcome.line.currency,
         rows: [detail],
@@ -496,6 +530,7 @@ export async function postAiLinesToHolding(
     }
   }
   for (const pool of pools.values()) {
+    scopedModels.add(pool.modelId);
     const distributed = distributeContributorPool(
       BigInt(pool.poolRoyaltyMicros),
       pool.rows.map((row) => ({
@@ -504,11 +539,32 @@ export async function postAiLinesToHolding(
         weightMicros: parseAiQuantity(row.datasetTokenWeight),
       })),
     );
-    for (const leg of distributed.allocations) {
+    // THE DEPRECATION HALT (PR 25, the tokenization patch) — allocations
+    // to a deprecated dataset version halt automatically: when the pool's
+    // version (the log's declared pool event id) has a deprecation of
+    // record, the withdrawing rights holder's share — every contributor's
+    // share when the deprecation names no specific payee — sweeps to the
+    // visible variance dust instead of paying out. Conservation holds
+    // exactly (halted cents are moved, never lost); the historical legs
+    // are archived by the deprecation engine, never deleted.
+    const deprecation = await store.getAiDatasetDeprecation(
+      pool.modelId,
+      pool.poolEventId,
+    );
+    const halted = haltDeprecatedAllocations(
+      distributed,
+      deprecation === undefined
+        ? new Set<string>()
+        : deprecation.rights_holder_payee_id !== null
+          ? new Set([deprecation.rights_holder_payee_id])
+          : new Set(distributed.allocations.map((leg) => leg.payeeId)),
+    );
+    const modelScope = aiModelLedgerScope(pool.modelId);
+    for (const leg of halted.allocations) {
       await postLeg(
         store,
         aiPoolLegEventId(
-          "huggingface_dataset_attribution_log_csv",
+          AI_POOL_SENDER_SPACE,
           pool.poolEventId,
           leg.payeeId,
         ),
@@ -516,22 +572,33 @@ export async function postAiLinesToHolding(
         pool.currency,
         now,
         counts,
+        modelScope,
       );
       counts.poolRoyaltyMicros += leg.amountMicros;
     }
-    if (distributed.varianceDustMicros > 0n) {
+    if (halted.varianceDustMicros > 0n) {
       await postLeg(
         store,
-        aiPoolDustEventId(
-          "huggingface_dataset_attribution_log_csv",
-          pool.poolEventId,
-        ),
-        distributed.varianceDustMicros,
+        aiPoolDustEventId(AI_POOL_SENDER_SPACE, pool.poolEventId),
+        halted.varianceDustMicros,
         pool.currency,
         now,
         counts,
+        modelScope,
       );
-      counts.poolDustMicros += distributed.varianceDustMicros;
+      counts.poolDustMicros += halted.varianceDustMicros;
+    }
+  }
+
+  // The re-freeze — a model with an active training dispute re-enters the
+  // hold state right after its legs post, so new accruals during a
+  // dispute land frozen, never releasable. The CAS flips only still-held
+  // legs (the filing-time sweep already froze the older ones), and the
+  // dispute's verified resolution re-runs its own thaw for anything filed
+  // mid-pass — the two sweeps converge on the dispute's outcome.
+  for (const modelId of scopedModels) {
+    if (frozenModels.has(modelId)) {
+      await store.freezeUnauthorizedTrainingHolds(aiModelLedgerScope(modelId));
     }
   }
 
