@@ -112,6 +112,9 @@ import type {
   MerchDesignerRoyaltyTierRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
+  MerchReturnReservePolicyRecord,
+  MerchReserveDrawdownRecord,
+  MerchFulfillmentTrackingRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -230,6 +233,9 @@ export class InMemoryStore implements Store {
   private merchDesignerRoyaltyTiers: MerchDesignerRoyaltyTierRecord[] = [];
   private merchDesignerRoyaltyBillings: MerchDesignerRoyaltyBillingRecord[] = [];
   private merchConsignmentSettlements: MerchConsignmentSettlementRecord[] = [];
+  private merchReturnReservePolicies: MerchReturnReservePolicyRecord[] = [];
+  private merchFulfillmentTrackings: MerchFulfillmentTrackingRecord[] = [];
+  private merchReserveDrawdowns: MerchReserveDrawdownRecord[] = [];
   // Film multi-territory withholding log + territory envelopes (0023, PR 18).
   private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
   private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
@@ -1785,6 +1791,123 @@ export class InMemoryStore implements Store {
     eventId: string,
   ): Promise<MerchConsignmentSettlementRecord | undefined> {
     return this.merchConsignmentSettlements.find((candidate) => candidate.event_id === eventId);
+  }
+
+  // --- Merch returns reserve + fulfillment confirmation (PR 23, migration 0027) ---
+
+  async upsertMerchReturnReservePolicy(
+    row: Omit<MerchReturnReservePolicyRecord, 'id'>,
+  ): Promise<MerchReturnReservePolicyRecord> {
+    // One policy of record per sku — upsert replaces the row atomically.
+    const existingIndex = this.merchReturnReservePolicies.findIndex(
+      (candidate) => candidate.sku_id === row.sku_id,
+    );
+    const record: MerchReturnReservePolicyRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.merchReturnReservePolicies[existingIndex] = record;
+    } else {
+      this.merchReturnReservePolicies.push(record);
+    }
+    return record;
+  }
+
+  async getMerchReturnReservePolicy(
+    skuId: string,
+  ): Promise<MerchReturnReservePolicyRecord | undefined> {
+    return this.merchReturnReservePolicies.find((candidate) => candidate.sku_id === skuId);
+  }
+
+  async insertMerchReserveDrawdown(
+    row: Omit<MerchReserveDrawdownRecord, 'id'>,
+  ): Promise<MerchReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter: a concurrent drawdown that loses the
+    // position throws.
+    if (
+      this.merchReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('merch_reserve_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.merchReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('merch_reserve_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: MerchReserveDrawdownRecord = { ...row, id: randomUUID() };
+    this.merchReserveDrawdowns.push(record);
+    return record;
+  }
+
+  async listMerchReserveDrawdowns(reserveLedgerId: string): Promise<MerchReserveDrawdownRecord[]> {
+    return this.merchReserveDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort((a, b) => a.drawn_before_cents - b.drawn_before_cents);
+  }
+
+  async insertMerchFulfillmentTracking(
+    row: Omit<MerchFulfillmentTrackingRecord, 'id'>,
+  ): Promise<MerchFulfillmentTrackingRecord> {
+    // UNIQUE on (fulfillment_event_id, tracking_number, tracking_state) — a
+    // re-shipped tracking event is the unique violation, never a double
+    // record.
+    if (
+      this.merchFulfillmentTrackings.some(
+        (existing) =>
+          existing.fulfillment_event_id === row.fulfillment_event_id &&
+          existing.tracking_number === row.tracking_number &&
+          existing.tracking_state === row.tracking_state,
+      )
+    ) {
+      uniqueViolation('merch_fulfillment_trackings.fulfillment_event_id,tracking_number,tracking_state');
+    }
+    const record: MerchFulfillmentTrackingRecord = { ...row, id: randomUUID() };
+    this.merchFulfillmentTrackings.push(record);
+    return record;
+  }
+
+  async listMerchFulfillmentTrackings(
+    fulfillmentEventId: string,
+  ): Promise<MerchFulfillmentTrackingRecord[]> {
+    return this.merchFulfillmentTrackings
+      .filter((row) => row.fulfillment_event_id === fulfillmentEventId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  async listMerchReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'merch_returns_reserve' && row.status === 'merch_returns_reserve',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleMerchReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'merch_returns_reserve') return undefined;
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
   }
 
 

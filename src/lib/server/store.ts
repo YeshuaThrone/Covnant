@@ -98,6 +98,9 @@ import type {
   MerchCollabPoolClass,
   MerchCollabRecoupmentApplicationRecord,
   MerchDesignerRoyaltyTierRecord,
+  MerchReturnReservePolicyRecord,
+  MerchReserveDrawdownRecord,
+  MerchFulfillmentTrackingRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
 } from '@/modules/don/records';
@@ -1133,6 +1136,92 @@ export interface Store {
     agreementId: string,
     poolClass: MerchCollabPoolClass,
   ): Promise<MerchCollabRecoupmentApplicationRecord[]>;
+
+  // --- Merch returns reserve + fulfillment confirmation (PR 23, migration 0027) ---
+  // The 10–15% holdback of a merch payout allocation locks as a ledger row
+  // with kind AND status 'merch_returns_reserve' — per-contract returns
+  // protection that stays OUT of every payee vault until the window
+  // elapses and the verified release pays it to creator net. The policy
+  // (rate band, window, beneficiary of record), the drawdown truth, and
+  // the tracking events live in migration 0027's tables; the reserve
+  // itself is a ledger row, so no migration touches ledger_transactions
+  // (status/kind stay free text, the 0006 precedent every holding state
+  // shares).
+
+  /**
+   * Registers (or replaces) the returns-reserve policy of record for one
+   * sku — upsert on sku_id: a re-registered policy replaces the row
+   * atomically (the option-agreement precedent). The lane validates the
+   * founder bands before this write; the schema's CHECKs enforce them
+   * again at rest.
+   */
+  upsertMerchReturnReservePolicy(
+    row: Omit<MerchReturnReservePolicyRecord, 'id'>,
+  ): Promise<MerchReturnReservePolicyRecord>;
+
+  /** One sku's returns-reserve policy of record. */
+  getMerchReturnReservePolicy(skuId: string): Promise<MerchReturnReservePolicyRecord | undefined>;
+
+  /**
+   * Writes one reserve drawdown of record: the append-only truth a reserve
+   * spends against. UNIQUE on (reserve_ledger_id, source_event_id) — a
+   * re-shipped return/chargeback event throws the unique violation, never
+   * double-draws. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+   * insert-as-lock position arbiter.
+   */
+  insertMerchReserveDrawdown(
+    row: Omit<MerchReserveDrawdownRecord, 'id'>,
+  ): Promise<MerchReserveDrawdownRecord>;
+
+  /**
+   * One reserve's drawdowns, oldest position first (drawn_before_cents
+   * ASC): the derived spend truth.
+   */
+  listMerchReserveDrawdowns(reserveLedgerId: string): Promise<MerchReserveDrawdownRecord[]>;
+
+  /**
+   * Writes one fulfillment tracking event of record — the fulfillment data
+   * the merch payout gate reads. UNIQUE on (fulfillment_event_id,
+   * tracking_number, tracking_state) — a re-shipped tracking event throws
+   * the unique violation (the replay surface).
+   */
+  insertMerchFulfillmentTracking(
+    row: Omit<MerchFulfillmentTrackingRecord, 'id'>,
+  ): Promise<MerchFulfillmentTrackingRecord>;
+
+  /**
+   * One fulfillment event's tracking events, oldest first (created_at ASC,
+   * insertion order as tiebreak): the lifecycle the confirmation resolves
+   * from.
+   */
+  listMerchFulfillmentTrackings(
+    fulfillmentEventId: string,
+  ): Promise<MerchFulfillmentTrackingRecord[]>;
+
+  /**
+   * The held reserve credits, newest first (created_at DESC, insertion
+   * order as tiebreak), bounded by limit — across ALL skus. Released or
+   * fully-drawn credits (status 'settled') are history, not holdings —
+   * they never appear here.
+   */
+  listMerchReturnsReserveCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * The release/drawdown CAS — the settlement concurrency canon (0009)
+   * applied to a held reserve: flips ONE row from status
+   * 'merch_returns_reserve' to 'settled' (settled_at = the passed
+   * instant) in a single conditional statement. Returns the row only when
+   * THIS call won the transition; undefined when the id is unknown OR the
+   * reserve is no longer held — the concurrent release or full-drawdown
+   * loser reads exactly that and refuses. The flip happens BEFORE any
+   * money moves (insert-as-lock, the payout-reversal precedent), so a
+   * crash mid-release fails toward "nothing moved twice": the settled row
+   * with no merch_returns_reserve_release journal is the visible alarm.
+   */
+  settleMerchReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
 
   /**
    * Registers (or replaces) the designer royalty tier of record for one

@@ -113,6 +113,9 @@ import type {
   MerchDesignerRoyaltyTierRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
+  MerchReturnReservePolicyRecord,
+  MerchReserveDrawdownRecord,
+  MerchFulfillmentTrackingRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -1151,6 +1154,69 @@ CREATE TABLE IF NOT EXISTS merch_consignment_settlements (
 );
 CREATE INDEX IF NOT EXISTS idx_merch_consignment_settlements_sku
   ON merch_consignment_settlements (sku_id);
+
+-- Merch returns reserve + fulfillment confirmation (migration 0027, PR 23).
+-- The returns-reserve policy of record — one per sku (upsert on sku_id) —
+-- carries the founder-banded money terms: the 10-15% holdback rate and the
+-- 30-60 day returns window, plus the beneficiary payee the verified
+-- release pays. Bands are CHECK-enforced at rest and lane-enforced at
+-- write.
+CREATE TABLE IF NOT EXISTS merch_return_reserve_policies (
+  id TEXT PRIMARY KEY,
+  sku_id TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL
+    CHECK (reserve_rate_bps >= 1000 AND reserve_rate_bps <= 1500),
+  reserve_window_days INTEGER NOT NULL
+    CHECK (reserve_window_days >= 30 AND reserve_window_days <= 60),
+  beneficiary_payee_id TEXT NOT NULL,
+  beneficiary_payee_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- The append-only reserve drawdown truth — the 0026 recoupment-application
+-- discipline at reserve scope. UNIQUE (reserve_ledger_id, source_event_id)
+-- is the replay guard (a re-shipped return/chargeback event is the unique
+-- violation, never a double drawdown); UNIQUE (reserve_ledger_id,
+-- drawn_before_cents) is the insert-as-lock position arbiter. The reserve
+-- ledger reference is uuid -> uuid, type-matched.
+CREATE TABLE IF NOT EXISTS merch_reserve_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL
+    CHECK (drawdown_class IN ('customer_return', 'chargeback')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL CHECK (drawn_before_cents >= 0),
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  FOREIGN KEY (reserve_ledger_id) REFERENCES ledger_transactions (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_merch_reserve_drawdowns_reserve
+  ON merch_reserve_drawdowns (reserve_ledger_id);
+
+-- The fulfillment tracking events the merch payout gate reads — the
+-- physical_fulfillment_confirmed source of truth. UNIQUE
+-- (fulfillment_event_id, tracking_number, tracking_state) is the replay
+-- guard (a re-shipped tracking event is the unique violation, never a
+-- double record). Only 'delivered' confirms; 'assigned' and 'in_transit'
+-- are honest not-yet states, and an absent tracking ledger is unknown —
+-- all refuse the gate, fail-closed.
+CREATE TABLE IF NOT EXISTS merch_fulfillment_trackings (
+  id TEXT PRIMARY KEY,
+  fulfillment_event_id TEXT NOT NULL,
+  tracking_number TEXT NOT NULL,
+  tracking_state TEXT NOT NULL
+    CHECK (tracking_state IN ('assigned', 'in_transit', 'delivered')),
+  carrier TEXT NOT NULL,
+  delivered_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (fulfillment_event_id, tracking_number, tracking_state)
+);
+CREATE INDEX IF NOT EXISTS idx_merch_fulfillment_trackings_event
+  ON merch_fulfillment_trackings (fulfillment_event_id);
 
 
 -- Film multi-territory withholding + cross-collateralization firewall
@@ -3460,6 +3526,134 @@ export class SqliteStore implements Store {
         .prepare(`SELECT * FROM merch_consignment_settlements WHERE event_id = ?`)
         .get(eventId) as MerchConsignmentSettlementRecord | undefined,
     );
+  }
+
+  // --- Merch returns reserve + fulfillment confirmation (PR 23, migration 0027) ---
+
+  async upsertMerchReturnReservePolicy(
+    row: Omit<MerchReturnReservePolicyRecord, 'id'>,
+  ): Promise<MerchReturnReservePolicyRecord> {
+    // One policy of record per sku — the ON CONFLICT upsert replaces the
+    // money terms atomically (the option-agreement precedent).
+    const record: MerchReturnReservePolicyRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_return_reserve_policies
+           (id, sku_id, reserve_rate_bps, reserve_window_days, beneficiary_payee_id, beneficiary_payee_name, created_at, updated_at)
+         VALUES (@id, @sku_id, @reserve_rate_bps, @reserve_window_days, @beneficiary_payee_id, @beneficiary_payee_name, @created_at, @updated_at)
+         ON CONFLICT (sku_id) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           reserve_window_days = excluded.reserve_window_days,
+           beneficiary_payee_id = excluded.beneficiary_payee_id,
+           beneficiary_payee_name = excluded.beneficiary_payee_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getMerchReturnReservePolicy(
+    skuId: string,
+  ): Promise<MerchReturnReservePolicyRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM merch_return_reserve_policies WHERE sku_id = ?`)
+        .get(skuId) as MerchReturnReservePolicyRecord | undefined,
+    );
+  }
+
+  async insertMerchReserveDrawdown(
+    row: Omit<MerchReserveDrawdownRecord, 'id'>,
+  ): Promise<MerchReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter: a concurrent drawdown that loses
+    // the position throws.
+    const record: MerchReserveDrawdownRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_reserve_drawdowns
+           (id, reserve_ledger_id, drawdown_class, source_event_id, drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (@id, @reserve_ledger_id, @drawdown_class, @source_event_id, @drawn_before_cents, @drawn_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listMerchReserveDrawdowns(reserveLedgerId: string): Promise<MerchReserveDrawdownRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM merch_reserve_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY drawn_before_cents ASC`,
+        )
+        .all(reserveLedgerId) as MerchReserveDrawdownRecord[],
+    );
+  }
+
+  async insertMerchFulfillmentTracking(
+    row: Omit<MerchFulfillmentTrackingRecord, 'id'>,
+  ): Promise<MerchFulfillmentTrackingRecord> {
+    // UNIQUE on (fulfillment_event_id, tracking_number, tracking_state) — a
+    // re-shipped tracking event is the unique violation, never a double
+    // record.
+    const record: MerchFulfillmentTrackingRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_fulfillment_trackings
+           (id, fulfillment_event_id, tracking_number, tracking_state, carrier, delivered_at, created_at)
+         VALUES (@id, @fulfillment_event_id, @tracking_number, @tracking_state, @carrier, @delivered_at, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listMerchFulfillmentTrackings(
+    fulfillmentEventId: string,
+  ): Promise<MerchFulfillmentTrackingRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM merch_fulfillment_trackings
+         WHERE fulfillment_event_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(fulfillmentEventId) as MerchFulfillmentTrackingRecord[],
+    );
+  }
+
+  async listMerchReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'merch_returns_reserve' AND status = 'merch_returns_reserve'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settleMerchReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS. changes = 0
+    // means the row is absent or no longer held; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'merch_returns_reserve'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
   }
 
   async getVtuberTaxWithholdingVerification(

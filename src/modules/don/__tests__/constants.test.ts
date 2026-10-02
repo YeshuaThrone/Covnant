@@ -82,6 +82,12 @@ describe('don constants', () => {
       // The merch collaboration release (PR 22, the founder merchandise
       // directive): the recoup-then-split settlement's journal kind.
       'merch_collab_release',
+      // The merchandise returns reserve + fulfillment confirmation (PR 23,
+      // the founder merchandise directive): the gated dispatch journal, the
+      // return/chargeback drawdown journal, and the window-release journal.
+      'merch_reserve_dispatch',
+      'merch_reserve_drawdown',
+      'merch_returns_reserve_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

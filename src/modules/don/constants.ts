@@ -111,6 +111,35 @@ export const WEBTOON_LINE_ARTIST_INKER_MAX_BPS = 3_000;
 export const WEBTOON_COLORIST_BACKGROUND_MIN_BPS = 1_000;
 export const WEBTOON_COLORIST_BACKGROUND_MAX_BPS = 1_500;
 
+// Merch returns reserve (PR 23, founder directive): 10–15% of every merch
+// payout allocation holds in a MERCH_RETURNS_RESERVE per contract for the
+// 30–60 day returns window — customer returns and chargebacks draw it down,
+// and the verified release pays the remainder to creator net after the
+// window. The lock is PER-SKU (per contract) — the payee and GL account
+// carry the sku the way the film escrow carries the film id. Deliberately
+// NOT 'platform', NOT the unclaimed holding sentinel, NOT any earlier
+// escrow prefix: reserve money is distinct from company dust, from every
+// creator vault, from unallocated recon funds, and from every other
+// holding state, in payee, GL account, and ledger kind, so no query can
+// fold one into another.
+export const MERCH_RETURNS_RESERVE_PAYEE_PREFIX = "merch_returns_reserve";
+export function merchReturnsReservePayeeId(skuId: string): string {
+  return `${MERCH_RETURNS_RESERVE_PAYEE_PREFIX}:${skuId}`;
+}
+export function merchReturnsReservePayeeName(skuId: string): string {
+  return `Merch Returns Reserve — ${skuId}`;
+}
+export function merchReturnsReserveGlAccount(skuId: string): string {
+  return `merch_returns_reserve:${skuId}`;
+}
+// The founder's bands, enforced at registration AND at use: a holdback rate
+// of 10–15% of the allocation and a returns window of 30–60 days. Anything
+// outside a band is a hostile contract, refused.
+export const MERCH_RETURNS_RESERVE_MIN_RATE_BPS = 1_000;
+export const MERCH_RETURNS_RESERVE_MAX_RATE_BPS = 1_500;
+export const MERCH_RETURNS_RESERVE_MIN_WINDOW_DAYS = 30;
+export const MERCH_RETURNS_RESERVE_MAX_WINDOW_DAYS = 60;
+
 // The studio role-group vocabulary — the three bands' keys. A schedule role
 // outside the vocabulary is a hostile registration.
 export const WEBTOON_STUDIO_ROLE_GROUPS = [
@@ -271,6 +300,17 @@ export const JOURNAL_KINDS = [
   // leg lands through the canonical posting seam with the destination
   // fail-closed.
   "merch_collab_release",
+  // Merch returns reserve + fulfillment confirmation (PR 23): a merch
+  // payout allocation's dispatch splits the held settlement — the
+  // non-reserve portion routes to the beneficiary of record's creator net
+  // ONLY through the tracking-derived fulfillment gate, the 10–15% reserve
+  // locks into the per-sku returns reserve. Returns and chargebacks draw
+  // the reserve down (the money goes back to the customer); after the
+  // 30–60 day window the verified release pays the remainder to creator
+  // net. Additive only.
+  "merch_reserve_dispatch",
+  "merch_reserve_drawdown",
+  "merch_returns_reserve_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

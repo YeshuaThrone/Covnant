@@ -301,6 +301,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // settlements; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0026_merch_cogs_collaboration_waterfall.sql',
+      // Merchandise returns reserve + fulfillment confirmation (PR 23, the
+      // founder merchandise directive): the per-SKU reserve policy of
+      // record, the append-only fulfillment tracking ledger, and the
+      // position-locked reserve drawdown ledger; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0027_merch_returns_reserve_fulfillment.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

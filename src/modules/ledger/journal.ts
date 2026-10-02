@@ -11,6 +11,7 @@ import {
   esportsPoolEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
+  merchReturnsReserveGlAccount,
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
@@ -212,6 +213,28 @@ export function translationLocalizationCredit(
 ): GlLegInput {
   return {
     account: translationLocalizationGlAccount(seriesId, languageCode),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Merch returns reserve legs (PR 23): the per-sku reserve lock account. A
+// dispatched payout allocation credits it with the 10–15% holdback (against
+// the unclaimed holding debit); a return/chargeback drawdown debits it back
+// to FBO cash, and the verified window release debits it to the creator
+// credit legs — never a vault bucket at post, never any other escrow's
+// account.
+export function merchReturnsReserveDebit(skuId: string, amountCents: number): GlLegInput {
+  return {
+    account: merchReturnsReserveGlAccount(skuId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function merchReturnsReserveCredit(skuId: string, amountCents: number): GlLegInput {
+  return {
+    account: merchReturnsReserveGlAccount(skuId),
     debit_cents: 0,
     credit_cents: amountCents,
   };
