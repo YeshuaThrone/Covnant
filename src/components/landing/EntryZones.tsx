@@ -10,6 +10,7 @@ import {
   type SealRequestState,
   type SealEntryValues,
 } from '@/components/landing/signupRequest';
+import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
 import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 
 /*
@@ -52,6 +53,12 @@ export function EntryZones() {
   // (the spec's funnel: the account exists first; this step can only
   // enrich it). A blank phone skips the step entirely — nothing to verify.
   const [otpStep, setOtpStep] = useState<{ email: string; phone: string } | null>(null);
+  // The email-verification hold: set the moment the account exists but is
+  // unconfirmed — the founder's active signup verification path (directive
+  // 2026-10-02). The ONLY session path is the confirmation link completing
+  // at /auth/callback, so the composition holds at check-your-email (with
+  // the resend control) instead of navigating to /agent unauthenticated.
+  const [checkEmail, setCheckEmail] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const stageNameRef = useRef<HTMLInputElement>(null);
   const legalNameRef = useRef<HTMLInputElement>(null);
@@ -60,11 +67,16 @@ export function EntryZones() {
   const passwordRef = useRef<HTMLInputElement>(null);
   const coreIndustryTitleRef = useRef<HTMLInputElement>(null);
 
-  /* Submit the captured values to POST /api/covnant/auth/signup. A
-   * successful signup response (201 created / 200 claim-or-repeat) advances
-   * immediately to /agent per the founder's auto-advance directive; every
-   * failure branch renders its contract state. The submit guard ref stays
-   * latched on success (the navigation is one-way — nothing may re-fire)
+  /* Submit the captured values to POST /api/covnant/auth/signup. A 201
+   * created advances to the verification funnel — the phone OTP step first
+   * when a phone is on file, then check-your-email; check-your-email
+   * directly otherwise. The account is born UNCONFIRMED and the
+   * confirmation link at /auth/callback is the only session path
+   * (email-verification directive 2026-10-02 — this supersedes the
+   * auto-advance-to-/agent ruling for fresh signups). A 200 claim-or-repeat
+   * still advances to /agent — that account predates the confirmation gate.
+   * Every failure branch renders its contract state. The submit guard ref
+   * stays latched on success (the funnel is one-way — nothing may re-fire)
    * and resets only on a failure the visitor can retry. */
   const submitSignup = async (values: SealEntryValues) => {
     setRequest({ phase: 'submitting' });
@@ -76,12 +88,16 @@ export function EntryZones() {
         cache: 'no-store',
       });
       if (response.status === 201) {
+        const email = values.email.trim().toLowerCase();
         const phone = values.phoneNumber.trim();
         if (phone !== '') {
-          setOtpStep({ email: values.email.trim().toLowerCase(), phone });
+          setOtpStep({ email, phone });
           return; // the submitting guard stays latched — same as navigation
         }
-        router.push('/agent');
+        // No phone on file: hold at check-your-email — the confirmation
+        // link at /auth/callback is the only session path (the
+        // confirmation email left with the 201 itself).
+        setCheckEmail(email);
         return;
       }
       if (response.status === 200) {
@@ -130,9 +146,19 @@ export function EntryZones() {
       <PhoneOtpStep
         email={otpStep.email}
         phone={otpStep.phone}
-        onDone={() => router.push('/agent')}
+        onDone={() => {
+          // The phone step can only enrich — the account is still
+          // unconfirmed, so the funnel holds at check-your-email (the
+          // confirmation link at /auth/callback is the only session path).
+          setCheckEmail(otpStep.email);
+          setOtpStep(null);
+        }}
       />
     );
+  }
+
+  if (checkEmail !== null) {
+    return <CheckYourEmail email={checkEmail} />;
   }
 
   const buttonClass = [

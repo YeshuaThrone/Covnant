@@ -5,8 +5,10 @@
  * replaced the double-click seal ritual. Pins: one signup fetch per submit,
  * the button's isSubmitting state (disabled + loading label while in
  * flight), the 201-with-phone response landing on the verification step
- * (the account exists first; the step can only enrich it), immediate
- * navigation to /agent on a 200 repeat or a blank-phone 201, NO rendered
+ * (the account exists first; the step can only enrich it), the
+ * check-your-email hold on any 201 (the account is born unconfirmed — the
+ * confirmation link at /auth/callback is the only session path),
+ * navigation to /agent on a 200 repeat, NO rendered
  * E.164 block for real-world captures (the founder's two formats ride the
  * wire as canonical E.164), the human invalid-phone message for genuinely
  * impossible input, retryability after a failure, and the retirement of
@@ -157,7 +159,7 @@ describe('EntryZones single-click submit', () => {
     expect(routerPush).not.toHaveBeenCalled();
   });
 
-  it('a 201 with a blank phone navigates straight to /agent — nothing to verify', async () => {
+  it('a 201 with a blank phone holds at check-your-email — the confirmation link is the only session path', async () => {
     const fetchMock = routedFetch({
       'auth/signup': { status: 201, body: CREATED_201 },
       'auth/phone/otp': OTP_OK,
@@ -168,8 +170,12 @@ describe('EntryZones single-click submit', () => {
     submitForm(form);
     await flushSubmit();
 
-    expect(routerPush).toHaveBeenCalledTimes(1);
-    expect(routerPush).toHaveBeenCalledWith('/agent');
+    // The account is born unconfirmed: no navigation — the ONLY session
+    // path is the confirmation link completing at /auth/callback.
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Check your email');
+    expect(container.textContent).toContain('artist@example.com');
+    expect(container.textContent).toContain('Resend Email');
     expect(container.textContent).not.toContain('Verify your phone');
   });
 
@@ -294,6 +300,35 @@ describe('EntryZones single-click submit', () => {
 
     expect(window.localStorage.getItem('covnant.sealedEntry')).toBeNull();
     expect(window.localStorage.length).toBe(0);
-    expect(routerPush).toHaveBeenCalledWith('/agent');
+    // The blank-phone 201 holds at check-your-email — no navigation.
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it('holds at check-your-email after the phone step completes — the funnel ends at the confirmation link', async () => {
+    const fetchMock = routedFetch({
+      'auth/signup': { status: 201, body: CREATED_201 },
+      'auth/phone/otp': OTP_OK,
+      'auth/phone/verify': { status: 200, body: { ok: true } },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { container, form } = mountEntryZones();
+    fillComposition(container, '830-358-2306');
+    submitForm(form);
+    await flushSubmit();
+    expect(container.textContent).toContain('Verify your phone');
+
+    // The skip control fires onDone — the composition holds at
+    // check-your-email instead of navigating (the account is still
+    // unconfirmed; /auth/callback is the only session path).
+    const skip = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === 'Skip for now — verify later',
+    );
+    expect(skip).toBeDefined();
+    await act(async () => {
+      skip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Check your email');
+    expect(routerPush).not.toHaveBeenCalled();
   });
 });
