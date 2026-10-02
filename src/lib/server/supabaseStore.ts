@@ -108,6 +108,9 @@ import type {
   MerchDesignerRoyaltyTierRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
+  MerchReturnReservePolicyRecord,
+  MerchReserveDrawdownRecord,
+  MerchFulfillmentTrackingRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -260,6 +263,14 @@ const TABLES = {
   merchDesignerRoyaltyTiers: 'merch_designer_royalty_tiers',
   merchDesignerRoyaltyBillings: 'merch_designer_royalty_billings',
   merchConsignmentSettlements: 'merch_consignment_settlements',
+  // Migration 0027 — the merch returns reserve + fulfillment confirmation
+  // layer (PR 23): the per-sku founder-banded holdback policy, the
+  // append-only reserve drawdown truth (the 0026 position-lock discipline
+  // at reserve scope), and the fulfillment tracking events the merch
+  // payout gate's physical_fulfillment_confirmed condition reads.
+  merchReturnReservePolicies: 'merch_return_reserve_policies',
+  merchReserveDrawdowns: 'merch_reserve_drawdowns',
+  merchFulfillmentTrackings: 'merch_fulfillment_trackings',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -2222,6 +2233,129 @@ export class SupabaseStore implements Store {
         .eq('event_id', eventId)
         .maybeSingle(),
       'getMerchConsignmentSettlementByEventId',
+    );
+  }
+
+  // --- Merch returns reserve + fulfillment confirmation (PR 23, migration 0027) ---
+
+  async upsertMerchReturnReservePolicy(
+    row: Omit<MerchReturnReservePolicyRecord, 'id'>,
+  ): Promise<MerchReturnReservePolicyRecord> {
+    // One policy of record per sku — the upsert targets sku_id, so a
+    // re-registered policy replaces the row atomically (the
+    // option-agreement precedent).
+    return this.oneStrict<MerchReturnReservePolicyRecord>(
+      this.client
+        .from(TABLES.merchReturnReservePolicies)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'sku_id' })
+        .select()
+        .maybeSingle(),
+      'upsertMerchReturnReservePolicy',
+    );
+  }
+
+  async getMerchReturnReservePolicy(
+    skuId: string,
+  ): Promise<MerchReturnReservePolicyRecord | undefined> {
+    return this.one<MerchReturnReservePolicyRecord>(
+      this.client
+        .from(TABLES.merchReturnReservePolicies)
+        .select()
+        .eq('sku_id', skuId)
+        .maybeSingle(),
+      'getMerchReturnReservePolicy',
+    );
+  }
+
+  async insertMerchReserveDrawdown(
+    row: Omit<MerchReserveDrawdownRecord, 'id'>,
+  ): Promise<MerchReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter.
+    return this.oneStrict<MerchReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.merchReserveDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchReserveDrawdown',
+    );
+  }
+
+  async listMerchReserveDrawdowns(reserveLedgerId: string): Promise<MerchReserveDrawdownRecord[]> {
+    return this.many<MerchReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.merchReserveDrawdowns)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .order('drawn_before_cents', { ascending: true }),
+      'listMerchReserveDrawdowns',
+    );
+  }
+
+  async insertMerchFulfillmentTracking(
+    row: Omit<MerchFulfillmentTrackingRecord, 'id'>,
+  ): Promise<MerchFulfillmentTrackingRecord> {
+    // UNIQUE on (fulfillment_event_id, tracking_number, tracking_state) — a
+    // re-shipped tracking event is the unique violation, never a double
+    // record.
+    return this.oneStrict<MerchFulfillmentTrackingRecord>(
+      this.client
+        .from(TABLES.merchFulfillmentTrackings)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchFulfillmentTracking',
+    );
+  }
+
+  async listMerchFulfillmentTrackings(
+    fulfillmentEventId: string,
+  ): Promise<MerchFulfillmentTrackingRecord[]> {
+    return this.many<MerchFulfillmentTrackingRecord>(
+      this.client
+        .from(TABLES.merchFulfillmentTrackings)
+        .select()
+        .eq('fulfillment_event_id', fulfillmentEventId)
+        .order('created_at', { ascending: true }),
+      'listMerchFulfillmentTrackings',
+    );
+  }
+
+  async listMerchReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'merch_returns_reserve')
+        .eq('status', 'merch_returns_reserve')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listMerchReturnsReserveCredits',
+    );
+  }
+
+  async settleMerchReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The status predicate in the UPDATE's WHERE is the CAS: PostgREST
+    // matches the row only while it is still held, so the concurrent
+    // release/drawdown loser gets zero rows back (maybeSingle → undefined).
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'merch_returns_reserve')
+        .select()
+        .maybeSingle(),
+      'settleMerchReturnsReserve',
     );
   }
 

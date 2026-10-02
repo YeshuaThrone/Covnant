@@ -1135,3 +1135,98 @@ export type MerchConsignmentSettlementRecord = {
   created_at: string;
 };
 
+/**
+ * The returns-reserve policy of record (migration 0027, PR 23) — one per
+ * sku (upsert on sku_id), the founder-directive bands the founder directive
+ * fixes: a 10–15% holdback rate (1000–1500 bps) and a 30–60 day reserve
+ * window. The policy is the terms of record the dispatch lane withholds
+ * from and the release lane reads its window from — never the caller.
+ * The beneficiary payee of record is the creator the reserve releases to
+ * after the window (the money terms come from the registry, never the
+ * caller — the collab-agreement precedent).
+ */
+export type MerchReturnReservePolicyRecord = {
+  id: string;
+  sku_id: string;
+  /** Whole basis points inside the founder band — 1000 (10%) to 1500 (15%). */
+  reserve_rate_bps: number;
+  /** Whole days inside the founder band — 30 to 60. */
+  reserve_window_days: number;
+  beneficiary_payee_id: string;
+  beneficiary_payee_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The returns-reserve drawdown class of record — the two movements that
+ * spend a reserve: a customer return and a chargeback. The class is
+ * checked at the schema (migration 0027's CHECK) and at the lane.
+ */
+export const MERCH_RESERVE_DRAWDOWN_CLASSES = [
+  "customer_return",
+  "chargeback",
+] as const;
+export type MerchReserveDrawdownClass =
+  (typeof MERCH_RESERVE_DRAWDOWN_CLASSES)[number];
+
+/**
+ * One returns-reserve drawdown (migration 0027) — the append-only truth a
+ * reserve spends against, the 0026 recoupment-application discipline at
+ * reserve scope. UNIQUE per (reserve_ledger_id, source_event_id): a
+ * re-shipped return/chargeback event is the unique violation, never a
+ * double drawdown. UNIQUE per (reserve_ledger_id, drawn_before_cents): the
+ * POSITION lock — the insert-as-lock arbiter — so two concurrent drawdowns
+ * of one reserve compute the same position and exactly one wins it; the
+ * loser re-derives from the append-only truth. The drawn sum IS the
+ * reserve's spend — derived, never a second mutable counter.
+ */
+export type MerchReserveDrawdownRecord = {
+  id: string;
+  /** The held reserve credit's ledger row id — the reserve being spent. */
+  reserve_ledger_id: string;
+  drawdown_class: MerchReserveDrawdownClass;
+  /** The return/chargeback event's content-derived id — the replay guard. */
+  source_event_id: string;
+  /** The reserve's drawn position the instant before this drawdown. */
+  drawn_before_cents: number;
+  drawn_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * The fulfillment tracking state of record — the carrier event lifecycle the
+ * merch payout gate's physical_fulfillment_confirmed condition resolves
+ * from. Only 'delivered' confirms; 'assigned' and 'in_transit' are honest
+ * not-yet states the gate refuses on (fail-closed), and an absent tracking
+ * ledger is an unknown that refuses the same way.
+ */
+export const MERCH_FULFILLMENT_TRACKING_STATES = [
+  "assigned",
+  "in_transit",
+  "delivered",
+] as const;
+export type MerchFulfillmentTrackingState =
+  (typeof MERCH_FULFILLMENT_TRACKING_STATES)[number];
+
+/**
+ * One fulfillment tracking event (migration 0027) — the fulfillment data
+ * the merch payout gate reads. UNIQUE per (fulfillment_event_id,
+ * tracking_number, tracking_state): a re-shipped tracking event is the
+ * unique violation, never a double record. The confirmation the gate
+ * enforces is a DELIVERED event on the fulfillment event — tracking
+ * assigned or in transit does not confirm, and no tracking at all is
+ * unknown (both refuse, fail-closed).
+ */
+export type MerchFulfillmentTrackingRecord = {
+  id: string;
+  fulfillment_event_id: string;
+  tracking_number: string;
+  tracking_state: MerchFulfillmentTrackingState;
+  carrier: string;
+  /** The delivery instant when tracking_state is 'delivered'; null before. */
+  delivered_at: string | null;
+  created_at: string;
+};
+

@@ -156,6 +156,14 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   translation_localization_release: 'Translation escrow released',
   ip_option_release: 'Adaptation option fee released',
   merch_collab_release: 'Merch collaboration settlement released',
+  // Merchandise returns reserve (PR 23, the founder merchandise directive):
+  // dispatch credits the beneficiary's vault for the non-reserve remainder
+  // (the holdback locks as the sentinel payee's reserve row), drawdown
+  // faces no vault (the refund leaves the FBO cash leg), and the window
+  // release credits the beneficiary's vault with the surviving reserve.
+  merch_reserve_dispatch: 'Merch payout dispatched (reserve held)',
+  merch_reserve_drawdown: 'Merch reserve drawn down',
+  merch_returns_reserve_release: 'Merch returns reserve released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
@@ -188,6 +196,14 @@ const INFLOW_KINDS: ReadonlySet<JournalKind> = new Set<JournalKind>([
   // credits the company payee. The post kind faces no vault — its credit
   // side is the platform's cashout-pending GL account — so it stays out.
   'gaming_cashout_release',
+  // Merchandise returns reserve (PR 23, the founder merchandise directive):
+  // the dispatch's non-reserve remainder rides the fail-closed cascade into
+  // the beneficiary's vault CREDIT, and the window release pays the
+  // surviving reserve into the same vault — both holder-facing inflows. The
+  // drawdown kind faces no vault (the refund leaves the FBO cash leg), so
+  // it stays out.
+  'merch_reserve_dispatch',
+  'merch_returns_reserve_release',
 ]);
 
 /** The entry_hash short form — the leading hash characters, display-safe. */

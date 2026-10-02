@@ -115,6 +115,13 @@ export const LEDGER_STATUSES = [
   // bands — before net funds allocate to the primary author (status →
   // 'settled').
   "translation_localization_pending",
+  // Merchandise returns reserve (PR 23, the founder merchandise directive):
+  // the founder-banded holdback (10–15%) of a merch payout allocation locks
+  // at dispatch until the returns window elapses; customer returns and
+  // payment chargebacks draw it down position-locked, and the verified
+  // release after the window settles it to the beneficiary of record
+  // (status → 'settled').
+  "merch_returns_reserve",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -161,6 +168,12 @@ export const LEDGER_KINDS = [
   // kind 'translation_localization_pending' with status 'settled'), the same
   // division PR 7, PR 9, PR 13, PR 14, and PR 15 use.
   "translation_localization_pending",
+  // Merch returns reserve (PR 23): the 10–15% of a merch payout allocation
+  // held per contract for the returns window. Kind marks WHAT the row is
+  // for its whole life (a released or fully-drawn reserve stays kind
+  // 'merch_returns_reserve' with status 'settled'), the same division PR 7,
+  // PR 9, PR 13, PR 14, PR 15, and PR 20 use.
+  "merch_returns_reserve",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
