@@ -103,6 +103,7 @@ function makePodcastLine(
     livestreamDetail: null,
     webtoonDetail: null,
     merchDetail: null,
+    aiDetail: null,
   };
 }
 

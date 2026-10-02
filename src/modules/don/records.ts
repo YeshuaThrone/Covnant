@@ -1230,3 +1230,67 @@ export type MerchFulfillmentTrackingRecord = {
   created_at: string;
 };
 
+/**
+ * The AI lane's bounded contributor-class vocabulary (PR 24, the founder
+ * AI directive + tokenization patch) — the training registry's classes of
+ * record. Data providers, voice sources, and original-IP owners share the
+ * directive's 30% contributor pool; the class is the audit trail's
+ * attribution fact, never a money-math input (the pro-rata token weights
+ * price the shares).
+ */
+export const AI_CONTRIBUTOR_CLASSES = [
+  "dataset",
+  "voice",
+  "original_ip",
+] as const;
+export type AiContributorClass = (typeof AI_CONTRIBUTOR_CLASSES)[number];
+
+/**
+ * One model's nested derivative split contract terms of record (migration
+ * 0028) — the directive's defaults (2000/5000/3000 bps) made per-contract
+ * configurable. UNIQUE per ai_model_id: one contract prices one model; a
+ * re-registered terms row is an upsert (the newest contract governs), and
+ * the recon posting pass reads it at each ingest.
+ */
+export type AiModelSplitTermsRecord = {
+  id: string;
+  /** UNIQUE — the model the terms price (the addendum 9 ai_model_id key). */
+  ai_model_id: string;
+  /** The base foundation model provider's system fee, whole bps off the top. */
+  base_model_provider_fee_bps: number;
+  /** The fine-tuner / LoRA creator's split of the post-fee remainder, bps. */
+  developer_split_bps: number;
+  /** The data + voice + original-IP contributor pool of the remainder, bps. */
+  contributor_pool_bps: number;
+  base_model_provider_payee_id: string;
+  base_model_provider_payee_name: string;
+  developer_payee_id: string;
+  developer_payee_name: string;
+  model_operator_payee_id: string;
+  model_operator_payee_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One contributor's registered dataset token weight on one model
+ * (migration 0028) — the model registry the posting pass resolves an
+ * unattributed inference event's contributor pool through, and the
+ * pro-rata denominator's inputs for training-pool royalties. UNIQUE per
+ * (ai_model_id, contributor_payee_id): a re-shipped attribution log is an
+ * upsert (the newest weight governs the next distribution), never a
+ * double registration.
+ */
+export type AiModelContributionRecord = {
+  id: string;
+  ai_model_id: string;
+  contributor_payee_id: string;
+  contributor_payee_name: string;
+  /** The bounded class vocabulary above — the attribution fact of record. */
+  contributor_class: AiContributorClass;
+  /** The contributor's exact decimal dataset token weight (1e-8 micros text). */
+  dataset_token_weight: string;
+  created_at: string;
+  updated_at: string;
+};
+

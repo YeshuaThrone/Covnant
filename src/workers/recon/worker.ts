@@ -41,6 +41,9 @@ import { isWebtoonProfileKind } from "./webtoonProfiles";
 import { writeMerchLinesToMatchQueue } from "./merchQueue";
 import { postMerchNetsToHolding } from "./merchPosting";
 import { isMerchProfileKind } from "./merchProfiles";
+import { writeAiLinesToMatchQueue } from "./aiQueue";
+import { postAiLinesToHolding } from "./aiPosting";
+import { isAiProfileKind } from "./aiProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -181,6 +184,15 @@ async function processJobBody(
     // the livestream escrow, or the webtoon conversions.
     if (isMerchProfileKind(matchedProfile.kind)) {
       return await parseMerch(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The AI lane branches the same way (PR 24): its rows are the four
+    // strict AI senders' metered inference / voice licensing / dataset
+    // attribution events whose money runs the founder's nested derivative
+    // split — never the music queue's split math, the gaming accumulator,
+    // the livestream escrow, the webtoon conversions, or the merch COGS
+    // deduction.
+    if (isAiProfileKind(matchedProfile.kind)) {
+      return await parseAi(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -431,6 +443,52 @@ async function parseMerch(
     merch_zero_net: counts.zeroNet,
     merch_cogs_micros: counts.cogsMicrosDeducted.toString(),
     merch_shrinkage_offset_micros: counts.shrinkageOffsetMicros.toString(),
+  };
+}
+
+/**
+ * The AI lane (PR 24): strict-profile parse → match_queue write → the
+ * nested derivative split posting. The parse pass already enforced the
+ * four senders' layouts (exact rate/revenue reconciliation, bounded
+ * vocabularies, identity/quantity validation); the queue pass landed the
+ * rows and the attribution registry upserts; this function runs the
+ * posting pass and reports the honest counts. A posting failure throws —
+ * the job fails with its row-scoped reason and a retry heals
+ * idempotently (the 409 guard counts the already-posted legs).
+ */
+async function parseAi(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeAiLinesToMatchQueue(deps.store, lines);
+  const posting = await postAiLinesToHolding(
+    deps.store,
+    counts.lineOutcomes,
+    now,
+  );
+  return {
+    events_written: counts.written,
+    matched: counts.written,
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: posting.postedLegs,
+    holding_replayed: posting.replayedLegs,
+    ai_written: counts.written,
+    ai_replayed: counts.alreadyPresent,
+    ai_held: posting.heldUnattributedEvents,
+    ai_legs_posted: posting.postedLegs,
+    ai_legs_replayed: posting.replayedLegs,
+    ai_legs_zero_net: posting.zeroNetLegs,
+    ai_fee_micros: posting.feeMicros.toString(),
+    ai_developer_micros: posting.developerMicros.toString(),
+    ai_operator_micros: posting.operatorMicros.toString(),
+    ai_attribution_micros: posting.attributionMicros.toString(),
+    ai_voice_licensing_micros: posting.voiceLicensingMicros.toString(),
+    ai_pool_royalty_micros: posting.poolRoyaltyMicros.toString(),
+    ai_pool_dust_micros: posting.poolDustMicros.toString(),
   };
 }
 

@@ -111,6 +111,8 @@ import type {
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
   MerchFulfillmentTrackingRecord,
+  AiModelSplitTermsRecord,
+  AiModelContributionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -271,6 +273,13 @@ const TABLES = {
   merchReturnReservePolicies: 'merch_return_reserve_policies',
   merchReserveDrawdowns: 'merch_reserve_drawdowns',
   merchFulfillmentTrackings: 'merch_fulfillment_trackings',
+  // Migration 0028 — the AI model registry (PR 24): one model's nested
+  // derivative split contract terms (UNIQUE per model) and the
+  // contributors' registered dataset token weights (UNIQUE per model+payee
+  // — a re-shipped attribution log converges). The recon posting pass's
+  // terms of record and the unattributed pool's fallback inputs.
+  aiModelSplitTerms: 'ai_model_split_terms',
+  aiModelContributions: 'ai_model_contributions',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -1469,6 +1478,75 @@ export class SupabaseStore implements Store {
       'settleGamingDevexConversionLogsByBatch',
     );
     return settled.length;
+  }
+
+  async upsertAiModelSplitTerms(
+    terms: Omit<AiModelSplitTermsRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiModelSplitTermsRecord> {
+    // UNIQUE per ai_model_id — the upsert targets the model key, so a
+    // re-registered contract replaces the row atomically (the newest
+    // contract governs the next ingest, never a duplicate).
+    return this.oneStrict<AiModelSplitTermsRecord>(
+      this.client
+        .from(TABLES.aiModelSplitTerms)
+        .upsert(
+          { ...terms, id: crypto.randomUUID() },
+          { onConflict: 'ai_model_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertAiModelSplitTerms',
+    );
+  }
+
+  async getAiModelSplitTerms(
+    aiModelId: string,
+  ): Promise<AiModelSplitTermsRecord | undefined> {
+    return this.one<AiModelSplitTermsRecord>(
+      this.client
+        .from(TABLES.aiModelSplitTerms)
+        .select()
+        .eq('ai_model_id', aiModelId)
+        .maybeSingle(),
+      'getAiModelSplitTerms',
+    );
+  }
+
+  async upsertAiModelContribution(
+    contribution: Omit<
+      AiModelContributionRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AiModelContributionRecord> {
+    // UNIQUE per (ai_model_id, contributor_payee_id) — a re-shipped
+    // attribution log converges; the newest weight governs.
+    return this.oneStrict<AiModelContributionRecord>(
+      this.client
+        .from(TABLES.aiModelContributions)
+        .upsert(
+          { ...contribution, id: crypto.randomUUID() },
+          { onConflict: 'ai_model_id,contributor_payee_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertAiModelContribution',
+    );
+  }
+
+  async listAiModelContributions(
+    aiModelId: string,
+  ): Promise<AiModelContributionRecord[]> {
+    // Write order — the registry's own audit order (created_at ASC, the
+    // devex log read's tiebreak; the synthetic insertion_order column does
+    // not exist on this table).
+    return this.many<AiModelContributionRecord>(
+      this.client
+        .from(TABLES.aiModelContributions)
+        .select()
+        .eq('ai_model_id', aiModelId)
+        .order('created_at', { ascending: true }),
+      'listAiModelContributions',
+    );
   }
 
   async upsertGamingStudioKyc(

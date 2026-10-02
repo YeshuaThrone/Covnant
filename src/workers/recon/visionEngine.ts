@@ -164,6 +164,7 @@ function validateVisionLine(
       livestreamDetail: null,
       webtoonDetail: null,
       merchDetail: null,
+      aiDetail: null,
     },
   };
 }

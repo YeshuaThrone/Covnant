@@ -272,6 +272,7 @@ function livestreamLine(
     livestreamDetail: detail,
     webtoonDetail: null,
     merchDetail: null,
+    aiDetail: null,
   };
 }
 

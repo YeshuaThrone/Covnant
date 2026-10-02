@@ -115,6 +115,8 @@ import type {
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
   MerchFulfillmentTrackingRecord,
+  AiModelSplitTermsRecord,
+  AiModelContributionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -203,6 +205,12 @@ export class InMemoryStore implements Store {
   // verification state per studio payee.
   private gamingDevexConversionLogs: GamingDevexConversionLogRecord[] = [];
   private gamingStudioKycVerifications = new Map<string, GamingStudioKycRecord>();
+  // --- AI model registry (0028, PR 24): the nested-split contract terms
+  // (UNIQUE per model) and the contributors' registered dataset token
+  // weights (UNIQUE per model+payee) — the recon posting pass's terms of
+  // record and the unattributed pool's fallback inputs.
+  private aiModelSplitTerms = new Map<string, AiModelSplitTermsRecord>();
+  private aiModelContributions = new Map<string, AiModelContributionRecord>();
   // --- VTuber agency licensing holdbacks + tax verification (0020, PR 15) ---
   private vtuberTaxWithholdingVerifications = new Map<
     string,
@@ -1111,6 +1119,59 @@ export class InMemoryStore implements Store {
       }
     }
     return settled;
+  }
+
+  async upsertAiModelSplitTerms(
+    terms: Omit<AiModelSplitTermsRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiModelSplitTermsRecord> {
+    // UNIQUE per ai_model_id — an upsert converges on the newest contract
+    // (the re-registered terms govern the next ingest, never a duplicate).
+    const now = new Date().toISOString();
+    const existing = this.aiModelSplitTerms.get(terms.ai_model_id);
+    const record: AiModelSplitTermsRecord = {
+      ...terms,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.aiModelSplitTerms.set(terms.ai_model_id, record);
+    return record;
+  }
+
+  async getAiModelSplitTerms(
+    aiModelId: string,
+  ): Promise<AiModelSplitTermsRecord | undefined> {
+    return this.aiModelSplitTerms.get(aiModelId);
+  }
+
+  async upsertAiModelContribution(
+    contribution: Omit<
+      AiModelContributionRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AiModelContributionRecord> {
+    // UNIQUE per (ai_model_id, contributor_payee_id) — a re-shipped
+    // attribution log converges; the newest weight governs.
+    const now = new Date().toISOString();
+    const key = `${contribution.ai_model_id}\u0000${contribution.contributor_payee_id}`;
+    const existing = this.aiModelContributions.get(key);
+    const record: AiModelContributionRecord = {
+      ...contribution,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.aiModelContributions.set(key, record);
+    return record;
+  }
+
+  async listAiModelContributions(
+    aiModelId: string,
+  ): Promise<AiModelContributionRecord[]> {
+    // Write order (insertion order for ties) — the registry's own audit order.
+    return [...this.aiModelContributions.values()].filter(
+      (row) => row.ai_model_id === aiModelId,
+    );
   }
 
   async upsertGamingStudioKyc(

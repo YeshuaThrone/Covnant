@@ -76,6 +76,7 @@ function impLine(
     merchDetail: null,
     livestreamDetail: null,
     webtoonDetail: null,
+    aiDetail: null,
     ...lineOverrides,
   };
 }

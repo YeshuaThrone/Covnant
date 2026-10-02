@@ -24,6 +24,7 @@
 import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/identifiers";
 import { PODCAST_PROFILES } from "./podcastProfiles";
 import { MERCH_PROFILES } from "./merchProfiles";
+import { AI_PROFILES } from "./aiProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
@@ -126,6 +127,7 @@ function musicLine(
     livestreamDetail: null,
     webtoonDetail: null,
     merchDetail: null,
+    aiDetail: null,
   };
 }
 
@@ -406,6 +408,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           livestreamDetail: null,
           webtoonDetail: null,
           merchDetail: null,
+          aiDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -545,6 +548,11 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // the POD printing-before-split, the consignment reconciliation, and the
   // POS net are merch-only).
   ...MERCH_PROFILES,
+  // The AI lane (PR 24) — same dispatch opinion; the worker branches on
+  // the profile kind before the music machinery (the metered usage unit
+  // math, the direct-to-actor voice routing, and the nested derivative
+  // split are AI-only).
+  ...AI_PROFILES,
 ];
 
 /**
