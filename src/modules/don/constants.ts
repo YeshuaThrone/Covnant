@@ -140,6 +140,31 @@ export const MERCH_RETURNS_RESERVE_MAX_RATE_BPS = 1_500;
 export const MERCH_RETURNS_RESERVE_MIN_WINDOW_DAYS = 30;
 export const MERCH_RETURNS_RESERVE_MAX_WINDOW_DAYS = 60;
 
+// --- The book returns reserve (PR 27, the founder publishing directive) ---
+//
+// Physical print allocations of one ISBN hold a BOOK_RETURNS_RESERVE per
+// contract for the returns window: the 15–20% the directive bands, held for
+// 90–120 days, then released to the beneficiary of record. Sentinel payee +
+// GL account per ISBN — the merch module's no-fold discipline; the reserve
+// is its own escrow-shaped money, never folded into platform dust.
+export const BOOK_RETURNS_RESERVE_PAYEE_PREFIX = "book_returns_reserve";
+export function bookReturnsReservePayeeId(isbn: string): string {
+  return `${BOOK_RETURNS_RESERVE_PAYEE_PREFIX}:${isbn}`;
+}
+export function bookReturnsReservePayeeName(isbn: string): string {
+  return `Book Returns Reserve — ${isbn}`;
+}
+export function bookReturnsReserveGlAccount(isbn: string): string {
+  return `book_returns_reserve:${isbn}`;
+}
+// The founder's book bands, enforced at registration AND at use: a holdback
+// rate of 15–20% of the allocation and a returns window of 90–120 days.
+// Anything outside a band is a hostile contract, refused.
+export const BOOK_RETURNS_RESERVE_MIN_RATE_BPS = 1_500;
+export const BOOK_RETURNS_RESERVE_MAX_RATE_BPS = 2_000;
+export const BOOK_RETURNS_RESERVE_MIN_WINDOW_DAYS = 90;
+export const BOOK_RETURNS_RESERVE_MAX_WINDOW_DAYS = 120;
+
 // The studio role-group vocabulary — the three bands' keys. A schedule role
 // outside the vocabulary is a hostile registration.
 export const WEBTOON_STUDIO_ROLE_GROUPS = [
@@ -311,6 +336,32 @@ export const JOURNAL_KINDS = [
   "merch_reserve_dispatch",
   "merch_reserve_drawdown",
   "merch_returns_reserve_release",
+  // The foreign tax hold (PR 27, the founder publishing directive): a
+  // FOREIGN print royalty's unclaimed-holding leg posts STRAIGHT INTO the
+  // FOREIGN_TAX_HOLD freeze — same legs as unclaimed_holding_post (FBO
+  // debit, unclaimed-holding credit), distinct kind for the audit trail.
+  // The verified withholding-tax-credit release THAWS the legs back to the
+  // holding state (a status CAS sweep, no journal — the reversal of the
+  // freeze is not money moving; the PR 25 dispute thaw precedent).
+  // Additive only.
+  "foreign_tax_hold_post",
+  // The book returns reserve (PR 27): a physical print allocation's
+  // dispatch splits the held credit — the 15–20% reserve locks into the
+  // per-ISBN returns reserve, the remainder re-parks in unclaimed holding
+  // until the publishing payout gate clears (the author payout releases
+  // THEN, offset first). Returns and chargebacks draw the reserve down
+  // (the money goes back to the publisher); after the 90–120 day window
+  // the verified release pays the remaining reserve to the beneficiary of
+  // record through the taxed cascade. Additive only.
+  "book_reserve_dispatch",
+  "book_reserve_drawdown",
+  "book_returns_reserve_release",
+  // The book print author payout (PR 27): the re-parked net-of-reserve
+  // holding releases through the fail-closed publishing gate, the
+  // outstanding chargeback offsets consume their recovery FIRST (the
+  // offset's credits go back to FBO), and the post-offset remainder routes
+  // through the same taxed cascade every payout rides. Additive only.
+  "book_print_net_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

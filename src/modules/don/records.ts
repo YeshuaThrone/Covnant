@@ -1416,6 +1416,172 @@ export type MerchFulfillmentTrackingRecord = {
 };
 
 /**
+ * The withholding-tax-credit verification state of record (PR 27, the
+ * foreign tax hold) — the evidence lifecycle a country+tax-year's foreign
+ * print royalties release against. Only 'verified' releases the hold;
+ * 'pending' and 'failed' are honest not-yet states, and an absent
+ * verification is an unknown — all refuse, fail-closed.
+ */
+export const WITHHOLDING_TAX_CREDIT_STATES = [
+  "pending",
+  "verified",
+  "failed",
+] as const;
+export type WithholdingTaxCreditState =
+  (typeof WITHHOLDING_TAX_CREDIT_STATES)[number];
+
+/**
+ * One withholding tax credit verification (PR 27, migration 0031) — the
+ * VERIFIED evidence that a foreign sale territory's withholding tax was
+ * credited at treaty terms (for example US-UK treaty evidence) for one tax
+ * year. UNIQUE per (country_code, tax_year): a re-recording converges (the
+ * evidence upgrade pending → verified replaces the row atomically). A
+ * 'verified' state REQUIRES the treaty reference, the evidence provenance,
+ * and the verifier — the state never lies about the credit.
+ */
+export type WithholdingTaxCreditVerificationRecord = {
+  id: string;
+  /** The sale territory's ISO-3166 alpha-2 country code, normalized uppercase. */
+  country_code: string;
+  tax_year: number;
+  state: WithholdingTaxCreditState;
+  /** The treaty of record the credit claims (required for 'verified'). */
+  treaty_ref: string | null;
+  /** The credit evidence's provenance (required for 'verified'). */
+  evidence_ref: string | null;
+  /** Who verified the evidence (required for 'verified'). */
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The ISBN rights verification state of record (PR 27) — the print-title
+ * rights chain the publishing payout gate's isbn_rights_verified condition
+ * resolves from. Only 'verified' passes; absent, pending, and failed all
+ * refuse, fail-closed.
+ */
+export const ISBN_RIGHTS_STATES = ["pending", "verified", "failed"] as const;
+export type IsbnRightsState = (typeof ISBN_RIGHTS_STATES)[number];
+
+/**
+ * One ISBN rights verification (PR 27, migration 0031) — the print title's
+ * verified rights chain of record. UNIQUE per isbn: a re-verification
+ * replaces the row atomically. A 'verified' state requires the rights
+ * evidence provenance — the state never lies about the chain.
+ */
+export type IsbnRightsVerificationRecord = {
+  id: string;
+  isbn: string;
+  state: IsbnRightsState;
+  /** The rights evidence's provenance (required for 'verified'). */
+  evidence_ref: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The book returns-reserve drawdown class of record (PR 27) — the two
+ * movements that spend a book reserve: a publisher's return of unsold
+ * bookstore stock and a payment chargeback. The class is checked at the
+ * schema (migration 0031's CHECK) and at the lane.
+ */
+export const BOOK_RESERVE_DRAWDOWN_CLASSES = [
+  "publisher_return",
+  "chargeback",
+] as const;
+export type BookReserveDrawdownClass =
+  (typeof BOOK_RESERVE_DRAWDOWN_CLASSES)[number];
+
+/**
+ * The book returns-reserve policy of record per ISBN (PR 27, migration
+ * 0031) — the founder-banded money terms the lock lane withholds from and
+ * the release lanes read. Bands are CHECK-enforced at rest and
+ * lane-enforced at write.
+ */
+export type BookReturnsReservePolicyRecord = {
+  id: string;
+  isbn: string;
+  /** Whole basis points inside the founder band — 1500 (15%) to 2000 (20%). */
+  reserve_rate_bps: number;
+  /** Whole days inside the founder band — 90 to 120. */
+  reserve_window_days: number;
+  beneficiary_payee_id: string;
+  beneficiary_payee_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One book returns-reserve drawdown (PR 27, migration 0031) — the
+ * append-only truth a reserve spends against, the merch reserve discipline
+ * (PR 23) at ISBN scope. UNIQUE per (reserve_ledger_id, source_event_id):
+ * a re-shipped return/chargeback event is the unique violation, never a
+ * double drawdown. UNIQUE per (reserve_ledger_id, drawn_before_cents): the
+ * POSITION lock — the insert-as-lock arbiter. The drawn sum IS the
+ * reserve's spend — derived, never a second mutable counter.
+ */
+export type BookReserveDrawdownRecord = {
+  id: string;
+  /** The held reserve credit's ledger row id — the reserve being spent. */
+  reserve_ledger_id: string;
+  drawdown_class: BookReserveDrawdownClass;
+  /** The return/chargeback event's content-derived id — the replay guard. */
+  source_event_id: string;
+  /** The reserve's drawn position the instant before this drawdown. */
+  drawn_before_cents: number;
+  drawn_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * One publisher return chargeback of record (PR 27, migration 0031) — the
+ * chargeback event against one ISBN's print allocations, the input the
+ * reserve drawdowns and the POD-net offset applications reconcile against.
+ * UNIQUE per event_id: a re-shipped chargeback event is the counted no-op,
+ * never a double record. The chargeback's recovery splits across two
+ * lanes: the title's held reserves (book_reserve_drawdowns rows with this
+ * event's id as source_event_id) and the outstanding remainder's offset
+ * against incoming POD net (book_chargeback_offset_applications rows).
+ */
+export type BookReturnChargebackRecord = {
+  id: string;
+  /** The chargeback event's content-derived id — the replay guard. */
+  event_id: string;
+  isbn: string;
+  chargeback_class: BookReserveDrawdownClass;
+  chargeback_cents: number;
+  currency: string;
+  created_at: string;
+};
+
+/**
+ * One chargeback offset application against an incoming POD net balance
+ * (PR 27, migration 0031) — the append-only truth of the publisher's
+ * recovery taken OUT of a specific held print allocation BEFORE author
+ * payouts release. UNIQUE per (chargeback_id, holding_ledger_id): a
+ * replayed release is the unique violation, never a double offset. UNIQUE
+ * per (chargeback_id, offset_before_cents): the POSITION lock — exactly one
+ * release wins an offset's next running position per chargeback.
+ */
+export type BookChargebackOffsetApplicationRecord = {
+  id: string;
+  /** The chargeback of record this application recovers against. */
+  chargeback_id: string;
+  /** The held print allocation the offset consumed from. */
+  holding_ledger_id: string;
+  /** The chargeback's applied position the instant before this application. */
+  offset_before_cents: number;
+  applied_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
  * The AI lane's bounded contributor-class vocabulary (PR 24, the founder
  * AI directive + tokenization patch) — the training registry's classes of
  * record. Data providers, voice sources, and original-IP owners share the

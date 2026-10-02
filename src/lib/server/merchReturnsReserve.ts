@@ -125,12 +125,21 @@ export type MerchReserveSplitPlan = {
  * dust holds with dust structurally zero). Refuses a non-integer or
  * non-positive allocation and a rate outside the founder band — a hostile
  * contract is refused, not clipped.
+ *
+ * The band is the CALLER's founder band, not a hardcode: it defaults to the
+ * merch instance's 10–15% (PR 23), and the book returns-reserve instance
+ * (PR 27) passes its own 15–20% — one planner, every vertical's configurable
+ * reserve mechanics.
  */
 export function buildReserveSplitPlan(input: {
   allocation_cents: number;
   reserve_rate_bps: number;
+  min_rate_bps?: number;
+  max_rate_bps?: number;
 }): { ok: true; value: MerchReserveSplitPlan } | MerchReserveFailure {
   const { allocation_cents, reserve_rate_bps } = input;
+  const minRateBps = input.min_rate_bps ?? MERCH_RETURNS_RESERVE_MIN_RATE_BPS;
+  const maxRateBps = input.max_rate_bps ?? MERCH_RETURNS_RESERVE_MAX_RATE_BPS;
   if (!Number.isInteger(allocation_cents) || allocation_cents <= 0) {
     return {
       ok: false,
@@ -139,16 +148,12 @@ export function buildReserveSplitPlan(input: {
       message: "A merch payout allocation splits in whole positive cents.",
     };
   }
-  if (
-    !Number.isInteger(reserve_rate_bps) ||
-    reserve_rate_bps < MERCH_RETURNS_RESERVE_MIN_RATE_BPS ||
-    reserve_rate_bps > MERCH_RETURNS_RESERVE_MAX_RATE_BPS
-  ) {
+  if (!Number.isInteger(reserve_rate_bps) || reserve_rate_bps < minRateBps || reserve_rate_bps > maxRateBps) {
     return {
       ok: false,
       status: 422,
       code: "reserve_rate_out_of_band",
-      message: `The returns-reserve rate must sit inside the founder band (${MERCH_RETURNS_RESERVE_MIN_RATE_BPS}–${MERCH_RETURNS_RESERVE_MAX_RATE_BPS} bps — 10–15%).`,
+      message: `The returns-reserve rate must sit inside the founder band (${minRateBps}–${maxRateBps} bps — ${minRateBps / 100}–${maxRateBps / 100}%).`,
     };
   }
   const reserve_cents = Math.floor((allocation_cents * reserve_rate_bps) / BPS_DENOMINATOR);
@@ -166,11 +171,17 @@ export function buildReserveSplitPlan(input: {
  * The PURE window check — a reserve releases only after its contract's
  * founder-banded window has fully elapsed since the holdback posted.
  * Whole days; the window boundary itself (elapsed === window) releases.
+ *
+ * The window band is the CALLER's founder band, not a hardcode: it defaults
+ * to the merch instance's 30–60 days (PR 23), and the book returns-reserve
+ * instance (PR 27) passes its own 90–120 days.
  */
 export function buildReserveWindowCheck(input: {
   created_at: string;
   window_days: number;
   now: Date;
+  min_window_days?: number;
+  max_window_days?: number;
 }): { ok: true; value: { elapsed_days: number } } | MerchReserveFailure {
   const createdAtMs = Date.parse(input.created_at);
   if (!Number.isFinite(createdAtMs)) {
@@ -181,16 +192,18 @@ export function buildReserveWindowCheck(input: {
       message: "The reserve credit's created_at is not a parseable instant.",
     };
   }
+  const minWindowDays = input.min_window_days ?? MERCH_RETURNS_RESERVE_MIN_WINDOW_DAYS;
+  const maxWindowDays = input.max_window_days ?? MERCH_RETURNS_RESERVE_MAX_WINDOW_DAYS;
   if (
     !Number.isInteger(input.window_days) ||
-    input.window_days < MERCH_RETURNS_RESERVE_MIN_WINDOW_DAYS ||
-    input.window_days > MERCH_RETURNS_RESERVE_MAX_WINDOW_DAYS
+    input.window_days < minWindowDays ||
+    input.window_days > maxWindowDays
   ) {
     return {
       ok: false,
       status: 422,
       code: "reserve_window_out_of_band",
-      message: `The returns-reserve window must sit inside the founder band (${MERCH_RETURNS_RESERVE_MIN_WINDOW_DAYS}–${MERCH_RETURNS_RESERVE_MAX_WINDOW_DAYS} days).`,
+      message: `The returns-reserve window must sit inside the founder band (${minWindowDays}–${maxWindowDays} days).`,
     };
   }
   const elapsedDays = (input.now.getTime() - createdAtMs) / 86_400_000;
@@ -211,6 +224,10 @@ export function buildReserveWindowCheck(input: {
  * class, a non-integer or non-positive amount, and an overdraw — the
  * reserve covers exactly what it holds; a drawdown beyond the remaining
  * balance is refused, never clipped into a negative reserve.
+ *
+ * The class vocabulary is the CALLER's, not a hardcode: it defaults to the
+ * merch instance's classes (PR 23), and the book returns-reserve instance
+ * (PR 27) passes its own publisher_return/chargeback pair.
  */
 export function buildReserveDrawdownPlan(input: {
   drawdown_class: string;
@@ -218,13 +235,15 @@ export function buildReserveDrawdownPlan(input: {
   drawn_before_cents: number;
   drawn_cents: number;
   remaining_cents: number;
+  drawdown_classes?: readonly string[];
 }): { ok: true; value: Pick<MerchReserveDrawdownRecord, "drawn_before_cents" | "drawn_cents" | "remaining_cents"> } | MerchReserveFailure {
-  if (!MERCH_RESERVE_DRAWDOWN_CLASSES.includes(input.drawdown_class as MerchReserveDrawdownClass)) {
+  const classes = input.drawdown_classes ?? MERCH_RESERVE_DRAWDOWN_CLASSES;
+  if (!classes.includes(input.drawdown_class)) {
     return {
       ok: false,
       status: 422,
       code: "invalid_drawdown_class",
-      message: `A reserve drawdown is a "${MERCH_RESERVE_DRAWDOWN_CLASSES.join('" or "')}" event.`,
+      message: `A reserve drawdown is a "${classes.join('" or "')}" event.`,
     };
   }
   if (input.source_event_id.trim() === "") {

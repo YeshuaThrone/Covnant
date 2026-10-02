@@ -12,6 +12,7 @@ import {
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   merchReturnsReserveGlAccount,
+  bookReturnsReserveGlAccount,
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
@@ -235,6 +236,28 @@ export function merchReturnsReserveDebit(skuId: string, amountCents: number): Gl
 export function merchReturnsReserveCredit(skuId: string, amountCents: number): GlLegInput {
   return {
     account: merchReturnsReserveGlAccount(skuId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Book returns reserve legs (PR 27): the per-ISBN reserve lock account — the
+// merch legs' mirror at ISBN scope. A locked print allocation credits it
+// with the 15–20% holdback (against the unclaimed holding debit); a
+// return/chargeback drawdown debits it back to FBO cash, and the verified
+// window release debits it to the beneficiary's taxed cascade legs — never a
+// vault bucket at post, never any other escrow's account.
+export function bookReturnsReserveDebit(isbn: string, amountCents: number): GlLegInput {
+  return {
+    account: bookReturnsReserveGlAccount(isbn),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function bookReturnsReserveCredit(isbn: string, amountCents: number): GlLegInput {
+  return {
+    account: bookReturnsReserveGlAccount(isbn),
     debit_cents: 0,
     credit_cents: amountCents,
   };

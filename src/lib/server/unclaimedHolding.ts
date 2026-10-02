@@ -287,6 +287,19 @@ export async function releaseUnclaimedHolding(
       message: `Holding credit ${row.id} is frozen in unauthorized_training_hold — an IP attribution dispute against the training dataset is active. Thaw runs only through the verified resolution path.`,
     };
   }
+  if (row.status === "foreign_tax_hold") {
+    // THE FOREIGN-TAX FREEZE (PR 27): the leg is a foreign print royalty
+    // held pending verified withholding-tax-credit evidence for its
+    // country/tax-year scope. The ONLY exit is the verified credit path
+    // (the evidence upsert → the thaw sweep) — a release attempt never
+    // unfreezes, fail-closed exactly like the dispute freeze above.
+    return {
+      ok: false,
+      status: 403,
+      code: "foreign_tax_hold",
+      message: `Holding credit ${row.id} is frozen in foreign_tax_hold — verified withholding tax credit evidence for its territory has not landed. Thaw runs only through the verified credit path.`,
+    };
+  }
   if (row.status !== "unclaimed_holding") {
     return {
       ok: false,

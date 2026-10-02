@@ -116,6 +116,12 @@ import type {
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
   MerchFulfillmentTrackingRecord,
+  WithholdingTaxCreditVerificationRecord,
+  IsbnRightsVerificationRecord,
+  BookReturnsReservePolicyRecord,
+  BookReserveDrawdownRecord,
+  BookReturnChargebackRecord,
+  BookChargebackOffsetApplicationRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
   AiTrainingDisputeRecord,
@@ -141,6 +147,7 @@ import {
   type UniversalRoyaltyLedgerRow,
 } from '@/lib/server/territorySettlement';
 import { podcastEpisodeIdOfQueueRow } from '@/modules/podcastSplits/engine';
+import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 
 /** Drops the store-internal ordering column; the DB row is otherwise the record. */
 function toRecord<T>(row: Record<string, unknown>): T {
@@ -307,6 +314,21 @@ const TABLES = {
   bookRecoupmentPools: 'book_recoupment_pools',
   bookRecoupmentApplications: 'book_recoupment_applications',
   bookEditorialSplitAccruals: 'book_editorial_split_accruals',
+  // Migration 0031 (PR 27) — the foreign tax hold + book returns reserve
+  // layer: the withholding-tax-credit verification of record per
+  // (country_code, tax_year) and the ISBN rights verification of record per
+  // isbn (the fail-closed evidence states), the per-ISBN founder-banded
+  // returns-reserve policy (upsert on isbn), the append-only reserve
+  // drawdown truth (replay + position uniques), the publisher return
+  // chargebacks of record (UNIQUE per event_id), and the append-only
+  // offset applications that recover an outstanding chargeback from an
+  // incoming POD net balance before author payouts release.
+  withholdingTaxCreditVerifications: 'withholding_tax_credit_verifications',
+  isbnRightsVerifications: 'isbn_rights_verifications',
+  bookReturnsReservePolicies: 'book_returns_reserve_policies',
+  bookReserveDrawdowns: 'book_reserve_drawdowns',
+  bookReturnChargebacks: 'book_return_chargebacks',
+  bookChargebackOffsetApplications: 'book_chargeback_offset_applications',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -2833,6 +2855,299 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'settleMerchReturnsReserve',
+    );
+  }
+
+  // --- Foreign tax hold + book returns reserve ledger states (PR 27) ---
+
+  async listForeignTaxHolds(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // The frozen-leg work queue: a thawed leg leaves the listing (its
+    // status returned to 'unclaimed_holding'). Newest first.
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'foreign_tax_hold')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listForeignTaxHolds',
+    );
+  }
+
+  async thawForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The THAW CAS sweep — the VERIFIED withholding credit's ledger leg:
+    // ONLY the scope's 'foreign_tax_hold' legs return to holding. A re-run
+    // is an honest no-op (the already-thawed legs no longer match).
+    const thawed = await this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'unclaimed_holding' })
+        .eq('split_run_id', taxHoldScope)
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'foreign_tax_hold')
+        .select(),
+      'thawForeignTaxHolds',
+    );
+    return thawed.length;
+  }
+
+  async freezeForeignTaxHolds(taxHoldScope: string): Promise<number> {
+    // The FREEZE CAS sweep — the foreign-tax-hold lane's ledger leg: ONLY
+    // the scope's still-held legs enter the freeze. A re-applied hold is a
+    // counted no-op (the already-frozen legs no longer match).
+    const frozen = await this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'foreign_tax_hold' })
+        .eq('split_run_id', taxHoldScope)
+        .eq('kind', 'unclaimed_holding')
+        .eq('status', 'unclaimed_holding')
+        .select(),
+      'freezeForeignTaxHolds',
+    );
+    return frozen.length;
+  }
+
+  async listBookReturnsReserveCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'book_returns_reserve')
+        .eq('status', 'book_returns_reserve')
+        .order('created_at', { ascending: false })
+        .order('insertion_order', { ascending: false })
+        .limit(limit),
+      'listBookReturnsReserveCredits',
+    );
+  }
+
+  async listBookReturnsReserveCreditsByIsbn(isbn: string): Promise<LedgerTransactionRecord[]> {
+    // EVERY state of the ISBN's reserves, oldest first — the FIFO draw
+    // ordering and the gate's window derivation (a settled reserve still
+    // proves its period ran).
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'book_returns_reserve')
+        .eq('payee_id', bookReturnsReservePayeeId(isbn))
+        .order('created_at', { ascending: true }),
+      'listBookReturnsReserveCreditsByIsbn',
+    );
+  }
+
+  async settleBookReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The status predicate in the UPDATE's WHERE is the CAS: PostgREST
+    // matches the row only while it is still held, so the concurrent
+    // release/drawdown loser gets zero rows back (maybeSingle → undefined).
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'book_returns_reserve')
+        .select()
+        .maybeSingle(),
+      'settleBookReturnsReserve',
+    );
+  }
+
+  // --- Foreign tax hold evidence + book returns reserve (PR 27, migration 0031) ---
+
+  async upsertWithholdingTaxCreditVerification(
+    row: Omit<WithholdingTaxCreditVerificationRecord, 'id'>,
+  ): Promise<WithholdingTaxCreditVerificationRecord> {
+    // The verification of record per (country_code, tax_year) — the upsert
+    // targets that pair, so a replayed verification returns the original
+    // row (idempotency) instead of a duplicate.
+    return this.oneStrict<WithholdingTaxCreditVerificationRecord>(
+      this.client
+        .from(TABLES.withholdingTaxCreditVerifications)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'country_code,tax_year' })
+        .select()
+        .maybeSingle(),
+      'upsertWithholdingTaxCreditVerification',
+    );
+  }
+
+  async getWithholdingTaxCreditVerification(
+    countryCode: string,
+    taxYear: number,
+  ): Promise<WithholdingTaxCreditVerificationRecord | undefined> {
+    return this.one<WithholdingTaxCreditVerificationRecord>(
+      this.client
+        .from(TABLES.withholdingTaxCreditVerifications)
+        .select()
+        .eq('country_code', countryCode)
+        .eq('tax_year', taxYear)
+        .maybeSingle(),
+      'getWithholdingTaxCreditVerification',
+    );
+  }
+
+  async upsertIsbnRightsVerification(
+    row: Omit<IsbnRightsVerificationRecord, 'id'>,
+  ): Promise<IsbnRightsVerificationRecord> {
+    // The rights verification of record per isbn — the upsert targets
+    // isbn, so a re-verified title replaces the row atomically.
+    return this.oneStrict<IsbnRightsVerificationRecord>(
+      this.client
+        .from(TABLES.isbnRightsVerifications)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'isbn' })
+        .select()
+        .maybeSingle(),
+      'upsertIsbnRightsVerification',
+    );
+  }
+
+  async getIsbnRightsVerification(
+    isbn: string,
+  ): Promise<IsbnRightsVerificationRecord | undefined> {
+    return this.one<IsbnRightsVerificationRecord>(
+      this.client
+        .from(TABLES.isbnRightsVerifications)
+        .select()
+        .eq('isbn', isbn)
+        .maybeSingle(),
+      'getIsbnRightsVerification',
+    );
+  }
+
+  async upsertBookReturnsReservePolicy(
+    row: Omit<BookReturnsReservePolicyRecord, 'id'>,
+  ): Promise<BookReturnsReservePolicyRecord> {
+    // One policy of record per isbn — the upsert targets isbn, so a
+    // re-registered policy replaces the row atomically (the merch
+    // sku_id precedent).
+    return this.oneStrict<BookReturnsReservePolicyRecord>(
+      this.client
+        .from(TABLES.bookReturnsReservePolicies)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'isbn' })
+        .select()
+        .maybeSingle(),
+      'upsertBookReturnsReservePolicy',
+    );
+  }
+
+  async getBookReturnsReservePolicy(
+    isbn: string,
+  ): Promise<BookReturnsReservePolicyRecord | undefined> {
+    return this.one<BookReturnsReservePolicyRecord>(
+      this.client
+        .from(TABLES.bookReturnsReservePolicies)
+        .select()
+        .eq('isbn', isbn)
+        .maybeSingle(),
+      'getBookReturnsReservePolicy',
+    );
+  }
+
+  async insertBookReserveDrawdown(
+    row: Omit<BookReserveDrawdownRecord, 'id'>,
+  ): Promise<BookReserveDrawdownRecord> {
+    // UNIQUE on (reserve_ledger_id, source_event_id) — a re-shipped
+    // return/chargeback event is the unique violation, never a double
+    // drawdown. UNIQUE on (reserve_ledger_id, drawn_before_cents) — the
+    // insert-as-lock position arbiter.
+    return this.oneStrict<BookReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.bookReserveDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookReserveDrawdown',
+    );
+  }
+
+  async listBookReserveDrawdowns(reserveLedgerId: string): Promise<BookReserveDrawdownRecord[]> {
+    return this.many<BookReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.bookReserveDrawdowns)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .order('drawn_before_cents', { ascending: true }),
+      'listBookReserveDrawdowns',
+    );
+  }
+
+  async insertBookReturnChargeback(
+    row: Omit<BookReturnChargebackRecord, 'id'>,
+  ): Promise<BookReturnChargebackRecord> {
+    // UNIQUE on event_id — a re-delivered publisher return event is the
+    // unique violation, never a duplicate chargeback of record.
+    return this.oneStrict<BookReturnChargebackRecord>(
+      this.client
+        .from(TABLES.bookReturnChargebacks)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookReturnChargeback',
+    );
+  }
+
+  async getBookReturnChargeback(
+    eventId: string,
+  ): Promise<BookReturnChargebackRecord | undefined> {
+    return this.one<BookReturnChargebackRecord>(
+      this.client
+        .from(TABLES.bookReturnChargebacks)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getBookReturnChargeback',
+    );
+  }
+
+  async listBookReturnChargebacksByIsbn(isbn: string): Promise<BookReturnChargebackRecord[]> {
+    // ONE ISBN's chargebacks, oldest first (created_at ASC): the FIFO
+    // ordering the outstanding-offset recovery reads.
+    return this.many<BookReturnChargebackRecord>(
+      this.client
+        .from(TABLES.bookReturnChargebacks)
+        .select()
+        .eq('isbn', isbn)
+        .order('created_at', { ascending: true }),
+      'listBookReturnChargebacksByIsbn',
+    );
+  }
+
+  async insertBookChargebackOffsetApplication(
+    row: Omit<BookChargebackOffsetApplicationRecord, 'id'>,
+  ): Promise<BookChargebackOffsetApplicationRecord> {
+    // UNIQUE on (chargeback_id, holding_ledger_id) — a replayed release is
+    // the unique violation, never a double recovery. UNIQUE on
+    // (chargeback_id, offset_before_cents) — the insert-as-lock position
+    // arbiter.
+    return this.oneStrict<BookChargebackOffsetApplicationRecord>(
+      this.client
+        .from(TABLES.bookChargebackOffsetApplications)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookChargebackOffsetApplication',
+    );
+  }
+
+  async listBookChargebackOffsetApplications(
+    chargebackId: string,
+  ): Promise<BookChargebackOffsetApplicationRecord[]> {
+    return this.many<BookChargebackOffsetApplicationRecord>(
+      this.client
+        .from(TABLES.bookChargebackOffsetApplications)
+        .select()
+        .eq('chargeback_id', chargebackId)
+        .order('offset_before_cents', { ascending: true }),
+      'listBookChargebackOffsetApplications',
     );
   }
 

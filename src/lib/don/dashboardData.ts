@@ -164,6 +164,19 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   merch_reserve_dispatch: 'Merch payout dispatched (reserve held)',
   merch_reserve_drawdown: 'Merch reserve drawn down',
   merch_returns_reserve_release: 'Merch returns reserve released',
+  // The foreign tax hold + book returns reserve (PR 27, the founder
+  // publishing directive): the freeze posts straight into holding, the
+  // lock splits the held print net into the per-ISBN reserve and the
+  // re-parked remainder, drawdowns refund the publisher's returns and
+  // chargebacks back to FBO, the verified window release pays the
+  // beneficiary through the taxed cascade, and the author payout releases
+  // the re-parked net with the outstanding chargeback offsets taken back
+  // to FBO first.
+  foreign_tax_hold_post: 'Foreign print royalty tax hold',
+  book_reserve_dispatch: 'Book returns reserve locked',
+  book_reserve_drawdown: 'Book returns reserve drawn',
+  book_returns_reserve_release: 'Book returns reserve released',
+  book_print_net_release: 'Book print net released',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

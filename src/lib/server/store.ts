@@ -108,6 +108,12 @@ import type {
   MerchFulfillmentTrackingRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
+  WithholdingTaxCreditVerificationRecord,
+  IsbnRightsVerificationRecord,
+  BookReturnsReservePolicyRecord,
+  BookReserveDrawdownRecord,
+  BookReturnChargebackRecord,
+  BookChargebackOffsetApplicationRecord,
   AiModelSplitTermsRecord,
   AiModelContributionRecord,
   AiTrainingDisputeRecord,
@@ -1511,6 +1517,167 @@ export interface Store {
   getMerchConsignmentSettlementByEventId(
     eventId: string,
   ): Promise<MerchConsignmentSettlementRecord | undefined>;
+
+  // --- Foreign tax hold + book returns reserve (PR 27, migration 0031) ---
+
+  /**
+   * The held FOREIGN_TAX_HOLD credits, newest first (created_at DESC,
+   * insertion order as tiebreak), bounded by limit — across ALL countries
+   * and tax years. Thawed (status back to 'unclaimed_holding') or released
+   * credits never appear here — the work queue of the verified release.
+   */
+  listForeignTaxHolds(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * The verified-release THAW sweep — flips EVERY ledger row with kind
+   * 'unclaimed_holding' AND status 'foreign_tax_hold' AND split_run_id =
+   * the passed tax-hold scope ('foreign_tax:{country}:{year}') back to
+   * status 'unclaimed_holding' in ONE conditional statement. Returns the
+   * flipped count (0 is the honest no-op: an empty scope thaws nothing
+   * and fails nothing).
+   */
+  thawForeignTaxHolds(taxHoldScope: string): Promise<number>;
+
+  /**
+   * The FREEZE CAS sweep — the foreign-tax-hold lane's ledger leg: flips
+   * EVERY held unclaimed-holding leg of one country/tax-year's ingest
+   * scope (split_run_id = the tax-hold scope) from status
+   * 'unclaimed_holding' to 'foreign_tax_hold' in one conditional
+   * statement, and returns the count of legs this call froze. The status
+   * predicate is the CAS: already-frozen, released, and settled legs are
+   * untouched (a re-applied hold's sweep is a counted no-op), and legs
+   * outside the scope — domestic legs, another territory's legs, other
+   * escrow legs — never match.
+   */
+  freezeForeignTaxHolds(taxHoldScope: string): Promise<number>;
+
+  /**
+   * Writes the withholding tax credit verification of record for one
+   * (country_code, tax_year) — upsert: a re-recording (the evidence
+   * upgrade pending → verified) replaces the row atomically. The lane
+   * refuses a 'verified' state without its treaty/evidence/verifier
+   * provenance before this write; the state at rest is the release gate's
+   * only key.
+   */
+  upsertWithholdingTaxCreditVerification(
+    row: Omit<WithholdingTaxCreditVerificationRecord, 'id'>,
+  ): Promise<WithholdingTaxCreditVerificationRecord>;
+
+  /** One (country_code, tax_year)'s withholding credit verification of record. */
+  getWithholdingTaxCreditVerification(
+    countryCode: string,
+    taxYear: number,
+  ): Promise<WithholdingTaxCreditVerificationRecord | undefined>;
+
+  /**
+   * Writes the ISBN rights verification of record for one ISBN — upsert on
+   * isbn: a re-verification replaces the row atomically. The lane refuses
+   * a 'verified' state without its evidence provenance before this write.
+   */
+  upsertIsbnRightsVerification(
+    row: Omit<IsbnRightsVerificationRecord, 'id'>,
+  ): Promise<IsbnRightsVerificationRecord>;
+
+  /** One ISBN's rights verification of record. */
+  getIsbnRightsVerification(isbn: string): Promise<IsbnRightsVerificationRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the returns-reserve policy of record for one
+   * ISBN — upsert on isbn (the option-agreement precedent). The lane
+   * validates the founder bands before this write; the schema's CHECKs
+   * enforce them again at rest.
+   */
+  upsertBookReturnsReservePolicy(
+    row: Omit<BookReturnsReservePolicyRecord, 'id'>,
+  ): Promise<BookReturnsReservePolicyRecord>;
+
+  /** One ISBN's returns-reserve policy of record. */
+  getBookReturnsReservePolicy(isbn: string): Promise<BookReturnsReservePolicyRecord | undefined>;
+
+  /**
+   * The held book reserve credits, newest first (created_at DESC,
+   * insertion order as tiebreak), bounded by limit — across ALL ISBNs.
+   * Settled (released or fully-drawn) reserves are history, not holdings —
+   * they never appear here.
+   */
+  listBookReturnsReserveCredits(limit?: number): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * ONE ISBN's reserve credits in EVERY state, oldest first (created_at
+   * ASC, insertion order as tiebreak) — the FIFO draw ordering AND the
+   * publishing gate's return_reserve_period_elapsed derivation, which
+   * reads history (a settled reserve still proves its period ran), not
+   * just the held balance.
+   */
+  listBookReturnsReserveCreditsByIsbn(isbn: string): Promise<LedgerTransactionRecord[]>;
+  /**
+   * The release/drawdown CAS — the settlement concurrency canon (0009)
+   * applied to a held book reserve: flips ONE row from status
+   * 'book_returns_reserve' to 'settled' (settled_at = the passed instant)
+   * in a single conditional statement. Returns the row only when THIS call
+   * won the transition; undefined when the id is unknown OR the reserve is
+   * no longer held — the concurrent release or full-drawdown loser reads
+   * exactly that and refuses. The flip happens BEFORE any money moves
+   * (insert-as-lock, the payout-reversal precedent), so a crash mid-release
+   * fails toward "nothing moved twice": the settled row with no
+   * book_returns_reserve_release journal is the visible alarm.
+   */
+  settleBookReturnsReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Writes one book reserve drawdown of record: the append-only truth a
+   * reserve spends against. UNIQUE on (reserve_ledger_id, source_event_id)
+   * — a re-shipped return/chargeback event throws the unique violation,
+   * never double-draws. UNIQUE on (reserve_ledger_id, drawn_before_cents)
+   * — the insert-as-lock position arbiter.
+   */
+  insertBookReserveDrawdown(
+    row: Omit<BookReserveDrawdownRecord, 'id'>,
+  ): Promise<BookReserveDrawdownRecord>;
+
+  /**
+   * One reserve's drawdowns, oldest position first (drawn_before_cents
+   * ASC): the derived spend truth.
+   */
+  listBookReserveDrawdowns(reserveLedgerId: string): Promise<BookReserveDrawdownRecord[]>;
+
+  /**
+   * Writes one publisher return chargeback of record. UNIQUE on event_id —
+   * a re-shipped chargeback event throws the unique violation (the replay
+   * surface); the lane reads the stored row and answers the counted no-op.
+   */
+  insertBookReturnChargeback(
+    row: Omit<BookReturnChargebackRecord, 'id'>,
+  ): Promise<BookReturnChargebackRecord>;
+
+  /**
+   * One ISBN's chargebacks, oldest first (created_at ASC, insertion order
+   * as tiebreak): the FIFO ordering the outstanding-offset recovery reads.
+   */
+  listBookReturnChargebacksByIsbn(isbn: string): Promise<BookReturnChargebackRecord[]>;
+
+  /**
+   * Writes one chargeback offset application of record — the publisher's
+   * recovery taken out of ONE held print allocation before author payouts
+   * release. UNIQUE on (chargeback_id, holding_ledger_id) — a replayed
+   * release throws the unique violation, never double-offsets. UNIQUE on
+   * (chargeback_id, offset_before_cents) — the insert-as-lock position
+   * arbiter: exactly one release wins an offset's next running position.
+   */
+  insertBookChargebackOffsetApplication(
+    row: Omit<BookChargebackOffsetApplicationRecord, 'id'>,
+  ): Promise<BookChargebackOffsetApplicationRecord>;
+
+  /**
+   * One chargeback's offset applications, oldest position first
+   * (offset_before_cents ASC): the derived recovery truth.
+   */
+  listBookChargebackOffsetApplications(
+    chargebackId: string,
+  ): Promise<BookChargebackOffsetApplicationRecord[]>;
 
   // --- BaaS transfers ---
   insertBaasTransfer(row: Omit<BaasTransferRecord, 'id'>): Promise<BaasTransferRecord>;
