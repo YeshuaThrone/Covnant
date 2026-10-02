@@ -1294,3 +1294,150 @@ export type AiModelContributionRecord = {
   updated_at: string;
 };
 
+
+// ---------------------------------------------------------------------------
+// AI training dispute freeze + payout gate states + dataset deprecations
+// (migration 0029, PR 25 — the founder AI directive + the tokenization
+// patch's opt-out mechanics).
+// ---------------------------------------------------------------------------
+
+/** The bounded lifecycle of an IP attribution dispute against a training dataset. */
+export const AI_TRAINING_DISPUTE_STATUSES = [
+  "filed",
+  "resolved",
+] as const;
+export type AiTrainingDisputeStatus =
+  (typeof AI_TRAINING_DISPUTE_STATUSES)[number];
+
+/**
+ * One rights holder's IP attribution dispute against a model's training
+ * dataset version (migration 0029). An ACTIVE dispute (status 'filed')
+ * freezes the model's unclaimed-holding legs into
+ * status 'unauthorized_training_hold' — the ledger shows the money, the
+ * release path refuses it. UNIQUE per (ai_model_id, dataset_version,
+ * rights_holder_payee_id): a re-filed dispute converges on the existing
+ * row (the freeze sweep re-runs as a counted no-op), never a duplicate.
+ */
+export type AiTrainingDisputeRecord = {
+  id: string;
+  /** The model whose inference payouts the dispute freezes. */
+  ai_model_id: string;
+  /** The disputed training dataset version of record (the attribution-log identity). */
+  dataset_version: string;
+  rights_holder_payee_id: string;
+  rights_holder_payee_name: string;
+  /** The dispute's stated basis (the filing's attribution claim). */
+  dispute_basis: string;
+  status: AiTrainingDisputeStatus;
+  /** The verified resolution's record — set only through the resolution CAS. */
+  resolution_notes: string | null;
+  resolved_at: string | null;
+  /** The operator identity that carried the verified resolution. */
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The AI training-consent state of record — the bounded tri-state
+ * vocabulary. 'unknown' is a DISTINCT stored state (an investigation that
+ * has not concluded), not a synonym for 'unverified': both refuse the
+ * payout gate, but the audit trail can tell "no" from "not yet known".
+ * An ABSENT row (no record for the payee) also refuses — fail-closed when
+ * absent or unknown, the locked discipline.
+ */
+export const AI_CONSENT_STATES = [
+  "verified",
+  "unverified",
+  "unknown",
+] as const;
+export type AiConsentState = (typeof AI_CONSENT_STATES)[number];
+
+/** The synthetic voice/likeness release state — the same tri-state discipline. */
+export const AI_LIKENESS_STATES = [
+  "released",
+  "withheld",
+  "unknown",
+] as const;
+export type AiLikenessState = (typeof AI_LIKENESS_STATES)[number];
+
+/**
+ * One payee's AI payout-gate states of record (migration 0029) — the
+ * persisted facts the AI vertical's compliance state resolves through.
+ * UNIQUE per payee_id: an upsert converges (the newest state governs the
+ * next dispatch). The AI payout gate reads these fail-closed: the release
+ * proceeds only when ai_training_consent_verified is 'verified' AND
+ * synthetic_voice_likeness_released is 'released' — anything else
+ * (absent, unknown, unverified, withheld) refuses.
+ */
+export type AiPayoutGateStateRecord = {
+  id: string;
+  /** UNIQUE — the payee whose AI payouts these states gate. */
+  payee_id: string;
+  /** The model the states were recorded against, when model-scoped. */
+  ai_model_id: string | null;
+  ai_training_consent_state: AiConsentState;
+  synthetic_voice_likeness_state: AiLikenessState;
+  /** The operator identity that recorded the state. */
+  verified_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The bounded vocabulary of dataset-version deprecation reasons. */
+export const AI_DEPRECATION_REASONS = [
+  "rights_withdrawal",
+  "model_deprecation",
+  "tokenization_opt_out",
+] as const;
+export type AiDeprecationReason =
+  (typeof AI_DEPRECATION_REASONS)[number];
+
+/**
+ * One dataset version's deprecation of record (migration 0029) — the
+ * rights withdrawal / opt-out / model-deprecation fact. UNIQUE per
+ * (ai_model_id, dataset_version): a re-deprecation converges. When
+ * rights_holder_payee_id is set the deprecation is THAT contributor's
+ * opt-out (their allocations halt individually); when null the whole
+ * dataset version halts. Deprecation HALTS future payout allocations to
+ * the version and ARCHIVES the historical allocation records — the
+ * append-only ledger trail is never deleted.
+ */
+export type AiDatasetDeprecationRecord = {
+  id: string;
+  /** UNIQUE with dataset_version — the model whose registry the version sits in. */
+  ai_model_id: string;
+  /** UNIQUE with ai_model_id — the deprecated dataset version (the pool event id of record). */
+  dataset_version: string;
+  reason: AiDeprecationReason;
+  /** The withdrawing rights holder when the deprecation is a named opt-out. */
+  rights_holder_payee_id: string | null;
+  rights_holder_payee_name: string | null;
+  deprecated_at: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One archived historical allocation of a deprecated dataset version
+ * (migration 0029). The ARCHIVE is the clean retirement record: the
+ * referenced ledger row is NEVER deleted or rewritten (the append-only
+ * trail stays intact) — this row is the queryable fact that the
+ * allocation belonged to a since-deprecated version. UNIQUE per
+ * (deprecation_id, ledger_transaction_id): a re-run deprecation
+ * converges, never double-archives.
+ */
+export type AiDatasetAllocationArchiveRecord = {
+  id: string;
+  /** The deprecation that archived this allocation. */
+  deprecation_id: string;
+  /** The archived ledger row — untouched, still on the append-only trail. */
+  ledger_transaction_id: string;
+  /** The contributor the allocation credited (the platform variance payee for dust legs). */
+  contributor_payee_id: string;
+  amount_cents: number;
+  currency: string;
+  archived_at: string;
+};
+

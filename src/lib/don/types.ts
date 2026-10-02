@@ -122,6 +122,20 @@ export const LEDGER_STATUSES = [
   // release after the window settles it to the beneficiary of record
   // (status → 'settled').
   "merch_returns_reserve",
+  // UNAUTHORIZED_TRAINING_HOLD (PR 25, the founder AI directive + the
+  // tokenization patch's opt-out): an AI model's unclaimed-holding legs
+  // FREEZE here while a rights holder's IP attribution dispute against the
+  // training dataset is active — the money is on the ledger, visibly, and
+  // cannot release. Kind never changes (kind marks WHAT the row is —
+  // still 'unclaimed_holding' money; status carries the state machine).
+  // The ONLY thaw is the verified resolution path: the dispute's CAS
+  // resolution (filed → resolved) through the training-dispute module
+  // flips the frozen legs back to status 'unclaimed_holding', at which
+  // point the normal clearance-gated release applies. No migration:
+  // ledger_transactions.status is free text (0006 has no check
+  // constraint), so the state extends the existing ledger contract in
+  // place.
+  "unauthorized_training_hold",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 

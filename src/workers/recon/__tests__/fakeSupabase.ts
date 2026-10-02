@@ -46,6 +46,16 @@ export const UNIQUE_COLUMNS: Record<string, string[][]> = {
   gaming_engine_royalty_events: [["event_id"]],
   gaming_item_split_schedules: [["item_id"]],
   gaming_split_payouts: [["source_event_id"]],
+  // AI dispute freeze + payout gates + dataset deprecations (migration
+  // 0029): the dispute of record per model+version+payee, one gate state
+  // per payee, one deprecation per model+version, and the archives that
+  // converge per deprecation+ledger row.
+  ai_training_disputes: [
+    ["ai_model_id", "dataset_version", "rights_holder_payee_id"],
+  ],
+  ai_payout_gate_states: [["payee_id"]],
+  ai_dataset_deprecations: [["ai_model_id", "dataset_version"]],
+  ai_dataset_allocation_archives: [["deprecation_id", "ledger_transaction_id"]],
 };
 
 export class FakeTable {
@@ -91,15 +101,22 @@ export class FakeTable {
     return this.rows.map((row) => ({ ...row }));
   }
 
-  update(patch: Row, filters: Array<[string, unknown]>): number {
-    let changed = 0;
+  /**
+   * PostgREST UPDATE ... RETURNING — patches every matching row and
+   * returns the UPDATED representations. The status-flip CAS sweeps
+   * (0029) depend on this: the filters that SELECTED the rows no longer
+   * match them after the patch, so a re-select would lose them (the
+   * real PostgREST returns the rows updated by the original filters).
+   */
+  updateReturning(patch: Row, filters: Array<[string, unknown]>): Row[] {
+    const updated: Row[] = [];
     for (let i = 0; i < this.rows.length; i++) {
       if (matchesRow(this.rows[i], filters)) {
         this.rows[i] = { ...this.rows[i], ...patch };
-        changed++;
+        updated.push({ ...this.rows[i] });
       }
     }
-    return changed;
+    return updated;
   }
 
   /** PostgREST-style delete — removes every matching row in place. */
@@ -267,9 +284,10 @@ class FakeQueryBuilder {
       return { data: [], error: null };
     }
     if (op.kind === "update") {
-      const changed = this.table.update(op.patch, this.filters);
-      if (changed === 0) return { data: null, error: null };
-      // Fall through: select returns the updated rows below.
+      const updated = this.table.updateReturning(op.patch, this.filters);
+      if (updated.length === 0) return { data: null, error: null };
+      if (this.single) return { data: updated[0] ?? null, error: null };
+      return { data: updated, error: null };
     }
     const rows = this.table
       .select()

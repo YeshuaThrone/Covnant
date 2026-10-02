@@ -1,5 +1,6 @@
 import type { Store } from "@/lib/server/store";
 import type { KycStatus } from "@/lib/don/types";
+import type { AiPayoutGateStateRecord } from "@/modules/don/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -308,6 +309,37 @@ export async function resolveCreatorKycStatus(
     return null;
   }
   return records[0].status;
+}
+
+/**
+ * The AI vertical's compliance state, resolved from the payout-gate state
+ * of record (migration 0029) — the store-backed reader the holding
+ * release path falls back to for the 'ai' vertical. FAIL-CLOSED on both
+ * failure modes the directive names: an ABSENT record returns null (the
+ * gate refuses with vertical_state_unknown), and an 'unknown' stored
+ * state maps to false (the gate refuses the specific condition). The
+ * booleans are true ONLY on the verified/released states of record —
+ * nothing defaults to allowing.
+ */
+export async function resolveAiVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+): Promise<Extract<
+  VerticalComplianceState,
+  { vertical: "ai" }
+> | null> {
+  const record: AiPayoutGateStateRecord | undefined =
+    await store.getAiPayoutGateState(payeeId);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "ai",
+    ai_training_consent_verified:
+      record.ai_training_consent_state === "verified",
+    synthetic_voice_likeness_released:
+      record.synthetic_voice_likeness_state === "released",
+  };
 }
 
 export type PayoutComplianceInput = {

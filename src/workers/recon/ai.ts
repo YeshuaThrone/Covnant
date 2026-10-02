@@ -97,6 +97,14 @@ export const DEFAULT_FINE_TUNER_SPLIT_BPS = 5000;
 export const DEFAULT_CONTRIBUTOR_POOL_BPS = 3000;
 
 /**
+ * The training-pool legs' sender space (PR 24) — the Hugging Face
+ * attribution-log CSV profile. Exported (PR 25) so the deprecation
+ * engine derives the SAME content-derived leg identities the posting
+ * pass wrote, without a copied string.
+ */
+export const AI_POOL_SENDER_SPACE = "huggingface_dataset_attribution_log_csv";
+
+/**
  * An exact decimal usage/count cell (tokens, characters, minutes, weights)
  * → 1e-8 micros. Quantities use the SAME fixed-point space as money — the
  * SDK's strict converter, never a float. A negative or malformed quantity
@@ -254,6 +262,36 @@ export function distributeContributorPool(
     }
   }
   return { allocations, varianceDustMicros: poolMicros - distributed };
+}
+
+/**
+ * THE OPT-OUT HALT (PR 25, the tokenization patch) — reassigns the
+ * deprecated contributors' computed allocations to the variance dust,
+ * keeping conservation EXACT: Σ allocations + dust still equals the pool
+ * (the halt moves cents, never invents or loses them). A withdrawn
+ * contributor's share is VISIBLY swept to variance — never redistributed
+ * to the remaining contributors (that would launder the withdrawal into
+ * their payouts) and never left payable to the withdrawn payee. Pure:
+ * same input, same output, no clock, no store.
+ */
+export function haltDeprecatedAllocations(
+  distributed: { allocations: AiPoolAllocation[]; varianceDustMicros: bigint },
+  deprecatedPayeeIds: ReadonlySet<string>,
+): { allocations: AiPoolAllocation[]; varianceDustMicros: bigint } {
+  if (deprecatedPayeeIds.size === 0) return distributed;
+  const kept: AiPoolAllocation[] = [];
+  let haltedMicros = 0n;
+  for (const leg of distributed.allocations) {
+    if (deprecatedPayeeIds.has(leg.payeeId)) {
+      haltedMicros += leg.amountMicros;
+      continue;
+    }
+    kept.push(leg);
+  }
+  return {
+    allocations: kept,
+    varianceDustMicros: distributed.varianceDustMicros + haltedMicros,
+  };
 }
 
 /**
