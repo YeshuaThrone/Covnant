@@ -93,7 +93,7 @@ comment on table public.merch_return_reserve_policies is
 -- ---------------------------------------------------------------------------
 create table if not exists public.merch_reserve_drawdowns (
   id                 uuid primary key default gen_random_uuid(),
-  reserve_ledger_id  uuid not null,
+  reserve_ledger_id  text not null,
   drawdown_class     text not null,
   source_event_id    text not null,
   drawn_before_cents integer not null,
