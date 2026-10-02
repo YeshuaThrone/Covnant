@@ -78,6 +78,7 @@ describe('don constants', () => {
       'vtuber_holdback_release',
       'translation_localization_post',
       'translation_localization_release',
+      'ip_option_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

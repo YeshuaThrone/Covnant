@@ -884,3 +884,80 @@ export type WebtoonRecoupmentApplicationRecord = {
   remaining_cents: number;
   created_at: string;
 };
+
+// --- IP adaptation optioning (PR 21, migration 0025) -----------------------
+
+/**
+ * The durable IP-rights verification state the publishing payout gate reads
+ * for option-fee dispatch (the VTuber tax-withholding verification's
+ * per-payee pattern, at work scope). One row per (payee_id, work_id); a
+ * re-verification replaces the row atomically (the studio-KYC upsert
+ * precedent). Only an explicit 'cleared' state passes the gate's
+ * ip_rights_cleared condition — absent, pending, and failed all refuse,
+ * fail-closed. A 'cleared' state carries mandatory evidence (the
+ * clearance's provenance) and requires an option agreement of record for
+ * the work — the machinery of record (the VTuber writer's precedent).
+ */
+export const PUBLISHING_IP_RIGHTS_STATES = ["pending", "cleared", "failed"] as const;
+export type PublishingIpRightsState = (typeof PUBLISHING_IP_RIGHTS_STATES)[number];
+
+export type PublishingIpRightsVerificationRecord = {
+  id: string;
+  /** The payee whose option-fee dispatch the gate evaluates. */
+  payee_id: string;
+  /** The optioned work the clearance covers. */
+  work_id: string;
+  /** The verification state — only 'cleared' passes the payout gate. */
+  state: PublishingIpRightsState;
+  /** The clearance's provenance of record — REQUIRED for 'cleared'. */
+  evidence_ref: string | null;
+  /** When the state reached 'cleared' (null until then). */
+  cleared_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The IP option agreement of record (migration 0025) — one per work (a
+ * webtoon series or novel optioned for film/TV/gaming). Names the original
+ * author of record (the IP holder and the cascade's residual holder), the
+ * agency of record, and the agency's commission in basis points OF THE
+ * REMAINDER (after every author IP allocation is reserved — never of the
+ * gross). Re-registering replaces the row atomically (upsert on work_id).
+ */
+export type IpOptionAgreementRecord = {
+  id: string;
+  /** The optioned work — the feed identity the option deal covers. */
+  work_id: string;
+  /** The original author of record — the IP holder; the residual holder. */
+  author_payee_id: string;
+  author_payee_name: string;
+  /** The agency of record — the author's representation on the option deal. */
+  agency_payee_id: string;
+  agency_payee_name: string;
+  /** The agency's commission, basis points of the REMAINDER (0..10000). */
+  agency_commission_bps: number;
+  /** The signed option agreement the terms were extracted from (of record). */
+  option_deal_ref: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One author-side IP allocation (migration 0025) — a ring-fenced share of
+ * the option fee reserved for one rights holder (the original author or a
+ * co-holder/estate) BEFORE any agency commission exists. The table's
+ * insertion order IS the reservation order (the deterministic author-first
+ * sequence). UNIQUE on (work_id, payee_id); the work's FK guards the
+ * agreement of record (text → text unique, type-matched).
+ */
+export type IpOptionAuthorAllocationRecord = {
+  id: string;
+  /** The optioned work — FK to the agreement of record. */
+  work_id: string;
+  payee_id: string;
+  payee_name: string;
+  /** This holder's ring-fenced IP allocation, basis points of the fee (1..10000). */
+  allocation_bps: number;
+  created_at: string;
+};

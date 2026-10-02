@@ -287,6 +287,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // pools/applications; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0024_webtoon_studio_translation_cascades.sql',
+      // IP adaptation optioning — the author-first option-fee cascade (Deep
+      // Royalties PR 21): the option agreement of record, the ordered
+      // author-side IP allocations (guarded, type-matched FK to the
+      // agreement), and the durable publishing ip_rights_cleared
+      // verification state; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0025_ip_option_agreements_author_cascade.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
