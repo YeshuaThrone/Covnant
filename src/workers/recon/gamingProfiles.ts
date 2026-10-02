@@ -236,6 +236,7 @@ function gamingLine(
     podcastDetail: null,
     gamingDetail: detail,
     livestreamDetail: null,
+    webtoonDetail: null,
   };
 }
 

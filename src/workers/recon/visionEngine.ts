@@ -162,6 +162,7 @@ function validateVisionLine(
       podcastDetail: null,
       gamingDetail: null,
       livestreamDetail: null,
+      webtoonDetail: null,
     },
   };
 }

@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers twenty profiles in dispatch order", () => {
+  it("registers twenty-three profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -53,6 +53,12 @@ describe("profile registry", () => {
       "tiktok_live_livestream_payouts_csv",
       "streamlabs_streamelements_alerts_csv",
       "esports_tournament_prize_pool_csv",
+      // The webtoon lane (Deep Royalties PR 19) — dispatched after
+      // livestream, its own rights family (serialized-comics statements,
+      // reader logs, and KENP pool reports).
+      "webtoon_coin_payout_csv",
+      "webtoon_reader_log_csv",
+      "kenp_page_read_pool_csv",
     ]);
   });
 

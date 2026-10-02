@@ -35,6 +35,9 @@ import { isGamingProfileKind } from "./gamingProfiles";
 import { postLivestreamLines } from "./livestreamPosting";
 import { writeLivestreamLinesToMatchQueue } from "./livestreamQueue";
 import { isLivestreamProfileKind } from "./livestreamProfiles";
+import { writeWebtoonLinesToMatchQueue } from "./webtoonQueue";
+import { postWebtoonLines } from "./webtoonPosting";
+import { isWebtoonProfileKind } from "./webtoonProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -157,6 +160,15 @@ async function processJobBody(
     // split math and never the gaming accumulator.
     if (isLivestreamProfileKind(matchedProfile.kind)) {
       return await parseLivestream(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The webtoon lane branches the same way (PR 19): its rows are
+    // rights_type 'unknown' serialized-chapter events whose money passes
+    // the coin conversion (recorded rate, layered shares), the KENP pool
+    // math, and the monthly-pass double-dip dedup — never the music
+    // queue's split math, the gaming accumulator, or the livestream
+    // escrow.
+    if (isWebtoonProfileKind(matchedProfile.kind)) {
+      return await parseWebtoon(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -321,6 +333,50 @@ async function parseLivestream(
     livestream_prize_pools_locked: posting.prizePoolsLocked,
     livestream_prize_pools_replayed: posting.prizePoolsReplayed,
     livestream_prize_pool_locked_cents: posting.prizePoolLockedCents,
+  };
+}
+
+/**
+ * The webtoon lane (PR 19): match_queue write (DOI cross-reference, the
+ * reading-event identity, the recorded conversion cells, the layered
+ * share deductions — and the monthly-pass double-dip dedup) → posting
+ * pass — the durable coin-conversion log first (coin-payout rows), then
+ * the creator-net holding credit (coin rows) or the pool gross credit
+ * (KENP rows). Every pass is idempotent (replays are counted no-ops
+ * through the per-source guards); quarantined double-dip rows never post.
+ */
+async function parseWebtoon(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeWebtoonLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+    deps.vault,
+  );
+  const posting = await postWebtoonLines(deps.store, counts.lineOutcomes, now);
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    webtoon_written: counts.written,
+    webtoon_replayed: counts.alreadyPresent,
+    webtoon_pass_claims: counts.passClaims,
+    webtoon_pass_deduped: counts.passDeduped,
+    webtoon_paid_as_coin: counts.paidAsCoin,
+    webtoon_conversions_logged: posting.conversionsLogged,
+    webtoon_conversions_replayed: posting.conversionsReplayed,
+    webtoon_store_cut_micros: posting.storeCutMicrosDeducted.toString(),
+    webtoon_platform_split_micros: posting.platformSplitMicrosDeducted.toString(),
+    webtoon_kenp_payout_cents: posting.kenpPayoutCents,
   };
 }
 

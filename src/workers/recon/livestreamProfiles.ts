@@ -270,6 +270,7 @@ function livestreamLine(
     podcastDetail: null,
     gamingDetail: null,
     livestreamDetail: detail,
+    webtoonDetail: null,
   };
 }
 

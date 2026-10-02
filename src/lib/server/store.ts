@@ -1026,6 +1026,12 @@ export interface Store {
   /** Quarantines one event verbatim; rejects on a replayed event_id. */
   insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord>;
   getMatchQueueEntry(id: string): Promise<MatchQueueRecord | undefined>;
+  /** The queue row carrying one content-derived event id — the recon
+   * lanes' dedup/double-dip cross-reference read. Unique by schema, so the
+   * result is a single row or undefined. */
+  getMatchQueueEntryByEventId(
+    eventId: string,
+  ): Promise<MatchQueueRecord | undefined>;
   /** Newest first; optional status filter; bounded by limit. */
   listMatchQueueEntries(
     status?: MatchQueueRecord['status'],

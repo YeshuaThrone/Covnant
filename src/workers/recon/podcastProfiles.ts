@@ -271,6 +271,7 @@ function podcastLine(
     podcastDetail: detail,
     gamingDetail: null,
     livestreamDetail: null,
+    webtoonDetail: null,
   };
 }
 

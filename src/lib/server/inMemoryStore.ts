@@ -1741,6 +1741,12 @@ export class InMemoryStore implements Store {
     return this.matchQueue.find((row) => row.id === id);
   }
 
+  async getMatchQueueEntryByEventId(
+    eventId: string,
+  ): Promise<MatchQueueRecord | undefined> {
+    return this.matchQueue.find((row) => row.event_id === eventId);
+  }
+
   async listMatchQueueEntries(
     status?: MatchQueueRecord['status'],
     limit: number = DEFAULT_LIST_SHOWS_LIMIT,
