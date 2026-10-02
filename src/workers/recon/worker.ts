@@ -38,6 +38,9 @@ import { isLivestreamProfileKind } from "./livestreamProfiles";
 import { writeWebtoonLinesToMatchQueue } from "./webtoonQueue";
 import { postWebtoonLines } from "./webtoonPosting";
 import { isWebtoonProfileKind } from "./webtoonProfiles";
+import { writeMerchLinesToMatchQueue } from "./merchQueue";
+import { postMerchNetsToHolding } from "./merchPosting";
+import { isMerchProfileKind } from "./merchProfiles";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
 import type { StatementProfile } from "./records";
@@ -169,6 +172,15 @@ async function processJobBody(
     // escrow.
     if (isWebtoonProfileKind(matchedProfile.kind)) {
       return await parseWebtoon(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The merch lane branches the same way (PR 22): its rows are
+    // rights_type 'unknown' physical-product fulfillment events whose
+    // money passes the COGS deduction (DTC equation, POD
+    // printing-before-split), the consignment reconciliation, and the POS
+    // net — never the music queue's split math, the gaming accumulator,
+    // the livestream escrow, or the webtoon conversions.
+    if (isMerchProfileKind(matchedProfile.kind)) {
+      return await parseMerch(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -377,6 +389,48 @@ async function parseWebtoon(
     webtoon_store_cut_micros: posting.storeCutMicrosDeducted.toString(),
     webtoon_platform_split_micros: posting.platformSplitMicrosDeducted.toString(),
     webtoon_kenp_payout_cents: posting.kenpPayoutCents,
+  };
+}
+
+/**
+ * The merch lane (PR 22): match_queue write (UPC cross-reference, the
+ * physical inventory SKU, the per-unit COGS the FIFO amortization keys on,
+ * and the recorded deduction legs) → posting pass — the computed net posts
+ * to UNCLAIMED_HOLDING per row kind (the DTC net realized profit equation,
+ * the POD collaborator split share of the after-printing remainder, the
+ * reconciled consignment net payout, the POS net). Every pass is
+ * idempotent (replays are counted no-ops through the per-source guards);
+ * negative-net and sub-cent rows never post — the queue row stays the
+ * visible quarantine record.
+ */
+async function parseMerch(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeMerchLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+    deps.vault,
+  );
+  const posting = await postMerchNetsToHolding(deps.store, counts, now);
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    merch_written: counts.written,
+    merch_replayed: counts.alreadyPresent,
+    merch_held_negative_net: counts.heldNegativeNet,
+    merch_zero_net: counts.zeroNet,
+    merch_cogs_micros: counts.cogsMicrosDeducted.toString(),
+    merch_shrinkage_offset_micros: counts.shrinkageOffsetMicros.toString(),
   };
 }
 

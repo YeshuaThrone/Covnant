@@ -105,6 +105,14 @@ import type {
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
+  MerchCogsLotRecord,
+  MerchCogsConsumptionRecord,
+  MerchCollabAgreementRecord,
+  MerchCollabPoolClass,
+  MerchCollabRecoupmentApplicationRecord,
+  MerchDesignerRoyaltyTierRecord,
+  MerchDesignerRoyaltyBillingRecord,
+  MerchConsignmentSettlementRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -1029,6 +1037,121 @@ CREATE TABLE IF NOT EXISTS publishing_ip_rights_verifications (
 );
 CREATE INDEX IF NOT EXISTS idx_publishing_ip_rights_verifications_work
   ON publishing_ip_rights_verifications (work_id);
+
+-- Merch COGS + the brand collaboration waterfall (migration 0026, PR 22).
+-- The production lots of record (UNIQUE per (sku_id, lot_ref)), the
+-- append-only FIFO consumption truth (UNIQUE per (lot, source event) —
+-- the replay guard — plus UNIQUE per (lot, units_consumed_before) — the
+-- insert-as-lock position arbiter), the collab agreement of record per
+-- sku (upsert on sku_id), the append-only overhead-recoupment ledger
+-- (the 0024 pool discipline at agreement scope), the designer royalty
+-- tier of record per sku (upsert on sku_id), the append-only royalty
+-- billing ledger (UNIQUE per (source event, sku)), and the durable
+-- consignment settlement reconciliation (UNIQUE per event_id).
+CREATE TABLE IF NOT EXISTS merch_cogs_lots (
+  id TEXT PRIMARY KEY,
+  sku_id TEXT NOT NULL,
+  lot_ref TEXT NOT NULL,
+  units_produced INTEGER NOT NULL CHECK (units_produced > 0),
+  cogs_per_unit_cents INTEGER NOT NULL CHECK (cogs_per_unit_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (sku_id, lot_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_merch_cogs_lots_sku
+  ON merch_cogs_lots (sku_id, created_at, lot_ref);
+
+CREATE TABLE IF NOT EXISTS merch_cogs_consumptions (
+  id TEXT PRIMARY KEY,
+  lot_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  units_consumed_before INTEGER NOT NULL CHECK (units_consumed_before >= 0),
+  units_consumed INTEGER NOT NULL CHECK (units_consumed > 0),
+  cogs_per_unit_cents INTEGER NOT NULL CHECK (cogs_per_unit_cents >= 0),
+  amortized_cents INTEGER NOT NULL CHECK (amortized_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (lot_id, source_event_id),
+  UNIQUE (lot_id, units_consumed_before),
+  FOREIGN KEY (lot_id) REFERENCES merch_cogs_lots (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_merch_cogs_consumptions_lot
+  ON merch_cogs_consumptions (lot_id);
+
+CREATE TABLE IF NOT EXISTS merch_collab_agreements (
+  id TEXT PRIMARY KEY,
+  sku_id TEXT NOT NULL UNIQUE,
+  manufacturer_payee_id TEXT NOT NULL,
+  manufacturer_payee_name TEXT NOT NULL,
+  brand_payee_id TEXT NOT NULL,
+  brand_payee_name TEXT NOT NULL,
+  artist_payee_id TEXT NOT NULL,
+  artist_payee_name TEXT NOT NULL,
+  artist_split_bps INTEGER NOT NULL CHECK (artist_split_bps >= 0 AND artist_split_bps <= 10000),
+  blank_sourcing_cents INTEGER NOT NULL CHECK (blank_sourcing_cents >= 0),
+  screen_printing_cents INTEGER NOT NULL CHECK (screen_printing_cents >= 0),
+  agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS merch_collab_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  agreement_id TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('blank_sourcing', 'screen_printing')),
+  source_event_id TEXT NOT NULL,
+  recouped_before_cents INTEGER NOT NULL CHECK (recouped_before_cents >= 0),
+  applied_cents INTEGER NOT NULL CHECK (applied_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (agreement_id, pool_class, source_event_id),
+  UNIQUE (agreement_id, pool_class, recouped_before_cents),
+  FOREIGN KEY (agreement_id) REFERENCES merch_collab_agreements (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_merch_collab_recoupment_applications_agreement
+  ON merch_collab_recoupment_applications (agreement_id, pool_class);
+
+CREATE TABLE IF NOT EXISTS merch_designer_royalty_tiers (
+  id TEXT PRIMARY KEY,
+  sku_id TEXT NOT NULL UNIQUE,
+  designer_payee_id TEXT NOT NULL,
+  designer_payee_name TEXT NOT NULL,
+  royalty_per_unit_cents INTEGER NOT NULL CHECK (royalty_per_unit_cents > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS merch_designer_royalty_billings (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  designer_payee_id TEXT NOT NULL,
+  designer_payee_name TEXT NOT NULL,
+  units_billed INTEGER NOT NULL CHECK (units_billed > 0),
+  royalty_per_unit_cents INTEGER NOT NULL CHECK (royalty_per_unit_cents > 0),
+  billed_cents INTEGER NOT NULL CHECK (billed_cents > 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id, sku_id),
+  FOREIGN KEY (sku_id) REFERENCES merch_designer_royalty_tiers (sku_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_merch_designer_royalty_billings_sku
+  ON merch_designer_royalty_billings (sku_id);
+
+CREATE TABLE IF NOT EXISTS merch_consignment_settlements (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  period TEXT NOT NULL,
+  location TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  units_sold INTEGER NOT NULL CHECK (units_sold > 0),
+  gross_cents INTEGER NOT NULL CHECK (gross_cents >= 0),
+  commission_cents INTEGER NOT NULL CHECK (commission_cents >= 0),
+  shrinkage_allowance_cents INTEGER NOT NULL CHECK (shrinkage_allowance_cents >= 0),
+  net_payout_cents INTEGER NOT NULL CHECK (net_payout_cents >= 0),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_merch_consignment_settlements_sku
+  ON merch_consignment_settlements (sku_id);
+
 
 -- Film multi-territory withholding + cross-collateralization firewall
 -- (migration 0023, PR 18). The withholding log is the per-line,
@@ -3135,6 +3258,208 @@ export class SqliteStore implements Store {
       )
       .get(row.payee_id, row.tax_year) as VtuberVerificationSqliteRow;
     return Promise.resolve(vtuberVerificationFromSqliteRow(stored));
+  }
+
+  // --- Merch COGS + the brand collaboration waterfall (PR 22, migration 0026) ---
+
+  async insertMerchCogsLot(row: Omit<MerchCogsLotRecord, 'id'>): Promise<MerchCogsLotRecord> {
+    // UNIQUE on (sku_id, lot_ref) — a re-registered lot throws the unique
+    // violation (the replay surface).
+    const record: MerchCogsLotRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_cogs_lots
+           (id, sku_id, lot_ref, units_produced, cogs_per_unit_cents, created_at)
+         VALUES (@id, @sku_id, @lot_ref, @units_produced, @cogs_per_unit_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listMerchCogsLots(skuId: string): Promise<MerchCogsLotRecord[]> {
+    // FIFO order — created_at ASC, then lot_ref ASC (the deterministic tie).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM merch_cogs_lots WHERE sku_id = ? ORDER BY created_at ASC, lot_ref ASC`,
+        )
+        .all(skuId) as MerchCogsLotRecord[],
+    );
+  }
+
+  async insertMerchCogsConsumption(
+    row: Omit<MerchCogsConsumptionRecord, 'id'>,
+  ): Promise<MerchCogsConsumptionRecord> {
+    // UNIQUE on (lot_id, source_event_id) — a replayed fulfillment event is
+    // the unique violation, never a double amortization. UNIQUE on
+    // (lot_id, units_consumed_before) — the insert-as-lock position
+    // arbiter: a concurrent consumer that loses the position throws.
+    const record: MerchCogsConsumptionRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_cogs_consumptions
+           (id, lot_id, source_event_id, units_consumed_before, units_consumed, cogs_per_unit_cents, amortized_cents, created_at)
+         VALUES (@id, @lot_id, @source_event_id, @units_consumed_before, @units_consumed, @cogs_per_unit_cents, @amortized_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listMerchCogsConsumptions(lotId: string): Promise<MerchCogsConsumptionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM merch_cogs_consumptions WHERE lot_id = ? ORDER BY units_consumed_before ASC`,
+        )
+        .all(lotId) as MerchCogsConsumptionRecord[],
+    );
+  }
+
+  async upsertMerchCollabAgreement(
+    row: Omit<MerchCollabAgreementRecord, 'id'>,
+  ): Promise<MerchCollabAgreementRecord> {
+    // One agreement of record per sku — INSERT ON CONFLICT replaces the
+    // row atomically (the option-agreement precedent).
+    const record: MerchCollabAgreementRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_collab_agreements
+           (id, sku_id, manufacturer_payee_id, manufacturer_payee_name, brand_payee_id, brand_payee_name, artist_payee_id, artist_payee_name, artist_split_bps, blank_sourcing_cents, screen_printing_cents, agreement_ref, created_at, updated_at)
+         VALUES (@id, @sku_id, @manufacturer_payee_id, @manufacturer_payee_name, @brand_payee_id, @brand_payee_name, @artist_payee_id, @artist_payee_name, @artist_split_bps, @blank_sourcing_cents, @screen_printing_cents, @agreement_ref, @created_at, @updated_at)
+         ON CONFLICT(sku_id) DO UPDATE SET
+           id = excluded.id,
+           manufacturer_payee_id = excluded.manufacturer_payee_id,
+           manufacturer_payee_name = excluded.manufacturer_payee_name,
+           brand_payee_id = excluded.brand_payee_id,
+           brand_payee_name = excluded.brand_payee_name,
+           artist_payee_id = excluded.artist_payee_id,
+           artist_payee_name = excluded.artist_payee_name,
+           artist_split_bps = excluded.artist_split_bps,
+           blank_sourcing_cents = excluded.blank_sourcing_cents,
+           screen_printing_cents = excluded.screen_printing_cents,
+           agreement_ref = excluded.agreement_ref,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getMerchCollabAgreement(skuId: string): Promise<MerchCollabAgreementRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM merch_collab_agreements WHERE sku_id = ?`)
+        .get(skuId) as MerchCollabAgreementRecord | undefined,
+    );
+  }
+
+  async insertMerchCollabRecoupmentApplication(
+    row: Omit<MerchCollabRecoupmentApplicationRecord, 'id'>,
+  ): Promise<MerchCollabRecoupmentApplicationRecord> {
+    // UNIQUE on (agreement_id, pool_class, source_event_id) — a replayed
+    // settlement is the unique violation, never a double recovery. UNIQUE
+    // on (agreement_id, pool_class, recouped_before_cents) — the
+    // insert-as-lock position arbiter.
+    const record: MerchCollabRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_collab_recoupment_applications
+           (id, agreement_id, pool_class, source_event_id, recouped_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @agreement_id, @pool_class, @source_event_id, @recouped_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listMerchCollabRecoupmentApplications(
+    agreementId: string,
+    poolClass: MerchCollabPoolClass,
+  ): Promise<MerchCollabRecoupmentApplicationRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM merch_collab_recoupment_applications
+           WHERE agreement_id = ? AND pool_class = ?
+           ORDER BY recouped_before_cents ASC`,
+        )
+        .all(agreementId, poolClass) as MerchCollabRecoupmentApplicationRecord[],
+    );
+  }
+
+  async upsertMerchDesignerRoyaltyTier(
+    row: Omit<MerchDesignerRoyaltyTierRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyTierRecord> {
+    // One tier of record per sku — INSERT ON CONFLICT replaces the row
+    // atomically (the option-agreement precedent).
+    const record: MerchDesignerRoyaltyTierRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_designer_royalty_tiers
+           (id, sku_id, designer_payee_id, designer_payee_name, royalty_per_unit_cents, created_at, updated_at)
+         VALUES (@id, @sku_id, @designer_payee_id, @designer_payee_name, @royalty_per_unit_cents, @created_at, @updated_at)
+         ON CONFLICT(sku_id) DO UPDATE SET
+           id = excluded.id,
+           designer_payee_id = excluded.designer_payee_id,
+           designer_payee_name = excluded.designer_payee_name,
+           royalty_per_unit_cents = excluded.royalty_per_unit_cents,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getMerchDesignerRoyaltyTier(
+    skuId: string,
+  ): Promise<MerchDesignerRoyaltyTierRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM merch_designer_royalty_tiers WHERE sku_id = ?`)
+        .get(skuId) as MerchDesignerRoyaltyTierRecord | undefined,
+    );
+  }
+
+  async insertMerchDesignerRoyaltyBilling(
+    row: Omit<MerchDesignerRoyaltyBillingRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyBillingRecord> {
+    // UNIQUE on (source_event_id, sku_id) — a replayed fulfillment event is
+    // the unique violation, never a double billing. The tier FK guards the
+    // billing's precondition.
+    const record: MerchDesignerRoyaltyBillingRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_designer_royalty_billings
+           (id, source_event_id, sku_id, designer_payee_id, designer_payee_name, units_billed, royalty_per_unit_cents, billed_cents, created_at)
+         VALUES (@id, @source_event_id, @sku_id, @designer_payee_id, @designer_payee_name, @units_billed, @royalty_per_unit_cents, @billed_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async insertMerchConsignmentSettlement(
+    row: Omit<MerchConsignmentSettlementRecord, 'id'>,
+  ): Promise<MerchConsignmentSettlementRecord> {
+    // UNIQUE on event_id — a re-shipped report is the unique violation
+    // (the replay surface).
+    const record: MerchConsignmentSettlementRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO merch_consignment_settlements
+           (id, event_id, period, location, sku_id, units_sold, gross_cents, commission_cents, shrinkage_allowance_cents, net_payout_cents, currency, created_at)
+         VALUES (@id, @event_id, @period, @location, @sku_id, @units_sold, @gross_cents, @commission_cents, @shrinkage_allowance_cents, @net_payout_cents, @currency, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getMerchConsignmentSettlementByEventId(
+    eventId: string,
+  ): Promise<MerchConsignmentSettlementRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM merch_consignment_settlements WHERE event_id = ?`)
+        .get(eventId) as MerchConsignmentSettlementRecord | undefined,
+    );
   }
 
   async getVtuberTaxWithholdingVerification(

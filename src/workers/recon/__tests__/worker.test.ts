@@ -63,6 +63,27 @@ function vaultWithEidr(): {
   };
 }
 
+/** A vault stub whose verified UPC resolves — the merch cross-reference path. */
+function merchVault(): {
+  findByIdentifier(kind: string, value: string): Promise<VaultAssetRecord | null>;
+} {
+  return {
+    async findByIdentifier(kind, value) {
+      if (kind === "UPC" && value === "012345678901") {
+        return {
+          cvtCode: "CVT-TEST-MERCH",
+          cbtCode: "CBT-MERCH-TEE",
+          title: "Crest Tee",
+          medium: "merchandise",
+          externalIdentifiers: { UPC: value },
+          holderUct: null,
+        };
+      }
+      return null;
+    },
+  };
+}
+
 describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
   it("returns undefined when the queue is empty", async () => {
     const worker = { store: make(), vault: null, now: NOW };
@@ -212,5 +233,80 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
 
     // Queue drained: a third pass has nothing to claim.
     expect(await store.claimReconJob(NOW(), RECON_WORKER_ENGINE)).toBeUndefined();
+  });
+
+  it("parses a merch ingest end-to-end: COGS deduction, quarantines, one post", async () => {
+    const store = make();
+    const { jobId } = await seedJob(
+      store,
+      "merch_shopify_dtc.csv",
+      loadFixture("merch_shopify_dtc.csv"),
+    );
+
+    const processed = await runOnce({ store, vault: merchVault(), now: NOW });
+    expect(processed?.outcome).toBe("completed");
+    expect(processed?.job.id).toBe(jobId);
+    expect(processed?.job.result).toEqual({
+      events_written: 4,
+      matched: 3, // rows 1–3 share the verified UPC; row 4's does not resolve
+      unmatched: 1,
+      engine_used: null,
+      holding_posted: 1, // row 1's $28.13 net; the other three never post
+      holding_replayed: 0,
+      merch_written: 4,
+      merch_replayed: 0,
+      merch_held_negative_net: 1, // row 3's $10.00 gross vs $25.00 COGS
+      merch_zero_net: 1, // row 2's $0.004 net
+      merch_cogs_micros: "4325000000", // (2×6.50 + 0.25 + 25.00 + 5.00) × 1e8
+      merch_shrinkage_offset_micros: "0", // the DTC lane carries no shrinkage
+    });
+    expect(processed?.job.status).toBe("completed");
+
+    // The queue rows carry the addendum 8 columns — the physical SKU and
+    // the per-unit COGS the FIFO amortization keys on — under the
+    // content-derived merch event ids (identity across re-shipped dumps,
+    // not per-ingest).
+    const rows = (await store.listMatchQueueEntries(undefined, 500)).filter((row) =>
+      row.event_id.startsWith("merch:dtc:"),
+    );
+    expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.sku_id !== null && row.sku_id !== "")).toBe(true);
+    // Row 1's tee: the per-unit COGS the FIFO amortization keys on, and
+    // the matched vault product. Row 4's tote: honestly unmatched.
+    const teeRow = rows.find((row) => row.cogs_per_unit_micros === "650000000");
+    expect(teeRow).toBeDefined();
+    expect(teeRow!.sku_id).toBe("SKU-TSHIRT-CREST");
+    expect(teeRow!.matched_cbt_code).toBe("CBT-MERCH-TEE");
+    const toteRow = rows.find((row) => row.sku_id === "SKU-TOTE-BLACK");
+    expect(toteRow).toBeDefined();
+    expect(toteRow!.matched_cbt_code).toBeNull();
+    expect(toteRow!.cogs_per_unit_micros).toBe("500000000"); // $5.00/unit
+  });
+
+  it("re-processes the same merch dump as a replay no-op — idempotent across ingests", async () => {
+    const store = make();
+    const { ingestId } = await seedJob(
+      store,
+      "merch_shopify_dtc.csv",
+      loadFixture("merch_shopify_dtc.csv"),
+    );
+    await runOnce({ store, vault: merchVault(), now: NOW });
+
+    // A re-shipped dump lands as a fresh ingest of the same bytes — the
+    // content-derived event ids collide, and everything replays as counted
+    // no-ops: nothing re-written, nothing re-posted.
+    await store.createReconJob({ source: "statement", ingest_id: ingestId });
+    const processed = await runOnce({ store, vault: merchVault(), now: NOW });
+    expect(processed?.outcome).toBe("completed");
+    expect(processed?.job.result).toMatchObject({
+      events_written: 0,
+      holding_posted: 0,
+      holding_replayed: 1,
+      merch_written: 0,
+      merch_replayed: 4,
+      merch_held_negative_net: 1, // the dispositions still count — visible, not posted
+      merch_zero_net: 1,
+    });
+    expect((await store.listUnclaimedHoldingCredits(100)).length).toBe(1);
   });
 });

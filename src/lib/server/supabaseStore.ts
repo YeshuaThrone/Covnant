@@ -100,6 +100,14 @@ import type {
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
+  MerchCogsLotRecord,
+  MerchCogsConsumptionRecord,
+  MerchCollabAgreementRecord,
+  MerchCollabPoolClass,
+  MerchCollabRecoupmentApplicationRecord,
+  MerchDesignerRoyaltyTierRecord,
+  MerchDesignerRoyaltyBillingRecord,
+  MerchConsignmentSettlementRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -240,6 +248,18 @@ const TABLES = {
   ipOptionAgreements: 'ip_option_agreements',
   ipOptionAuthorAllocations: 'ip_option_author_allocations',
   publishingIpRightsVerifications: 'publishing_ip_rights_verifications',
+  // Migration 0026 — the merch COGS + collaboration waterfall layer (PR 22):
+  // production lots and their append-only FIFO consumption truth, the
+  // collab agreement of record per sku, the append-only overhead-recoupment
+  // ledger, the designer royalty tiers and their per-fulfillment-event
+  // billings, and the durable consignment settlement reconciliation.
+  merchCogsLots: 'merch_cogs_lots',
+  merchCogsConsumptions: 'merch_cogs_consumptions',
+  merchCollabAgreements: 'merch_collab_agreements',
+  merchCollabRecoupmentApplications: 'merch_collab_recoupment_applications',
+  merchDesignerRoyaltyTiers: 'merch_designer_royalty_tiers',
+  merchDesignerRoyaltyBillings: 'merch_designer_royalty_billings',
+  merchConsignmentSettlements: 'merch_consignment_settlements',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -2014,6 +2034,194 @@ export class SupabaseStore implements Store {
         .eq('work_id', workId)
         .maybeSingle(),
       'getPublishingIpRightsVerification',
+    );
+  }
+
+  // --- Merch COGS + the brand collaboration waterfall (PR 22, migration 0026) ---
+
+  async insertMerchCogsLot(row: Omit<MerchCogsLotRecord, 'id'>): Promise<MerchCogsLotRecord> {
+    // UNIQUE on (sku_id, lot_ref) — a re-registered lot throws the unique
+    // violation (the replay surface).
+    return this.oneStrict<MerchCogsLotRecord>(
+      this.client
+        .from(TABLES.merchCogsLots)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchCogsLot',
+    );
+  }
+
+  async listMerchCogsLots(skuId: string): Promise<MerchCogsLotRecord[]> {
+    // FIFO order — created_at ASC, then lot_ref ASC (the deterministic tie).
+    return this.many<MerchCogsLotRecord>(
+      this.client
+        .from(TABLES.merchCogsLots)
+        .select()
+        .eq('sku_id', skuId)
+        .order('created_at', { ascending: true })
+        .order('lot_ref', { ascending: true }),
+      'listMerchCogsLots',
+    );
+  }
+
+  async insertMerchCogsConsumption(
+    row: Omit<MerchCogsConsumptionRecord, 'id'>,
+  ): Promise<MerchCogsConsumptionRecord> {
+    // UNIQUE on (lot_id, source_event_id) — a replayed fulfillment event is
+    // the unique violation, never a double amortization. UNIQUE on
+    // (lot_id, units_consumed_before) — the insert-as-lock position
+    // arbiter: a concurrent consumer that loses the position throws.
+    return this.oneStrict<MerchCogsConsumptionRecord>(
+      this.client
+        .from(TABLES.merchCogsConsumptions)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchCogsConsumption',
+    );
+  }
+
+  async listMerchCogsConsumptions(lotId: string): Promise<MerchCogsConsumptionRecord[]> {
+    return this.many<MerchCogsConsumptionRecord>(
+      this.client
+        .from(TABLES.merchCogsConsumptions)
+        .select()
+        .eq('lot_id', lotId)
+        .order('units_consumed_before', { ascending: true }),
+      'listMerchCogsConsumptions',
+    );
+  }
+
+  async upsertMerchCollabAgreement(
+    row: Omit<MerchCollabAgreementRecord, 'id'>,
+  ): Promise<MerchCollabAgreementRecord> {
+    // One agreement of record per sku — the upsert targets sku_id, so a
+    // re-registered agreement replaces the row atomically (the
+    // option-agreement precedent).
+    return this.oneStrict<MerchCollabAgreementRecord>(
+      this.client
+        .from(TABLES.merchCollabAgreements)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'sku_id' })
+        .select()
+        .maybeSingle(),
+      'upsertMerchCollabAgreement',
+    );
+  }
+
+  async getMerchCollabAgreement(skuId: string): Promise<MerchCollabAgreementRecord | undefined> {
+    return this.one<MerchCollabAgreementRecord>(
+      this.client
+        .from(TABLES.merchCollabAgreements)
+        .select()
+        .eq('sku_id', skuId)
+        .maybeSingle(),
+      'getMerchCollabAgreement',
+    );
+  }
+
+  async insertMerchCollabRecoupmentApplication(
+    row: Omit<MerchCollabRecoupmentApplicationRecord, 'id'>,
+  ): Promise<MerchCollabRecoupmentApplicationRecord> {
+    // UNIQUE on (agreement_id, pool_class, source_event_id) — a replayed
+    // settlement is the unique violation, never a double recovery. UNIQUE
+    // on (agreement_id, pool_class, recouped_before_cents) — the
+    // insert-as-lock position arbiter.
+    return this.oneStrict<MerchCollabRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.merchCollabRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchCollabRecoupmentApplication',
+    );
+  }
+
+  async listMerchCollabRecoupmentApplications(
+    agreementId: string,
+    poolClass: MerchCollabPoolClass,
+  ): Promise<MerchCollabRecoupmentApplicationRecord[]> {
+    return this.many<MerchCollabRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.merchCollabRecoupmentApplications)
+        .select()
+        .eq('agreement_id', agreementId)
+        .eq('pool_class', poolClass)
+        .order('recouped_before_cents', { ascending: true }),
+      'listMerchCollabRecoupmentApplications',
+    );
+  }
+
+  async upsertMerchDesignerRoyaltyTier(
+    row: Omit<MerchDesignerRoyaltyTierRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyTierRecord> {
+    // One tier of record per sku — the upsert targets sku_id, so a
+    // re-registered tier replaces the row atomically (the option-agreement
+    // precedent).
+    return this.oneStrict<MerchDesignerRoyaltyTierRecord>(
+      this.client
+        .from(TABLES.merchDesignerRoyaltyTiers)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'sku_id' })
+        .select()
+        .maybeSingle(),
+      'upsertMerchDesignerRoyaltyTier',
+    );
+  }
+
+  async getMerchDesignerRoyaltyTier(
+    skuId: string,
+  ): Promise<MerchDesignerRoyaltyTierRecord | undefined> {
+    return this.one<MerchDesignerRoyaltyTierRecord>(
+      this.client
+        .from(TABLES.merchDesignerRoyaltyTiers)
+        .select()
+        .eq('sku_id', skuId)
+        .maybeSingle(),
+      'getMerchDesignerRoyaltyTier',
+    );
+  }
+
+  async insertMerchDesignerRoyaltyBilling(
+    row: Omit<MerchDesignerRoyaltyBillingRecord, 'id'>,
+  ): Promise<MerchDesignerRoyaltyBillingRecord> {
+    // UNIQUE on (source_event_id, sku_id) — a replayed fulfillment event is
+    // the unique violation, never a double billing. The tier FK guards the
+    // billing's precondition.
+    return this.oneStrict<MerchDesignerRoyaltyBillingRecord>(
+      this.client
+        .from(TABLES.merchDesignerRoyaltyBillings)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchDesignerRoyaltyBilling',
+    );
+  }
+
+  async insertMerchConsignmentSettlement(
+    row: Omit<MerchConsignmentSettlementRecord, 'id'>,
+  ): Promise<MerchConsignmentSettlementRecord> {
+    // UNIQUE on event_id — a re-shipped report is the unique violation
+    // (the replay surface).
+    return this.oneStrict<MerchConsignmentSettlementRecord>(
+      this.client
+        .from(TABLES.merchConsignmentSettlements)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertMerchConsignmentSettlement',
+    );
+  }
+
+  async getMerchConsignmentSettlementByEventId(
+    eventId: string,
+  ): Promise<MerchConsignmentSettlementRecord | undefined> {
+    return this.one<MerchConsignmentSettlementRecord>(
+      this.client
+        .from(TABLES.merchConsignmentSettlements)
+        .select()
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      'getMerchConsignmentSettlementByEventId',
     );
   }
 

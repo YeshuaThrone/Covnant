@@ -23,6 +23,7 @@
 
 import { canonicalizeIdentifier } from "../../../covnant-sdk/src/contracts/identifiers";
 import { PODCAST_PROFILES } from "./podcastProfiles";
+import { MERCH_PROFILES } from "./merchProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
@@ -124,6 +125,7 @@ function musicLine(
     gamingDetail: null,
     livestreamDetail: null,
     webtoonDetail: null,
+    merchDetail: null,
   };
 }
 
@@ -403,6 +405,7 @@ function filmProfile(def: FilmHeader): StatementProfile {
           gamingDetail: null,
           livestreamDetail: null,
           webtoonDetail: null,
+          merchDetail: null,
         } satisfies ParsedStatementLine;
       });
     },
@@ -537,6 +540,11 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // the layered store/platform shares, the KENP pool math, and the
   // monthly-pass dedup are webtoon-only).
   ...WEBTOON_PROFILES,
+  // The merch lane (PR 22) — same dispatch opinion; the worker branches on
+  // the profile kind before the music machinery (the DTC COGS equation,
+  // the POD printing-before-split, the consignment reconciliation, and the
+  // POS net are merch-only).
+  ...MERCH_PROFILES,
 ];
 
 /**

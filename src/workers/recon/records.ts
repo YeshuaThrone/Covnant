@@ -53,7 +53,11 @@ export type StatementProfileKind =
   | "esports_tournament_prize_pool_csv"
   | "webtoon_coin_payout_csv"
   | "webtoon_reader_log_csv"
-  | "kenp_page_read_pool_csv";
+  | "kenp_page_read_pool_csv"
+  | "shopify_dtc_dump_csv"
+  | "pod_fulfillment_dump_csv"
+  | "wholesale_consignment_payout_csv"
+  | "square_pos_dump_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -284,6 +288,99 @@ export interface WebtoonLineDetail {
 }
 
 /**
+ * The merch lane's platform vocabularies (PR 22, founder merchandise
+ * directive). Shopify is the DTC storefront dump's only sender; the POD
+ * fulfillment dumps share one strict layout across the two named print
+ * partners (the webtoon coin-payout precedent — one profile, a bounded
+ * platform column); wholesale consignment and Square POS are their own
+ * single-sender reports.
+ */
+export type MerchDtcPlatform = "shopify";
+export type MerchPodPlatform = "printful" | "gelato";
+export type MerchConsignmentPlatform = "wholesale_consignment";
+export type MerchPosPlatform = "square_pos";
+
+/**
+ * The merch lane's per-line context (PR 22). Null on every non-merch line —
+ * the field's PRESENCE is the lane discriminator, the same pattern as
+ * podcastDetail/gamingDetail/livestreamDetail/webtoonDetail. Every row
+ * carries the physical inventory identity (the SKU id — the addendum 8
+ * column this lane exists to populate) and the money legs its COGS math
+ * deducts; the four kinds are the directive's four dump senders.
+ */
+export type MerchLineDetail =
+  | {
+      /** A DTC storefront order-fulfillment row — the net-realized-profit
+       * equation's subject (gross − unit production COGS × units − shipping
+       * − fulfillment − gateway = net realized profit). */
+      readonly kind: "dtc_order";
+      readonly platform: MerchDtcPlatform;
+      /** The storefront order id — half of the fulfillment-event identity
+       * the dedup keys on (re-shipped dumps replay, never double-post). */
+      readonly orderId: string;
+      /** The physical inventory SKU (the addendum 8 sku_id). */
+      readonly skuId: string;
+      readonly units: number;
+      /** Per-unit production COGS as exact micros text — recorded verbatim
+       * (the founder's rate-logging rule, the POD printing-cost precedent). */
+      readonly unitProductionCogsMicros: string;
+      readonly shippingFeeMicros: string;
+      readonly fulfillmentFeeMicros: string;
+      readonly gatewayFeeMicros: string;
+      /** The guest-designer per-unit royalty the storefront deducted, as
+       * exact micros text (0 when the sku carries no royalty tier). */
+      readonly designerRoyaltyMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** A print-on-demand fulfillment row — printing costs deduct from
+       * the gross customer price BEFORE split percentages apply. */
+      readonly kind: "pod_fulfillment";
+      readonly platform: MerchPodPlatform;
+      readonly orderId: string;
+      readonly skuId: string;
+      readonly units: number;
+      /** Per-unit base item printing cost, exact micros text. */
+      readonly printingCostPerUnitMicros: string;
+      /** The collaborator's split share as whole basis points of the
+       * AFTER-printing remainder (0-10_000) — the invariant the lane pins. */
+      readonly splitShareBps: number;
+      readonly period: string;
+    }
+  | {
+      /** A wholesale consignment payout report row — gross, commission,
+       * and the shrinkage/loss allowance must reconcile exactly against the
+       * reported net payout (a report that disagrees with its own
+       * arithmetic is rejected whole, never silently adjusted). */
+      readonly kind: "consignment_payout";
+      readonly platform: MerchConsignmentPlatform;
+      /** The payout report row's own id — the event identity. */
+      readonly payoutId: string;
+      readonly skuId: string;
+      readonly unitsSold: number;
+      readonly commissionMicros: string;
+      /** The shrinkage/loss allowance — the offset against the net payout. */
+      readonly shrinkageAllowanceMicros: string;
+      /** The partner's reported net payout, exact micros text. */
+      readonly reportedNetPayoutMicros: string;
+      /** The `YYYY-MM` payout period (validated at parse). */
+      readonly period: string;
+      /** The consignment location (free text provenance). */
+      readonly location: string | null;
+    }
+  | {
+      /** A Square POS retail sale row — the net (gross − processing fee)
+       * posts to holding. */
+      readonly kind: "pos_sale";
+      readonly platform: MerchPosPlatform;
+      readonly saleId: string;
+      readonly skuId: string;
+      readonly units: number;
+      readonly processingFeeMicros: string;
+      readonly period: string;
+    };
+
+/**
  * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
  * The Epic Games Store and Unreal Engine Marketplace share one engine-
  * royalty accumulator scope (the Epic family) — the store cell discriminates
@@ -399,6 +496,11 @@ export interface ParsedStatementLine {
    * null on every non-webtoon line — the presence IS the lane
    * discriminator. */
   webtoonDetail: WebtoonLineDetail | null;
+  /** Merch lane context (the physical inventory SKU, the dump sender, the
+   * COGS/printing/fee legs the net math deducts, the consignment
+   * reconciliation cells); null on every non-merch line — the presence IS
+   * the lane discriminator. */
+  merchDetail: MerchLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

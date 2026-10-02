@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers twenty-three profiles in dispatch order", () => {
+  it("registers twenty-seven profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -59,6 +59,14 @@ describe("profile registry", () => {
       "webtoon_coin_payout_csv",
       "webtoon_reader_log_csv",
       "kenp_page_read_pool_csv",
+      // The merch lane (Deep Royalties PR 22, the founder merchandise
+      // directive) — dispatched after webtoon, its own rights family
+      // (physical-product fulfillment events matched by UPC, the COGS
+      // deduction, and the consignment reconciliation).
+      "shopify_dtc_dump_csv",
+      "pod_fulfillment_dump_csv",
+      "wholesale_consignment_payout_csv",
+      "square_pos_dump_csv",
     ]);
   });
 

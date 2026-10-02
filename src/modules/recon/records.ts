@@ -176,6 +176,24 @@ export interface ReconJobResult {
   /** Webtoon lane: integer cents posted for KENP page-read pool rows this
    * pass (pages × the period's recorded Global Fund rate). */
   webtoon_kenp_payout_cents?: number;
+  /** Merch lane (PR 22): queue rows written this pass (DTC, POD,
+   * consignment, and POS fulfillment events). */
+  merch_written?: number;
+  /** Merch lane: same-row replays caught by the event-id guard. */
+  merch_replayed?: number;
+  /** Merch lane: negative-net rows written into quarantine — a dump row
+   * whose cost legs exceed its gross (visible, never posted). */
+  merch_held_negative_net?: number;
+  /** Merch lane: sub-cent/zero nets — recorded in the queue row, never
+   * rounded up into the integer-cent ledger. */
+  merch_zero_net?: number;
+  /** Merch lane: production COGS / printing costs recorded across the
+   * pass's deductions, exact fixed-point micros as text (never a float) —
+   * the FIFO amortization engine's debt-side input. */
+  merch_cogs_micros?: string;
+  /** Merch lane: consignment shrinkage allowances offset against net
+   * payout settlements this pass, exact fixed-point micros as text. */
+  merch_shrinkage_offset_micros?: string;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */
