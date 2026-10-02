@@ -264,7 +264,7 @@ describe('escalation — exactly one retry, only on failure (criterion 4)', () =
   });
 });
 
-describe('model defaults — env absence resolves to the deployed 4.5 IDs', () => {
+describe('model defaults — env absence resolves to the deployed model IDs', () => {
   // The retired Claude 3.5 IDs must never come back as fallbacks: Anthropic
   // answers them with not_found_error (probed live during PR #75 wiring), so
   // a lost env var would 502 the whole funnel. CI cannot hold the real key,
@@ -276,7 +276,7 @@ describe('model defaults — env absence resolves to the deployed 4.5 IDs', () =
     expect(mockModel.mock.calls[0]?.[0]).toBe('claude-haiku-4-5-20251001');
   });
 
-  it('escalates as claude-sonnet-4-5-20250929 when AGENT_MODEL_ESCALATION is unset', async () => {
+  it('escalates as claude-sonnet-5-5 when AGENT_MODEL_ESCALATION is unset', async () => {
     vi.stubEnv('AGENT_MODEL_ESCALATION', undefined);
     mockModel
       .mockResolvedValueOnce(modelOk(validToolInput(0.42)))
@@ -284,6 +284,6 @@ describe('model defaults — env absence resolves to the deployed 4.5 IDs', () =
     const response = await POST(agentRequest('A song'));
     expect(response.status).toBe(200);
     expect(mockModel).toHaveBeenCalledTimes(2);
-    expect(mockModel.mock.calls[1]?.[0]).toBe('claude-sonnet-4-5-20250929');
+    expect(mockModel.mock.calls[1]?.[0]).toBe('claude-sonnet-5-5');
   });
 });

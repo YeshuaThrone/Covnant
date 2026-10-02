@@ -11,7 +11,7 @@ import half of it is test-enforced by the guardrail in
 |           | UCT — User Context                                                                                     | CVT — Computer & Data Vision                                                                                                              | CBT — Codebase & Architecture                                                 |
 | --------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | **Runs**    | Vercel functions (Next.js routes)                                                                       | Standalone worker process, in-repo (`npm run worker:recon`), hosted where long-running processes live                                      | External CLI harness (Claude Code-style), launched by a human                  |
-| **Engine**  | `claude-haiku-4-5` default, `claude-sonnet-4-5` escalation (env-overridable)                            | Deterministic code by default; vision/computer-use engine behind `RECON_VISION_*` env — flips on with a key + model ID, no code change     | Agent harness credentials; never a runtime dependency                          |
+| **Engine**  | `claude-haiku-4-5` default, `claude-sonnet-5-5` escalation (env-overridable)                            | Deterministic code by default; vision/computer-use engine behind `RECON_VISION_*` env — flips on with a key + model ID, no code change     | Agent harness credentials; never a runtime dependency                          |
 | **Contract**| Sync request/response, sub-second; heavy work → one `INSERT` into `royalty_recon_jobs` → 202, return     | Claim jobs (`FOR UPDATE SKIP LOCKED`), parse, write `match_queue`, mark result, pg_net webhook → UCT                                       | Repo maintenance, migrations across the Supabase schema, long test suites      |
 | **Never**   | No inline parsing, no model fan-out, no dashboard automation in a request cycle                         | Never runs inside Vercel functions; never writes to ledger tables directly                                                                 | No imports from `src/app/**`; zero runtime exposure in production              |
 
@@ -37,7 +37,7 @@ and goes red the moment a lane reaches into the other.
 ## Engine IDs — "Claude 3.5" means the deployed 4.5 IDs
 
 The UCT registration agent runs `claude-haiku-4-5-20251001` (default) with
-`claude-sonnet-4-5-20250929` escalation, selected via `AGENT_MODEL` /
+`claude-sonnet-5-5` escalation, selected via `AGENT_MODEL` /
 `AGENT_MODEL_ESCALATION`. Founder directives that say "Claude 3.5" map to
 these deployed 4.5 IDs — the 3.5 model IDs are retired at Anthropic
 (`not_found_error` on every variant, verified live against the founder's key

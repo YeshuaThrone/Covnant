@@ -24,7 +24,7 @@
  *   6. strict zod re-parse of the returned tool input — malformed output is
  *      NEVER repaired, partially returned, or stored;
  *   7. escalation — at most ONE retry with AGENT_MODEL_ESCALATION
- *      (default claude-sonnet-4-5), only when the first pass failed
+ *      (default claude-sonnet-5-5), only when the first pass failed
  *      validation or came back below AGENT_CONFIDENCE_THRESHOLD, and only
  *      while AGENT_ESCALATION is on (default). Model/transport failures do
  *      NOT escalate (a different model id does not fix an API outage);
@@ -52,7 +52,7 @@ const MAX_DESCRIPTION_LENGTH = 8_000;
 // AGENT_MODEL_ESCALATION. The Claude 3.5 IDs stay retired: Anthropic answers
 // them with not_found_error (probed live during PR #75 wiring).
 const DEFAULT_AGENT_MODEL = 'claude-haiku-4-5-20251001';
-const DEFAULT_ESCALATION_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_ESCALATION_MODEL = 'claude-sonnet-5-5';
 
 type DraftAttempt =
   | { kind: 'valid'; draft: AgentRegistrationDraft }
