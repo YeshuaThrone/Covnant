@@ -77,6 +77,8 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  FilmTerritoryWithholdingRecord,
+  FilmTerritoryDistributionRecord,
   GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
@@ -192,6 +194,9 @@ export class InMemoryStore implements Store {
   private derivativeRoyaltyEdges: DerivativeRoyaltyEdgeRecord[] = [];
   private sampleClearanceEdges: SampleClearanceEdgeRecord[] = [];
   private compositionPublishers: CompositionPublisherRecord[] = [];
+  // Film multi-territory withholding log + territory envelopes (0023, PR 18).
+  private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
+  private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
   private dspWebhookEvents = new Map<string, DspWebhookEventRecord>();
   private splitReversals: SplitReversalRecord[] = [];
   private mulClearances = new Map<string, MulClearanceRecord>();
@@ -645,6 +650,94 @@ export class InMemoryStore implements Store {
       this.filmWaterfallDistributions.filter((row) => row.film_id === filmId),
       (row) => row.created_at,
       'asc',
+    );
+  }
+
+  // --- Film multi-territory withholding + cross-collateralization firewall (migration 0023, PR 18) ---
+
+  async insertFilmTerritoryWithholding(
+    row: Omit<FilmTerritoryWithholdingRecord, 'id'>,
+  ): Promise<FilmTerritoryWithholdingRecord> {
+    // UNIQUE on event_id (the content-derived match_queue event) — one
+    // withholding log per line, ever; a duplicate insert throws the same
+    // failure mode the database enforces (the replay surface).
+    if (this.filmTerritoryWithholdings.some((existing) => existing.event_id === row.event_id)) {
+      uniqueViolation('film_territory_withholdings.event_id');
+    }
+    const record: FilmTerritoryWithholdingRecord = { ...row, id: randomUUID() };
+    this.filmTerritoryWithholdings.push(record);
+    return record;
+  }
+
+  async getFilmTerritoryWithholdingByEventId(
+    eventId: string,
+  ): Promise<FilmTerritoryWithholdingRecord | undefined> {
+    return this.filmTerritoryWithholdings.find((row) => row.event_id === eventId);
+  }
+
+  async listFilmTerritoryWithholdingsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryWithholdingRecord[]> {
+    return sortByTime(
+      this.filmTerritoryWithholdings.filter((row) => row.film_id === filmId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertFilmTerritoryDistribution(
+    row: Omit<FilmTerritoryDistributionRecord, 'id'>,
+  ): Promise<FilmTerritoryDistributionRecord> {
+    // UNIQUE on (escrow_ledger_id, territory_code) — one routing decision
+    // per released receipt per territory, ever (the same failure mode the
+    // database enforces).
+    if (
+      this.filmTerritoryDistributions.some(
+        (existing) =>
+          existing.escrow_ledger_id === row.escrow_ledger_id &&
+          existing.territory_code === row.territory_code,
+      )
+    ) {
+      uniqueViolation('film_territory_distributions.escrow_ledger_id,territory_code');
+    }
+    const record: FilmTerritoryDistributionRecord = { ...row, id: randomUUID() };
+    // Array push = the database's insertion_order — the per-territory paid
+    // fold's routing order for rows sharing a created_at.
+    this.filmTerritoryDistributions.push(record);
+    return record;
+  }
+
+  async listFilmTerritoryDistributionsByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    return this.filmTerritoryDistributions
+      .filter((row) => row.escrow_ledger_id === escrowLedgerId)
+      .sort((a, b) => a.territory_code.localeCompare(b.territory_code));
+  }
+
+  async listFilmTerritoryDistributionsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    return sortByTime(
+      this.filmTerritoryDistributions.filter((row) => row.film_id === filmId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async updateFilmTerritoryDistributionStatus(
+    id: string,
+    status: FilmTerritoryDistributionRecord['status'],
+  ): Promise<FilmTerritoryDistributionRecord | undefined> {
+    const row = this.filmTerritoryDistributions.find((candidate) => candidate.id === id);
+    if (row === undefined) return undefined;
+    row.status = status;
+    return row;
+  }
+
+  async deleteFilmTerritoryDistribution(id: string): Promise<void> {
+    this.filmTerritoryDistributions = this.filmTerritoryDistributions.filter(
+      (row) => row.id !== id,
     );
   }
 

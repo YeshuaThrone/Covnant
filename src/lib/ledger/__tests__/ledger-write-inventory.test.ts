@@ -275,6 +275,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // still no DDL on universal_royalty_ledger — the referencing pin
       // below holds.
       '0022_sample_cascade_cover_mechanicals.sql',
+      // Film multi-territory withholding + cross-collateralization firewall
+      // (Deep Royalties PR 18): the per-line pre-conversion withholding log
+      // and the per-territory routing envelopes; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0023_film_territory_withholding_firewall.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

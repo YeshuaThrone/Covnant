@@ -78,6 +78,8 @@ import type {
 import type {
   FilmWaterfallDefinitionRecord,
   FilmWaterfallDistributionRecord,
+  FilmTerritoryWithholdingRecord,
+  FilmTerritoryDistributionRecord,
   GamingDevexConversionLogRecord,
   GamingEngineRoyaltyEventRecord,
   GamingItemSplitScheduleRecord,
@@ -882,6 +884,52 @@ CREATE TABLE IF NOT EXISTS composition_publishers (
 );
 CREATE INDEX IF NOT EXISTS idx_composition_publishers_composition
   ON composition_publishers (composition_id);
+
+-- Film multi-territory withholding + cross-collateralization firewall
+-- (migration 0023, PR 18). The withholding log is the per-line,
+-- pre-conversion foreign-tax evidence (UNIQUE per match_queue event — the
+-- once-only replay guard); the territory envelopes are the per-territory
+-- routing decisions (UNIQUE per released receipt per territory). jsonb
+-- columns pack as TEXT JSON — the waterfall discipline.
+CREATE TABLE IF NOT EXISTS film_territory_withholdings (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  film_id TEXT NOT NULL,
+  territory_code TEXT NOT NULL,
+  foreign_tax_withheld INTEGER NOT NULL,
+  withholding_rate_bps INTEGER NOT NULL,
+  rate_table_version TEXT,
+  source_currency TEXT NOT NULL,
+  gross_source_micros TEXT NOT NULL,
+  withheld_source_micros TEXT NOT NULL,
+  net_source_micros TEXT NOT NULL,
+  base_currency TEXT NOT NULL,
+  fx_rate_micros INTEGER NOT NULL,
+  gross_base_cents INTEGER NOT NULL,
+  withheld_base_cents INTEGER NOT NULL,
+  net_base_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_film_territory_withholdings_film
+  ON film_territory_withholdings (film_id);
+
+CREATE TABLE IF NOT EXISTS film_territory_distributions (
+  id TEXT PRIMARY KEY,
+  film_id TEXT NOT NULL,
+  escrow_ledger_id TEXT NOT NULL,
+  territory_code TEXT NOT NULL,
+  status TEXT NOT NULL,
+  fdg_bypass_cents INTEGER NOT NULL,
+  legs TEXT NOT NULL,
+  tier_allocations TEXT NOT NULL,
+  unpaid_total_cents INTEGER NOT NULL,
+  cross_collateralization_permitted INTEGER NOT NULL,
+  cross_applications TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (escrow_ledger_id, territory_code)
+);
+CREATE INDEX IF NOT EXISTS idx_film_territory_distributions_film
+  ON film_territory_distributions (film_id);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -968,6 +1016,83 @@ function filmWaterfallDistributionFromDbRow(
     tier_allocations: unpack<FilmWaterfallDistributionRecord['tier_allocations']>(
       row.tier_allocations,
       'tier_allocations',
+    ),
+  };
+}
+
+// --- Film multi-territory withholding + firewall (migration 0023, PR 18) — row projection helpers ---
+//
+// The territory envelope's legs/tier_allocations/cross_applications pack as
+// TEXT JSON (the parent waterfall distribution's discipline); the two CAMA
+// flags store as 0/1 INTEGER (the SQLite boolean discipline). Unpacking is
+// fail-closed: a corrupt mirror throws rather than silently yielding an
+// empty allocation.
+
+type FilmTerritoryDistributionDbRow = Omit<
+  FilmTerritoryDistributionRecord,
+  'legs' | 'tier_allocations' | 'cross_applications' | 'cross_collateralization_permitted'
+> & {
+  legs: string;
+  tier_allocations: string;
+  cross_applications: string | null;
+  cross_collateralization_permitted: number;
+};
+function filmTerritoryDistributionToDbRow(
+  record: FilmTerritoryDistributionRecord,
+): FilmTerritoryDistributionDbRow {
+  return {
+    ...record,
+    cross_collateralization_permitted: record.cross_collateralization_permitted ? 1 : 0,
+    legs: JSON.stringify(record.legs),
+    tier_allocations: JSON.stringify(record.tier_allocations),
+    cross_applications:
+      record.cross_applications === null ? null : JSON.stringify(record.cross_applications),
+  };
+}
+
+type FilmTerritoryWithholdingDbRow = Omit<FilmTerritoryWithholdingRecord, 'foreign_tax_withheld'> & {
+  foreign_tax_withheld: number;
+};
+
+function filmTerritoryWithholdingToDbRow(
+  record: FilmTerritoryWithholdingRecord,
+): FilmTerritoryWithholdingDbRow {
+  return { ...record, foreign_tax_withheld: record.foreign_tax_withheld ? 1 : 0 };
+}
+
+function filmTerritoryWithholdingFromDbRow(
+  row: FilmTerritoryWithholdingDbRow,
+): FilmTerritoryWithholdingRecord {
+  return { ...row, foreign_tax_withheld: row.foreign_tax_withheld !== 0 };
+}
+
+function filmTerritoryDistributionFromDbRow(
+  row: FilmTerritoryDistributionDbRow,
+): FilmTerritoryDistributionRecord {
+  const unpack = <T>(json: string | null, column: string): T | null => {
+    if (json === null) return null;
+    try {
+      return JSON.parse(json) as T;
+    } catch (error) {
+      throw new Error(
+        `film_territory_distributions.${column} for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+        { cause: error },
+      );
+    }
+  };
+  return {
+    ...row,
+    cross_collateralization_permitted: row.cross_collateralization_permitted !== 0,
+    legs: unpack<FilmTerritoryDistributionRecord['legs']>(row.legs, 'legs') as NonNullable<
+      FilmTerritoryDistributionRecord['legs']
+    >,
+    tier_allocations: unpack<FilmTerritoryDistributionRecord['tier_allocations']>(
+      row.tier_allocations,
+      'tier_allocations',
+    ) as NonNullable<FilmTerritoryDistributionRecord['tier_allocations']>,
+    cross_applications: unpack<FilmTerritoryDistributionRecord['cross_applications']>(
+      row.cross_applications,
+      'cross_applications',
     ),
   };
 }
@@ -1859,6 +1984,133 @@ export class SqliteStore implements Store {
       )
       .all(filmId) as FilmWaterfallDistributionDbRow[];
     return Promise.resolve(rows.map(filmWaterfallDistributionFromDbRow));
+  }
+
+  // --- Film multi-territory withholding + cross-collateralization firewall (migration 0023, PR 18) ---
+
+  async insertFilmTerritoryWithholding(
+    row: Omit<FilmTerritoryWithholdingRecord, 'id'>,
+  ): Promise<FilmTerritoryWithholdingRecord> {
+    // UNIQUE on event_id (the content-derived match_queue event): a
+    // duplicate insert throws (better-sqlite3 surfaces the constraint
+    // violation) and the caller recovers by reading the existing row — one
+    // withholding log per line, ever.
+    const record: FilmTerritoryWithholdingRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO film_territory_withholdings
+           (id, event_id, film_id, territory_code, foreign_tax_withheld,
+            withholding_rate_bps, rate_table_version, source_currency,
+            gross_source_micros, withheld_source_micros, net_source_micros,
+            base_currency, fx_rate_micros, gross_base_cents, withheld_base_cents,
+            net_base_cents, created_at)
+         VALUES (@id, @event_id, @film_id, @territory_code, @foreign_tax_withheld,
+            @withholding_rate_bps, @rate_table_version, @source_currency,
+            @gross_source_micros, @withheld_source_micros, @net_source_micros,
+            @base_currency, @fx_rate_micros, @gross_base_cents, @withheld_base_cents,
+            @net_base_cents, @created_at)`,
+      )
+      .run(
+        filmTerritoryWithholdingToDbRow(record) as unknown as Record<string, unknown>,
+      );
+    return Promise.resolve(record);
+  }
+
+  async getFilmTerritoryWithholdingByEventId(
+    eventId: string,
+  ): Promise<FilmTerritoryWithholdingRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM film_territory_withholdings WHERE event_id = ?`)
+      .get(eventId) as FilmTerritoryWithholdingDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : filmTerritoryWithholdingFromDbRow(row),
+    );
+  }
+
+  async listFilmTerritoryWithholdingsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryWithholdingRecord[]> {
+    // Oldest first — the film's withholding history in log order.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM film_territory_withholdings
+         WHERE film_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(filmId) as FilmTerritoryWithholdingDbRow[];
+    return Promise.resolve(rows.map(filmTerritoryWithholdingFromDbRow));
+  }
+
+  async insertFilmTerritoryDistribution(
+    row: Omit<FilmTerritoryDistributionRecord, 'id'>,
+  ): Promise<FilmTerritoryDistributionRecord> {
+    // UNIQUE on (escrow_ledger_id, territory_code): a duplicate insert
+    // throws (better-sqlite3 surfaces the constraint violation) and the
+    // caller recovers by reading the existing rows — one routing decision
+    // per released receipt per territory, ever.
+    const record: FilmTerritoryDistributionRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO film_territory_distributions
+           (id, film_id, escrow_ledger_id, territory_code, status, fdg_bypass_cents,
+            legs, tier_allocations, unpaid_total_cents, cross_collateralization_permitted,
+            cross_applications, created_at)
+         VALUES (@id, @film_id, @escrow_ledger_id, @territory_code, @status, @fdg_bypass_cents,
+            @legs, @tier_allocations, @unpaid_total_cents, @cross_collateralization_permitted,
+            @cross_applications, @created_at)`,
+      )
+      .run(
+        filmTerritoryDistributionToDbRow(record) as unknown as Record<string, unknown>,
+      );
+    return Promise.resolve(record);
+  }
+
+  async listFilmTerritoryDistributionsByEscrow(
+    escrowLedgerId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    // One receipt's territory envelopes, territory_code ASC (deterministic).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM film_territory_distributions
+         WHERE escrow_ledger_id = ?
+         ORDER BY territory_code ASC`,
+      )
+      .all(escrowLedgerId) as FilmTerritoryDistributionDbRow[];
+    return Promise.resolve(rows.map(filmTerritoryDistributionFromDbRow));
+  }
+
+  async listFilmTerritoryDistributionsByFilm(
+    filmId: string,
+  ): Promise<FilmTerritoryDistributionRecord[]> {
+    // Oldest first — the per-territory paid state folds in routing order
+    // (rowid ASC is the strict tiebreak when created_at strings tie).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM film_territory_distributions
+         WHERE film_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(filmId) as FilmTerritoryDistributionDbRow[];
+    return Promise.resolve(rows.map(filmTerritoryDistributionFromDbRow));
+  }
+
+  async updateFilmTerritoryDistributionStatus(
+    id: string,
+    status: FilmTerritoryDistributionRecord['status'],
+  ): Promise<FilmTerritoryDistributionRecord | undefined> {
+    this.db
+      .prepare(`UPDATE film_territory_distributions SET status = ? WHERE id = ?`)
+      .run(status, id);
+    const row = this.db
+      .prepare(`SELECT * FROM film_territory_distributions WHERE id = ?`)
+      .get(id) as FilmTerritoryDistributionDbRow | undefined;
+    return Promise.resolve(
+      row === undefined ? undefined : filmTerritoryDistributionFromDbRow(row),
+    );
+  }
+
+  async deleteFilmTerritoryDistribution(id: string): Promise<void> {
+    this.db.prepare(`DELETE FROM film_territory_distributions WHERE id = ?`).run(id);
   }
 
   // --- Podcast episode splits + guest milestone bonuses (migration 0017, PR 11) ---
