@@ -102,6 +102,11 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  BookEditorialSplitScheduleRecord,
+  BookRecoupmentPoolRecord,
+  BookRecoupmentPoolClass,
+  BookRecoupmentApplicationRecord,
+  BookEditorialSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1093,6 +1098,66 @@ CREATE TABLE IF NOT EXISTS webtoon_recoupment_applications (
 );
 CREATE INDEX IF NOT EXISTS idx_webtoon_recoupment_applications_pool
   ON webtoon_recoupment_applications (pool_id);
+
+-- Book editorial split ledger (migration 0030, PR 26). The schedule of
+-- record per title_key (JSON contributor roster), the sequential advance
+-- pools (UNIQUE per (isbn, class, sequence_no)), their append-only
+-- application truth (the replay + position uniques), and the executed
+-- split accruals (UNIQUE per source_event_id).
+CREATE TABLE IF NOT EXISTS book_editorial_split_schedules (
+  id TEXT PRIMARY KEY,
+  title_key TEXT NOT NULL UNIQUE,
+  scope TEXT NOT NULL CHECK (scope IN ('book', 'magazine_issue')),
+  mode TEXT NOT NULL CHECK (mode IN ('flat_per_issue', 'percentage', 'pro_rata')),
+  pro_rata_basis TEXT,
+  contributors TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS book_recoupment_pools (
+  id TEXT PRIMARY KEY,
+  isbn TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('ebook_advance', 'print_advance', 'audiobook_production_unrecouped')),
+  sequence_no INTEGER NOT NULL CHECK (sequence_no > 0),
+  advance_cents INTEGER NOT NULL CHECK (advance_cents > 0),
+  recouped_cents INTEGER NOT NULL CHECK (recouped_cents >= 0),
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'recouped')),
+  advance_agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (isbn, pool_class, sequence_no)
+);
+
+CREATE TABLE IF NOT EXISTS book_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  pool_id TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('ebook_advance', 'print_advance', 'audiobook_production_unrecouped')),
+  isbn TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  recouped_before_cents INTEGER NOT NULL,
+  applied_cents INTEGER NOT NULL CHECK (applied_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (pool_id, source_event_id),
+  UNIQUE (pool_id, recouped_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_book_recoupment_applications_pool
+  ON book_recoupment_applications (pool_id);
+
+CREATE TABLE IF NOT EXISTS book_editorial_split_accruals (
+  id TEXT PRIMARY KEY,
+  schedule_id TEXT NOT NULL,
+  title_key TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('book', 'magazine_issue')),
+  source_event_id TEXT NOT NULL UNIQUE,
+  basis_cents INTEGER NOT NULL CHECK (basis_cents >= 0),
+  allocations TEXT NOT NULL,
+  dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
+  created_at TEXT NOT NULL
+);
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
@@ -3600,6 +3665,159 @@ export class SqliteStore implements Store {
         | WebtoonRecoupmentPoolRecord
         | undefined,
     );
+  }
+
+  // Migration 0030 — the book editorial split ledger (PR 26).
+
+  async upsertBookEditorialSplitSchedule(
+    row: BookEditorialSplitScheduleRecord,
+  ): Promise<BookEditorialSplitScheduleRecord> {
+    // One schedule of record per title_key — INSERT ON CONFLICT replaces
+    // the row atomically (the caller preserves identity + version).
+    const dbRow = {
+      ...row,
+      contributors: JSON.stringify(row.contributors),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO book_editorial_split_schedules
+           (id, title_key, scope, mode, pro_rata_basis, contributors, version, created_at, updated_at)
+         VALUES (@id, @title_key, @scope, @mode, @pro_rata_basis, @contributors, @version, @created_at, @updated_at)
+         ON CONFLICT (title_key) DO UPDATE SET
+           scope = excluded.scope,
+           mode = excluded.mode,
+           pro_rata_basis = excluded.pro_rata_basis,
+           contributors = excluded.contributors,
+           version = excluded.version,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(dbRow as unknown as Record<string, unknown>);
+    return Promise.resolve(row);
+  }
+
+  async getBookEditorialSplitSchedule(
+    titleKey: string,
+  ): Promise<BookEditorialSplitScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM book_editorial_split_schedules WHERE title_key = ?`)
+      .get(titleKey) as (BookEditorialSplitScheduleRecord & { contributors: string }) | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      ...row,
+      contributors: JSON.parse(row.contributors) as BookEditorialSplitScheduleRecord['contributors'],
+    });
+  }
+
+  async insertBookRecoupmentPool(
+    row: Omit<BookRecoupmentPoolRecord, 'id'>,
+  ): Promise<BookRecoupmentPoolRecord> {
+    // UNIQUE per (isbn, pool_class, sequence_no) — a re-registered slot is
+    // the unique violation, never a silent duplicate.
+    const record: BookRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_recoupment_pools
+           (id, isbn, pool_class, sequence_no, advance_cents, recouped_cents, currency, status, advance_agreement_ref, created_at, updated_at)
+         VALUES (@id, @isbn, @pool_class, @sequence_no, @advance_cents, @recouped_cents, @currency, @status, @advance_agreement_ref, @created_at, @updated_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listBookRecoupmentPools(
+    isbn: string,
+    poolClass: BookRecoupmentPoolClass,
+  ): Promise<BookRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the recoupment order of record (rowid ASC the
+    // strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM book_recoupment_pools
+         WHERE isbn = ? AND pool_class = ?
+         ORDER BY sequence_no ASC, rowid ASC`,
+        )
+        .all(isbn, poolClass) as BookRecoupmentPoolRecord[],
+    );
+  }
+
+  async updateBookRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: BookRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<BookRecoupmentPoolRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the 'active' state only. changes = 0 means the pool is absent or
+    // already recouped; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE book_recoupment_pools
+         SET recouped_cents = ?, status = ?, updated_at = ?
+         WHERE id = ? AND status = 'active'`,
+      )
+      .run(recoupedCents, status, updatedAt, id);
+    if (result.changes === 0) return undefined;
+    return Promise.resolve(
+      this.db.prepare(`SELECT * FROM book_recoupment_pools WHERE id = ?`).get(id) as
+        | BookRecoupmentPoolRecord
+        | undefined,
+    );
+  }
+
+  async insertBookRecoupmentApplication(
+    row: Omit<BookRecoupmentApplicationRecord, 'id'>,
+  ): Promise<BookRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — a replayed application is the
+    // unique violation, never a double recovery. UNIQUE per
+    // (pool_id, recouped_before_cents) — the POSITION lock (the
+    // insert-as-lock arbiter).
+    const record: BookRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO book_recoupment_applications
+           (id, pool_id, pool_class, isbn, source_event_id, recouped_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @pool_id, @pool_class, @isbn, @source_event_id, @recouped_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listBookRecoupmentApplications(
+    poolId: string,
+  ): Promise<BookRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order (rowid ASC
+    // the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM book_recoupment_applications
+         WHERE pool_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(poolId) as BookRecoupmentApplicationRecord[],
+    );
+  }
+
+  async insertBookEditorialSplitAccrual(
+    row: Omit<BookEditorialSplitAccrualRecord, 'id'>,
+  ): Promise<BookEditorialSplitAccrualRecord> {
+    // UNIQUE per source_event_id — a replayed accrual is the unique
+    // violation, never a double designation.
+    const record: BookEditorialSplitAccrualRecord = { ...row, id: randomUUID() };
+    const dbRow = {
+      ...record,
+      allocations: JSON.stringify(record.allocations),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO book_editorial_split_accruals
+           (id, schedule_id, title_key, scope, source_event_id, basis_cents, allocations, dust_cents, created_at)
+         VALUES (@id, @schedule_id, @title_key, @scope, @source_event_id, @basis_cents, @allocations, @dust_cents, @created_at)`,
+      )
+      .run(dbRow as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
   }
 
   async listTranslationLocalizationEscrowCredits(

@@ -885,6 +885,191 @@ export type WebtoonRecoupmentApplicationRecord = {
   created_at: string;
 };
 
+// --- Book editorial split ledger (PR 26, migration 0030) -------------------
+
+/**
+ * The stream classes a book title's advances recoup through (the founder
+ * publishing directive) — the isolation firewall's vocabulary: a royalty
+ * event recoups ONLY its own class, exactly the webtoon print/coin rule;
+ * audiobook_production_unrecouped is its own class, never
+ * cross-collateralized from e-book or print revenue.
+ */
+export const BOOK_RECOUPMENT_POOL_CLASSES = [
+  'ebook_advance',
+  'print_advance',
+  'audiobook_production_unrecouped',
+] as const;
+export type BookRecoupmentPoolClass = (typeof BOOK_RECOUPMENT_POOL_CLASSES)[number];
+
+export function isBookRecoupmentPoolClass(value: string): value is BookRecoupmentPoolClass {
+  return (BOOK_RECOUPMENT_POOL_CLASSES as readonly string[]).includes(value);
+}
+
+/**
+ * One sequential advance recoupment pool of record per (isbn, class,
+ * sequence_no) (migration 0030) — the co-author/ghostwriter sequence: a
+ * title's pools fill in sequence_no order, 100% of the stream's net
+ * royalties flowing until each clears. The append-only application rows
+ * are the truth; recouped_cents/status are the derived read (the webtoon
+ * pool's discipline).
+ */
+export type BookRecoupmentPoolRecord = {
+  id: string;
+  /** The title identity the pools key on — the canonical ISBN-13. */
+  isbn: string;
+  pool_class: BookRecoupmentPoolClass;
+  /** The recoupment order (1 = first). The sequence is the co-author /
+   * ghostwriter contract's order of record. */
+  sequence_no: number;
+  /** The fronted advance, integer cents. */
+  advance_cents: number;
+  /** The running recovery, integer cents (<= advance_cents). */
+  recouped_cents: number;
+  currency: string;
+  /** 'active' until the advance fully recoups, then 'recouped'. */
+  status: 'active' | 'recouped';
+  /** The advance agreement of record. */
+  advance_agreement_ref: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One book recoupment application (migration 0030) — the append-only
+ * recovery ledger. UNIQUE per (pool_id, source_event_id): a replayed
+ * application is the unique violation, never a double recovery. UNIQUE per
+ * (pool_id, recouped_before_cents): the POSITION lock — the insert-as-lock
+ * arbiter (PR 12/PR 99/webtoon discipline) — so two concurrent
+ * applications of one pool compute the same running position and exactly
+ * one wins it; the loser re-derives from the append-only truth.
+ */
+export type BookRecoupmentApplicationRecord = {
+  id: string;
+  pool_id: string;
+  pool_class: BookRecoupmentPoolClass;
+  isbn: string;
+  /** The revenue feed's content-derived event id — the replay guard. */
+  source_event_id: string;
+  /** The pool's recouped_cents the instant before this application. */
+  recouped_before_cents: number;
+  /** The integer cents of revenue applied this application. */
+  applied_cents: number;
+  /** The integer cents of the pool still open after this application. */
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * The editorial cut contributor roles the directive names — the magazine
+ * roster's creative credits plus the book side's contributing authors.
+ * The role is descriptive metadata on the cut (the money keys on the
+ * payee and the mode), recorded for the audit trail.
+ */
+export const BOOK_EDITORIAL_CONTRIBUTOR_ROLES = [
+  'cover_artist',
+  'featured_columnist',
+  'senior_editor',
+  'layout_designer',
+  'contributing_author',
+] as const;
+export type BookEditorialContributorRole =
+  (typeof BOOK_EDITORIAL_CONTRIBUTOR_ROLES)[number];
+
+export function isBookEditorialContributorRole(
+  value: string,
+): value is BookEditorialContributorRole {
+  return (BOOK_EDITORIAL_CONTRIBUTOR_ROLES as readonly string[]).includes(value);
+}
+
+/**
+ * The cut modes: flat per-issue (the contracted fee, once per issue —
+ * cover artists and layout designers), percentage (bps of the funding
+ * base — subscription cuts and post-advance standard splits), and pro-rata
+ * (anthology contributors by page or word count).
+ */
+export const BOOK_EDITORIAL_SPLIT_MODES = [
+  'flat_per_issue',
+  'percentage',
+  'pro_rata',
+] as const;
+export type BookEditorialSplitMode = (typeof BOOK_EDITORIAL_SPLIT_MODES)[number];
+
+/** The anthology pro-rata bases the directive pins. */
+export const BOOK_EDITORIAL_PRO_RATA_BASES = ['page_count', 'word_count'] as const;
+export type BookEditorialProRataBasis = (typeof BOOK_EDITORIAL_PRO_RATA_BASES)[number];
+
+/**
+ * One contributor's cut of record on a schedule. Exactly one money field
+ * is non-null per contributor — the mode's own input (validated at
+ * registration; the cascade refuses a schedule that mixes modes where the
+ * scope forbids it).
+ */
+export type BookEditorialContributorSpec = {
+  payee_id: string;
+  payee_name: string;
+  role: BookEditorialContributorRole;
+  mode: BookEditorialSplitMode;
+  /** flat_per_issue: the contracted flat cents per issue. */
+  flat_cents: number | null;
+  /** percentage: whole basis points of the funding base. */
+  percentage_bps: number | null;
+  /** pro_rata: the contributor's page or word count (positive). */
+  pro_rata_count: number | null;
+};
+
+/**
+ * The editorial split schedule of record (migration 0030) — one per
+ * title_key. Book scope keys the title's ISBN (post-advance standard
+ * splits in 'percentage' mode, or an anthology's pro-rata in 'pro_rata'
+ * mode with its basis); magazine_issue scope keys `magazine:{issueId}` and
+ * carries the issue's roster with per-contributor modes (the directive's
+ * configurable flat-per-issue vs percentage cuts).
+ */
+export type BookEditorialSplitScheduleRecord = {
+  id: string;
+  title_key: string;
+  scope: 'book' | 'magazine_issue';
+  mode: BookEditorialSplitMode;
+  /** pro_rata mode's basis; null otherwise. */
+  pro_rata_basis: BookEditorialProRataBasis | null;
+  contributors: BookEditorialContributorSpec[];
+  /** The schedule's revision — a re-registration increments it; accrued
+   * cuts keep their version's event ids (history, never re-cut). */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One payee's designated share on an accrual — the release path's input. */
+export type BookEditorialSplitAllocation = {
+  payee_id: string;
+  payee_name: string;
+  share_cents: number;
+};
+
+/**
+ * One executed editorial split (migration 0030) — the append-only accrual
+ * ledger. UNIQUE per source_event_id: a replayed split is the unique
+ * violation, never a double accrual. The accrual DESIGNATES the routing;
+ * the money moves through the standing release machinery (the payout
+ * gates) — the accrual row is the gate's verified input.
+ */
+export type BookEditorialSplitAccrualRecord = {
+  id: string;
+  schedule_id: string;
+  title_key: string;
+  scope: 'book' | 'magazine_issue';
+  /** The funding row's event id, or the flat cut's per-issue identity
+   * (`book:magazine_flat:{issueId}:{version}`) — the once-only guard. */
+  source_event_id: string;
+  /** The split's funding base, integer cents (0 for flat cuts). */
+  basis_cents: number;
+  allocations: BookEditorialSplitAllocation[];
+  /** The visible floor residue — never rounded into a contributor's credit. */
+  dust_cents: number;
+  created_at: string;
+};
+
 // --- IP adaptation optioning (PR 21, migration 0025) -----------------------
 
 /**

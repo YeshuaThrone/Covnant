@@ -234,6 +234,38 @@ export interface ReconJobResult {
   /** AI lane: pro-rata floor residue swept visibly, exact fixed-point
    * micros as text (never rounded up into a contributor's credit). */
   ai_pool_dust_micros?: string;
+  /** Book lane: match_queue rows written / replayed (the UNIQUE event_id
+   * no-ops across a re-shipped report). */
+  book_written?: number;
+  book_replayed?: number;
+  /** Book lane: matched vs unmatched rows (the ISBN vault cross-reference). */
+  book_matched?: number;
+  book_unmatched?: number;
+  /** Book lane: negative-net quarantines / sub-cent zero nets — recorded,
+   * never posted. */
+  book_held_negative_net?: number;
+  book_zero_net?: number;
+  /** Book lane: the print rows' total recorded POD deductions, exact
+   * fixed-point micros as text. */
+  book_print_deduction_micros?: string;
+  /** Book lane: holding posts / replays. */
+  book_holding_posted?: number;
+  book_holding_replayed?: number;
+  /** Book lane: recoupment applications written / replayed events, integer
+   * cents applied to pools this pass. */
+  book_recoupments_applied?: number;
+  book_recoupments_replayed?: number;
+  book_recoupment_applied_cents?: number;
+  /** Book lane: post-clearance royalty — integer cents that flowed past
+   * the advance sequence (the splits' basis). */
+  book_recoupment_excess_cents?: number;
+  /** Book lane: editorial split accruals written / replayed. */
+  book_split_accruals?: number;
+  book_split_accruals_replayed?: number;
+  /** Book lane: rows with no pool registered (money stays in holding) and
+   * rows with no editorial schedule (honest skips, never silent drops). */
+  book_skipped_no_pool?: number;
+  book_skipped_no_schedule?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

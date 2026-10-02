@@ -97,6 +97,11 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  BookEditorialSplitScheduleRecord,
+  BookRecoupmentPoolRecord,
+  BookRecoupmentPoolClass,
+  BookRecoupmentApplicationRecord,
+  BookEditorialSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -293,6 +298,15 @@ const TABLES = {
   aiPayoutGateStates: 'ai_payout_gate_states',
   aiDatasetDeprecations: 'ai_dataset_deprecations',
   aiDatasetAllocationArchives: 'ai_dataset_allocation_archives',
+  // Migration 0030 (PR 26) — the book editorial split ledger: the schedule
+  // of record per title_key (upsert on title_key), the sequential advance
+  // pools (UNIQUE per (isbn, class, sequence_no)), their append-only
+  // application truth (replay + position uniques), and the executed split
+  // accruals (UNIQUE per source_event_id).
+  bookEditorialSplitSchedules: 'book_editorial_split_schedules',
+  bookRecoupmentPools: 'book_recoupment_pools',
+  bookRecoupmentApplications: 'book_recoupment_applications',
+  bookEditorialSplitAccruals: 'book_editorial_split_accruals',
   // Migration 0023 — the film multi-territory withholding log + territory
   // envelopes (PR 18). The withholding log is the per-line, pre-conversion
   // foreign-tax evidence; the envelopes are the per-territory routing
@@ -2290,6 +2304,135 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'updateWebtoonRecoupmentPoolProgress',
+    );
+  }
+
+  // --- Book editorial split ledger (PR 26, migration 0030) ---
+
+  async upsertBookEditorialSplitSchedule(
+    row: BookEditorialSplitScheduleRecord,
+  ): Promise<BookEditorialSplitScheduleRecord> {
+    // One schedule of record per title_key — the upsert targets the key, so
+    // a re-registration (identity + version preserved by the caller)
+    // replaces the row atomically.
+    return this.oneStrict<BookEditorialSplitScheduleRecord>(
+      this.client
+        .from(TABLES.bookEditorialSplitSchedules)
+        .upsert({ ...row }, { onConflict: 'title_key' })
+        .select()
+        .maybeSingle(),
+      'upsertBookEditorialSplitSchedule',
+    );
+  }
+
+  async getBookEditorialSplitSchedule(
+    titleKey: string,
+  ): Promise<BookEditorialSplitScheduleRecord | undefined> {
+    return this.one<BookEditorialSplitScheduleRecord>(
+      this.client
+        .from(TABLES.bookEditorialSplitSchedules)
+        .select()
+        .eq('title_key', titleKey)
+        .maybeSingle(),
+      'getBookEditorialSplitSchedule',
+    );
+  }
+
+  async insertBookRecoupmentPool(
+    row: Omit<BookRecoupmentPoolRecord, 'id'>,
+  ): Promise<BookRecoupmentPoolRecord> {
+    // UNIQUE per (isbn, pool_class, sequence_no): a re-registered sequence
+    // slot throws here — never a silent duplicate advance slot.
+    return this.oneStrict<BookRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.bookRecoupmentPools)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookRecoupmentPool',
+    );
+  }
+
+  async listBookRecoupmentPools(
+    isbn: string,
+    poolClass: BookRecoupmentPoolClass,
+  ): Promise<BookRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the recoupment order of record.
+    return this.many<BookRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.bookRecoupmentPools)
+        .select()
+        .eq('isbn', isbn)
+        .eq('pool_class', poolClass)
+        .order('sequence_no', { ascending: true }),
+      'listBookRecoupmentPools',
+    );
+  }
+
+  async updateBookRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: BookRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<BookRecoupmentPoolRecord | undefined> {
+    // The pool CAS: one conditional update scoped to the 'active' state —
+    // changes=0 (no returned row) means the pool is absent or already
+    // recouped; either way this call lost the race (the webtoon CAS).
+    return this.one<BookRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.bookRecoupmentPools)
+        .update({ recouped_cents: recoupedCents, status, updated_at: updatedAt })
+        .eq('id', id)
+        .eq('status', 'active')
+        .select()
+        .maybeSingle(),
+      'updateBookRecoupmentPoolProgress',
+    );
+  }
+
+  async insertBookRecoupmentApplication(
+    row: Omit<BookRecoupmentApplicationRecord, 'id'>,
+  ): Promise<BookRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id): a replayed application throws
+    // here — the once-only replay guard, never a double recovery. UNIQUE
+    // per (pool_id, recouped_before_cents): the POSITION lock (the
+    // insert-as-lock arbiter).
+    return this.oneStrict<BookRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.bookRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookRecoupmentApplication',
+    );
+  }
+
+  async listBookRecoupmentApplications(
+    poolId: string,
+  ): Promise<BookRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return this.many<BookRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.bookRecoupmentApplications)
+        .select()
+        .eq('pool_id', poolId)
+        .order('created_at', { ascending: true }),
+      'listBookRecoupmentApplications',
+    );
+  }
+
+  async insertBookEditorialSplitAccrual(
+    row: Omit<BookEditorialSplitAccrualRecord, 'id'>,
+  ): Promise<BookEditorialSplitAccrualRecord> {
+    // UNIQUE per source_event_id: a replayed accrual throws here — the
+    // once-only designation guard, never a double split.
+    return this.oneStrict<BookEditorialSplitAccrualRecord>(
+      this.client
+        .from(TABLES.bookEditorialSplitAccruals)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertBookEditorialSplitAccrual',
     );
   }
 

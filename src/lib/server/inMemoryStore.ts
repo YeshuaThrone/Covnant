@@ -101,6 +101,11 @@ import type {
   WebtoonRecoupmentPoolRecord,
   WebtoonRecoupmentPoolClass,
   WebtoonRecoupmentApplicationRecord,
+  BookEditorialSplitScheduleRecord,
+  BookRecoupmentPoolRecord,
+  BookRecoupmentPoolClass,
+  BookRecoupmentApplicationRecord,
+  BookEditorialSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -241,6 +246,11 @@ export class InMemoryStore implements Store {
   private webtoonLocalizationCostLines: WebtoonLocalizationCostLineRecord[] = [];
   private webtoonRecoupmentPools: WebtoonRecoupmentPoolRecord[] = [];
   private webtoonRecoupmentApplications: WebtoonRecoupmentApplicationRecord[] = [];
+  // Migration 0030 — the book editorial split ledger state.
+  private bookEditorialSplitSchedules: BookEditorialSplitScheduleRecord[] = [];
+  private bookRecoupmentPools: BookRecoupmentPoolRecord[] = [];
+  private bookRecoupmentApplications: BookRecoupmentApplicationRecord[] = [];
+  private bookEditorialSplitAccruals: BookEditorialSplitAccrualRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -1793,6 +1803,135 @@ export class InMemoryStore implements Store {
     row.status = status;
     row.updated_at = updatedAt;
     return { ...row };
+  }
+
+  // Migration 0030 — the book editorial split ledger (PR 26).
+
+  async upsertBookEditorialSplitSchedule(
+    row: BookEditorialSplitScheduleRecord,
+  ): Promise<BookEditorialSplitScheduleRecord> {
+    // One schedule of record per title_key — the caller builds the row from
+    // the existing record (identity + version preserved); replace atomically.
+    const existingIndex = this.bookEditorialSplitSchedules.findIndex(
+      (candidate) => candidate.title_key === row.title_key,
+    );
+    if (existingIndex >= 0) {
+      this.bookEditorialSplitSchedules[existingIndex] = { ...row };
+      return { ...this.bookEditorialSplitSchedules[existingIndex] };
+    }
+    this.bookEditorialSplitSchedules.push({ ...row });
+    return { ...row };
+  }
+
+  async getBookEditorialSplitSchedule(
+    titleKey: string,
+  ): Promise<BookEditorialSplitScheduleRecord | undefined> {
+    return this.bookEditorialSplitSchedules.find((candidate) => candidate.title_key === titleKey);
+  }
+
+  async insertBookRecoupmentPool(
+    row: Omit<BookRecoupmentPoolRecord, 'id'>,
+  ): Promise<BookRecoupmentPoolRecord> {
+    // UNIQUE per (isbn, pool_class, sequence_no) — a re-registered sequence
+    // slot is the unique violation, never a silent duplicate.
+    if (
+      this.bookRecoupmentPools.some(
+        (existing) =>
+          existing.isbn === row.isbn &&
+          existing.pool_class === row.pool_class &&
+          existing.sequence_no === row.sequence_no,
+      )
+    ) {
+      uniqueViolation('book_recoupment_pools.isbn,pool_class,sequence_no');
+    }
+    const record: BookRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    this.bookRecoupmentPools.push(record);
+    return { ...record };
+  }
+
+  async listBookRecoupmentPools(
+    isbn: string,
+    poolClass: BookRecoupmentPoolClass,
+  ): Promise<BookRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the recoupment order of record.
+    return this.bookRecoupmentPools
+      .filter((row) => row.isbn === isbn && row.pool_class === poolClass)
+      .sort((a, b) => a.sequence_no - b.sequence_no)
+      .map((row) => ({ ...row }));
+  }
+
+  async updateBookRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: BookRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<BookRecoupmentPoolRecord | undefined> {
+    const row = this.bookRecoupmentPools.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — an already-recouped pool refuses
+    // the update (undefined), the webtoon pool's settle discipline.
+    if (row === undefined || row.status !== 'active') {
+      return undefined;
+    }
+    row.recouped_cents = recoupedCents;
+    row.status = status;
+    row.updated_at = updatedAt;
+    return { ...row };
+  }
+
+  async insertBookRecoupmentApplication(
+    row: Omit<BookRecoupmentApplicationRecord, 'id'>,
+  ): Promise<BookRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — the replay guard; UNIQUE per
+    // (pool_id, recouped_before_cents) — the position lock (the webtoon
+    // insert-as-lock arbiter).
+    if (
+      this.bookRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('book_recoupment_applications.pool_id,source_event_id');
+    }
+    if (
+      this.bookRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('book_recoupment_applications.pool_id,recouped_before_cents');
+    }
+    const record: BookRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.bookRecoupmentApplications.push(record);
+    return { ...record };
+  }
+
+  async listBookRecoupmentApplications(
+    poolId: string,
+  ): Promise<BookRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return sortByTime(
+      this.bookRecoupmentApplications.filter((row) => row.pool_id === poolId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertBookEditorialSplitAccrual(
+    row: Omit<BookEditorialSplitAccrualRecord, 'id'>,
+  ): Promise<BookEditorialSplitAccrualRecord> {
+    // UNIQUE per source_event_id — a replayed accrual is the unique
+    // violation, never a double designation.
+    if (
+      this.bookEditorialSplitAccruals.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('book_editorial_split_accruals.source_event_id');
+    }
+    const record: BookEditorialSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.bookEditorialSplitAccruals.push(record);
+    return { ...record };
   }
 
   async listTranslationLocalizationEscrowCredits(
