@@ -40,6 +40,7 @@ function filmLine(micros: bigint, period: string): ParsedStatementLine {
     livestreamDetail: null,
     webtoonDetail: null,
     merchDetail: null,
+    aiDetail: null,
   };
 }
 

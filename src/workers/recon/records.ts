@@ -57,7 +57,11 @@ export type StatementProfileKind =
   | "shopify_dtc_dump_csv"
   | "pod_fulfillment_dump_csv"
   | "wholesale_consignment_payout_csv"
-  | "square_pos_dump_csv";
+  | "square_pos_dump_csv"
+  | "openai_llm_billing_log_csv"
+  | "wandb_inference_telemetry_csv"
+  | "elevenlabs_voice_clone_licensing_csv"
+  | "huggingface_dataset_attribution_log_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -380,6 +384,132 @@ export type MerchLineDetail =
       readonly period: string;
     };
 
+// ---------------------------------------------------------------------------
+// The AI lane (PR 24, founder AI directive + tokenization patch): metered
+// usage units, contributor classes, and the per-line context union.
+// ---------------------------------------------------------------------------
+
+/** The addendum 8 usage-unit vocabulary the lane parses. */
+export const AI_USAGE_UNITS = ["tokens", "characters", "minutes"] as const;
+export type AiUsageUnit = (typeof AI_USAGE_UNITS)[number];
+
+/** Synthetic voice licensing prices per character or per minute — never tokens. */
+export const AI_VOICE_USAGE_UNITS = ["characters", "minutes"] as const;
+export type AiVoiceUsageUnit = (typeof AI_VOICE_USAGE_UNITS)[number];
+
+// The contributor-class vocabulary's home is the shared record module (the
+// merch drawdown-class precedent) — re-exported so the lane's typed
+// surface stays one import away.
+export { AI_CONTRIBUTOR_CLASSES } from "@/modules/don/records";
+export type { AiContributorClass } from "@/modules/don/records";
+import { AI_CONTRIBUTOR_CLASSES as AI_CONTRIBUTOR_CLASS_VALUES } from "@/modules/don/records";
+import type { AiContributorClass } from "@/modules/don/records";
+
+export function isAiUsageUnit(unit: string): unit is AiUsageUnit {
+  return (AI_USAGE_UNITS as readonly string[]).includes(unit);
+}
+
+export function isAiVoiceUsageUnit(unit: string): unit is AiVoiceUsageUnit {
+  return (AI_VOICE_USAGE_UNITS as readonly string[]).includes(unit);
+}
+
+export function isAiContributorClass(value: string): value is AiContributorClass {
+  return (AI_CONTRIBUTOR_CLASS_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * The metered usage pair — only the two usage-metered AI detail kinds
+ * carry per-event usage; attribution rows are weight facts, and the
+ * queue builder stores null for them.
+ */
+export function aiMeteredUsage(
+  detail: AiLineDetail | null,
+): {
+  readonly usageUnit: AiUsageUnit | AiVoiceUsageUnit;
+  readonly usageQuantity: string;
+} | null {
+  if (detail === null) return null;
+  return detail.kind === "inference_billing" ||
+    detail.kind === "voice_licensing"
+    ? { usageUnit: detail.usageUnit, usageQuantity: detail.usageQuantity }
+    : null;
+}
+
+/**
+ * The AI lane's per-line context (PR 24). Null on every non-AI line — the
+ * field's PRESENCE is the lane discriminator, the same pattern as
+ * podcastDetail/gamingDetail/livestreamDetail/webtoonDetail/merchDetail.
+ * Every row carries the metered-usage identity (the addendum 8
+ * usage_unit/usage_quantity columns) and the model attribution key (the
+ * addendum 9 ai_model_id column); the three kinds are the directive's
+ * four senders — the two inference billing/telemetry logs share the
+ * billing shape.
+ */
+export type AiLineDetail =
+  | {
+      /** An API token billing/telemetry row (OpenAI/custom LLM billing,
+       * Weights & Biases telemetry) — the nested derivative split's and
+       * the fractional attribution's subject. */
+      readonly kind: "inference_billing";
+      /** The sender's own usage-event id (request id / run id) — the
+       * event-level legs' identity half. */
+      readonly usageEventId: string;
+      readonly modelId: string;
+      readonly usageUnit: AiUsageUnit;
+      /** Exact decimal usage amount as text (never a float). */
+      readonly usageQuantity: string;
+      /** The APPLIED per-unit rate as exact micros text, recorded verbatim
+       * (the founder's rate-logging rule). */
+      readonly ratePerUnitMicros: string;
+      /** The row's reported total API token revenue, exact micros text —
+       * self-reconciled against quantity × rate at parse. */
+      readonly totalRevenueMicros: string;
+      /** Contributor attribution rows carry the payee of record; null on
+       * an event's unattributed (registry-fallback) row. */
+      readonly contributorPayeeId: string | null;
+      readonly contributorPayeeName: string | null;
+      /** The row's fractional attribution weight, exact decimal text; null
+       * when the row carries no contributor. */
+      readonly datasetAttributionWeight: string | null;
+      readonly period: string;
+    }
+  | {
+      /** A synthetic voice stream event (ElevenLabs Voice Library) — its
+       * licensing fee routes DIRECTLY to the original voice actor. */
+      readonly kind: "voice_licensing";
+      readonly usageEventId: string;
+      readonly voiceId: string;
+      readonly modelId: string;
+      /** The original voice actor of record — the direct routing's payee. */
+      readonly voiceActorPayeeId: string;
+      readonly voiceActorPayeeName: string;
+      readonly usageUnit: AiVoiceUsageUnit;
+      /** Exact decimal usage amount as text (never a float). */
+      readonly usageQuantity: string;
+      /** The APPLIED per-character/per-minute rate, exact micros text. */
+      readonly ratePerUnitMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** A model training attribution log row (Hugging Face) — the
+       * contributor registry's source, and (when the file declares a data
+       * pool royalty) the pro-rata pool distribution's input. */
+      readonly kind: "dataset_attribution";
+      readonly modelId: string;
+      /** The sender's attribution event id — the registry identity. */
+      readonly attributionEventId: string;
+      readonly contributorPayeeId: string;
+      readonly contributorPayeeName: string;
+      readonly contributorClass: AiContributorClass;
+      /** The contributor's dataset token weight, exact decimal text. */
+      readonly datasetTokenWeight: string;
+      /** The file's one optional data-pool royalty event: its id and the
+       * pool amount, exact micros text — null on weights-only files. */
+      readonly poolEventId: string | null;
+      readonly poolRoyaltyMicros: string | null;
+      readonly period: string;
+    };
+
 /**
  * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
  * The Epic Games Store and Unreal Engine Marketplace share one engine-
@@ -501,6 +631,15 @@ export interface ParsedStatementLine {
    * reconciliation cells); null on every non-merch line — the presence IS
    * the lane discriminator. */
   merchDetail: MerchLineDetail | null;
+
+  /**
+   * The AI lane's per-line context (metered usage unit/quantity, the model
+   * attribution key, the voice-actor direct-routing cells, the contributor
+   * weights and pool cells) — null on every non-AI line; the field's
+   * PRESENCE is the lane discriminator. Populates the addendum 8/9
+   * columns' intended purpose.
+   */
+  aiDetail: AiLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

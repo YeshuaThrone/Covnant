@@ -307,6 +307,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // position-locked reserve drawdown ledger; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0027_merch_returns_reserve_fulfillment.sql',
+      // AI model registry (PR 24, the founder AI directive + the
+      // tokenization patch): the per-model nested split terms of record
+      // and the contributor dataset-token-weight registry; still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0028_ai_model_registry.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

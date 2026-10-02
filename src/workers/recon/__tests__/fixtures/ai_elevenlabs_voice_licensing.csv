@@ -1,0 +1,4 @@
+Event ID,Voice ID,Model ID,Voice Actor Payee ID,Voice Actor Payee Name,Usage Unit,Usage Quantity,Rate Per Unit,Currency,Date
+voice-evt-001,voice-mara-7,eleven-turbo-v2,actor-mara-9,Mara Velez,characters,350000,0.00002,USD,2026-09-18
+voice-evt-002,voice-mara-7,eleven-turbo-v2,actor-mara-9,Mara Velez,minutes,1,0.005,USD,2026-09-18
+voice-evt-003,voice-mara-7,eleven-turbo-v2,actor-mara-9,Mara Velez,minutes,20,0.005,USD,2026-09-18

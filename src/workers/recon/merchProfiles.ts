@@ -277,6 +277,7 @@ function merchLine(
     livestreamDetail: null,
     webtoonDetail: null,
     merchDetail: detail,
+    aiDetail: null,
   };
 }
 

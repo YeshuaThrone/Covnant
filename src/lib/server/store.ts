@@ -103,6 +103,9 @@ import type {
   MerchFulfillmentTrackingRecord,
   MerchDesignerRoyaltyBillingRecord,
   MerchConsignmentSettlementRecord,
+  AiModelSplitTermsRecord,
+  AiModelContributionRecord,
+  AiContributorClass,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -753,6 +756,37 @@ export interface Store {
     batchRef: string,
     settledAt: string,
   ): Promise<number>;
+
+  /**
+   * Upserts one model's nested derivative split contract terms (migration
+   * 0028) — UNIQUE per ai_model_id; a re-registration replaces the row
+   * (the newest contract governs the next ingest).
+   */
+  upsertAiModelSplitTerms(
+    terms: Omit<AiModelSplitTermsRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiModelSplitTermsRecord>;
+
+  /** One model's contract terms of record; null when the model is unregistered. */
+  getAiModelSplitTerms(
+    aiModelId: string,
+  ): Promise<AiModelSplitTermsRecord | undefined>;
+
+  /**
+   * Upserts one contributor's registered dataset token weight on one model
+   * (migration 0028) — UNIQUE per (ai_model_id, contributor_payee_id); a
+   * re-shipped attribution log converges (the newest weight governs).
+   */
+  upsertAiModelContribution(
+    contribution: Omit<
+      AiModelContributionRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AiModelContributionRecord>;
+
+  /** One model's registered contributors (the registry fallback's pool inputs). */
+  listAiModelContributions(
+    aiModelId: string,
+  ): Promise<AiModelContributionRecord[]>;
 
   /**
    * Writes one studio's KYC verification state (one row per studio payee —

@@ -116,6 +116,8 @@ import type {
   MerchReturnReservePolicyRecord,
   MerchReserveDrawdownRecord,
   MerchFulfillmentTrackingRecord,
+  AiModelSplitTermsRecord,
+  AiModelContributionRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -794,6 +796,38 @@ CREATE TABLE IF NOT EXISTS gaming_devex_conversion_logs (
   status TEXT NOT NULL,
   settled_at TEXT,
   created_at TEXT NOT NULL
+);
+
+-- AI model registry (0028, PR 24): one model's nested derivative split
+-- contract terms (UNIQUE per model — the newest contract governs) and the
+-- contributors' registered dataset token weights (UNIQUE per model+payee —
+-- a re-shipped attribution log converges).
+CREATE TABLE IF NOT EXISTS ai_model_split_terms (
+  id TEXT PRIMARY KEY,
+  ai_model_id TEXT NOT NULL UNIQUE,
+  base_model_provider_fee_bps INTEGER NOT NULL,
+  developer_split_bps INTEGER NOT NULL,
+  contributor_pool_bps INTEGER NOT NULL,
+  base_model_provider_payee_id TEXT NOT NULL,
+  base_model_provider_payee_name TEXT NOT NULL,
+  developer_payee_id TEXT NOT NULL,
+  developer_payee_name TEXT NOT NULL,
+  model_operator_payee_id TEXT NOT NULL,
+  model_operator_payee_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_model_contributions (
+  id TEXT PRIMARY KEY,
+  ai_model_id TEXT NOT NULL,
+  contributor_payee_id TEXT NOT NULL,
+  contributor_payee_name TEXT NOT NULL,
+  contributor_class TEXT NOT NULL,
+  dataset_token_weight TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (ai_model_id, contributor_payee_id)
 );
 
 CREATE TABLE IF NOT EXISTS gaming_studio_kyc_verifications (
@@ -2868,6 +2902,100 @@ export class SqliteStore implements Store {
       )
       .run(settledAt, batchRef);
     return Promise.resolve(result.changes);
+  }
+
+  async upsertAiModelSplitTerms(
+    terms: Omit<AiModelSplitTermsRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<AiModelSplitTermsRecord> {
+    // UNIQUE per ai_model_id — an upsert converges on the newest contract
+    // (the re-registered terms govern the next ingest, never a duplicate).
+    const now = new Date().toISOString();
+    const record: AiModelSplitTermsRecord = {
+      ...terms,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO ai_model_split_terms
+           (id, ai_model_id, base_model_provider_fee_bps, developer_split_bps, contributor_pool_bps,
+            base_model_provider_payee_id, base_model_provider_payee_name, developer_payee_id,
+            developer_payee_name, model_operator_payee_id, model_operator_payee_name,
+            created_at, updated_at)
+         VALUES (@id, @ai_model_id, @base_model_provider_fee_bps, @developer_split_bps, @contributor_pool_bps,
+            @base_model_provider_payee_id, @base_model_provider_payee_name, @developer_payee_id,
+            @developer_payee_name, @model_operator_payee_id, @model_operator_payee_name,
+            @created_at, @updated_at)
+         ON CONFLICT (ai_model_id) DO UPDATE SET
+           base_model_provider_fee_bps = excluded.base_model_provider_fee_bps,
+           developer_split_bps = excluded.developer_split_bps,
+           contributor_pool_bps = excluded.contributor_pool_bps,
+           base_model_provider_payee_id = excluded.base_model_provider_payee_id,
+           base_model_provider_payee_name = excluded.base_model_provider_payee_name,
+           developer_payee_id = excluded.developer_payee_id,
+           developer_payee_name = excluded.developer_payee_name,
+           model_operator_payee_id = excluded.model_operator_payee_id,
+           model_operator_payee_name = excluded.model_operator_payee_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getAiModelSplitTerms(
+    aiModelId: string,
+  ): Promise<AiModelSplitTermsRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM ai_model_split_terms WHERE ai_model_id = ?`)
+      .get(aiModelId) as AiModelSplitTermsRecord | undefined;
+    return Promise.resolve(row);
+  }
+
+  async upsertAiModelContribution(
+    contribution: Omit<
+      AiModelContributionRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AiModelContributionRecord> {
+    // UNIQUE per (ai_model_id, contributor_payee_id) — a re-shipped
+    // attribution log converges; the newest weight governs.
+    const now = new Date().toISOString();
+    const record: AiModelContributionRecord = {
+      ...contribution,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO ai_model_contributions
+           (id, ai_model_id, contributor_payee_id, contributor_payee_name, contributor_class,
+            dataset_token_weight, created_at, updated_at)
+         VALUES (@id, @ai_model_id, @contributor_payee_id, @contributor_payee_name, @contributor_class,
+            @dataset_token_weight, @created_at, @updated_at)
+         ON CONFLICT (ai_model_id, contributor_payee_id) DO UPDATE SET
+           contributor_payee_name = excluded.contributor_payee_name,
+           contributor_class = excluded.contributor_class,
+           dataset_token_weight = excluded.dataset_token_weight,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listAiModelContributions(
+    aiModelId: string,
+  ): Promise<AiModelContributionRecord[]> {
+    // Write order (rowid ASC is the strict tiebreak when created_at ties).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM ai_model_contributions
+         WHERE ai_model_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(aiModelId) as AiModelContributionRecord[];
+    return Promise.resolve(rows);
   }
 
   async upsertGamingStudioKyc(

@@ -273,6 +273,7 @@ function podcastLine(
     livestreamDetail: null,
     webtoonDetail: null,
     merchDetail: null,
+    aiDetail: null,
   };
 }
 

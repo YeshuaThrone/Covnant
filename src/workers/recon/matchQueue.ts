@@ -14,7 +14,12 @@
 import type { MatchQueueRecord } from "@/modules/sdk/records";
 import type { Store } from "@/lib/server/store";
 import type { VaultAssetRecord, VaultExternalIdentifierKind } from "@/lib/covnant/vault";
-import type { ParsedStatementLine, ReconIdentifierKind } from "./records";
+import type {
+  AiLineDetail,
+  ParsedStatementLine,
+  ReconIdentifierKind,
+} from "./records";
+import { aiMeteredUsage } from "./records";
 
 /** True when the error is any backend's unique-constraint violation. */
 export function isUniqueViolation(error: unknown): boolean {
@@ -63,6 +68,24 @@ export interface VaultLookup {
 }
 
 /**
+ * The AI lane's attribution weight cell — the exact decimal text the
+ * queue's addendum 9 column carries: a blended row's own fractional
+ * weight, a registry row's dataset token weight, and nothing on voice
+ * rows (voice money routes directly — no weight prices it).
+ */
+function aiAttributionWeightText(detail: AiLineDetail | null): string | null {
+  if (detail === null) return null;
+  switch (detail.kind) {
+    case "inference_billing":
+      return detail.datasetAttributionWeight;
+    case "dataset_attribution":
+      return detail.datasetTokenWeight;
+    case "voice_licensing":
+      return null;
+  }
+}
+
+/**
  * Builds the full match_queue row for one parsed line. Every column is
  * explicit — the closed-record type keeps the builder honest as the queue
  * schema grows.
@@ -105,12 +128,15 @@ export function buildMatchQueueRow(
     language_code: null,
     sku_id: null,
     cogs_per_unit_micros: null,
-    usage_unit: null,
-    usage_quantity: null,
+    // The AI lane's metered-usage and model-attribution columns (the
+    // addendum 8/9 columns' intended purpose, wired by PR 24) — derived
+    // from the line's own aiDetail; null on every non-AI line.
+    usage_unit: aiMeteredUsage(line.aiDetail)?.usageUnit ?? null,
+    usage_quantity: aiMeteredUsage(line.aiDetail)?.usageQuantity ?? null,
     isbn: null,
     country_code: null,
-    ai_model_id: null,
-    dataset_attribution_weight: null,
+    ai_model_id: line.aiDetail?.modelId ?? null,
+    dataset_attribution_weight: aiAttributionWeightText(line.aiDetail),
     artwork_id: null,
     provenance_hash: null,
     jurisdiction_code: null,

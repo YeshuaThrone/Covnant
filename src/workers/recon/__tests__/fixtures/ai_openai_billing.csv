@@ -1,0 +1,4 @@
+Event ID,Model ID,Usage Unit,Usage Quantity,Rate Per Unit,Total Revenue,Contributor Payee ID,Contributor Payee Name,Dataset Attribution Weight,Currency,Date
+evt-unattr-001,gpt-4o-ft-01,tokens,1000000,0.000005,5.00,,,,USD,2026-09-15
+evt-blend-002,gpt-4o-ft-01,tokens,2000000,0.000002,4.00,contrib-data-1,Data One,0.10,USD,2026-09-16
+evt-blend-002,gpt-4o-ft-01,tokens,2000000,0.000002,4.00,contrib-voice-1,Voice Two,0.05,USD,2026-09-16

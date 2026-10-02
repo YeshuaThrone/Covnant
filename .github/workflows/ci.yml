@@ -179,6 +179,18 @@ jobs:
           # idempotency.
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
           psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
+          # Merch returns reserve + fulfillment confirmation (PR 23): the
+          # returns-protection deal of record, the append-only reserve
+          # drawdowns, and the fulfillment tracking events — applied twice
+          # like 0011-0026 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0027_merch_returns_reserve_fulfillment.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0027_merch_returns_reserve_fulfillment.sql
+          # AI model registry (PR 24, founder AI directive): the nested
+          # derivative split contract of record per model and the
+          # contributors' registered dataset token weights — applied twice
+          # like 0011-0027 to prove idempotency.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0028_ai_model_registry.sql
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0028_ai_model_registry.sql
 
       - name: Assert the engine's exact columns exist
         env:
@@ -887,6 +899,85 @@ jobs:
           dup_settle=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_consignment_settlements where event_id = 'evt_consignment_probe'")
           [ "$dup_settle" = "1" ] || { echo "DUPLICATE CONSIGNMENT SETTLEMENT ACCEPTED by the UNIQUE event_id"; exit 1; }
           echo "OK: merch_consignment_settlements UNIQUE event_id rejects a replayed payout report"
+
+          # Merch returns reserve + fulfillment confirmation (migration
+          # 0027, PR 23): the deal-of-record bands, the drawdown replay +
+          # position uniques, the tracking state vocabulary, and RLS
+          # deny-all on all three.
+          assert_cols merch_return_reserve_policies id sku_id reserve_rate_bps reserve_window_days beneficiary_payee_id beneficiary_payee_name created_at updated_at
+          assert_cols merch_reserve_drawdowns id reserve_ledger_id drawdown_class source_event_id drawn_before_cents drawn_cents remaining_cents created_at
+          assert_cols merch_fulfillment_trackings id fulfillment_event_id tracking_number tracking_state carrier delivered_at created_at
+          for table in merch_return_reserve_policies merch_reserve_drawdowns merch_fulfillment_trackings; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the three 0027 merch tables have RLS enabled"
+          # A hostile contract (a holdback outside the founder's 10-15%
+          # band) is unrepresentable at rest.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_return_reserve_policies (sku_id, reserve_rate_bps, reserve_window_days, beneficiary_payee_id, beneficiary_payee_name) values ('SKU-RES-PROBE', 1600, 45, 'ben_merch_probe', 'Probe Beneficiary')" >/dev/null 2>&1 || true
+          bad_band=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_return_reserve_policies where sku_id = 'SKU-RES-PROBE'")
+          [ "$bad_band" = "0" ] || { echo "OUT-OF-BAND HOLDBACK RATE ACCEPTED by the band check"; exit 1; }
+          echo "OK: merch_return_reserve_policies band check rejects a hostile contract"
+          # The drawdown replay guard: a re-shipped return event is the
+          # UNIQUE (reserve, source_event), never a double drawdown.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ledger_transactions (id, split_run_id, line_item_id, payee_id, payee_name, role, share_bps, amount_cents, currency, status, created_at, kind) values ('00000000-0000-0000-0000-0000000027a1', 'run_res_probe', 'line_res_probe', 'res_probe_payee', 'Probe Reserve', 'platform', 10000, 5000, 'USD', 'merch_returns_reserve', now(), 'royalty')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into merch_reserve_drawdowns (reserve_ledger_id, drawdown_class, source_event_id, drawn_before_cents, drawn_cents, remaining_cents) values ('00000000-0000-0000-0000-0000000027a1', 'customer_return', 'evt_res_probe_1', 0, 500, 4500)"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_reserve_drawdowns (reserve_ledger_id, drawdown_class, source_event_id, drawn_before_cents, drawn_cents, remaining_cents) values ('00000000-0000-0000-0000-0000000027a1', 'customer_return', 'evt_res_probe_1', 500, 500, 4000)" >/dev/null 2>&1 || true
+          dup_draw=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_reserve_drawdowns where source_event_id = 'evt_res_probe_1'")
+          [ "$dup_draw" = "1" ] || { echo "DUPLICATE RESERVE DRAWDOWN ACCEPTED by the UNIQUE pair"; exit 1; }
+          echo "OK: merch_reserve_drawdowns replay unique rejects a re-shipped return event"
+          # The tracking state vocabulary: a bogus lifecycle refuses, and
+          # only 'delivered' exists to confirm fulfillment.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into merch_fulfillment_trackings (fulfillment_event_id, tracking_number, tracking_state, carrier) values ('evt_track_probe', '1Z999', 'lost', 'UPS')" >/dev/null 2>&1 || true
+          bad_state=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from merch_fulfillment_trackings where fulfillment_event_id = 'evt_track_probe'")
+          [ "$bad_state" = "0" ] || { echo "BOGUS TRACKING STATE ACCEPTED by the state check"; exit 1; }
+          echo "OK: merch_fulfillment_trackings state check rejects unknown lifecycles"
+
+          # AI model registry (migration 0028, PR 24, the founder AI
+          # directive): the nested derivative split contract of record per
+          # model and the contributors' registered dataset token weights —
+          # the directive's defaults as row values, the nested ORDER
+          # enforced at rest, and RLS deny-all on both.
+          assert_cols ai_model_split_terms id ai_model_id base_model_provider_fee_bps developer_split_bps contributor_pool_bps base_model_provider_payee_id base_model_provider_payee_name developer_payee_id developer_payee_name model_operator_payee_id model_operator_payee_name created_at updated_at
+          assert_cols ai_model_contributions id ai_model_id contributor_payee_id contributor_payee_name contributor_class dataset_token_weight created_at updated_at
+          for table in ai_model_split_terms ai_model_contributions; do
+            rls_enabled=$(psql -h localhost -U postgres -d covnant_check -tAc \
+              "select relrowsecurity from pg_class c join pg_namespace n on c.relnamespace = n.oid where n.nspname='public' and c.relname='$table'")
+            [ "$rls_enabled" = "t" ] || { echo "RLS NOT ENABLED on $table"; exit 1; }
+          done
+          echo "OK: the two AI registry tables have RLS enabled"
+          # The directive's default contract prices at rest: 2000/5000/3000.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ai_model_split_terms (ai_model_id, base_model_provider_fee_bps, developer_split_bps, contributor_pool_bps, base_model_provider_payee_id, base_model_provider_payee_name, developer_payee_id, developer_payee_name, model_operator_payee_id, model_operator_payee_name) values ('gpt-probe', 2000, 5000, 3000, 'prov_ai_probe', 'Probe Provider', 'dev_ai_probe', 'Probe FineTuner', 'op_ai_probe', 'Probe Operator')"
+          # One contract per model: the registry upserts on this key, so a
+          # second INSERT for the same model is the DDL guard refusing.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ai_model_split_terms (ai_model_id, base_model_provider_fee_bps, developer_split_bps, contributor_pool_bps, base_model_provider_payee_id, base_model_provider_payee_name, developer_payee_id, developer_payee_name, model_operator_payee_id, model_operator_payee_name) values ('gpt-probe', 1000, 1000, 1000, 'prov_ai_probe2', 'Probe Provider 2', 'dev_ai_probe2', 'Probe FineTuner 2', 'op_ai_probe2', 'Probe Operator 2')" >/dev/null 2>&1 || true
+          dup_terms=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ai_model_split_terms where ai_model_id = 'gpt-probe'")
+          [ "$dup_terms" = "1" ] || { echo "SECOND SPLIT CONTRACT ACCEPTED for one model"; exit 1; }
+          echo "OK: ai_model_split_terms UNIQUE per model keeps one contract of record"
+          # The nested ORDER as DDL: a contract whose fine-tuner split and
+          # contributor pool over-commit the post-fee remainder refuses.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ai_model_split_terms (ai_model_id, base_model_provider_fee_bps, developer_split_bps, contributor_pool_bps, base_model_provider_payee_id, base_model_provider_payee_name, developer_payee_id, developer_payee_name, model_operator_payee_id, model_operator_payee_name) values ('gpt-overcommit', 2000, 5000, 6000, 'prov_ai_probe', 'Probe Provider', 'dev_ai_probe', 'Probe FineTuner', 'op_ai_probe', 'Probe Operator')" >/dev/null 2>&1 || true
+          over=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ai_model_split_terms where ai_model_id = 'gpt-overcommit'")
+          [ "$over" = "0" ] || { echo "OVER-COMMITTED NESTED SPLIT ACCEPTED by the nested-order check"; exit 1; }
+          echo "OK: ai_model_split_terms nested-order check rejects an over-committed remainder"
+          # The contributor registry: exact-decimal weights ride as text
+          # (the 1e-8 micros space), the class vocabulary is bounded, a
+          # zero/negative weight refuses, and a re-shipped attribution row
+          # is the UNIQUE (model, payee), never a second registration.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -c "insert into ai_model_contributions (ai_model_id, contributor_payee_id, contributor_payee_name, contributor_class, dataset_token_weight) values ('gpt-probe', 'data_ai_probe', 'Probe Data', 'dataset', '0.00000001')"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ai_model_contributions (ai_model_id, contributor_payee_id, contributor_payee_name, contributor_class, dataset_token_weight) values ('gpt-probe', 'voice_ai_probe', 'Probe Voice', 'voice_model', '0.00000001')" >/dev/null 2>&1 || true
+          bad_class=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ai_model_contributions where contributor_payee_id = 'voice_ai_probe'")
+          [ "$bad_class" = "0" ] || { echo "UNKNOWN CONTRIBUTOR CLASS ACCEPTED by the class check"; exit 1; }
+          echo "OK: ai_model_contributions class check rejects unknown vocabularies"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ai_model_contributions (ai_model_id, contributor_payee_id, contributor_payee_name, contributor_class, dataset_token_weight) values ('gpt-probe', 'zero_ai_probe', 'Probe Zero', 'dataset', '0')" >/dev/null 2>&1 || true
+          zero_weight=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ai_model_contributions where contributor_payee_id = 'zero_ai_probe'")
+          [ "$zero_weight" = "0" ] || { echo "ZERO DATASET TOKEN WEIGHT ACCEPTED by the weight check"; exit 1; }
+          echo "OK: ai_model_contributions weight check rejects non-positive weights"
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=0 -c "insert into ai_model_contributions (ai_model_id, contributor_payee_id, contributor_payee_name, contributor_class, dataset_token_weight) values ('gpt-probe', 'data_ai_probe', 'Probe Data', 'dataset', '0.00000002')" >/dev/null 2>&1 || true
+          dup_contrib=$(psql -h localhost -U postgres -d covnant_check -tAc "select count(*) from ai_model_contributions where ai_model_id = 'gpt-probe' and contributor_payee_id = 'data_ai_probe'")
+          [ "$dup_contrib" = "1" ] || { echo "SECOND REGISTRATION ROW ACCEPTED for one (model, contributor)"; exit 1; }
+          echo "OK: ai_model_contributions UNIQUE pair keeps one weight of record per (model, contributor)"
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

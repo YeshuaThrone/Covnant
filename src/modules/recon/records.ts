@@ -194,6 +194,46 @@ export interface ReconJobResult {
   /** Merch lane: consignment shrinkage allowances offset against net
    * payout settlements this pass, exact fixed-point micros as text. */
   merch_shrinkage_offset_micros?: string;
+  /** AI lane (PR 24): queue rows written this pass (OpenAI/W&B billing
+   * events, ElevenLabs voice events, and Hugging Face attribution rows). */
+  ai_written?: number;
+  /** AI lane: same-row replays caught by the event-id guard. */
+  ai_replayed?: number;
+  /** AI lane: rows held in quarantine — a voice event without a voice
+   * actor of record, an inference event whose model is unregistered, an
+   * unattributed event whose model registry is empty (visible, never
+   * posted, never dropped). */
+  ai_held?: number;
+  /** AI lane: legs credited to UNCLAIMED_HOLDING this pass — the nested
+   * split's fee/developer/operator legs, the per-contributor attribution
+   * legs, and the direct-to-actor voice licensing legs. */
+  ai_legs_posted?: number;
+  /** AI lane: legs whose post hit the per-source replay guard — no-ops. */
+  ai_legs_replayed?: number;
+  /** AI lane: sub-cent legs — recorded in their queue rows, never rounded
+   * up into the integer-cent ledger. */
+  ai_legs_zero_net?: number;
+  /** AI lane: base foundation model provider system fees posted, exact
+   * fixed-point micros as text (never a float). */
+  ai_fee_micros?: string;
+  /** AI lane: fine-tuner/LoRA creator splits posted, exact fixed-point
+   * micros as text. */
+  ai_developer_micros?: string;
+  /** AI lane: model operator margins posted (the computed complement),
+   * exact fixed-point micros as text. */
+  ai_operator_micros?: string;
+  /** AI lane: per-contributor attribution micro-royalties posted, exact
+   * fixed-point micros as text. */
+  ai_attribution_micros?: string;
+  /** AI lane: voice licensing fees posted DIRECTLY to the original voice
+   * actors of record, exact fixed-point micros as text. */
+  ai_voice_licensing_micros?: string;
+  /** AI lane: training-pool royalties distributed pro-rata by registered
+   * dataset token weights, exact fixed-point micros as text. */
+  ai_pool_royalty_micros?: string;
+  /** AI lane: pro-rata floor residue swept visibly, exact fixed-point
+   * micros as text (never rounded up into a contributor's credit). */
+  ai_pool_dust_micros?: string;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

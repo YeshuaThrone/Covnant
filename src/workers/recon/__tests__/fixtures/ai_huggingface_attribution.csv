@@ -1,0 +1,3 @@
+Model ID,Attribution Event ID,Contributor Payee ID,Contributor Payee Name,Contributor Class,Dataset Token Weight,Pool Event ID,Data Pool Royalty,Currency,Date
+gpt-4o-ft-01,attr-2026-09-a,contrib-data-1,Data One,dataset,3,pool-evt-2026-09,0.90,USD,2026-09-19
+gpt-4o-ft-01,attr-2026-09-b,contrib-voice-1,Voice Two,voice,1,pool-evt-2026-09,0.90,USD,2026-09-19

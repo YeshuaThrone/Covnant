@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers twenty-seven profiles in dispatch order", () => {
+  it("registers thirty-one profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -67,6 +67,12 @@ describe("profile registry", () => {
       "pod_fulfillment_dump_csv",
       "wholesale_consignment_payout_csv",
       "square_pos_dump_csv",
+      // The AI lane (PR 24) — metered inference billing, inference
+      // telemetry, synthetic-voice licensing, and dataset attribution.
+      "openai_llm_billing_log_csv",
+      "wandb_inference_telemetry_csv",
+      "elevenlabs_voice_clone_licensing_csv",
+      "huggingface_dataset_attribution_log_csv",
     ]);
   });
 
