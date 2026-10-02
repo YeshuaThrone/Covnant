@@ -108,6 +108,13 @@ export const LEDGER_STATUSES = [
   // and avatar IP licensing holdbacks, tech setup amortization — before net
   // income releases to the talent (status → 'settled').
   "avatar_ip_licensing_holdback",
+  // Translation/localization escrow (PR 20): a foreign language feed's
+  // translation royalty locked in the per-series-per-language escrow until
+  // localization costs fully amortize and the verified release runs the
+  // localization cascade — localizer royalty first, then the studio split
+  // bands — before net funds allocate to the primary author (status →
+  // 'settled').
+  "translation_localization_pending",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -147,6 +154,13 @@ export const LEDGER_KINDS = [
   // (a released receipt stays kind 'avatar_ip_licensing_holdback' with
   // status 'settled'), the same division PR 7, PR 9, PR 13, and PR 14 use.
   "avatar_ip_licensing_holdback",
+  // Translation/localization escrow (PR 20): a foreign language feed's
+  // translation royalty locked per series+language until localization costs
+  // fully amortize and the verified release runs the localization cascade.
+  // Kind marks WHAT the row is for its whole life (a released receipt stays
+  // kind 'translation_localization_pending' with status 'settled'), the same
+  // division PR 7, PR 9, PR 13, PR 14, and PR 15 use.
+  "translation_localization_pending",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

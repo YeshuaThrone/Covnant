@@ -97,6 +97,63 @@ export function vtuberHoldbackGlAccount(agencyId: string): string {
   return `avatar_ip_licensing_holdback:${agencyId}`;
 }
 
+// Webtoon studio split bands (PR 20, founder webtoon + serialized-publishing
+// directive): the per-contract production split schedule's role groups, each
+// a share of the POST-translation net. A registered schedule names whole
+// basis points per group INSIDE its band — below the floor under-recovers
+// the studio's own contribution terms, above the cap exceeds the mandate;
+// the allocator refuses anything outside the band. The bands leave the
+// primary author the residual (60-85% studio team, 15-40% author/IP holder).
+export const WEBTOON_ORIGINAL_CREATOR_STORYWRITER_MIN_BPS = 3_000;
+export const WEBTOON_ORIGINAL_CREATOR_STORYWRITER_MAX_BPS = 4_000;
+export const WEBTOON_LINE_ARTIST_INKER_MIN_BPS = 2_000;
+export const WEBTOON_LINE_ARTIST_INKER_MAX_BPS = 3_000;
+export const WEBTOON_COLORIST_BACKGROUND_MIN_BPS = 1_000;
+export const WEBTOON_COLORIST_BACKGROUND_MAX_BPS = 1_500;
+
+// The studio role-group vocabulary — the three bands' keys. A schedule role
+// outside the vocabulary is a hostile registration.
+export const WEBTOON_STUDIO_ROLE_GROUPS = [
+  "original_creator_storywriter",
+  "line_artist_inker",
+  "colorist_background",
+] as const;
+export type WebtoonStudioRoleGroup = (typeof WEBTOON_STUDIO_ROLE_GROUPS)[number];
+
+// Translation/localization escrow (PR 20, founder directive): a foreign
+// language feed's translation royalty locks in the PER-LANGUAGE escrow until
+// localization costs fully amortize and the verified release runs the
+// localization cascade — the localizer's royalty BEFORE the primary author's
+// net. The lock is PER-SERIES-PER-LANGUAGE — the payee and GL account carry
+// the series id and language code the way the VTuber holdback carries the
+// agency id — because the localization contract, the cost amortization
+// schedule, and the cascade ordering are all per-language-feed program.
+// Deliberately NOT 'platform', NOT the unclaimed holding sentinel, NOT any
+// prior escrow prefix: translation royalties are distinct from company dust,
+// from every creator vault, from unallocated recon funds, and from every
+// other escrow state, in payee, GL account, and ledger kind, so no query
+// can fold one into another.
+export const TRANSLATION_LOCALIZATION_PENDING_PAYEE_PREFIX =
+  "translation_localization_pending";
+export function translationLocalizationPayeeId(
+  seriesId: string,
+  languageCode: string,
+): string {
+  return `${TRANSLATION_LOCALIZATION_PENDING_PAYEE_PREFIX}:${seriesId}:${languageCode}`;
+}
+export function translationLocalizationPayeeName(
+  seriesId: string,
+  languageCode: string,
+): string {
+  return `Translation Localization Pending — ${seriesId} (${languageCode})`;
+}
+export function translationLocalizationGlAccount(
+  seriesId: string,
+  languageCode: string,
+): string {
+  return `translation_localization_pending:${seriesId}:${languageCode}`;
+}
+
 // The agency management fee band (PR 15): the founder directive caps the
 // automated agency management deduction at 20–40% of the gross — below 20%
 // under-recovers the agency program, above 40% exceeds the mandate; the
@@ -191,6 +248,14 @@ export const JOURNAL_KINDS = [
   // talent. Additive only.
   "vtuber_holdback_post",
   "vtuber_holdback_release",
+  // Translation/localization escrow (PR 20): a foreign language feed's
+  // translation royalty locks in the per-series-per-language escrow (post),
+  // then the verified release runs the localization cascade — the
+  // localization cost amortization line, the localizer's royalty, the studio
+  // split bands — before net funds allocate to the primary author. Additive
+  // only.
+  "translation_localization_post",
+  "translation_localization_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

@@ -76,6 +76,8 @@ describe('don constants', () => {
       'esports_pool_escrow_release',
       'vtuber_holdback_post',
       'vtuber_holdback_release',
+      'translation_localization_post',
+      'translation_localization_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

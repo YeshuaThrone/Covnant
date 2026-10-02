@@ -94,6 +94,13 @@ import type {
   DerivativeRoyaltyEdgeRecord,
   SampleClearanceEdgeRecord,
   CompositionPublisherRecord,
+  WebtoonStudioSplitRoleRecord,
+  WebtoonLocalizationContractRecord,
+  WebtoonLocalizationCostScheduleRecord,
+  WebtoonLocalizationCostLineRecord,
+  WebtoonRecoupmentPoolRecord,
+  WebtoonRecoupmentPoolClass,
+  WebtoonRecoupmentApplicationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -194,6 +201,13 @@ export class InMemoryStore implements Store {
   private derivativeRoyaltyEdges: DerivativeRoyaltyEdgeRecord[] = [];
   private sampleClearanceEdges: SampleClearanceEdgeRecord[] = [];
   private compositionPublishers: CompositionPublisherRecord[] = [];
+  // Migration 0024 — the webtoon studio split + translation cascade state.
+  private webtoonStudioSplitRoles: WebtoonStudioSplitRoleRecord[] = [];
+  private webtoonLocalizationContracts: WebtoonLocalizationContractRecord[] = [];
+  private webtoonLocalizationCostSchedules: WebtoonLocalizationCostScheduleRecord[] = [];
+  private webtoonLocalizationCostLines: WebtoonLocalizationCostLineRecord[] = [];
+  private webtoonRecoupmentPools: WebtoonRecoupmentPoolRecord[] = [];
+  private webtoonRecoupmentApplications: WebtoonRecoupmentApplicationRecord[] = [];
   // Film multi-territory withholding log + territory envelopes (0023, PR 18).
   private filmTerritoryWithholdings: FilmTerritoryWithholdingRecord[] = [];
   private filmTerritoryDistributions: FilmTerritoryDistributionRecord[] = [];
@@ -1274,6 +1288,229 @@ export class InMemoryStore implements Store {
     // Insertion order — the deterministic routing order (the array IS the
     // insertion_order identity column's local mirror).
     return this.compositionPublishers.filter((row) => row.composition_id === compositionId);
+  }
+
+  // --- Webtoon studio splits + translation cascades (PR 20, migration 0024) ---
+
+  async insertWebtoonStudioSplitRole(
+    row: Omit<WebtoonStudioSplitRoleRecord, 'id'>,
+  ): Promise<WebtoonStudioSplitRoleRecord> {
+    // UNIQUE on (series_id, role_group, payee_id) — a duplicate registration
+    // throws the unique violation (the replay surface).
+    if (
+      this.webtoonStudioSplitRoles.some(
+        (existing) =>
+          existing.series_id === row.series_id &&
+          existing.role_group === row.role_group &&
+          existing.payee_id === row.payee_id,
+      )
+    ) {
+      uniqueViolation('webtoon_studio_split_roles.series_id,role_group,payee_id');
+    }
+    const record: WebtoonStudioSplitRoleRecord = { ...row, id: randomUUID() };
+    this.webtoonStudioSplitRoles.push(record);
+    return record;
+  }
+
+  async listWebtoonStudioSplitRoles(seriesId: string): Promise<WebtoonStudioSplitRoleRecord[]> {
+    // Insertion order — the deterministic allocation order (the array IS the
+    // insertion_order identity column's local mirror).
+    return this.webtoonStudioSplitRoles.filter((row) => row.series_id === seriesId);
+  }
+
+  async upsertWebtoonLocalizationContract(
+    row: Omit<WebtoonLocalizationContractRecord, 'id'>,
+  ): Promise<WebtoonLocalizationContractRecord> {
+    // One localizer of record per (series, language) feed — INSERT ON
+    // CONFLICT replaces the row atomically (the studio-KYC precedent).
+    const existingIndex = this.webtoonLocalizationContracts.findIndex(
+      (candidate) =>
+        candidate.series_id === row.series_id && candidate.language_code === row.language_code,
+    );
+    const record: WebtoonLocalizationContractRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.webtoonLocalizationContracts[existingIndex] = record;
+    } else {
+      this.webtoonLocalizationContracts.push(record);
+    }
+    return record;
+  }
+
+  async getWebtoonLocalizationContract(
+    seriesId: string,
+    languageCode: string,
+  ): Promise<WebtoonLocalizationContractRecord | undefined> {
+    return this.webtoonLocalizationContracts.find(
+      (candidate) =>
+        candidate.series_id === seriesId && candidate.language_code === languageCode,
+    );
+  }
+
+  async insertWebtoonLocalizationCostSchedule(
+    row: Omit<WebtoonLocalizationCostScheduleRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostScheduleRecord> {
+    // UNIQUE on schedule_ref — the business key the release resolves by.
+    if (
+      this.webtoonLocalizationCostSchedules.some(
+        (existing) => existing.schedule_ref === row.schedule_ref,
+      )
+    ) {
+      uniqueViolation('webtoon_localization_cost_schedules.schedule_ref');
+    }
+    const record: WebtoonLocalizationCostScheduleRecord = { ...row, id: randomUUID() };
+    this.webtoonLocalizationCostSchedules.push(record);
+    return record;
+  }
+
+  async getWebtoonLocalizationCostScheduleByRef(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostScheduleRecord | undefined> {
+    return this.webtoonLocalizationCostSchedules.find(
+      (candidate) => candidate.schedule_ref === scheduleRef,
+    );
+  }
+
+  async insertWebtoonLocalizationCostLine(
+    row: Omit<WebtoonLocalizationCostLineRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostLineRecord> {
+    // UNIQUE per (schedule_ref, line_index) — the insert-as-lock guard: a
+    // concurrent release consuming one period twice throws here.
+    if (
+      this.webtoonLocalizationCostLines.some(
+        (existing) =>
+          existing.schedule_ref === row.schedule_ref && existing.line_index === row.line_index,
+      )
+    ) {
+      uniqueViolation('webtoon_localization_cost_lines.schedule_ref,line_index');
+    }
+    const record: WebtoonLocalizationCostLineRecord = { ...row, id: randomUUID() };
+    this.webtoonLocalizationCostLines.push(record);
+    return record;
+  }
+
+  async listWebtoonLocalizationCostLines(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostLineRecord[]> {
+    // line_index ASC — the consumed periods in amortization order.
+    return this.webtoonLocalizationCostLines
+      .filter((row) => row.schedule_ref === scheduleRef)
+      .sort((a, b) => a.line_index - b.line_index);
+  }
+
+  async upsertWebtoonRecoupmentPool(
+    row: Omit<WebtoonRecoupmentPoolRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentPoolRecord> {
+    // One pool of record per (series, class) — INSERT ON CONFLICT replaces
+    // the row atomically.
+    const existingIndex = this.webtoonRecoupmentPools.findIndex(
+      (candidate) =>
+        candidate.series_id === row.series_id && candidate.pool_class === row.pool_class,
+    );
+    const record: WebtoonRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    if (existingIndex >= 0) {
+      this.webtoonRecoupmentPools[existingIndex] = record;
+    } else {
+      this.webtoonRecoupmentPools.push(record);
+    }
+    return record;
+  }
+
+  async getWebtoonRecoupmentPool(
+    seriesId: string,
+    poolClass: WebtoonRecoupmentPoolClass,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    return this.webtoonRecoupmentPools.find(
+      (candidate) => candidate.series_id === seriesId && candidate.pool_class === poolClass,
+    );
+  }
+
+  async insertWebtoonRecoupmentApplication(
+    row: Omit<WebtoonRecoupmentApplicationRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — a replayed application is the
+    // unique violation, never a double recovery. UNIQUE per
+    // (pool_id, recouped_before_cents) — the POSITION lock: a concurrent
+    // application computing the same running position loses here and
+    // re-derives from the append-only truth.
+    if (
+      this.webtoonRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('webtoon_recoupment_applications.pool_id,source_event_id');
+    }
+    if (
+      this.webtoonRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('webtoon_recoupment_applications.pool_id,recouped_before_cents');
+    }
+    const record: WebtoonRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.webtoonRecoupmentApplications.push(record);
+    return record;
+  }
+
+  async listWebtoonRecoupmentApplications(
+    poolId: string,
+  ): Promise<WebtoonRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return sortByTime(
+      this.webtoonRecoupmentApplications.filter((row) => row.pool_id === poolId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async updateWebtoonRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: WebtoonRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    const row = this.webtoonRecoupmentPools.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — an already-recouped pool refuses the
+    // update (undefined), the same settle discipline the escrow rows ride.
+    if (row === undefined || row.status !== 'active') {
+      return undefined;
+    }
+    row.recouped_cents = recoupedCents;
+    row.status = status;
+    row.updated_at = updatedAt;
+    return { ...row };
+  }
+
+  async listTranslationLocalizationEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'translation_localization_pending' &&
+          row.status === 'translation_localization_pending',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settleTranslationLocalizationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — the same single-threaded-by-
+    // construction atomicity the film-escrow/gaming-cashout/holdback settles
+    // ride.
+    if (row === undefined || row.status !== 'translation_localization_pending') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
   }
 
 

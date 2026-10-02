@@ -280,6 +280,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // and the per-territory routing envelopes; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0023_film_territory_withholding_firewall.sql',
+      // Webtoon studio splits + per-language translation cascades (Deep
+      // Royalties PR 20): the studio split registry, the per-language
+      // localization contracts, the translation-cost amortization
+      // schedule/consumed lines, and the isolated recoupment
+      // pools/applications; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0024_webtoon_studio_translation_cascades.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

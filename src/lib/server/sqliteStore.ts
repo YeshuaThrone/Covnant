@@ -95,6 +95,13 @@ import type {
   DerivativeRoyaltyEdgeRecord,
   SampleClearanceEdgeRecord,
   CompositionPublisherRecord,
+  WebtoonStudioSplitRoleRecord,
+  WebtoonLocalizationContractRecord,
+  WebtoonLocalizationCostScheduleRecord,
+  WebtoonLocalizationCostLineRecord,
+  WebtoonRecoupmentPoolRecord,
+  WebtoonRecoupmentPoolClass,
+  WebtoonRecoupmentApplicationRecord,
 } from '@/modules/don/records';
 import type {
   MatchQueueRecord,
@@ -884,6 +891,96 @@ CREATE TABLE IF NOT EXISTS composition_publishers (
 );
 CREATE INDEX IF NOT EXISTS idx_composition_publishers_composition
   ON composition_publishers (composition_id);
+
+-- Webtoon studio splits + translation cascades (migration 0024, PR 20). The
+-- studio split registry is the per-series production contract (one row per
+-- series/role-group/payee, group bands enforced at plan time — they are
+-- cross-row group totals); the localization contract keys each foreign
+-- language feed; the cost amortization schedule/lines are the VTuber
+-- tech-setup discipline (immutable schedule, append-only consumed lines,
+-- unique per (schedule_ref, line_index)); the recoupment pools + applications
+-- carry the print-advance/digital-coin isolation (pool UNIQUE per
+-- (series, class), applications UNIQUE per (pool, source event) — the
+-- replay guard).
+CREATE TABLE IF NOT EXISTS webtoon_studio_split_roles (
+  id TEXT PRIMARY KEY,
+  series_id TEXT NOT NULL,
+  role_group TEXT NOT NULL CHECK (role_group IN ('original_creator_storywriter', 'line_artist_inker', 'colorist_background')),
+  payee_id TEXT NOT NULL,
+  payee_name TEXT NOT NULL,
+  share_bps INTEGER NOT NULL CHECK (share_bps > 0 AND share_bps <= 10000),
+  contract_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (series_id, role_group, payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webtoon_studio_split_roles_series
+  ON webtoon_studio_split_roles (series_id);
+
+CREATE TABLE IF NOT EXISTS webtoon_localization_contracts (
+  id TEXT PRIMARY KEY,
+  series_id TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  localizer_payee_id TEXT NOT NULL,
+  localizer_payee_name TEXT NOT NULL,
+  fee_mode TEXT NOT NULL CHECK (fee_mode IN ('flat_fee', 'rev_share')),
+  per_chapter_flat_fee_cents INTEGER NOT NULL CHECK (per_chapter_flat_fee_cents >= 0),
+  rev_share_bps INTEGER NOT NULL CHECK (rev_share_bps >= 0 AND rev_share_bps <= 10000),
+  contract_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (series_id, language_code)
+);
+
+CREATE TABLE IF NOT EXISTS webtoon_localization_cost_schedules (
+  id TEXT PRIMARY KEY,
+  schedule_ref TEXT NOT NULL UNIQUE,
+  series_id TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  total_cost_cents INTEGER NOT NULL CHECK (total_cost_cents > 0),
+  amortization_periods INTEGER NOT NULL CHECK (amortization_periods > 0),
+  cost_agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS webtoon_localization_cost_lines (
+  id TEXT PRIMARY KEY,
+  schedule_ref TEXT NOT NULL,
+  line_index INTEGER NOT NULL CHECK (line_index >= 0),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  released_in_ledger_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (schedule_ref, line_index)
+);
+CREATE INDEX IF NOT EXISTS idx_webtoon_localization_cost_lines_ref
+  ON webtoon_localization_cost_lines (schedule_ref);
+
+CREATE TABLE IF NOT EXISTS webtoon_recoupment_pools (
+  id TEXT PRIMARY KEY,
+  series_id TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('print_advance', 'digital_coin_unlock')),
+  advance_cents INTEGER NOT NULL CHECK (advance_cents > 0),
+  recouped_cents INTEGER NOT NULL CHECK (recouped_cents >= 0),
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'recouped')),
+  advance_agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (series_id, pool_class)
+);
+
+CREATE TABLE IF NOT EXISTS webtoon_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  pool_id TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('print_advance', 'digital_coin_unlock')),
+  source_event_id TEXT NOT NULL,
+  recouped_before_cents INTEGER NOT NULL,
+  applied_cents INTEGER NOT NULL CHECK (applied_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (pool_id, source_event_id),
+  UNIQUE (pool_id, recouped_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_webtoon_recoupment_applications_pool
+  ON webtoon_recoupment_applications (pool_id);
 
 -- Film multi-territory withholding + cross-collateralization firewall
 -- (migration 0023, PR 18). The withholding log is the per-line,
@@ -2604,6 +2701,258 @@ export class SqliteStore implements Store {
         `UPDATE ledger_transactions
          SET status = 'settled', settled_at = ?
          WHERE id = ? AND status = 'avatar_ip_licensing_holdback'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  // --- Webtoon studio splits + translation cascades (PR 20, migration 0024) ---
+
+  async insertWebtoonStudioSplitRole(
+    row: Omit<WebtoonStudioSplitRoleRecord, 'id'>,
+  ): Promise<WebtoonStudioSplitRoleRecord> {
+    // UNIQUE on (series_id, role_group, payee_id) — a duplicate registration
+    // throws the unique violation (the replay surface).
+    const record: WebtoonStudioSplitRoleRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_studio_split_roles
+           (id, series_id, role_group, payee_id, payee_name, share_bps, contract_ref, created_at)
+         VALUES (@id, @series_id, @role_group, @payee_id, @payee_name, @share_bps, @contract_ref, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listWebtoonStudioSplitRoles(seriesId: string): Promise<WebtoonStudioSplitRoleRecord[]> {
+    // Insertion order (rowid ASC) — the deterministic allocation order.
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM webtoon_studio_split_roles WHERE series_id = ? ORDER BY rowid ASC`)
+        .all(seriesId) as WebtoonStudioSplitRoleRecord[],
+    );
+  }
+
+  async upsertWebtoonLocalizationContract(
+    row: Omit<WebtoonLocalizationContractRecord, 'id'>,
+  ): Promise<WebtoonLocalizationContractRecord> {
+    // One localizer of record per (series, language) feed — INSERT ON
+    // CONFLICT replaces the row atomically (the studio-KYC precedent).
+    const record: WebtoonLocalizationContractRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_localization_contracts
+           (id, series_id, language_code, localizer_payee_id, localizer_payee_name, fee_mode, per_chapter_flat_fee_cents, rev_share_bps, contract_ref, created_at)
+         VALUES (@id, @series_id, @language_code, @localizer_payee_id, @localizer_payee_name, @fee_mode, @per_chapter_flat_fee_cents, @rev_share_bps, @contract_ref, @created_at)
+         ON CONFLICT(series_id, language_code) DO UPDATE SET
+           id = excluded.id,
+           localizer_payee_id = excluded.localizer_payee_id,
+           localizer_payee_name = excluded.localizer_payee_name,
+           fee_mode = excluded.fee_mode,
+           per_chapter_flat_fee_cents = excluded.per_chapter_flat_fee_cents,
+           rev_share_bps = excluded.rev_share_bps,
+           contract_ref = excluded.contract_ref,
+           created_at = excluded.created_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getWebtoonLocalizationContract(
+    seriesId: string,
+    languageCode: string,
+  ): Promise<WebtoonLocalizationContractRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM webtoon_localization_contracts WHERE series_id = ? AND language_code = ?`,
+        )
+        .get(seriesId, languageCode) as WebtoonLocalizationContractRecord | undefined,
+    );
+  }
+
+  async insertWebtoonLocalizationCostSchedule(
+    row: Omit<WebtoonLocalizationCostScheduleRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostScheduleRecord> {
+    // UNIQUE on schedule_ref — the business key the release resolves by.
+    const record: WebtoonLocalizationCostScheduleRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_localization_cost_schedules
+           (id, schedule_ref, series_id, language_code, total_cost_cents, amortization_periods, cost_agreement_ref, created_at)
+         VALUES (@id, @schedule_ref, @series_id, @language_code, @total_cost_cents, @amortization_periods, @cost_agreement_ref, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getWebtoonLocalizationCostScheduleByRef(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostScheduleRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM webtoon_localization_cost_schedules WHERE schedule_ref = ?`)
+        .get(scheduleRef) as WebtoonLocalizationCostScheduleRecord | undefined,
+    );
+  }
+
+  async insertWebtoonLocalizationCostLine(
+    row: Omit<WebtoonLocalizationCostLineRecord, 'id'>,
+  ): Promise<WebtoonLocalizationCostLineRecord> {
+    // UNIQUE per (schedule_ref, line_index) — the insert-as-lock consume
+    // arbiter; a concurrent consume of the same period throws and the
+    // caller re-derives the next line (the VTuber amortization discipline).
+    const record: WebtoonLocalizationCostLineRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_localization_cost_lines
+           (id, schedule_ref, line_index, amount_cents, released_in_ledger_id, created_at)
+         VALUES (@id, @schedule_ref, @line_index, @amount_cents, @released_in_ledger_id, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listWebtoonLocalizationCostLines(
+    scheduleRef: string,
+  ): Promise<WebtoonLocalizationCostLineRecord[]> {
+    // Line index order — the deterministic consumption order (rowid ASC is
+    // the strict tiebreak, though the unique constraint precludes ties).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM webtoon_localization_cost_lines
+         WHERE schedule_ref = ?
+         ORDER BY line_index ASC, rowid ASC`,
+        )
+        .all(scheduleRef) as WebtoonLocalizationCostLineRecord[],
+    );
+  }
+
+  async upsertWebtoonRecoupmentPool(
+    row: Omit<WebtoonRecoupmentPoolRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentPoolRecord> {
+    // One pool of record per (series, class) — INSERT ON CONFLICT replaces
+    // the row atomically.
+    const record: WebtoonRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_recoupment_pools
+           (id, series_id, pool_class, advance_cents, recouped_cents, currency, status, advance_agreement_ref, created_at, updated_at)
+         VALUES (@id, @series_id, @pool_class, @advance_cents, @recouped_cents, @currency, @status, @advance_agreement_ref, @created_at, @updated_at)
+         ON CONFLICT(series_id, pool_class) DO UPDATE SET
+           id = excluded.id,
+           advance_cents = excluded.advance_cents,
+           recouped_cents = excluded.recouped_cents,
+           currency = excluded.currency,
+           status = excluded.status,
+           advance_agreement_ref = excluded.advance_agreement_ref,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getWebtoonRecoupmentPool(
+    seriesId: string,
+    poolClass: WebtoonRecoupmentPoolClass,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM webtoon_recoupment_pools WHERE series_id = ? AND pool_class = ?`)
+        .get(seriesId, poolClass) as WebtoonRecoupmentPoolRecord | undefined,
+    );
+  }
+
+  async insertWebtoonRecoupmentApplication(
+    row: Omit<WebtoonRecoupmentApplicationRecord, 'id'>,
+  ): Promise<WebtoonRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — a replayed application is the
+    // unique violation, never a double recovery. UNIQUE per
+    // (pool_id, recouped_before_cents) — the POSITION lock (the
+    // insert-as-lock arbiter).
+    const record: WebtoonRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO webtoon_recoupment_applications
+           (id, pool_id, pool_class, source_event_id, recouped_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @pool_id, @pool_class, @source_event_id, @recouped_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listWebtoonRecoupmentApplications(
+    poolId: string,
+  ): Promise<WebtoonRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order (rowid ASC
+    // the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM webtoon_recoupment_applications
+         WHERE pool_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(poolId) as WebtoonRecoupmentApplicationRecord[],
+    );
+  }
+
+  async updateWebtoonRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: WebtoonRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<WebtoonRecoupmentPoolRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the 'active' state only. changes = 0 means the pool is absent or
+    // already recouped; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE webtoon_recoupment_pools
+         SET recouped_cents = ?, status = ?, updated_at = ?
+         WHERE id = ? AND status = 'active'`,
+      )
+      .run(recoupedCents, status, updatedAt, id);
+    if (result.changes === 0) return undefined;
+    return Promise.resolve(
+      this.db.prepare(`SELECT * FROM webtoon_recoupment_pools WHERE id = ?`).get(id) as
+        | WebtoonRecoupmentPoolRecord
+        | undefined,
+    );
+  }
+
+  async listTranslationLocalizationEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      (
+        this.db
+          .prepare(
+            `SELECT * FROM ledger_transactions
+         WHERE kind = 'translation_localization_pending' AND status = 'translation_localization_pending'
+         ORDER BY created_at DESC
+         LIMIT ?`,
+          )
+          .all(limit) as LedgerTransactionRecord[]
+      ).reverse(),
+    );
+  }
+
+  async settleTranslationLocalizationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the escrow lock state only. changes = 0 means the row is absent or
+    // no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'translation_localization_pending'`,
       )
       .run(settledAt, id);
     if (result.changes === 0) return undefined;
