@@ -1,0 +1,3 @@
+Pass ID,Venue ID,Zone Code,Spatial Footprint Sqft,Sale Date,Pass Type,Pass Revenue,Occupancy Tax,Infrastructure COGS,Group Tour Discount,Tour Discount Approved,Currency,Reporting Period
+AP-2026-0101,venue-orbit-zone,ORBIT,120000,2026-04-02,day_pass,250000.00,15000.00,20000.00,5000.00,pending,USD,2026-04
+AP-2026-0102,venue-nova-lab,NOVA,80000,2026-04-05,season_pass,90000.00,5400.00,7200.00,0.00,approved,USD,2026-04

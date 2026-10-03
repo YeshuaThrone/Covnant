@@ -90,14 +90,24 @@ describe("profile registry", () => {
       "licensing_sellthrough_log_csv",
       "licensing_ecommerce_pos_csv",
       "licensing_wholesale_manifest_csv",
-      // The NIL lane (PR 34, the founder NIL directive) — dispatched last,
-      // its own rights family (third-party brand endorsement deals,
+      // The NIL lane (PR 34, the founder NIL directive) — its own rights
+      // family (third-party brand endorsement deals,
       // collective deal disclosures, school direct revenue-share pools, and
       // media rights revenue distributions; never music-rights split math).
       "nil_brand_endorsement_csv",
       "nil_collective_disclosure_csv",
       "nil_school_rev_share_pool_csv",
       "nil_media_rights_distribution_csv",
+      // The spatial lane (PR 36, the founder spatial directive) —
+      // dispatched last, its own rights family (venue turnstile ticket
+      // scans, attraction pass sales, in-park food and beverage register
+      // feeds, location-tagged retail POS logs, and RFID wristband
+      // telemetry; never music-rights split math).
+      "spatial_turnstile_ticket_scans_csv",
+      "spatial_attraction_pass_sales_csv",
+      "spatial_fnb_register_csv",
+      "spatial_retail_pos_csv",
+      "spatial_rfid_wristband_telemetry_csv",
     ]);
   });
 

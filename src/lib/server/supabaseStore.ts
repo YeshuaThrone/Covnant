@@ -181,6 +181,16 @@ import type {
   NilStateRuleRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialMicroPolicyRecord,
+  SpatialMicroRoyaltyRecord,
+  SpatialOccupancyTierScheduleRecord,
+  SpatialOverheadPolicyRecord,
+  SpatialRoyaltyApplicationRecord,
+  SpatialThroughputYearRecord,
+  SpatialZoneAllocationRecord,
+  SpatialZoneAssignmentRecord,
+} from '@/modules/spatial/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -450,6 +460,14 @@ const TABLES = {
   nilAdvanceSchedules: 'nil_advance_schedules',
   nilTransferPortalEntries: 'nil_transfer_portal_entries',
   nilUnearnedClawbacks: 'nil_unearned_clawbacks',
+  spatialOccupancyTierSchedules: 'spatial_occupancy_tier_schedules',
+  spatialOverheadPolicies: 'spatial_overhead_policies',
+  spatialZoneAssignments: 'spatial_zone_assignments',
+  spatialMicroPolicies: 'spatial_micro_policies',
+  spatialThroughputYears: 'spatial_throughput_years',
+  spatialRoyaltyApplications: 'spatial_royalty_applications',
+  spatialZoneAllocations: 'spatial_zone_allocations',
+  spatialMicroRoyalties: 'spatial_micro_royalty_ledger',
 } as const;
 
 /**
@@ -4226,6 +4244,268 @@ export class SupabaseStore implements Store {
         .eq('portal_entry_id', portalEntryId)
         .maybeSingle(),
       'getNilUnearnedClawback',
+    );
+  }
+
+  // --- Spatial POS + occupancy royalties + zone allocation (PR 36, migration 0040) ---
+
+  async upsertSpatialOccupancyTierSchedule(
+    row: Omit<SpatialOccupancyTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOccupancyTierScheduleRecord> {
+    // UNIQUE per (venue_id, year) — a re-registration converges (the newest
+    // schedule governs the next walk). No id in the payload — the id is
+    // server-assigned on insert and must not rotate on conflict (the PR 33
+    // parity lesson, applied per the 0039 pattern).
+    return this.oneStrict<SpatialOccupancyTierScheduleRecord>(
+      this.client
+        .from(TABLES.spatialOccupancyTierSchedules)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'venue_id,year',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialOccupancyTierSchedule',
+    );
+  }
+
+  async getSpatialOccupancyTierSchedule(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOccupancyTierScheduleRecord | undefined> {
+    return this.one<SpatialOccupancyTierScheduleRecord>(
+      this.client
+        .from(TABLES.spatialOccupancyTierSchedules)
+        .select()
+        .eq('venue_id', venueId)
+        .eq('year', year)
+        .maybeSingle(),
+      'getSpatialOccupancyTierSchedule',
+    );
+  }
+
+  async upsertSpatialOverheadPolicy(
+    row: Omit<SpatialOverheadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOverheadPolicyRecord> {
+    // UNIQUE per (venue_id, year) — a re-registration converges. No id in
+    // the payload (the id never rotates on conflict).
+    return this.oneStrict<SpatialOverheadPolicyRecord>(
+      this.client
+        .from(TABLES.spatialOverheadPolicies)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'venue_id,year',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialOverheadPolicy',
+    );
+  }
+
+  async getSpatialOverheadPolicy(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOverheadPolicyRecord | undefined> {
+    return this.one<SpatialOverheadPolicyRecord>(
+      this.client
+        .from(TABLES.spatialOverheadPolicies)
+        .select()
+        .eq('venue_id', venueId)
+        .eq('year', year)
+        .maybeSingle(),
+      'getSpatialOverheadPolicy',
+    );
+  }
+
+  async upsertSpatialZoneAssignment(
+    row: Omit<SpatialZoneAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialZoneAssignmentRecord> {
+    // UNIQUE per (venue_id, zone_code) — a re-registration converges (the
+    // newest assignment governs the next zone walk). No id in the payload.
+    return this.oneStrict<SpatialZoneAssignmentRecord>(
+      this.client
+        .from(TABLES.spatialZoneAssignments)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'venue_id,zone_code',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialZoneAssignment',
+    );
+  }
+
+  async getSpatialZoneAssignment(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialZoneAssignmentRecord | undefined> {
+    return this.one<SpatialZoneAssignmentRecord>(
+      this.client
+        .from(TABLES.spatialZoneAssignments)
+        .select()
+        .eq('venue_id', venueId)
+        .eq('zone_code', zoneCode)
+        .maybeSingle(),
+      'getSpatialZoneAssignment',
+    );
+  }
+
+  async upsertSpatialMicroPolicy(
+    row: Omit<SpatialMicroPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMicroPolicyRecord> {
+    // UNIQUE per (venue_id, zone_code) — a re-registration converges. No
+    // id in the payload.
+    return this.oneStrict<SpatialMicroPolicyRecord>(
+      this.client
+        .from(TABLES.spatialMicroPolicies)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'venue_id,zone_code',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialMicroPolicy',
+    );
+  }
+
+  async getSpatialMicroPolicy(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialMicroPolicyRecord | undefined> {
+    return this.one<SpatialMicroPolicyRecord>(
+      this.client
+        .from(TABLES.spatialMicroPolicies)
+        .select()
+        .eq('venue_id', venueId)
+        .eq('zone_code', zoneCode)
+        .maybeSingle(),
+      'getSpatialMicroPolicy',
+    );
+  }
+
+  async advanceSpatialThroughputYear(
+    venueId: string,
+    year: string,
+    entriesAdded: number,
+  ): Promise<SpatialThroughputYearRecord> {
+    // UNIQUE per (venue_id, year) — the tracker converges: the standing
+    // position plus this row's entries. The cumulative walk is serialized
+    // per venue-year by the recon lane (one event at a time), so a
+    // read-modify-upsert carries the same position arithmetic the SQLite
+    // backend expresses additively in its ON CONFLICT arm. No id in the
+    // payload (the id never rotates on conflict).
+    const existing = await this.getSpatialThroughputYear(venueId, year);
+    return this.oneStrict<SpatialThroughputYearRecord>(
+      this.client
+        .from(TABLES.spatialThroughputYears)
+        .upsert(
+          {
+            venue_id: venueId,
+            year,
+            cumulative_entries: (existing?.cumulative_entries ?? 0) + entriesAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'venue_id,year' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceSpatialThroughputYear',
+    );
+  }
+
+  async getSpatialThroughputYear(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialThroughputYearRecord | undefined> {
+    return this.one<SpatialThroughputYearRecord>(
+      this.client
+        .from(TABLES.spatialThroughputYears)
+        .select()
+        .eq('venue_id', venueId)
+        .eq('year', year)
+        .maybeSingle(),
+      'getSpatialThroughputYear',
+    );
+  }
+
+  async insertSpatialRoyaltyApplication(
+    row: Omit<SpatialRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialRoyaltyApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard: a
+    // re-walked event throws here, never a double royalty (the caller
+    // reads the winner through the getter).
+    return this.oneStrict<SpatialRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.spatialRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialRoyaltyApplication',
+    );
+  }
+
+  async getSpatialRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord | undefined> {
+    return this.one<SpatialRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.spatialRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSpatialRoyaltyApplication',
+    );
+  }
+
+  async insertSpatialZoneAllocation(
+    row: Omit<SpatialZoneAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialZoneAllocationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard: a
+    // re-walked sale throws here, never a double allocation.
+    return this.oneStrict<SpatialZoneAllocationRecord>(
+      this.client
+        .from(TABLES.spatialZoneAllocations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialZoneAllocation',
+    );
+  }
+
+  async getSpatialZoneAllocation(
+    sourceEventId: string,
+  ): Promise<SpatialZoneAllocationRecord | undefined> {
+    return this.one<SpatialZoneAllocationRecord>(
+      this.client
+        .from(TABLES.spatialZoneAllocations)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSpatialZoneAllocation',
+    );
+  }
+
+  async insertSpatialMicroRoyalty(
+    row: Omit<SpatialMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialMicroRoyaltyRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard: a
+    // re-walked telemetry event throws here, never a double micro-payout.
+    return this.oneStrict<SpatialMicroRoyaltyRecord>(
+      this.client
+        .from(TABLES.spatialMicroRoyalties)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialMicroRoyalty',
+    );
+  }
+
+  async getSpatialMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<SpatialMicroRoyaltyRecord | undefined> {
+    return this.one<SpatialMicroRoyaltyRecord>(
+      this.client
+        .from(TABLES.spatialMicroRoyalties)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSpatialMicroRoyalty',
     );
   }
 

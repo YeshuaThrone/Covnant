@@ -176,6 +176,16 @@ import type {
   NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialMicroPolicyRecord,
+  SpatialMicroRoyaltyRecord,
+  SpatialOccupancyTierScheduleRecord,
+  SpatialOverheadPolicyRecord,
+  SpatialRoyaltyApplicationRecord,
+  SpatialThroughputYearRecord,
+  SpatialZoneAllocationRecord,
+  SpatialZoneAssignmentRecord,
+} from '@/modules/spatial/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2933,6 +2943,144 @@ export interface Store {
 
   /** One portal entry's clawback of record; undefined when none. */
   getNilUnearnedClawback(portalEntryId: string): Promise<NilUnearnedClawbackRecord | undefined>;
+
+  // -------------------------------------------------------------------------
+  // Spatial POS + occupancy royalties + zone allocation (PR 36, migration
+  // 0040) — the founder spatial directive's durable facts: the schedules,
+  // policies, assignments, and throughput tracker the walks read, and the
+  // three append-only application ledgers the walks write.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Registers (or replaces) the occupancy royalty schedule of record for
+   * one (venue, year) — UNIQUE per (venue_id, year): the newest schedule
+   * governs the next walk.
+   */
+  upsertSpatialOccupancyTierSchedule(
+    row: Omit<SpatialOccupancyTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOccupancyTierScheduleRecord>;
+
+  /** One venue-year's schedule of record; undefined when none — the walk
+   * refuses fail-closed (no schedule, no royalty). */
+  getSpatialOccupancyTierSchedule(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOccupancyTierScheduleRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the shared facility overhead policy of record
+   * for one (venue, year) — UNIQUE per (venue_id, year).
+   */
+  upsertSpatialOverheadPolicy(
+    row: Omit<SpatialOverheadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOverheadPolicyRecord>;
+
+  /** One venue-year's overhead policy of record; undefined when none —
+   * every IP distribution refuses fail-closed (no policy, no deduction,
+   * no royalty). */
+  getSpatialOverheadPolicy(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOverheadPolicyRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the assigned IP owner of record for one
+   * (venue, zone) — UNIQUE per (venue_id, zone_code): the newest
+   * assignment governs the next zone walk.
+   */
+  upsertSpatialZoneAssignment(
+    row: Omit<SpatialZoneAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialZoneAssignmentRecord>;
+
+  /** One venue-zone's assignment of record; undefined when none — the
+   * zone walk skips fail-closed (never guessed routing). */
+  getSpatialZoneAssignment(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialZoneAssignmentRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the micro-royalty rate of record for one
+   * (venue, zone) — UNIQUE per (venue_id, zone_code).
+   */
+  upsertSpatialMicroPolicy(
+    row: Omit<SpatialMicroPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMicroPolicyRecord>;
+
+  /** One venue-zone's micro rates of record; undefined when none — the
+   * telemetry walk skips fail-closed. */
+  getSpatialMicroPolicy(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialMicroPolicyRecord | undefined>;
+
+  /**
+   * Advances the cumulative annual throughput of record for one (venue,
+   * year) by the row's entries — UNIQUE per (venue_id, year): the tracker
+   * converges (an upsert adds); the walk reads the position BEFORE this
+   * advance through the getter.
+   */
+  advanceSpatialThroughputYear(
+    venueId: string,
+    year: string,
+    entriesAdded: number,
+  ): Promise<SpatialThroughputYearRecord>;
+
+  /** One venue-year's cumulative throughput of record; undefined when no
+   * row has advanced yet (the walk's position starts at zero). */
+  getSpatialThroughputYear(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialThroughputYearRecord | undefined>;
+
+  /**
+   * Appends one executed occupancy royalty application — the Adjusted
+   * Location Sales calculator's legs, the shared overhead deduction, and
+   * the tier walk's committed bands (migration 0040). UNIQUE per
+   * source_event_id is the replay guard — a re-walked event throws, never
+   * a double royalty.
+   */
+  insertSpatialRoyaltyApplication(
+    row: Omit<SpatialRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialRoyaltyApplicationRecord>;
+
+  /** One royalty application of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getSpatialRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed zone allocation — the zone's sales routed to the
+   * assigned IP owner's waterfall, overhead-first (migration 0040).
+   * UNIQUE per source_event_id is the replay guard — a re-walked sale
+   * throws, never a double allocation.
+   */
+  insertSpatialZoneAllocation(
+    row: Omit<SpatialZoneAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialZoneAllocationRecord>;
+
+  /** One zone allocation of record by its source event id; undefined when
+   * none — the replay check's read. */
+  getSpatialZoneAllocation(
+    sourceEventId: string,
+  ): Promise<SpatialZoneAllocationRecord | undefined>;
+
+  /**
+   * Appends one executed micro-royalty — the dwell/session legs and the
+   * exact unit-price math (migration 0040). UNIQUE per source_event_id is
+   * the replay guard — a re-walked telemetry event throws, never a double
+   * micro-payout.
+   */
+  insertSpatialMicroRoyalty(
+    row: Omit<SpatialMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialMicroRoyaltyRecord>;
+
+  /** One micro-royalty of record by its source event id; undefined when
+   * none — the replay check's read. */
+  getSpatialMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<SpatialMicroRoyaltyRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

@@ -30,6 +30,7 @@ import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
 import { LICENSING_PROFILES } from "./licensingProfiles";
 import { NIL_PROFILES } from "./nilProfiles";
+import { SPATIAL_PROFILES } from "./spatialProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -573,6 +574,13 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // adjusted pool walk, and the equal group split are NIL-only, and NIL
   // rows never touch the music split machinery).
   ...NIL_PROFILES,
+  // The spatial lane (PR 36) — same dispatch opinion; the worker branches
+  // on the profile kind before the music machinery (the Adjusted Location
+  // Sales calculator, the throughput tier walk with cumulative tracking,
+  // the dwell/session micro-royalties, the zone routing to the assigned
+  // IP owner, and the shared facility overhead deduction are spatial-only,
+  // and spatial rows never touch the music split machinery).
+  ...SPATIAL_PROFILES,
 ];
 
 /**
