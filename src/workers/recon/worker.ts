@@ -56,9 +56,11 @@ import { postTheatricalNetsToHolding } from "./theatricalPosting";
 import { isLicensingProfileKind } from "./licensingProfiles";
 import { isNilProfileKind } from "./nilProfiles";
 import { isSpatialProfileKind } from "./spatialProfiles";
+import { isFitnessProfileKind } from "./fitnessProfiles";
 import { writeLicensingLinesToMatchQueue } from "./licensingQueue";
 import { writeNilRowsToStore } from "./nilQueue";
 import { writeSpatialRowsToStore } from "./spatialQueue";
+import { writeFitnessRowsToStore } from "./fitnessQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
@@ -285,6 +287,25 @@ async function processJobBody(
     // never sees a spatial row.
     if (isSpatialProfileKind(matchedProfile.kind)) {
       return await parseSpatial(deps, matchedProfile, content);
+    }
+    // The fitness lane branches the same way (PR 38, the founder
+    // directive): its rows are the five strict senders' stream-start /
+    // workout-log / equipment-telemetry / check-in / allocation events
+    // whose money runs the Digital Stream Realization, the trainer
+    // royalty tier walk with cumulative monthly tracking, the sync music
+    // deductions BEFORE the trainer net, the live-event server load
+    // residuals, the franchise override + network fee BEFORE the
+    // instructor disbursement, the co-branded 50-50 splits, the wearable
+    // algorithm micro-royalties, and the module-weighted co-creation
+    // waterfalls — never the music queue's split math, the gaming
+    // accumulator, the livestream escrow, the webtoon conversions, the
+    // merch COGS deduction, the AI split, the book editorial cascade, the
+    // art fabrication waterfalls, the theatrical deal classes, the
+    // brand-licensing cascade, the NIL verdict walk, or the spatial
+    // occupancy walks. The store applications ARE the lane's money of
+    // record; match_queue never sees a fitness row.
+    if (isFitnessProfileKind(matchedProfile.kind)) {
+      return await parseFitness(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -930,6 +951,83 @@ async function parseSpatial(
     spatial_occupancy_royalty_cents: counts.occupancyRoyaltyCents,
     spatial_zone_royalty_cents: counts.zoneRoyaltyCents,
     spatial_micro_royalty_cents: counts.microRoyaltyCents,
+  };
+}
+
+/**
+ * The fitness lane (PR 38, the founder directive): the five strict
+ * senders' rows run the seven store walks and the store's fitness
+ * applications ARE the lane's money of record — the Digital Stream
+ * Realization applications (gross pool − app store engine cut − digital
+ * infrastructure overhead = Net Fitness Content Pool), the trainer
+ * royalty applications (sync music master + publishing deductions
+ * BEFORE the trainer net, the cumulative tier walk, the subscriber
+ * retention bonus), the live-event server load residuals, the franchise
+ * override applications (certified-content overrides + network fee
+ * BEFORE the instructor disbursement), the co-branded franchise splits,
+ * the wearable algorithm micro-royalties, and the module-weighted
+ * co-creation waterfalls. No match_queue row, no holding post: replay
+ * guards and the fail-closed policies of record govern everything. The
+ * result's fitness_* block is absent on every other lane — its presence
+ * is the discriminator.
+ */
+async function parseFitness(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeFitnessRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationApplicationsWritten +
+      counts.royaltyApplicationsWritten +
+      counts.liveResidualsWritten +
+      counts.franchiseApplicationsWritten +
+      counts.cobrandSplitsWritten +
+      counts.algorithmRoyaltiesWritten +
+      counts.cocreationApplicationsWritten,
+    matched: 0, // no vault matching on this lane — the fitness tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    fitness_realization_applications_committed: counts.realizationApplicationsWritten,
+    fitness_realization_applications_replayed: counts.realizationApplicationsReplayed,
+    fitness_realization_held_negative_net: counts.realizationHeldNegativeNet,
+    fitness_royalty_applications_committed: counts.royaltyApplicationsWritten,
+    fitness_royalty_applications_replayed: counts.royaltyApplicationsReplayed,
+    fitness_royalty_skipped_no_tier_schedule: counts.royaltySkippedNoTierSchedule,
+    fitness_royalty_skipped_no_sync_policy: counts.royaltySkippedNoSyncPolicy,
+    fitness_royalty_held_negative_net: counts.royaltyHeldNegativeNet,
+    fitness_live_residuals_committed: counts.liveResidualsWritten,
+    fitness_live_residuals_replayed: counts.liveResidualsReplayed,
+    fitness_live_skipped_no_load_policy: counts.liveSkippedNoLoadPolicy,
+    fitness_franchise_applications_committed: counts.franchiseApplicationsWritten,
+    fitness_franchise_applications_replayed: counts.franchiseApplicationsReplayed,
+    fitness_franchise_skipped_no_policy: counts.franchiseSkippedNoPolicy,
+    fitness_franchise_held_negative_net: counts.franchiseHeldNegativeNet,
+    fitness_cobrand_splits_committed: counts.cobrandSplitsWritten,
+    fitness_cobrand_splits_replayed: counts.cobrandSplitsReplayed,
+    fitness_cobrand_skipped_no_partnership: counts.cobrandSkippedNoPartnership,
+    fitness_algorithm_royalties_committed: counts.algorithmRoyaltiesWritten,
+    fitness_algorithm_royalties_replayed: counts.algorithmRoyaltiesReplayed,
+    fitness_algorithm_skipped_no_policy: counts.algorithmSkippedNoPolicy,
+    fitness_cocreation_applications_committed: counts.cocreationApplicationsWritten,
+    fitness_cocreation_applications_replayed: counts.cocreationApplicationsReplayed,
+    fitness_cocreation_skipped_no_waterfall: counts.cocreationSkippedNoWaterfall,
+    fitness_net_fitness_content_pool_cents: counts.netFitnessContentPoolCents,
+    fitness_trainer_tier_payout_cents: counts.trainerTierPayoutCents,
+    fitness_retention_bonus_cents: counts.retentionBonusCents,
+    fitness_sync_music_deduction_cents: counts.syncMusicDeductionCents,
+    fitness_server_load_deduction_cents: counts.serverLoadDeductionCents,
+    fitness_franchise_override_cents: counts.franchiseOverrideCents,
+    fitness_network_fee_cents: counts.networkFeeCents,
+    fitness_instructor_disbursement_cents: counts.instructorDisbursementCents,
+    fitness_cobrand_ip_owner_cents: counts.cobrandIpOwnerCents,
+    fitness_cobrand_distributor_cents: counts.cobrandDistributorCents,
+    fitness_algorithm_royalty_cents: counts.algorithmRoyaltyCents,
+    fitness_cocreation_allocated_cents: counts.cocreationAllocatedCents,
   };
 }
 

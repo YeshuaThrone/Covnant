@@ -209,6 +209,24 @@ import type {
   SpatialZoneAssignmentRecord,
 } from '@/modules/spatial/records';
 import type {
+  FitnessAlgorithmPolicyRecord,
+  FitnessAlgorithmRoyaltyRecord,
+  FitnessCoBrandPartnershipRecord,
+  FitnessCocreationModuleRecord,
+  FitnessCocreationApplicationRecord,
+  FitnessCompletionMonthRecord,
+  FitnessFranchiseApplicationRecord,
+  FitnessFranchiseClassMonthRecord,
+  FitnessFranchisePolicyRecord,
+  FitnessCobrandSplitApplicationRecord,
+  FitnessLiveLoadPolicyRecord,
+  FitnessLiveResidualApplicationRecord,
+  FitnessRealizationApplicationRecord,
+  FitnessSyncMusicPolicyRecord,
+  FitnessTrainerRoyaltyApplicationRecord,
+  FitnessTrainerTierScheduleRecord,
+} from '@/modules/fitness/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2273,6 +2291,284 @@ CREATE TABLE IF NOT EXISTS spatial_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (payee_id, venue_id)
+);
+
+-- The fitness lane (migration 0042, PR 38). The founder fitness directive's
+-- durable facts: the tier schedules, rate policies, partnerships, and
+-- waterfalls the walks read, the monthly trackers the cumulative walks
+-- advance, and the seven append-only application ledgers the walks write.
+-- No foreign keys by design — the tables key on content-derived event ids,
+-- the sender's trainer/program/franchise identifiers, and reporting months
+-- (the 0036–0041 discipline).
+CREATE TABLE IF NOT EXISTS fitness_trainer_tier_schedules (
+  id TEXT PRIMARY KEY,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  bands TEXT NOT NULL,
+  retention_bonus_micros_per_completion INTEGER NOT NULL CHECK (retention_bonus_micros_per_completion >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (trainer_id, program_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_completion_months (
+  id TEXT PRIMARY KEY,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  cumulative_completions INTEGER NOT NULL CHECK (cumulative_completions >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (trainer_id, program_id, month)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_sync_music_policies (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL,
+  master_royalty_micros_per_workout INTEGER NOT NULL CHECK (master_royalty_micros_per_workout >= 0),
+  publishing_royalty_micros_per_workout INTEGER NOT NULL CHECK (publishing_royalty_micros_per_workout >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (program_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_live_load_policies (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL,
+  bands TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (program_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_franchise_policies (
+  id TEXT PRIMARY KEY,
+  studio_franchise_code TEXT NOT NULL,
+  franchise_license_override_bps INTEGER NOT NULL CHECK (franchise_license_override_bps >= 0 AND franchise_license_override_bps <= 10000),
+  network_fee_bps INTEGER NOT NULL CHECK (network_fee_bps >= 0 AND network_fee_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (studio_franchise_code)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_franchise_class_months (
+  id TEXT PRIMARY KEY,
+  studio_franchise_code TEXT NOT NULL,
+  month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  cumulative_classes INTEGER NOT NULL CHECK (cumulative_classes >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (studio_franchise_code, month)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_co_brand_partnerships (
+  id TEXT PRIMARY KEY,
+  studio_franchise_code TEXT NOT NULL,
+  ip_owner_id TEXT NOT NULL,
+  distributor_id TEXT NOT NULL,
+  ip_owner_share_bps INTEGER NOT NULL CHECK (ip_owner_share_bps > 0 AND ip_owner_share_bps < 10000),
+  distributor_share_bps INTEGER NOT NULL CHECK (distributor_share_bps > 0 AND distributor_share_bps < 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (studio_franchise_code),
+  CHECK (ip_owner_share_bps + distributor_share_bps = 10000)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_algorithm_policies (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL,
+  algorithm_creator_id TEXT NOT NULL,
+  micros_per_active_user INTEGER NOT NULL CHECK (micros_per_active_user > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (program_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_cocreation_modules (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL,
+  module_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  weight_bps INTEGER NOT NULL CHECK (weight_bps > 0 AND weight_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (program_id, module_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  gross_subscription_pool_cents INTEGER NOT NULL CHECK (gross_subscription_pool_cents >= 0),
+  app_store_engine_cut_cents INTEGER NOT NULL CHECK (app_store_engine_cut_cents >= 0),
+  digital_infrastructure_overhead_cents INTEGER NOT NULL CHECK (digital_infrastructure_overhead_cents >= 0),
+  net_fitness_content_pool_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (net_fitness_content_pool_cents
+    = gross_subscription_pool_cents
+      - app_store_engine_cut_cents - digital_infrastructure_overhead_cents)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_trainer_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL CHECK (sender IN ('stream_start', 'workout_complete')),
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  completed_count INTEGER NOT NULL CHECK (completed_count > 0),
+  class_revenue_cents INTEGER NOT NULL CHECK (class_revenue_cents >= 0),
+  sync_policy_ref TEXT,
+  master_royalty_micros_per_workout INTEGER NOT NULL CHECK (master_royalty_micros_per_workout >= 0),
+  publishing_royalty_micros_per_workout INTEGER NOT NULL CHECK (publishing_royalty_micros_per_workout >= 0),
+  sync_master_micros INTEGER NOT NULL CHECK (sync_master_micros >= 0),
+  sync_publishing_micros INTEGER NOT NULL CHECK (sync_publishing_micros >= 0),
+  sync_master_cents INTEGER NOT NULL CHECK (sync_master_cents >= 0),
+  sync_publishing_cents INTEGER NOT NULL CHECK (sync_publishing_cents >= 0),
+  trainer_net_basis_cents INTEGER NOT NULL,
+  tier_schedule_ref TEXT,
+  tier_legs TEXT NOT NULL,
+  tier_payout_micros INTEGER NOT NULL CHECK (tier_payout_micros >= 0),
+  tier_payout_cents INTEGER NOT NULL CHECK (tier_payout_cents >= 0),
+  retained_count INTEGER NOT NULL CHECK (retained_count >= 0),
+  retention_bonus_micros_per_completion INTEGER NOT NULL CHECK (retention_bonus_micros_per_completion >= 0),
+  retention_bonus_micros INTEGER NOT NULL CHECK (retention_bonus_micros >= 0),
+  retention_bonus_cents INTEGER NOT NULL CHECK (retention_bonus_cents >= 0),
+  monthly_completions_before INTEGER,
+  monthly_completions_after INTEGER,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The sync deductions came FIRST: the trainer's net share basis is the
+  -- class revenue less both sync legs (the founder's ordering, pinned).
+  CHECK (trainer_net_basis_cents
+    = class_revenue_cents - sync_master_cents - sync_publishing_cents),
+  CHECK (retained_count <= completed_count),
+  CHECK (verdict = 'paid' OR (trainer_net_basis_cents < 0
+    AND tier_payout_micros = 0 AND tier_payout_cents = 0
+    AND retention_bonus_micros = 0 AND retention_bonus_cents = 0
+    AND monthly_completions_before IS NULL AND monthly_completions_after IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS fitness_live_residual_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  peak_simultaneous_viewers INTEGER NOT NULL CHECK (peak_simultaneous_viewers > 0),
+  live_event_revenue_cents INTEGER NOT NULL CHECK (live_event_revenue_cents >= 0),
+  load_band_from INTEGER NOT NULL CHECK (load_band_from >= 0),
+  load_band_to INTEGER,
+  server_load_bps INTEGER NOT NULL CHECK (server_load_bps >= 0 AND server_load_bps <= 10000),
+  server_load_deduction_cents INTEGER NOT NULL CHECK (server_load_deduction_cents >= 0),
+  net_live_residual_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (net_live_residual_cents
+    = live_event_revenue_cents - server_load_deduction_cents),
+  CHECK (server_load_deduction_cents <= live_event_revenue_cents)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_franchise_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  class_count INTEGER NOT NULL CHECK (class_count > 0),
+  classes_before INTEGER,
+  classes_after INTEGER,
+  class_revenue_cents INTEGER NOT NULL CHECK (class_revenue_cents >= 0),
+  certified_choreography_revenue_cents INTEGER NOT NULL CHECK (certified_choreography_revenue_cents >= 0),
+  certified_audio_revenue_cents INTEGER NOT NULL CHECK (certified_audio_revenue_cents >= 0),
+  franchise_license_override_bps INTEGER NOT NULL CHECK (franchise_license_override_bps >= 0 AND franchise_license_override_bps <= 10000),
+  choreography_override_cents INTEGER NOT NULL CHECK (choreography_override_cents >= 0),
+  audio_override_cents INTEGER NOT NULL CHECK (audio_override_cents >= 0),
+  franchise_override_total_cents INTEGER NOT NULL CHECK (franchise_override_total_cents >= 0),
+  network_fee_bps INTEGER NOT NULL CHECK (network_fee_bps >= 0 AND network_fee_bps <= 10000),
+  network_fee_cents INTEGER NOT NULL CHECK (network_fee_cents >= 0),
+  instructor_disbursement_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The override and network fee come off BEFORE the instructor
+  -- disbursement (the founder's ordering, pinned).
+  CHECK (instructor_disbursement_cents
+    = class_revenue_cents - franchise_override_total_cents - network_fee_cents),
+  CHECK (franchise_override_total_cents
+    = choreography_override_cents + audio_override_cents),
+  CHECK (verdict = 'paid' OR (instructor_disbursement_cents < 0
+    AND classes_before IS NULL AND classes_after IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS fitness_cobrand_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  ip_owner_id TEXT NOT NULL,
+  distributor_id TEXT NOT NULL,
+  net_class_stream_earnings_cents INTEGER NOT NULL CHECK (net_class_stream_earnings_cents >= 0),
+  ip_owner_share_bps INTEGER NOT NULL CHECK (ip_owner_share_bps > 0 AND ip_owner_share_bps < 10000),
+  distributor_share_bps INTEGER NOT NULL CHECK (distributor_share_bps > 0 AND distributor_share_bps < 10000),
+  ip_owner_cents INTEGER NOT NULL CHECK (ip_owner_cents >= 0),
+  distributor_cents INTEGER NOT NULL CHECK (distributor_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (ip_owner_share_bps + distributor_share_bps = 10000),
+  CHECK (ip_owner_cents + distributor_cents = net_class_stream_earnings_cents)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_algorithm_royalty_ledger (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  equipment_type TEXT NOT NULL CHECK (equipment_type IN ('connected_bike', 'treadmill')),
+  equipment_id TEXT NOT NULL,
+  wearable_active_users INTEGER NOT NULL CHECK (wearable_active_users >= 0),
+  algorithm_creator_id TEXT NOT NULL,
+  micros_per_active_user INTEGER NOT NULL CHECK (micros_per_active_user > 0),
+  royalty_micros INTEGER NOT NULL CHECK (royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_cocreation_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  enrollment_revenue_cents INTEGER NOT NULL CHECK (enrollment_revenue_cents >= 0),
+  waterfall_legs TEXT NOT NULL,
+  allocated_total_cents INTEGER NOT NULL CHECK (allocated_total_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The waterfall conserves its basis exactly (largest-remainder exact).
+  CHECK (allocated_total_cents = enrollment_revenue_cents)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -11234,6 +11530,1012 @@ export class SqliteStore implements Store {
       verified_by: row.verified_by as string,
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 38 — the fitness lane (migration 0042). Policies and trackers upsert
+  // on their identities; the ledgers are append-only — a UNIQUE
+  // source_event_id replay conflict throws, never a double application.
+  // ---------------------------------------------------------------------------
+
+  async upsertFitnessTrainerTierSchedule(
+    row: Omit<FitnessTrainerTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessTrainerTierScheduleRecord> {
+    // UNIQUE per (trainer_id, program_id) — the newest schedule governs the
+    // next walk; the id never rides the conflict payload (the id rotates on
+    // conflict — the PR 33 lesson).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_trainer_tier_schedules
+           (id, trainer_id, program_id, bands, retention_bonus_micros_per_completion,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (trainer_id, program_id) DO UPDATE SET
+           bands = excluded.bands,
+           retention_bonus_micros_per_completion = excluded.retention_bonus_micros_per_completion,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.trainer_id,
+        record.program_id,
+        record.bands,
+        record.retention_bonus_micros_per_completion,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessTrainerTierSchedule(record.trainer_id, record.program_id) as Promise<
+      FitnessTrainerTierScheduleRecord
+    >;
+  }
+
+  async getFitnessTrainerTierSchedule(
+    trainerId: string,
+    programId: string,
+  ): Promise<FitnessTrainerTierScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM fitness_trainer_tier_schedules WHERE trainer_id = ? AND program_id = ?`,
+      )
+      .get(trainerId, programId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      bands: row.bands as string,
+      retention_bonus_micros_per_completion:
+        row.retention_bonus_micros_per_completion as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessSyncMusicPolicy(
+    row: Omit<FitnessSyncMusicPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessSyncMusicPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_sync_music_policies
+           (id, program_id, master_royalty_micros_per_workout,
+            publishing_royalty_micros_per_workout, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (program_id) DO UPDATE SET
+           master_royalty_micros_per_workout = excluded.master_royalty_micros_per_workout,
+           publishing_royalty_micros_per_workout = excluded.publishing_royalty_micros_per_workout,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.program_id,
+        record.master_royalty_micros_per_workout,
+        record.publishing_royalty_micros_per_workout,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessSyncMusicPolicy(record.program_id) as Promise<FitnessSyncMusicPolicyRecord>;
+  }
+
+  async getFitnessSyncMusicPolicy(
+    programId: string,
+  ): Promise<FitnessSyncMusicPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_sync_music_policies WHERE program_id = ?`)
+      .get(programId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      program_id: row.program_id as string,
+      master_royalty_micros_per_workout:
+        row.master_royalty_micros_per_workout as number,
+      publishing_royalty_micros_per_workout:
+        row.publishing_royalty_micros_per_workout as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessLiveLoadPolicy(
+    row: Omit<FitnessLiveLoadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveLoadPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_live_load_policies
+           (id, program_id, bands, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (program_id) DO UPDATE SET
+           bands = excluded.bands,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record.id, record.program_id, record.bands, record.created_at, record.updated_at);
+    return this.getFitnessLiveLoadPolicy(record.program_id) as Promise<FitnessLiveLoadPolicyRecord>;
+  }
+
+  async getFitnessLiveLoadPolicy(
+    programId: string,
+  ): Promise<FitnessLiveLoadPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_live_load_policies WHERE program_id = ?`)
+      .get(programId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      program_id: row.program_id as string,
+      bands: row.bands as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessFranchisePolicy(
+    row: Omit<FitnessFranchisePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessFranchisePolicyRecord> {
+    // UNIQUE per studio_franchise_code — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_franchise_policies
+           (id, studio_franchise_code, franchise_license_override_bps, network_fee_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (studio_franchise_code) DO UPDATE SET
+           franchise_license_override_bps = excluded.franchise_license_override_bps,
+           network_fee_bps = excluded.network_fee_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.studio_franchise_code,
+        record.franchise_license_override_bps,
+        record.network_fee_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessFranchisePolicy(
+      record.studio_franchise_code,
+    ) as Promise<FitnessFranchisePolicyRecord>;
+  }
+
+  async getFitnessFranchisePolicy(
+    studioFranchiseCode: string,
+  ): Promise<FitnessFranchisePolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_franchise_policies WHERE studio_franchise_code = ?`)
+      .get(studioFranchiseCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      franchise_license_override_bps: row.franchise_license_override_bps as number,
+      network_fee_bps: row.network_fee_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessCoBrandPartnership(
+    row: Omit<FitnessCoBrandPartnershipRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCoBrandPartnershipRecord> {
+    // UNIQUE per studio_franchise_code — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_co_brand_partnerships
+           (id, studio_franchise_code, ip_owner_id, distributor_id, ip_owner_share_bps,
+            distributor_share_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (studio_franchise_code) DO UPDATE SET
+           ip_owner_id = excluded.ip_owner_id,
+           distributor_id = excluded.distributor_id,
+           ip_owner_share_bps = excluded.ip_owner_share_bps,
+           distributor_share_bps = excluded.distributor_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.studio_franchise_code,
+        record.ip_owner_id,
+        record.distributor_id,
+        record.ip_owner_share_bps,
+        record.distributor_share_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessCoBrandPartnership(
+      record.studio_franchise_code,
+    ) as Promise<FitnessCoBrandPartnershipRecord>;
+  }
+
+  async getFitnessCoBrandPartnership(
+    studioFranchiseCode: string,
+  ): Promise<FitnessCoBrandPartnershipRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_co_brand_partnerships WHERE studio_franchise_code = ?`)
+      .get(studioFranchiseCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      ip_owner_id: row.ip_owner_id as string,
+      distributor_id: row.distributor_id as string,
+      ip_owner_share_bps: row.ip_owner_share_bps as number,
+      distributor_share_bps: row.distributor_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessAlgorithmPolicy(
+    row: Omit<FitnessAlgorithmPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAlgorithmPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_algorithm_policies
+           (id, program_id, algorithm_creator_id, micros_per_active_user,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (program_id) DO UPDATE SET
+           algorithm_creator_id = excluded.algorithm_creator_id,
+           micros_per_active_user = excluded.micros_per_active_user,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.program_id,
+        record.algorithm_creator_id,
+        record.micros_per_active_user,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessAlgorithmPolicy(record.program_id) as Promise<FitnessAlgorithmPolicyRecord>;
+  }
+
+  async getFitnessAlgorithmPolicy(
+    programId: string,
+  ): Promise<FitnessAlgorithmPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_algorithm_policies WHERE program_id = ?`)
+      .get(programId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      program_id: row.program_id as string,
+      algorithm_creator_id: row.algorithm_creator_id as string,
+      micros_per_active_user: row.micros_per_active_user as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessCocreationModule(
+    row: Omit<FitnessCocreationModuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCocreationModuleRecord> {
+    // UNIQUE per (program_id, module_id) — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_cocreation_modules
+           (id, program_id, module_id, trainer_id, weight_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (program_id, module_id) DO UPDATE SET
+           trainer_id = excluded.trainer_id,
+           weight_bps = excluded.weight_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.program_id,
+        record.module_id,
+        record.trainer_id,
+        record.weight_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async listFitnessCocreationModules(
+    programId: string,
+  ): Promise<FitnessCocreationModuleRecord[]> {
+    const rows = this.db
+      .prepare(`SELECT * FROM fitness_cocreation_modules WHERE program_id = ? ORDER BY rowid`)
+      .all(programId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      program_id: row.program_id as string,
+      module_id: row.module_id as string,
+      trainer_id: row.trainer_id as string,
+      weight_bps: row.weight_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async advanceFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+    completionsAdded: number,
+  ): Promise<FitnessCompletionMonthRecord> {
+    // UNIQUE per (trainer_id, program_id, month) — the tracker converges
+    // (the upsert ADDS the row's completions to the cumulative position).
+    const record = {
+      id: randomUUID(),
+      trainer_id: trainerId,
+      program_id: programId,
+      month,
+      cumulative_completions: completionsAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_completion_months
+           (id, trainer_id, program_id, month, cumulative_completions, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (trainer_id, program_id, month) DO UPDATE SET
+           cumulative_completions = fitness_completion_months.cumulative_completions
+             + excluded.cumulative_completions,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.trainer_id,
+        record.program_id,
+        record.month,
+        record.cumulative_completions,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessCompletionMonth(trainerId, programId, month) as Promise<
+      FitnessCompletionMonthRecord
+    >;
+  }
+
+  async getFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+  ): Promise<FitnessCompletionMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM fitness_completion_months
+           WHERE trainer_id = ? AND program_id = ? AND month = ?`,
+      )
+      .get(trainerId, programId, month) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      month: row.month as string,
+      cumulative_completions: row.cumulative_completions as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+    classesAdded: number,
+  ): Promise<FitnessFranchiseClassMonthRecord> {
+    // UNIQUE per (studio_franchise_code, month) — the tracker converges.
+    const record = {
+      id: randomUUID(),
+      studio_franchise_code: studioFranchiseCode,
+      month,
+      cumulative_classes: classesAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_franchise_class_months
+           (id, studio_franchise_code, month, cumulative_classes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (studio_franchise_code, month) DO UPDATE SET
+           cumulative_classes = fitness_franchise_class_months.cumulative_classes
+             + excluded.cumulative_classes,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.studio_franchise_code,
+        record.month,
+        record.cumulative_classes,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessFranchiseClassMonth(studioFranchiseCode, month) as Promise<
+      FitnessFranchiseClassMonthRecord
+    >;
+  }
+
+  async getFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+  ): Promise<FitnessFranchiseClassMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM fitness_franchise_class_months
+           WHERE studio_franchise_code = ? AND month = ?`,
+      )
+      .get(studioFranchiseCode, month) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      month: row.month as string,
+      cumulative_classes: row.cumulative_classes as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertFitnessRealizationApplication(
+    row: Omit<FitnessRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessRealizationApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked
+    // allocation throws here, never a double application.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_realization_applications
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, gross_subscription_pool_cents, app_store_engine_cut_cents,
+            digital_infrastructure_overhead_cents, net_fitness_content_pool_cents,
+            verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.gross_subscription_pool_cents,
+        record.app_store_engine_cut_cents,
+        record.digital_infrastructure_overhead_cents,
+        record.net_fitness_content_pool_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_realization_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_subscription_pool_cents: row.gross_subscription_pool_cents as number,
+      app_store_engine_cut_cents: row.app_store_engine_cut_cents as number,
+      digital_infrastructure_overhead_cents:
+        row.digital_infrastructure_overhead_cents as number,
+      net_fitness_content_pool_cents: row.net_fitness_content_pool_cents as number,
+      verdict: row.verdict as FitnessRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessTrainerRoyaltyApplication(
+    row: Omit<FitnessTrainerRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_trainer_royalty_applications
+           (id, source_event_id, sender, trainer_id, program_id, studio_franchise_code,
+            period, currency, completed_count, class_revenue_cents, sync_policy_ref,
+            master_royalty_micros_per_workout, publishing_royalty_micros_per_workout,
+            sync_master_micros, sync_publishing_micros, sync_master_cents,
+            sync_publishing_cents, trainer_net_basis_cents, tier_schedule_ref,
+            tier_legs, tier_payout_micros, tier_payout_cents, retained_count,
+            retention_bonus_micros_per_completion, retention_bonus_micros,
+            retention_bonus_cents, monthly_completions_before, monthly_completions_after,
+            verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.completed_count,
+        record.class_revenue_cents,
+        record.sync_policy_ref,
+        record.master_royalty_micros_per_workout,
+        record.publishing_royalty_micros_per_workout,
+        record.sync_master_micros,
+        record.sync_publishing_micros,
+        record.sync_master_cents,
+        record.sync_publishing_cents,
+        record.trainer_net_basis_cents,
+        record.tier_schedule_ref,
+        record.tier_legs,
+        record.tier_payout_micros,
+        record.tier_payout_cents,
+        record.retained_count,
+        record.retention_bonus_micros_per_completion,
+        record.retention_bonus_micros,
+        record.retention_bonus_cents,
+        record.monthly_completions_before,
+        record.monthly_completions_after,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessTrainerRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_trainer_royalty_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as FitnessTrainerRoyaltyApplicationRecord['sender'],
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      completed_count: row.completed_count as number,
+      class_revenue_cents: row.class_revenue_cents as number,
+      sync_policy_ref: (row.sync_policy_ref as string | null) ?? null,
+      master_royalty_micros_per_workout:
+        row.master_royalty_micros_per_workout as number,
+      publishing_royalty_micros_per_workout:
+        row.publishing_royalty_micros_per_workout as number,
+      sync_master_micros: row.sync_master_micros as number,
+      sync_publishing_micros: row.sync_publishing_micros as number,
+      sync_master_cents: row.sync_master_cents as number,
+      sync_publishing_cents: row.sync_publishing_cents as number,
+      trainer_net_basis_cents: row.trainer_net_basis_cents as number,
+      tier_schedule_ref: (row.tier_schedule_ref as string | null) ?? null,
+      tier_legs: row.tier_legs as string,
+      tier_payout_micros: row.tier_payout_micros as number,
+      tier_payout_cents: row.tier_payout_cents as number,
+      retained_count: row.retained_count as number,
+      retention_bonus_micros_per_completion:
+        row.retention_bonus_micros_per_completion as number,
+      retention_bonus_micros: row.retention_bonus_micros as number,
+      retention_bonus_cents: row.retention_bonus_cents as number,
+      monthly_completions_before: (row.monthly_completions_before as number | null) ?? null,
+      monthly_completions_after: (row.monthly_completions_after as number | null) ?? null,
+      verdict: row.verdict as FitnessTrainerRoyaltyApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessLiveResidualApplication(
+    row: Omit<FitnessLiveResidualApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveResidualApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_live_residual_applications
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, peak_simultaneous_viewers, live_event_revenue_cents,
+            load_band_from, load_band_to, server_load_bps, server_load_deduction_cents,
+            net_live_residual_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.peak_simultaneous_viewers,
+        record.live_event_revenue_cents,
+        record.load_band_from,
+        record.load_band_to,
+        record.server_load_bps,
+        record.server_load_deduction_cents,
+        record.net_live_residual_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessLiveResidualApplication(
+    sourceEventId: string,
+  ): Promise<FitnessLiveResidualApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_live_residual_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      peak_simultaneous_viewers: row.peak_simultaneous_viewers as number,
+      live_event_revenue_cents: row.live_event_revenue_cents as number,
+      load_band_from: row.load_band_from as number,
+      load_band_to: (row.load_band_to as number | null) ?? null,
+      server_load_bps: row.server_load_bps as number,
+      server_load_deduction_cents: row.server_load_deduction_cents as number,
+      net_live_residual_cents: row.net_live_residual_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessFranchiseApplication(
+    row: Omit<FitnessFranchiseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessFranchiseApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_franchise_applications
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, class_count, classes_before, classes_after, class_revenue_cents,
+            certified_choreography_revenue_cents, certified_audio_revenue_cents,
+            franchise_license_override_bps, choreography_override_cents,
+            audio_override_cents, franchise_override_total_cents, network_fee_bps,
+            network_fee_cents, instructor_disbursement_cents, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.class_count,
+        record.classes_before,
+        record.classes_after,
+        record.class_revenue_cents,
+        record.certified_choreography_revenue_cents,
+        record.certified_audio_revenue_cents,
+        record.franchise_license_override_bps,
+        record.choreography_override_cents,
+        record.audio_override_cents,
+        record.franchise_override_total_cents,
+        record.network_fee_bps,
+        record.network_fee_cents,
+        record.instructor_disbursement_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessFranchiseApplication(
+    sourceEventId: string,
+  ): Promise<FitnessFranchiseApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_franchise_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      class_count: row.class_count as number,
+      classes_before: (row.classes_before as number | null) ?? null,
+      classes_after: (row.classes_after as number | null) ?? null,
+      class_revenue_cents: row.class_revenue_cents as number,
+      certified_choreography_revenue_cents:
+        row.certified_choreography_revenue_cents as number,
+      certified_audio_revenue_cents: row.certified_audio_revenue_cents as number,
+      franchise_license_override_bps: row.franchise_license_override_bps as number,
+      choreography_override_cents: row.choreography_override_cents as number,
+      audio_override_cents: row.audio_override_cents as number,
+      franchise_override_total_cents: row.franchise_override_total_cents as number,
+      network_fee_bps: row.network_fee_bps as number,
+      network_fee_cents: row.network_fee_cents as number,
+      instructor_disbursement_cents: row.instructor_disbursement_cents as number,
+      verdict: row.verdict as FitnessFranchiseApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessCobrandSplitApplication(
+    row: Omit<FitnessCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCobrandSplitApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_cobrand_split_applications
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, ip_owner_id, distributor_id, net_class_stream_earnings_cents,
+            ip_owner_share_bps, distributor_share_bps, ip_owner_cents,
+            distributor_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.ip_owner_id,
+        record.distributor_id,
+        record.net_class_stream_earnings_cents,
+        record.ip_owner_share_bps,
+        record.distributor_share_bps,
+        record.ip_owner_cents,
+        record.distributor_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCobrandSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_cobrand_split_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      ip_owner_id: row.ip_owner_id as string,
+      distributor_id: row.distributor_id as string,
+      net_class_stream_earnings_cents: row.net_class_stream_earnings_cents as number,
+      ip_owner_share_bps: row.ip_owner_share_bps as number,
+      distributor_share_bps: row.distributor_share_bps as number,
+      ip_owner_cents: row.ip_owner_cents as number,
+      distributor_cents: row.distributor_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessAlgorithmRoyalty(
+    row: Omit<FitnessAlgorithmRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAlgorithmRoyaltyRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_algorithm_royalty_ledger
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, equipment_type, equipment_id, wearable_active_users,
+            algorithm_creator_id, micros_per_active_user, royalty_micros,
+            royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.equipment_type,
+        record.equipment_id,
+        record.wearable_active_users,
+        record.algorithm_creator_id,
+        record.micros_per_active_user,
+        record.royalty_micros,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessAlgorithmRoyalty(
+    sourceEventId: string,
+  ): Promise<FitnessAlgorithmRoyaltyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_algorithm_royalty_ledger WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      equipment_type: row.equipment_type as FitnessAlgorithmRoyaltyRecord['equipment_type'],
+      equipment_id: row.equipment_id as string,
+      wearable_active_users: row.wearable_active_users as number,
+      algorithm_creator_id: row.algorithm_creator_id as string,
+      micros_per_active_user: row.micros_per_active_user as number,
+      royalty_micros: row.royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFitnessCocreationApplication(
+    row: Omit<FitnessCocreationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCocreationApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_cocreation_applications
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, enrollment_revenue_cents, waterfall_legs, allocated_total_cents,
+            created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.enrollment_revenue_cents,
+        record.waterfall_legs,
+        record.allocated_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessCocreationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCocreationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_cocreation_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      enrollment_revenue_cents: row.enrollment_revenue_cents as number,
+      waterfall_legs: row.waterfall_legs as string,
+      allocated_total_cents: row.allocated_total_cents as number,
+      created_at: row.created_at as string,
     };
   }
 }

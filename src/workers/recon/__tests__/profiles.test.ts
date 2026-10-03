@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers forty-four profiles in dispatch order", () => {
+  it("registers fifty-four profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -108,6 +108,17 @@ describe("profile registry", () => {
       "spatial_fnb_register_csv",
       "spatial_retail_pos_csv",
       "spatial_rfid_wristband_telemetry_csv",
+      // The fitness lane (PR 38, the founder fitness directive) —
+      // dispatched last, its own rights family (digital stream starts,
+      // completed workout logs, connected bike and treadmill telemetry,
+      // studio class check-ins, and app subscription allocations; never
+      // music-rights split math — the sync music deductions are the
+      // fitness queue's own ledger legs).
+      "fitness_stream_starts_csv",
+      "fitness_completed_workouts_csv",
+      "fitness_equipment_telemetry_csv",
+      "fitness_studio_checkins_csv",
+      "fitness_subscription_allocations_csv",
     ]);
   });
 

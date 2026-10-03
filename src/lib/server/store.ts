@@ -197,6 +197,24 @@ import type {
   SpatialZoneAssignmentRecord,
 } from '@/modules/spatial/records';
 import type {
+  FitnessAlgorithmPolicyRecord,
+  FitnessAlgorithmRoyaltyRecord,
+  FitnessCoBrandPartnershipRecord,
+  FitnessCocreationModuleRecord,
+  FitnessCocreationApplicationRecord,
+  FitnessCompletionMonthRecord,
+  FitnessFranchiseApplicationRecord,
+  FitnessFranchiseClassMonthRecord,
+  FitnessFranchisePolicyRecord,
+  FitnessCobrandSplitApplicationRecord,
+  FitnessLiveLoadPolicyRecord,
+  FitnessLiveResidualApplicationRecord,
+  FitnessRealizationApplicationRecord,
+  FitnessSyncMusicPolicyRecord,
+  FitnessTrainerRoyaltyApplicationRecord,
+  FitnessTrainerTierScheduleRecord,
+} from '@/modules/fitness/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -3288,6 +3306,267 @@ export interface Store {
     payeeId: string,
     venueId: string,
   ): Promise<SpatialPayoutGateStateRecord | undefined>;
+
+  // -------------------------------------------------------------------------
+  // PR 38 — the fitness lane (migration 0042): the founder fitness
+  // directive's durable facts of record — the tier schedules, rate
+  // policies, partnerships, waterfalls, and trackers the walks read, and
+  // the append-only application ledgers the walks write.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Registers (or replaces) the trainer royalty tier schedule of record
+   * for one (trainer, program) — UNIQUE per (trainer_id, program_id): the
+   * newest schedule governs the next walk.
+   */
+  upsertFitnessTrainerTierSchedule(
+    row: Omit<FitnessTrainerTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessTrainerTierScheduleRecord>;
+
+  /** One trainer-program's tier schedule of record; undefined when none —
+   * the royalty walk refuses fail-closed (no schedule, no tier payout). */
+  getFitnessTrainerTierSchedule(
+    trainerId: string,
+    programId: string,
+  ): Promise<FitnessTrainerTierScheduleRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the sync music policy of record for one
+   * program — UNIQUE per program_id: the per-workout master and
+   * publishing rates deducted BEFORE the trainer net share.
+   */
+  upsertFitnessSyncMusicPolicy(
+    row: Omit<FitnessSyncMusicPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessSyncMusicPolicyRecord>;
+
+  /** One program's sync music policy of record; undefined when none — a
+   * class-revenue row skips fail-closed (the walk never guesses a music
+   * rate). */
+  getFitnessSyncMusicPolicy(
+    programId: string,
+  ): Promise<FitnessSyncMusicPolicyRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the live-event server load policy of record
+   * for one program — UNIQUE per program_id.
+   */
+  upsertFitnessLiveLoadPolicy(
+    row: Omit<FitnessLiveLoadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveLoadPolicyRecord>;
+
+  /** One program's live load policy of record; undefined when none — a
+   * live broadcast row skips fail-closed. */
+  getFitnessLiveLoadPolicy(
+    programId: string,
+  ): Promise<FitnessLiveLoadPolicyRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the studio franchise policy of record for one
+   * franchise code — UNIQUE per studio_franchise_code: the license
+   * override on certified content and the network fee.
+   */
+  upsertFitnessFranchisePolicy(
+    row: Omit<FitnessFranchisePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessFranchisePolicyRecord>;
+
+  /** One franchise code's policy of record; undefined when none — a
+   * check-in row skips fail-closed (never a guessed override). */
+  getFitnessFranchisePolicy(
+    studioFranchiseCode: string,
+  ): Promise<FitnessFranchisePolicyRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the studio-to-app partnership of record for
+   * one franchise code — UNIQUE per studio_franchise_code: the two
+   * payees and the shares splitting the net class stream earnings.
+   */
+  upsertFitnessCoBrandPartnership(
+    row: Omit<FitnessCoBrandPartnershipRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCoBrandPartnershipRecord>;
+
+  /** One franchise code's partnership of record; undefined when none —
+   * the co-brand walk skips (a studio without a partnership splits
+   * nothing). */
+  getFitnessCoBrandPartnership(
+    studioFranchiseCode: string,
+  ): Promise<FitnessCoBrandPartnershipRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the wearable / algorithm micro-royalty policy
+   * of record for one program — UNIQUE per program_id.
+   */
+  upsertFitnessAlgorithmPolicy(
+    row: Omit<FitnessAlgorithmPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAlgorithmPolicyRecord>;
+
+  /** One program's algorithm policy of record; undefined when none — a
+   * telemetry row skips fail-closed (never a guessed micro-fee). */
+  getFitnessAlgorithmPolicy(
+    programId: string,
+  ): Promise<FitnessAlgorithmPolicyRecord | undefined>;
+
+  /**
+   * Registers one module of a program's co-creation waterfall of record —
+   * UNIQUE per (program_id, module_id): a re-registration converges.
+   */
+  upsertFitnessCocreationModule(
+    row: Omit<FitnessCocreationModuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCocreationModuleRecord>;
+
+  /** One program's registered co-creation modules of record, in
+   * registration order; empty when none registered. */
+  listFitnessCocreationModules(
+    programId: string,
+  ): Promise<FitnessCocreationModuleRecord[]>;
+
+  /**
+   * Advances the cumulative monthly completion tracker of record for one
+   * (trainer, program, month) by the row's completions — UNIQUE per
+   * (trainer_id, program_id, month): the tracker converges (an upsert
+   * adds); the walk reads the position BEFORE this advance through the
+   * getter.
+   */
+  advanceFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+    completionsAdded: number,
+  ): Promise<FitnessCompletionMonthRecord>;
+
+  /** One trainer-program-month's cumulative completions of record;
+   * undefined when no row has advanced yet (position starts at zero). */
+  getFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+  ): Promise<FitnessCompletionMonthRecord | undefined>;
+
+  /**
+   * Advances the cumulative monthly class count tracker of record for one
+   * (franchise code, month) by the row's check-ins — UNIQUE per
+   * (studio_franchise_code, month).
+   */
+  advanceFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+    classesAdded: number,
+  ): Promise<FitnessFranchiseClassMonthRecord>;
+
+  /** One franchise-month's cumulative class count of record; undefined
+   * when no row has advanced yet. */
+  getFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+  ): Promise<FitnessFranchiseClassMonthRecord | undefined>;
+
+  /**
+   * Appends one executed Digital Stream Realization — the founder's exact
+   * identity on the allocation event's legs (migration 0042). UNIQUE per
+   * source_event_id is the replay guard — a re-walked allocation throws,
+   * never a double application.
+   */
+  insertFitnessRealizationApplication(
+    row: Omit<FitnessRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed trainer royalty application — the sync music
+   * deductions before the trainer net, the committed tier walk, and the
+   * retention bonus (migration 0042). UNIQUE per source_event_id is the
+   * replay guard.
+   */
+  insertFitnessTrainerRoyaltyApplication(
+    row: Omit<FitnessTrainerRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord>;
+
+  /** One trainer royalty application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessTrainerRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed live-event streaming residual — the server load
+   * deduction priced at the band holding the broadcast's peak viewers
+   * (migration 0042). UNIQUE per source_event_id is the replay guard.
+   */
+  insertFitnessLiveResidualApplication(
+    row: Omit<FitnessLiveResidualApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveResidualApplicationRecord>;
+
+  /** One live residual application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessLiveResidualApplication(
+    sourceEventId: string,
+  ): Promise<FitnessLiveResidualApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed studio franchise class override — the tracked
+   * class counts, the certified-content overrides, and the network fee
+   * before the instructor disbursement (migration 0042). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertFitnessFranchiseApplication(
+    row: Omit<FitnessFranchiseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessFranchiseApplicationRecord>;
+
+  /** One franchise application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessFranchiseApplication(
+    sourceEventId: string,
+  ): Promise<FitnessFranchiseApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed co-branded franchise split — the net class
+   * stream earnings split per the partnership of record (migration 0042).
+   * UNIQUE per source_event_id is the replay guard.
+   */
+  insertFitnessCobrandSplitApplication(
+    row: Omit<FitnessCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCobrandSplitApplicationRecord>;
+
+  /** One co-brand split application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCobrandSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed wearable / algorithm micro-royalty — the daily
+   * active feature usage priced at the policy's per-active-user micro-fee
+   * (migration 0042). UNIQUE per source_event_id is the replay guard.
+   */
+  insertFitnessAlgorithmRoyalty(
+    row: Omit<FitnessAlgorithmRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAlgorithmRoyaltyRecord>;
+
+  /** One algorithm micro-royalty of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessAlgorithmRoyalty(
+    sourceEventId: string,
+  ): Promise<FitnessAlgorithmRoyaltyRecord | undefined>;
+
+  /**
+   * Appends one executed module-weighted co-creation split — the
+   * program's enrollment revenue split across the registered module
+   * weightings, conserved exactly (migration 0042). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertFitnessCocreationApplication(
+    row: Omit<FitnessCocreationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCocreationApplicationRecord>;
+
+  /** One co-creation application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessCocreationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCocreationApplicationRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

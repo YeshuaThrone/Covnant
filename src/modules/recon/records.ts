@@ -440,6 +440,58 @@ export interface ReconJobResult {
   spatial_occupancy_royalty_cents?: number;
   spatial_zone_royalty_cents?: number;
   spatial_micro_royalty_cents?: number;
+  /** Fitness lane (PR 38): the Digital Stream Realization walk — the
+   * Net Fitness Content Pool of record. */
+  fitness_realization_applications_committed?: number;
+  fitness_realization_applications_replayed?: number;
+  fitness_realization_held_negative_net?: number;
+  /** Fitness lane: the trainer royalty walk — the sync music deductions
+   * FIRST, then the cumulative tier walk and the retention bonus. */
+  fitness_royalty_applications_committed?: number;
+  fitness_royalty_applications_replayed?: number;
+  fitness_royalty_skipped_no_tier_schedule?: number;
+  fitness_royalty_skipped_no_sync_policy?: number;
+  fitness_royalty_held_negative_net?: number;
+  /** Fitness lane: the live-event streaming residual walk — the server
+   * load bands at the peak simultaneous viewers. */
+  fitness_live_residuals_committed?: number;
+  fitness_live_residuals_replayed?: number;
+  fitness_live_skipped_no_load_policy?: number;
+  /** Fitness lane: the franchise override walk — certified-content
+   * overrides + the network fee BEFORE the instructor disbursement. */
+  fitness_franchise_applications_committed?: number;
+  fitness_franchise_applications_replayed?: number;
+  fitness_franchise_skipped_no_policy?: number;
+  fitness_franchise_held_negative_net?: number;
+  /** Fitness lane: the co-branded franchise split walk — the net class
+   * stream earnings between the IP owner and the distributor. */
+  fitness_cobrand_splits_committed?: number;
+  fitness_cobrand_splits_replayed?: number;
+  fitness_cobrand_skipped_no_partnership?: number;
+  /** Fitness lane: the wearable / algorithm micro-royalty ledger — the
+   * daily active feature usage at the policy's micro-fee. */
+  fitness_algorithm_royalties_committed?: number;
+  fitness_algorithm_royalties_replayed?: number;
+  fitness_algorithm_skipped_no_policy?: number;
+  /** Fitness lane: the multi-trainer co-creation waterfall — the
+   * module-weighted split of the realized pool. */
+  fitness_cocreation_applications_committed?: number;
+  fitness_cocreation_applications_replayed?: number;
+  fitness_cocreation_skipped_no_waterfall?: number;
+  /** Fitness lane: the committed money, integer cents — the realized
+   * pool and every leg the seven walks priced. */
+  fitness_net_fitness_content_pool_cents?: number;
+  fitness_trainer_tier_payout_cents?: number;
+  fitness_retention_bonus_cents?: number;
+  fitness_sync_music_deduction_cents?: number;
+  fitness_server_load_deduction_cents?: number;
+  fitness_franchise_override_cents?: number;
+  fitness_network_fee_cents?: number;
+  fitness_instructor_disbursement_cents?: number;
+  fitness_cobrand_ip_owner_cents?: number;
+  fitness_cobrand_distributor_cents?: number;
+  fitness_algorithm_royalty_cents?: number;
+  fitness_cocreation_allocated_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

@@ -31,6 +31,7 @@ import { WEBTOON_PROFILES } from "./webtoonProfiles";
 import { LICENSING_PROFILES } from "./licensingProfiles";
 import { NIL_PROFILES } from "./nilProfiles";
 import { SPATIAL_PROFILES } from "./spatialProfiles";
+import { FITNESS_PROFILES } from "./fitnessProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -581,6 +582,15 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // IP owner, and the shared facility overhead deduction are spatial-only,
   // and spatial rows never touch the music split machinery).
   ...SPATIAL_PROFILES,
+  // The fitness lane (PR 38) — same dispatch opinion; the worker branches
+  // on the profile kind before the music machinery (the Digital Stream
+  // Realization calculator, the cumulative monthly tier walk, the sync
+  // music deductions before the trainer net share, the live-event server
+  // load residuals, the franchise class override with its network fee,
+  // the co-brand split, the wearable/algorithm micro-royalties, and the
+  // module-weighted co-creation waterfalls are fitness-only, and fitness
+  // rows never touch the music split machinery).
+  ...FITNESS_PROFILES,
 ];
 
 /**

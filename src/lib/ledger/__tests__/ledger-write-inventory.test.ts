@@ -402,6 +402,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // spatial audit escrow, and payout gate states; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0041_spatial_capex_msg_popup_escrow_gate_states.sql',
+      // PR 38 (the founder fitness directive): sixteen additive tables for
+      // fitness policies and monthly trackers, co-creation modules, and the
+      // seven replay-guarded application ledgers (realization, trainer
+      // royalty, live residual, franchise override, co-brand split,
+      // algorithm royalty, co-creation waterfall); still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0042_fitness_telemetry_trainer_royalties_sync_music.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
