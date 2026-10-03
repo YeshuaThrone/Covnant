@@ -105,6 +105,10 @@ import type {
   EstateSuccessionTransitionRecord,
   EstateSplitAccrualRecord,
   EstatePayoutGateStateRecord,
+  TheatricalProductionDealRecord,
+  TheatricalStopSettlementRecord,
+  TheatricalRecoupmentApplicationRecord,
+  TheatricalSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1442,6 +1446,74 @@ export interface Store {
    * payee has none — the fail-closed absent state (the gate refuses).
    */
   getEstatePayoutGateState(payeeId: string): Promise<EstatePayoutGateStateRecord | undefined>;
+
+  // --- AGBOR box office + theatrical recoupment (PR 30, migration 0034) ---
+
+  /**
+   * Upserts the production's versioned box office deal of record
+   * (migration 0034) — UNIQUE per scope_key: a re-registration replaces the
+   * row atomically with its version incremented (the art schedule upsert
+   * discipline; the caller builds the row from the existing record).
+   */
+  upsertTheatricalProductionDeal(
+    row: TheatricalProductionDealRecord,
+  ): Promise<TheatricalProductionDealRecord>;
+
+  /** One production's deal of record; undefined when none — fail-closed. */
+  getTheatricalProductionDeal(
+    productionId: string,
+  ): Promise<TheatricalProductionDealRecord | undefined>;
+
+  /**
+   * Append one per-stop settlement sheet. UNIQUE per source_event_id: a
+   * replayed settlement row throws the unique violation, never a double
+   * stop — the (production, venue, show date) triple plus the sender's
+   * settlement id ride the row as provenance.
+   */
+  insertTheatricalStopSettlement(
+    row: Omit<TheatricalStopSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalStopSettlementRecord>;
+
+  /** One production's stop sheets, show_date then created_at — the tour book. */
+  listTheatricalStopSettlements(productionId: string): Promise<TheatricalStopSettlementRecord[]>;
+
+  /**
+   * Advance a deal's running investor recoupment counter — only forward,
+   * never past the capitalization budget. Undefined = the deal is absent or
+   * the caller lost the race to a concurrent update (the pool CAS's
+   * discipline; the append-only application rows stay the replay arbiter).
+   */
+  updateTheatricalDealRecoupment(
+    id: string,
+    recoupedCents: number,
+    updatedAt: string,
+  ): Promise<TheatricalProductionDealRecord | undefined>;
+
+  /**
+   * Append one investor recoupment application. UNIQUE per (deal_id,
+   * source_event_id) — the replay guard; UNIQUE per (deal_id,
+   * recouped_before_cents) — the position lock (the books/art discipline).
+   */
+  insertTheatricalRecoupmentApplication(
+    row: Omit<TheatricalRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalRecoupmentApplicationRecord>;
+
+  /** One deal's applications, created_at ASC — the running recovery. */
+  listTheatricalRecoupmentApplications(
+    dealId: string,
+  ): Promise<TheatricalRecoupmentApplicationRecord[]>;
+
+  /**
+   * Append one executed box office split. UNIQUE per (deal_id,
+   * source_event_id): a replayed accrual throws the unique violation,
+   * never a double designation.
+   */
+  insertTheatricalSplitAccrual(
+    row: Omit<TheatricalSplitAccrualRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalSplitAccrualRecord>;
+
+  /** One deal's executed splits, created_at ASC — the accrual ledger. */
+  listTheatricalSplitAccruals(dealId: string): Promise<TheatricalSplitAccrualRecord[]>;
 
   /**
    * The locked translation-localization escrow receipts (kind AND status

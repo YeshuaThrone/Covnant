@@ -309,6 +309,36 @@ export interface ReconJobResult {
    * drops). */
   art_skipped_no_pool?: number;
   art_skipped_no_schedule?: number;
+  /** Theatrical lane: match_queue rows written / replayed (the UNIQUE
+   * event_id no-ops across a re-shipped settlement report). */
+  theatrical_written?: number;
+  theatrical_replayed?: number;
+  /** Theatrical lane: matched vs unmatched rows. */
+  theatrical_matched?: number;
+  theatrical_unmatched?: number;
+  /** Theatrical lane: negative-net quarantines and sub-cent zero nets —
+   * recorded, never posted. */
+  theatrical_held_negative_net?: number;
+  theatrical_zero_net?: number;
+  /** Theatrical lane: holding posts / replays. */
+  theatrical_holding_posted?: number;
+  theatrical_holding_replayed?: number;
+  /** Theatrical lane: the stops' GBOR and AGBOR legs, exact fixed-point
+   * micros as text (the AGBOR calculator's totals across the pass). */
+  theatrical_gbor_micros?: string;
+  theatrical_deductions_micros?: string;
+  theatrical_agbor_micros?: string;
+  /** Theatrical lane: Grand Rights deductions across stops, integer cents. */
+  theatrical_grand_rights_cents?: number;
+  /** Theatrical lane: venue expenses recouped and the capped overage left
+   * with the promoter, integer cents. */
+  theatrical_venue_expense_recouped_cents?: number;
+  theatrical_venue_expense_capped_cents?: number;
+  /** Theatrical lane: deal payouts designated across stops, integer cents. */
+  theatrical_deal_payout_cents?: number;
+  /** Theatrical lane: stops that crossed the capitalization budget — the
+   * automatic 50/50 switchover events. */
+  theatrical_recoupment_switchovers?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

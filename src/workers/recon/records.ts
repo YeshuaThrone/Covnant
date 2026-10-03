@@ -70,7 +70,15 @@ export type StatementProfileKind =
   | "openai_llm_billing_log_csv"
   | "wandb_inference_telemetry_csv"
   | "elevenlabs_voice_clone_licensing_csv"
-  | "huggingface_dataset_attribution_log_csv";
+  | "huggingface_dataset_attribution_log_csv"
+
+// The AGBOR box office lane (PR 30) — the four venue settlement senders the
+// founder directive names (AXS, Ticketmaster, Eventbrite, VenuePOS), one
+// strict profile per sender's settlement sheet.
+  | "theatrical_axs_settlement_csv"
+  | "theatrical_ticketmaster_settlement_csv"
+  | "theatrical_eventbrite_payout_csv"
+  | "theatrical_venuepos_settlement_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -768,6 +776,43 @@ export interface GamingLineDetail {
   readonly annualYear: number;
 }
 
+/**
+ * The AGBOR box office lane's per-line context (PR 30): one venue
+ * settlement row — one stop's sheet keyed on the addendum 11 triple
+ * (production_id, venue_id, show_date). The identity fields derive the
+ * event id per sender (the sha256 fingerprints in theatrical.ts); the money
+ * legs ride the row verbatim as exact micros text (the founder's
+ * rate-logging rule). One union, sender-discriminated: the four settlement
+ * layouts normalize onto the same stop legs.
+ */
+export type TheatricalLineDetail = {
+  /** The venue settlement sender — its own event-id space per sender. */
+  readonly sender: "axs" | "ticketmaster" | "eventbrite" | "venuepos";
+  /** The reconciliation triple — multi-city reconciliation keys on it. */
+  readonly productionId: string;
+  readonly venueId: string;
+  /** ISO YYYY-MM-DD. */
+  readonly showDate: string;
+  /** The sender's settlement id of record — part of the row identity. */
+  readonly settlementId: string;
+  /** The stop's city/market (provenance; the city-specific context). */
+  readonly city: string;
+  /** GBOR — the gross box office receipts, exact micros text. */
+  readonly gborMicros: string;
+  /** The AGBOR deduction legs, exact micros text, recorded verbatim. */
+  readonly salesTaxMicros: string;
+  readonly cardProcessingMicros: string;
+  readonly facilityMaintenanceMicros: string;
+  readonly ffeMicros: string;
+  readonly groupDiscountMicros: string;
+  /** The stop's venue expenses and the local promoter expense cap, exact
+   * micros text — the cap bounds what recoups before the net tour splits. */
+  readonly venueExpenseMicros: string;
+  readonly promoterExpenseCapMicros: string;
+  /** The statement's period (settlement month, YYYY-MM). */
+  readonly period: string;
+};
+
 /** One normalized statement line — the worker's parse vocabulary. */
 export interface ParsedStatementLine {
   /** 1-based data-row number within the statement (header excluded). */
@@ -845,6 +890,13 @@ export interface ParsedStatementLine {
    * agency cells); null on every non-art line — the presence IS the lane
    * discriminator. Optional for the same reason as bookDetail. */
   artDetail?: ArtLineDetail | null;
+
+  /** AGBOR box office lane context (the venue settlement sender, the
+   * reconciliation triple, the settlement id of record, the GBOR and
+   * deduction legs, the venue expense and promoter expense cap cells); null
+   * on every non-theatrical line — the presence IS the lane discriminator.
+   * Optional for the same reason as bookDetail. */
+  theatricalDetail?: TheatricalLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

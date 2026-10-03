@@ -117,6 +117,10 @@ import type {
   EstateSuccessionTransitionRecord,
   EstateSplitAccrualRecord,
   EstatePayoutGateStateRecord,
+  TheatricalProductionDealRecord,
+  TheatricalStopSettlementRecord,
+  TheatricalRecoupmentApplicationRecord,
+  TheatricalSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -280,6 +284,10 @@ export class InMemoryStore implements Store {
   private estateSuccessionTransitions: EstateSuccessionTransitionRecord[] = [];
   private estateSplitAccruals: EstateSplitAccrualRecord[] = [];
   private estatePayoutGateStates = new Map<string, EstatePayoutGateStateRecord>();
+  private theatricalProductionDeals: TheatricalProductionDealRecord[] = [];
+  private theatricalStopSettlements: TheatricalStopSettlementRecord[] = [];
+  private theatricalRecoupmentApplications: TheatricalRecoupmentApplicationRecord[] = [];
+  private theatricalSplitAccruals: TheatricalSplitAccrualRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -2310,6 +2318,155 @@ export class InMemoryStore implements Store {
   ): Promise<EstatePayoutGateStateRecord | undefined> {
     const found = this.estatePayoutGateStates.get(payeeId);
     return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertTheatricalProductionDeal(
+    row: TheatricalProductionDealRecord,
+  ): Promise<TheatricalProductionDealRecord> {
+    // One deal of record per scope_key — replace on the key, the existing
+    // row's identity preserved (the caller increments version).
+    const existingIndex = this.theatricalProductionDeals.findIndex(
+      (candidate) => candidate.scope_key === row.scope_key,
+    );
+    if (existingIndex >= 0) {
+      this.theatricalProductionDeals[existingIndex] = { ...row };
+      return { ...this.theatricalProductionDeals[existingIndex] };
+    }
+    this.theatricalProductionDeals.push({ ...row });
+    return { ...row };
+  }
+
+  async getTheatricalProductionDeal(
+    productionId: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    const found = this.theatricalProductionDeals.find(
+      (candidate) => candidate.scope_key === `production:${productionId}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertTheatricalStopSettlement(
+    row: Omit<TheatricalStopSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalStopSettlementRecord> {
+    // UNIQUE per source_event_id — a replayed settlement row is the unique
+    // violation, never a double stop.
+    if (
+      this.theatricalStopSettlements.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('theatrical_stop_settlements.source_event_id');
+    }
+    const record: TheatricalStopSettlementRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.theatricalStopSettlements.push(record);
+    return { ...record };
+  }
+
+  async listTheatricalStopSettlements(
+    productionId: string,
+  ): Promise<TheatricalStopSettlementRecord[]> {
+    // show_date then created_at — the tour book in stop order.
+    return sortByTime(
+      this.theatricalStopSettlements.filter((row) => row.production_id === productionId),
+      (row) => `${row.show_date}T${row.created_at}`,
+      'asc',
+    );
+  }
+
+  async updateTheatricalDealRecoupment(
+    id: string,
+    recoupedCents: number,
+    updatedAt: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    const row = this.theatricalProductionDeals.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — the counter only advances and never
+    // past the capitalization budget; a regressed value refuses (undefined).
+    if (
+      row === undefined ||
+      recoupedCents <= row.recouped_cents ||
+      recoupedCents > (row.capitalization_budget_cents ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      return undefined;
+    }
+    row.recouped_cents = recoupedCents;
+    row.updated_at = updatedAt;
+    return { ...row };
+  }
+
+  async insertTheatricalRecoupmentApplication(
+    row: Omit<TheatricalRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalRecoupmentApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id) — the replay guard; UNIQUE per
+    // (deal_id, recouped_before_cents) — the position lock (the books
+    // insert-as-lock arbiter).
+    if (
+      this.theatricalRecoupmentApplications.some(
+        (existing) => existing.deal_id === row.deal_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('theatrical_recoupment_applications.deal_id,source_event_id');
+    }
+    if (
+      this.theatricalRecoupmentApplications.some(
+        (existing) =>
+          existing.deal_id === row.deal_id &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('theatrical_recoupment_applications.deal_id,recouped_before_cents');
+    }
+    const record: TheatricalRecoupmentApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.theatricalRecoupmentApplications.push(record);
+    return { ...record };
+  }
+
+  async listTheatricalRecoupmentApplications(
+    dealId: string,
+  ): Promise<TheatricalRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return sortByTime(
+      this.theatricalRecoupmentApplications.filter((row) => row.deal_id === dealId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertTheatricalSplitAccrual(
+    row: Omit<TheatricalSplitAccrualRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalSplitAccrualRecord> {
+    // UNIQUE per (deal_id, source_event_id) — a replayed accrual is the
+    // unique violation, never a double designation.
+    if (
+      this.theatricalSplitAccruals.some(
+        (existing) => existing.deal_id === row.deal_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('theatrical_split_accruals.deal_id,source_event_id');
+    }
+    const record: TheatricalSplitAccrualRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.theatricalSplitAccruals.push(record);
+    return { ...record };
+  }
+
+  async listTheatricalSplitAccruals(dealId: string): Promise<TheatricalSplitAccrualRecord[]> {
+    // created_at ASC — the executed designations in execution order.
+    return sortByTime(
+      this.theatricalSplitAccruals.filter((row) => row.deal_id === dealId),
+      (row) => row.created_at,
+      'asc',
+    );
   }
 
   async listTranslationLocalizationEscrowCredits(

@@ -1495,6 +1495,166 @@ export type EstatePayoutGateStateRecord = {
   updated_at: string;
 };
 
+// --- AGBOR box office + theatrical recoupment (PR 30, migration 0034) -------
+
+/**
+ * The theatrical publisher of record — the Grand Rights collection entities
+ * the founder brief names (authors and composers are paid THROUGH these;
+ * the publisher's payee identity rides the deal). The vocabulary is closed
+ * at registration.
+ */
+export const THEATRICAL_PUBLISHERS = ["concord", "mti", "rodgers_hammerstein"] as const;
+export type TheatricalPublisherCode = (typeof THEATRICAL_PUBLISHERS)[number];
+
+/** The two deal classes the box office waterfall walks. */
+export const THEATRICAL_DEAL_CLASSES = ["comedy_guarantee", "theatrical_recoupment"] as const;
+export type TheatricalDealClass = (typeof THEATRICAL_DEAL_CLASSES)[number];
+
+/** The Grand Rights founder band — top-line 6% to 10% of AGBOR. */
+export const GRAND_RIGHTS_MIN_BPS = 600;
+export const GRAND_RIGHTS_MAX_BPS = 1000;
+
+/**
+ * The versioned box office deal of record per production scope (scope_key
+ * `production:<id>`) — the tier table the waterfall walks. Comedy deals pin
+ * the greater-of terms (flat guarantee vs percentage of the net box office
+ * after venue expense recoupment); theatrical deals pin the capitalization
+ * budget the investor recoupment tiers walk and the post-recoupment 50/50
+ * pair. The Grand Rights rate is optional on both classes — present on
+ * deals that license the underlying play/musical, absent otherwise; the
+ * 6–10% band validates at registration. A re-registration increments
+ * version; accrued designations keep their version's history, never re-cut.
+ */
+export type TheatricalProductionDealRecord = {
+  id: string;
+  /** UNIQUE — the production scope (`production:<production_id>`). */
+  scope_key: string;
+  deal_class: TheatricalDealClass;
+  /** Grand Rights licensing rate, bps of AGBOR, inside the 6–10% band; null
+   * when the production licenses no underlying theatrical work. Paired
+   * non-null with the publisher identity columns. */
+  grand_rights_rate_bps: number | null;
+  publisher_code: TheatricalPublisherCode | null;
+  publisher_payee_id: string | null;
+  publisher_payee_name: string | null;
+  /** The comedy class's guarantee recipient; null on theatrical deals. */
+  artist_payee_id: string | null;
+  artist_payee_name: string | null;
+  /** The theatrical class's post-recoupment split pair; null on comedy. */
+  producer_payee_id: string | null;
+  producer_payee_name: string | null;
+  investor_payee_id: string | null;
+  investor_payee_name: string | null;
+  /** Comedy: the flat guarantee floor, whole cents (> 0); null otherwise. */
+  flat_guarantee_cents: number | null;
+  /** Comedy: the percentage leg, bps of the net box office after venue
+   * expense recoupment (0–10000); null otherwise. */
+  guarantee_percentage_bps: number | null;
+  /** Theatrical: the capitalization budget the investors recoup against,
+   * whole cents (> 0); null on comedy. */
+  capitalization_budget_cents: number | null;
+  /** The running investor recoupment counter (never exceeds the budget). */
+  recouped_cents: number;
+  currency: string;
+  /** The tier table's version — incremented on re-registration. */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The role a designated share pays (the accrual allocation's discriminator). */
+export const THEATRICAL_ALLOCATION_ROLES = [
+  "theatrical_publisher",
+  "artist",
+  "producer",
+  "investor",
+] as const;
+export type TheatricalAllocationRole = (typeof THEATRICAL_ALLOCATION_ROLES)[number];
+
+/** One designated share on a split accrual — the per-payee payout leg. */
+export type TheatricalSplitAllocation = {
+  payee_id: string;
+  payee_name: string;
+  role: TheatricalAllocationRole;
+  share_cents: number;
+};
+
+/**
+ * One per-stop settlement sheet — the multi-city venue reconciliation row
+ * keyed on (production_id, venue_id, show_date), the addendum 11 triple.
+ * Every leg of the stop's math rides the row; the conservation checks pin
+ * the AGBOR equation and the cap arithmetic exactly (migration 0034).
+ */
+export type TheatricalStopSettlementRecord = {
+  id: string;
+  production_id: string;
+  venue_id: string;
+  /** ISO YYYY-MM-DD — the reconciliation triple's date leg. */
+  show_date: string;
+  /** The funding queue row's event id — part of the once-only key. */
+  source_event_id: string;
+  /** The sender's settlement id of record (provenance). */
+  settlement_id: string;
+  sender_code: "axs" | "ticketmaster" | "eventbrite" | "venuepos";
+  city: string;
+  gbor_cents: number;
+  sales_tax_cents: number;
+  card_fees_cents: number;
+  facility_fee_cents: number;
+  ffe_fee_cents: number;
+  group_discount_cents: number;
+  /** GBOR minus the four deduction legs — exact to the cent. */
+  agbor_cents: number;
+  /** The Grand Rights deduction (0 when the deal registers no rate). */
+  grand_rights_cents: number;
+  venue_expense_cents: number;
+  promoter_expense_cap_cents: number;
+  /** min(venue_expense, promoter cap) — what recouped before the splits. */
+  venue_expense_recouped_cents: number;
+  /** The capped overage — the promoter's own money, never the tour's. */
+  venue_expense_capped_cents: number;
+  /** The total designated to the deal's payees this event. */
+  deal_payout_cents: number;
+  currency: string;
+  created_at: string;
+};
+
+/**
+ * One append-only investor recoupment application — 100% of a stop's net
+ * profits applied to the capitalization budget. The position fields make
+ * the ledger self-auditing: recouped_before + applied + remaining ties each
+ * row to its neighbors without trusting any mutable counter.
+ */
+export type TheatricalRecoupmentApplicationRecord = {
+  id: string;
+  deal_id: string;
+  scope_key: string;
+  source_event_id: string;
+  recouped_before_cents: number;
+  applied_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * One append-only payout designation — the once-only allocation of a stop's
+ * distributable net across the deal's payees (the Grand Rights publisher
+ * leg, the artist's guarantee payout, the investor recoupment leg, the
+ * post-recoupment 50/50 legs). dust_cents is the sub-cent residue of the
+ * half splits; allocations + dust = basis, exact.
+ */
+export type TheatricalSplitAccrualRecord = {
+  id: string;
+  deal_id: string;
+  scope_key: string;
+  deal_class: TheatricalDealClass;
+  source_event_id: string;
+  basis_cents: number;
+  allocations: TheatricalSplitAllocation[];
+  dust_cents: number;
+  created_at: string;
+};
+
 // --- IP adaptation optioning (PR 21, migration 0025) -----------------------
 
 /**
