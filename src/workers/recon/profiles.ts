@@ -28,6 +28,7 @@ import { AI_PROFILES } from "./aiProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
+import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
   parseStatementMoney,
@@ -553,6 +554,11 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // math, the direct-to-actor voice routing, and the nested derivative
   // split are AI-only).
   ...AI_PROFILES,
+  // The art-market lane (PR 28) — same dispatch opinion; the worker
+  // branches on the profile kind before the music machinery (the founder
+  // gallery equation, the ARR sliding scale, the fabrication recoupment
+  // waterfalls, and the museum licensing isolation are art-only).
+  ...ART_PROFILES,
 ];
 
 /**

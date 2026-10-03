@@ -94,6 +94,12 @@ import type {
   BookRecoupmentPoolClass,
   BookRecoupmentApplicationRecord,
   BookEditorialSplitAccrualRecord,
+  ArtRecoupmentPoolRecord,
+  ArtRecoupmentPoolClass,
+  ArtRecoupmentApplicationRecord,
+  ArtSplitScheduleRecord,
+  ArtSplitAccrualRecord,
+  ArtLicensingAgencyPolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1263,6 +1269,82 @@ export interface Store {
   insertBookEditorialSplitAccrual(
     row: Omit<BookEditorialSplitAccrualRecord, 'id'>,
   ): Promise<BookEditorialSplitAccrualRecord>;
+
+  /**
+   * The art split schedule of record per scope_key (PR 28, migration 0032)
+   * — upsert on the key: a re-registration keeps the row's identity and
+   * increments its version (the cascade builds the row from the existing
+   * record; the store replaces it atomically).
+   */
+  upsertArtSplitSchedule(row: ArtSplitScheduleRecord): Promise<ArtSplitScheduleRecord>;
+
+  /** One schedule of record — the waterfall pass's gate. */
+  getArtSplitSchedule(scopeKey: string): Promise<ArtSplitScheduleRecord | undefined>;
+
+  /**
+   * Append one sequential fabrication recoupment pool. UNIQUE per
+   * (scope_key, pool_class, sequence_no): a re-registered sequence slot
+   * throws the unique violation, never a silent duplicate.
+   */
+  insertArtRecoupmentPool(
+    row: Omit<ArtRecoupmentPoolRecord, 'id'>,
+  ): Promise<ArtRecoupmentPoolRecord>;
+
+  /**
+   * One scope+class pool sequence, sequence_no ASC — the fabrication
+   * recoupment order.
+   */
+  listArtRecoupmentPools(
+    scopeKey: string,
+    poolClass: ArtRecoupmentPoolClass,
+  ): Promise<ArtRecoupmentPoolRecord[]>;
+
+  /**
+   * THE pool CAS: advances a pool's running recovery and flips status when
+   * the recovery completes — only from the 'active' state. Undefined = the
+   * pool is absent or no longer active (the caller lost the race to the
+   * completing application). The append-only application rows stay the
+   * replay arbiter; this counter is the derived read.
+   */
+  updateArtRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: ArtRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<ArtRecoupmentPoolRecord | undefined>;
+
+  /**
+   * Append one art recoupment application. UNIQUE per (pool_id,
+   * source_event_id) — the replay guard; UNIQUE per (pool_id,
+   * recouped_before_cents) — the position lock (the books discipline).
+   */
+  insertArtRecoupmentApplication(
+    row: Omit<ArtRecoupmentApplicationRecord, 'id'>,
+  ): Promise<ArtRecoupmentApplicationRecord>;
+
+  /** One pool's applications, created_at ASC — the running recovery. */
+  listArtRecoupmentApplications(poolId: string): Promise<ArtRecoupmentApplicationRecord[]>;
+
+  /**
+   * Append one executed art split. UNIQUE per source_event_id: a replayed
+   * accrual throws the unique violation, never a double designation.
+   */
+  insertArtSplitAccrual(row: Omit<ArtSplitAccrualRecord, 'id'>): Promise<ArtSplitAccrualRecord>;
+
+  /**
+   * The copyright agency collection-fee policy of record per agency_code
+   * (PR 28, migration 0032) — upsert on the key: a re-registration
+   * replaces the row atomically (the founder band validates at
+   * registration; the store stores the registered rate).
+   */
+  upsertArtLicensingAgencyPolicy(
+    row: Omit<ArtLicensingAgencyPolicyRecord, 'id'>,
+  ): Promise<ArtLicensingAgencyPolicyRecord>;
+
+  /** One agency's policy of record — the licensing pass's configurable rate. */
+  getArtLicensingAgencyPolicy(
+    agencyCode: ArtLicensingAgencyPolicyRecord['agency_code'],
+  ): Promise<ArtLicensingAgencyPolicyRecord | undefined>;
 
   /**
    * The locked translation-localization escrow receipts (kind AND status

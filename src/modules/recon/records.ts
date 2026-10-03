@@ -266,6 +266,49 @@ export interface ReconJobResult {
    * rows with no editorial schedule (honest skips, never silent drops). */
   book_skipped_no_pool?: number;
   book_skipped_no_schedule?: number;
+  /** Art lane: match_queue rows written / replayed (the UNIQUE event_id
+   * no-ops across a re-shipped report). */
+  art_written?: number;
+  art_replayed?: number;
+  /** Art lane: matched vs unmatched rows (the Artwork ID vault
+   * cross-reference). */
+  art_matched?: number;
+  art_unmatched?: number;
+  /** Art lane: negative-net quarantines, sub-cent zero nets, no-ARR
+   * primary-sale rows, and audit attestations — recorded, never posted. */
+  art_held_negative_net?: number;
+  art_zero_net?: number;
+  art_no_arr?: number;
+  art_audit_recorded?: number;
+  /** Art lane: holding posts / replays. */
+  art_holding_posted?: number;
+  art_holding_replayed?: number;
+  /** Art lane: resale rows' statutory royalties, duty offsets, and net
+   * secondary royalties, exact fixed-point micros as text. */
+  art_arr_royalty_micros?: string;
+  art_arr_duty_offset_micros?: string;
+  art_arr_net_micros?: string;
+  /** Art lane: museum licensing fees, agency collection deductions, and
+   * the isolated Don Ledger net, exact fixed-point micros as text. */
+  art_licensing_fee_micros?: string;
+  art_licensing_agency_deduction_micros?: string;
+  art_licensing_net_micros?: string;
+  /** Art lane: fabrication recoupment applications written / replayed
+   * events, integer cents applied to pools this pass. */
+  art_recoupments_applied?: number;
+  art_recoupments_replayed?: number;
+  art_recoupment_applied_cents?: number;
+  /** Art lane: post-clearance net — integer cents that flowed past the
+   * fabrication debt sequence (the splits' basis). */
+  art_recoupment_excess_cents?: number;
+  /** Art lane: fabrication split accruals written / replayed. */
+  art_split_accruals?: number;
+  art_split_accruals_replayed?: number;
+  /** Art lane: sales with no fabrication pool registered (money stays in
+   * holding) and sales with no split schedule (honest skips, never silent
+   * drops). */
+  art_skipped_no_pool?: number;
+  art_skipped_no_schedule?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

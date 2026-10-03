@@ -106,6 +106,12 @@ import type {
   BookRecoupmentPoolClass,
   BookRecoupmentApplicationRecord,
   BookEditorialSplitAccrualRecord,
+  ArtRecoupmentPoolRecord,
+  ArtRecoupmentPoolClass,
+  ArtRecoupmentApplicationRecord,
+  ArtSplitScheduleRecord,
+  ArtSplitAccrualRecord,
+  ArtLicensingAgencyPolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -258,6 +264,12 @@ export class InMemoryStore implements Store {
   private bookRecoupmentPools: BookRecoupmentPoolRecord[] = [];
   private bookRecoupmentApplications: BookRecoupmentApplicationRecord[] = [];
   private bookEditorialSplitAccruals: BookEditorialSplitAccrualRecord[] = [];
+  // Migration 0032 — the art market waterfall state.
+  private artSplitSchedules: ArtSplitScheduleRecord[] = [];
+  private artRecoupmentPools: ArtRecoupmentPoolRecord[] = [];
+  private artRecoupmentApplications: ArtRecoupmentApplicationRecord[] = [];
+  private artSplitAccruals: ArtSplitAccrualRecord[] = [];
+  private artLicensingAgencyPolicies: ArtLicensingAgencyPolicyRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -1946,6 +1958,159 @@ export class InMemoryStore implements Store {
     const record: BookEditorialSplitAccrualRecord = { ...row, id: randomUUID() };
     this.bookEditorialSplitAccruals.push(record);
     return { ...record };
+  }
+
+  // --- Art market waterfalls (migration 0032, PR 28) -----------------------
+
+  async upsertArtSplitSchedule(
+    row: ArtSplitScheduleRecord,
+  ): Promise<ArtSplitScheduleRecord> {
+    // One schedule of record per scope_key — the caller builds the row from
+    // the existing record (identity + version preserved); replace atomically.
+    const existingIndex = this.artSplitSchedules.findIndex(
+      (candidate) => candidate.scope_key === row.scope_key,
+    );
+    if (existingIndex >= 0) {
+      this.artSplitSchedules[existingIndex] = { ...row };
+      return { ...this.artSplitSchedules[existingIndex] };
+    }
+    this.artSplitSchedules.push({ ...row });
+    return { ...row };
+  }
+
+  async getArtSplitSchedule(scopeKey: string): Promise<ArtSplitScheduleRecord | undefined> {
+    const found = this.artSplitSchedules.find((candidate) => candidate.scope_key === scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertArtRecoupmentPool(
+    row: Omit<ArtRecoupmentPoolRecord, 'id'>,
+  ): Promise<ArtRecoupmentPoolRecord> {
+    // UNIQUE per (scope_key, pool_class, sequence_no) — a re-registered
+    // sequence slot is the unique violation, never a silent duplicate.
+    if (
+      this.artRecoupmentPools.some(
+        (existing) =>
+          existing.scope_key === row.scope_key &&
+          existing.pool_class === row.pool_class &&
+          existing.sequence_no === row.sequence_no,
+      )
+    ) {
+      uniqueViolation('art_recoupment_pools.scope_key,pool_class,sequence_no');
+    }
+    const record: ArtRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    this.artRecoupmentPools.push(record);
+    return { ...record };
+  }
+
+  async listArtRecoupmentPools(
+    scopeKey: string,
+    poolClass: ArtRecoupmentPoolClass,
+  ): Promise<ArtRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the fabrication recoupment order of record.
+    return this.artRecoupmentPools
+      .filter((row) => row.scope_key === scopeKey && row.pool_class === poolClass)
+      .sort((a, b) => a.sequence_no - b.sequence_no)
+      .map((row) => ({ ...row }));
+  }
+
+  async updateArtRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: ArtRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<ArtRecoupmentPoolRecord | undefined> {
+    const row = this.artRecoupmentPools.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — an already-recouped pool refuses
+    // the update (undefined), the books pool's settle discipline.
+    if (row === undefined || row.status !== 'active') {
+      return undefined;
+    }
+    row.recouped_cents = recoupedCents;
+    row.status = status;
+    row.updated_at = updatedAt;
+    return { ...row };
+  }
+
+  async insertArtRecoupmentApplication(
+    row: Omit<ArtRecoupmentApplicationRecord, 'id'>,
+  ): Promise<ArtRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — the replay guard; UNIQUE per
+    // (pool_id, recouped_before_cents) — the position lock (the books
+    // insert-as-lock arbiter).
+    if (
+      this.artRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('art_recoupment_applications.pool_id,source_event_id');
+    }
+    if (
+      this.artRecoupmentApplications.some(
+        (existing) =>
+          existing.pool_id === row.pool_id &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('art_recoupment_applications.pool_id,recouped_before_cents');
+    }
+    const record: ArtRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.artRecoupmentApplications.push(record);
+    return { ...record };
+  }
+
+  async listArtRecoupmentApplications(
+    poolId: string,
+  ): Promise<ArtRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return sortByTime(
+      this.artRecoupmentApplications.filter((row) => row.pool_id === poolId),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertArtSplitAccrual(
+    row: Omit<ArtSplitAccrualRecord, 'id'>,
+  ): Promise<ArtSplitAccrualRecord> {
+    // UNIQUE per source_event_id — a replayed accrual is the unique
+    // violation, never a double designation.
+    if (
+      this.artSplitAccruals.some((existing) => existing.source_event_id === row.source_event_id)
+    ) {
+      uniqueViolation('art_split_accruals.source_event_id');
+    }
+    const record: ArtSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.artSplitAccruals.push(record);
+    return { ...record };
+  }
+
+  async upsertArtLicensingAgencyPolicy(
+    row: Omit<ArtLicensingAgencyPolicyRecord, 'id'>,
+  ): Promise<ArtLicensingAgencyPolicyRecord> {
+    // One policy of record per agency_code — replace on the key, the
+    // existing row's identity preserved.
+    const existing = this.artLicensingAgencyPolicies.find(
+      (candidate) => candidate.agency_code === row.agency_code,
+    );
+    if (existing !== undefined) {
+      const updated: ArtLicensingAgencyPolicyRecord = { ...row, id: existing.id };
+      this.artLicensingAgencyPolicies[this.artLicensingAgencyPolicies.indexOf(existing)] = updated;
+      return { ...updated };
+    }
+    const record: ArtLicensingAgencyPolicyRecord = { ...row, id: randomUUID() };
+    this.artLicensingAgencyPolicies.push(record);
+    return { ...record };
+  }
+
+  async getArtLicensingAgencyPolicy(
+    agencyCode: ArtLicensingAgencyPolicyRecord['agency_code'],
+  ): Promise<ArtLicensingAgencyPolicyRecord | undefined> {
+    const found = this.artLicensingAgencyPolicies.find(
+      (candidate) => candidate.agency_code === agencyCode,
+    );
+    return found === undefined ? undefined : { ...found };
   }
 
   async listTranslationLocalizationEscrowCredits(

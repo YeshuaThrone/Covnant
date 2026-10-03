@@ -332,6 +332,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // chargebacks, and the chargeback offset applications; still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0031_foreign_tax_hold_book_returns_reserve.sql',
+      // Art-market waterfalls (PR 28, the founder art directive): the
+      // fabrication recoupment pools/applications, the percentage split
+      // schedules/accruals, and the museum licensing agency-fee policies;
+      // still no DDL on universal_royalty_ledger — the referencing pin
+      // below holds.
+      '0032_art_market_waterfalls.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

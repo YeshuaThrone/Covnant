@@ -107,6 +107,12 @@ import type {
   BookRecoupmentPoolClass,
   BookRecoupmentApplicationRecord,
   BookEditorialSplitAccrualRecord,
+  ArtRecoupmentPoolRecord,
+  ArtRecoupmentPoolClass,
+  ArtRecoupmentApplicationRecord,
+  ArtSplitScheduleRecord,
+  ArtSplitAccrualRecord,
+  ArtLicensingAgencyPolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1164,6 +1170,79 @@ CREATE TABLE IF NOT EXISTS book_editorial_split_accruals (
   allocations TEXT NOT NULL,
   dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
   created_at TEXT NOT NULL
+);
+
+-- Art market waterfalls (migration 0032, PR 28). The fabrication recoupment
+-- pools of record (UNIQUE per (scope_key, pool_class, sequence_no)), the
+-- append-only recovery applications (UNIQUE per (pool, source event) — the
+-- replay guard — plus UNIQUE per (pool, recouped_before) — the insert-as-lock
+-- position arbiter), the split schedule of record per scope_key (upsert),
+-- the append-only executed splits (UNIQUE per source event), and the
+-- copyright agency collection-fee policy of record per agency_code (upsert,
+-- the founder band validates at registration).
+CREATE TABLE IF NOT EXISTS art_recoupment_pools (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('print_edition_fabrication', 'sculpture_fabrication')),
+  sequence_no INTEGER NOT NULL CHECK (sequence_no > 0),
+  debt_cents INTEGER NOT NULL CHECK (debt_cents > 0),
+  recouped_cents INTEGER NOT NULL CHECK (recouped_cents >= 0),
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'recouped')),
+  creditor_role TEXT NOT NULL CHECK (creditor_role IN ('master_printmaker', 'lithographer', 'bronze_foundry', 'three_d_printing')),
+  creditor_payee_id TEXT NOT NULL,
+  creditor_payee_name TEXT NOT NULL,
+  agreement_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key, pool_class, sequence_no)
+);
+
+CREATE TABLE IF NOT EXISTS art_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  pool_id TEXT NOT NULL,
+  pool_class TEXT NOT NULL CHECK (pool_class IN ('print_edition_fabrication', 'sculpture_fabrication')),
+  scope_key TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  recouped_before_cents INTEGER NOT NULL,
+  applied_cents INTEGER NOT NULL CHECK (applied_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (pool_id, source_event_id),
+  UNIQUE (pool_id, recouped_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_art_recoupment_applications_pool
+  ON art_recoupment_applications (pool_id);
+
+CREATE TABLE IF NOT EXISTS art_split_schedules (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  scope TEXT NOT NULL CHECK (scope IN ('print_edition', 'sculpture_fabrication')),
+  contributors TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS art_split_accruals (
+  id TEXT PRIMARY KEY,
+  schedule_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('print_edition', 'sculpture_fabrication')),
+  source_event_id TEXT NOT NULL UNIQUE,
+  basis_cents INTEGER NOT NULL CHECK (basis_cents >= 0),
+  allocations TEXT NOT NULL,
+  dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS art_licensing_agency_policies (
+  id TEXT PRIMARY KEY,
+  agency_code TEXT NOT NULL UNIQUE CHECK (agency_code IN ('ars', 'dacs')),
+  agency_name TEXT NOT NULL,
+  collection_fee_bps INTEGER NOT NULL CHECK (collection_fee_bps >= 1500 AND collection_fee_bps <= 2000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -3915,6 +3994,186 @@ export class SqliteStore implements Store {
       )
       .run(dbRow as unknown as Record<string, unknown>);
     return Promise.resolve(record);
+  }
+
+  // --- Art market waterfalls (migration 0032, PR 28) -----------------------
+
+  async upsertArtSplitSchedule(
+    row: ArtSplitScheduleRecord,
+  ): Promise<ArtSplitScheduleRecord> {
+    // One schedule of record per scope_key — INSERT ON CONFLICT replaces
+    // the row atomically (the caller preserves identity + version).
+    const dbRow = {
+      ...row,
+      contributors: JSON.stringify(row.contributors),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO art_split_schedules
+           (id, scope_key, scope, contributors, version, created_at, updated_at)
+         VALUES (@id, @scope_key, @scope, @contributors, @version, @created_at, @updated_at)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           scope = excluded.scope,
+           contributors = excluded.contributors,
+           version = excluded.version,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(dbRow as unknown as Record<string, unknown>);
+    return Promise.resolve(row);
+  }
+
+  async getArtSplitSchedule(scopeKey: string): Promise<ArtSplitScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM art_split_schedules WHERE scope_key = ?`)
+      .get(scopeKey) as (ArtSplitScheduleRecord & { contributors: string }) | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      ...row,
+      contributors: JSON.parse(row.contributors) as ArtSplitScheduleRecord['contributors'],
+    });
+  }
+
+  async insertArtRecoupmentPool(
+    row: Omit<ArtRecoupmentPoolRecord, 'id'>,
+  ): Promise<ArtRecoupmentPoolRecord> {
+    // UNIQUE per (scope_key, pool_class, sequence_no) — a re-registered
+    // slot is the unique violation, never a silent duplicate.
+    const record: ArtRecoupmentPoolRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO art_recoupment_pools
+           (id, scope_key, pool_class, sequence_no, debt_cents, recouped_cents, currency, status, creditor_role, creditor_payee_id, creditor_payee_name, agreement_ref, created_at, updated_at)
+         VALUES (@id, @scope_key, @pool_class, @sequence_no, @debt_cents, @recouped_cents, @currency, @status, @creditor_role, @creditor_payee_id, @creditor_payee_name, @agreement_ref, @created_at, @updated_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listArtRecoupmentPools(
+    scopeKey: string,
+    poolClass: ArtRecoupmentPoolClass,
+  ): Promise<ArtRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the fabrication recoupment order of record (rowid
+    // ASC the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM art_recoupment_pools
+         WHERE scope_key = ? AND pool_class = ?
+         ORDER BY sequence_no ASC, rowid ASC`,
+        )
+        .all(scopeKey, poolClass) as ArtRecoupmentPoolRecord[],
+    );
+  }
+
+  async updateArtRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: ArtRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<ArtRecoupmentPoolRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the 'active' state only. changes = 0 means the pool is absent or
+    // already recouped; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE art_recoupment_pools
+         SET recouped_cents = ?, status = ?, updated_at = ?
+         WHERE id = ? AND status = 'active'`,
+      )
+      .run(recoupedCents, status, updatedAt, id);
+    if (result.changes === 0) return undefined;
+    return Promise.resolve(
+      this.db.prepare(`SELECT * FROM art_recoupment_pools WHERE id = ?`).get(id) as
+        | ArtRecoupmentPoolRecord
+        | undefined,
+    );
+  }
+
+  async insertArtRecoupmentApplication(
+    row: Omit<ArtRecoupmentApplicationRecord, 'id'>,
+  ): Promise<ArtRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id) — a replayed application is the
+    // unique violation, never a double recovery. UNIQUE per
+    // (pool_id, recouped_before_cents) — the POSITION lock (the
+    // insert-as-lock arbiter).
+    const record: ArtRecoupmentApplicationRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO art_recoupment_applications
+           (id, pool_id, pool_class, scope_key, source_event_id, recouped_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @pool_id, @pool_class, @scope_key, @source_event_id, @recouped_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listArtRecoupmentApplications(
+    poolId: string,
+  ): Promise<ArtRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order (rowid ASC
+    // the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM art_recoupment_applications
+         WHERE pool_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(poolId) as ArtRecoupmentApplicationRecord[],
+    );
+  }
+
+  async insertArtSplitAccrual(
+    row: Omit<ArtSplitAccrualRecord, 'id'>,
+  ): Promise<ArtSplitAccrualRecord> {
+    // UNIQUE per source_event_id — a replayed accrual is the unique
+    // violation, never a double designation.
+    const record: ArtSplitAccrualRecord = { ...row, id: randomUUID() };
+    const dbRow = {
+      ...record,
+      allocations: JSON.stringify(record.allocations),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO art_split_accruals
+           (id, schedule_id, scope_key, scope, source_event_id, basis_cents, allocations, dust_cents, created_at)
+         VALUES (@id, @schedule_id, @scope_key, @scope, @source_event_id, @basis_cents, @allocations, @dust_cents, @created_at)`,
+      )
+      .run(dbRow as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async upsertArtLicensingAgencyPolicy(
+    row: Omit<ArtLicensingAgencyPolicyRecord, 'id'>,
+  ): Promise<ArtLicensingAgencyPolicyRecord> {
+    // One policy of record per agency_code — INSERT ON CONFLICT replaces
+    // the row atomically (the founder band validates at registration).
+    const record: ArtLicensingAgencyPolicyRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO art_licensing_agency_policies
+           (id, agency_code, agency_name, collection_fee_bps, created_at, updated_at)
+         VALUES (@id, @agency_code, @agency_name, @collection_fee_bps, @created_at, @updated_at)
+         ON CONFLICT (agency_code) DO UPDATE SET
+           agency_name = excluded.agency_name,
+           collection_fee_bps = excluded.collection_fee_bps,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getArtLicensingAgencyPolicy(
+    agencyCode: ArtLicensingAgencyPolicyRecord['agency_code'],
+  ): Promise<ArtLicensingAgencyPolicyRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM art_licensing_agency_policies WHERE agency_code = ?`)
+        .get(agencyCode) as ArtLicensingAgencyPolicyRecord | undefined,
+    );
   }
 
   async listTranslationLocalizationEscrowCredits(

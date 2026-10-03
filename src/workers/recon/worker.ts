@@ -47,6 +47,10 @@ import { isAiProfileKind } from "./aiProfiles";
 import { writeBookLinesToMatchQueue } from "./booksQueue";
 import { postBookNetsToHolding } from "./booksPosting";
 import { isBookProfileKind } from "./booksProfiles";
+import { writeArtLinesToMatchQueue } from "./artQueue";
+import { postArtNetsToHolding } from "./artPosting";
+import { isArtProfileKind } from "./artProfiles";
+import { runArtWaterfallPass } from "@/lib/server/artMarketCascade";
 import { runBookEditorialSplitPass } from "@/lib/server/bookEditorialCascade";
 import { StatementParseError } from "./records";
 import { dispatchStatementProfile } from "./profiles";
@@ -207,6 +211,16 @@ async function processJobBody(
     // the webtoon conversions, the merch COGS deduction, or the AI split.
     if (isBookProfileKind(matchedProfile.kind)) {
       return await parseBooks(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The art-market lane branches the same way (PR 28): its rows are the
+    // five strict art senders' gallery/resale/edition/licensing/audit
+    // events whose money runs the founder's gallery equation, the ARR
+    // sliding scale, and the fabrication waterfalls — never the music
+    // queue's split math, the gaming accumulator, the livestream escrow,
+    // the webtoon conversions, the merch COGS deduction, the AI split, or
+    // the book editorial cascade.
+    if (isArtProfileKind(matchedProfile.kind)) {
+      return await parseArt(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -558,6 +572,85 @@ async function parseBooks(
     book_split_accruals_replayed: splits.splitAccrualsReplayed,
     book_skipped_no_pool: splits.skippedNoPool + splits.skippedCurrencyMismatch,
     book_skipped_no_schedule: splits.skippedNoSchedule,
+  };
+}
+
+/**
+ * The art-market lane (PR 28): strict-profile parse → match_queue write
+ * (Artwork ID cross-reference, recorded deduction legs, net computed once
+ * at write time) → holding posting (money dispositions only) → the
+ * fabrication waterfall pass — print-edition and sculpture fabrication
+ * pools recoup their OWN class's sequence (the isolation firewall), and
+ * post-clearance net splits per the scope's registered schedule. Museum
+ * licensing posts its agency-net through the same holding seam (the Don
+ * Ledger's isolated feed); audits post nothing. Every pass is idempotent
+ * (replays are counted no-ops through the per-source UNIQUE guards); a
+ * pass failure throws — the job fails with its row-scoped reason and a
+ * retry heals idempotently.
+ */
+async function parseArt(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeArtLinesToMatchQueue(
+    deps.store,
+    ingestId,
+    lines,
+  );
+  const posting = await postArtNetsToHolding(deps.store, counts, now);
+  const waterfall = await runArtWaterfallPass(deps.store, counts, now);
+
+  // The lane's money aggregates — resale royalty legs and licensing legs
+  // aggregated from the write pass's own outcomes (never recomputed).
+  let arrNetMicros = 0n;
+  let licensingNetMicros = 0n;
+  let licensingAgencyMicros = 0n;
+  for (const outcome of counts.lineOutcomes) {
+    if (outcome.disposition !== "money") continue;
+    if (outcome.detail.kind === "auction_resale") {
+      arrNetMicros += BigInt(outcome.netMicros);
+    }
+    if (outcome.detail.kind === "museum_licensing") {
+      licensingNetMicros += BigInt(outcome.netMicros);
+      licensingAgencyMicros += BigInt(outcome.deductionMicros);
+    }
+  }
+
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    art_written: counts.written,
+    art_replayed: counts.alreadyPresent,
+    art_matched: counts.matched,
+    art_unmatched: counts.unmatched,
+    art_held_negative_net: counts.heldNegativeNet,
+    art_zero_net: counts.zeroNet,
+    art_no_arr: counts.noArr,
+    art_audit_recorded: counts.auditRows,
+    art_holding_posted: posting.posted,
+    art_holding_replayed: posting.alreadyPosted,
+    art_arr_royalty_micros: (arrNetMicros + counts.resaleDutyOffsetMicros).toString(),
+    art_arr_duty_offset_micros: counts.resaleDutyOffsetMicros.toString(),
+    art_arr_net_micros: arrNetMicros.toString(),
+    art_licensing_fee_micros: (licensingNetMicros + licensingAgencyMicros).toString(),
+    art_licensing_agency_deduction_micros: licensingAgencyMicros.toString(),
+    art_licensing_net_micros: licensingNetMicros.toString(),
+    art_recoupments_applied: waterfall.recoupmentsApplied,
+    art_recoupments_replayed: waterfall.recoupmentsReplayed,
+    art_recoupment_applied_cents: waterfall.recoupmentAppliedCents,
+    art_recoupment_excess_cents: waterfall.recoupmentExcessCents,
+    art_split_accruals: waterfall.splitAccruals,
+    art_split_accruals_replayed: waterfall.splitAccrualsReplayed,
+    art_skipped_no_pool: waterfall.skippedNoPool + waterfall.skippedCurrencyMismatch,
+    art_skipped_no_schedule: waterfall.skippedNoSchedule,
   };
 }
 
