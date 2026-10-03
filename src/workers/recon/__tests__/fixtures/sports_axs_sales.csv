@@ -1,0 +1,2 @@
+Ticket Event ID,Nil Contract ID,Athlete GLAN,Venue GLN,League Rights Code,Turnstile Scan Hash,Gross Ticket Sales,Facility Fees,Local Taxes,Insurance Withheld,Processing Fees,Tickets Sold,Currency,Reporting Period
+AX-2026-03-0001,nil-contract-88,athlete:wr-two,VEN-ARENA-2,NFL-LIC-2026,hash-turnstile-b,"$50,000.00",4000.00,2500.00,1000.00,1500.00,5000,USD,2026-03

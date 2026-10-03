@@ -37,6 +37,7 @@ import { SERVICE_PROFILES } from "./serviceProfiles";
 import { DEVELOPER_PROFILES } from "./developerProfiles";
 import { HARDWARE_PROFILES } from "./hardwareProfiles";
 import { ENERGY_PROFILES } from "./energyProfiles";
+import { SPORTS_PROFILES } from "./sportsProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -638,6 +639,16 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // the per-tonne carbon offset micro-royalties are energy-only, and
   // energy rows never touch the music split machinery).
   ...ENERGY_PROFILES,
+  // The sports lane (PR 50, the founder sports directive) — the same
+  // dispatch opinion once more: the worker branches on the profile kind
+  // before the music machinery (the Net Venue Realization calculator,
+  // the turnstile-to-receipt reconciliation, the perpetual resale
+  // royalty splits, the league pool waterfalls with market-size, cap,
+  // and incentive offsets, the union group-licensing routing, the NIL
+  // profile reconciliations, and the biometric micro-payouts are
+  // sports-only, and sports rows never touch the music split
+  // machinery).
+  ...SPORTS_PROFILES,
 ];
 
 /**

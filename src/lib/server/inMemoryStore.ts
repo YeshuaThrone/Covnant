@@ -240,6 +240,26 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  SportsBiometricMicroPayoutApplicationRecord,
+  SportsBiometricRoyaltyPolicyRecord,
+  SportsBiometricTrackingPostRecord,
+  SportsBroadcastingContractRecord,
+  SportsGateReconciliationRecord,
+  SportsGroupLicensingApplicationRecord,
+  SportsLicenseeClass,
+  SportsLeaguePoolDistributionRecord,
+  SportsLeaguePoolPolicyRecord,
+  SportsLeagueTeamRegistrationRecord,
+  SportsNetVenueRealizationRecord,
+  SportsNilDealReconciliationRecord,
+  SportsResaleRoyaltyApplicationRecord,
+  SportsResaleRoyaltyPolicyRecord,
+  SportsResaleSalePostRecord,
+  SportsStudentAthleteProfileRecord,
+  SportsTicketSalePostRecord,
+  SportsTurnstileScanPostRecord,
+} from '@/modules/sports/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -770,6 +790,27 @@ export class InMemoryStore implements Store {
     ResourceAuditEscrowReconciliationRecord
   >();
   private resourcePayoutGateStates = new Map<string, ResourcePayoutGateStateRecord>();
+  // PR 50 — the sports lane's state: the registries of record (athlete
+  // profiles and the policies/team owners), the replay-guard posts, and
+  // the recompute-in-place positions (reconciliations, realizations,
+  // distributions).
+  private sportsStudentAthleteProfiles = new Map<string, SportsStudentAthleteProfileRecord>();
+  private sportsResaleRoyaltyPolicies = new Map<string, SportsResaleRoyaltyPolicyRecord>();
+  private sportsLeaguePoolPolicies = new Map<string, SportsLeaguePoolPolicyRecord>();
+  private sportsLeagueTeams = new Map<string, SportsLeagueTeamRegistrationRecord>();
+  private sportsBiometricRoyaltyPolicies = new Map<string, SportsBiometricRoyaltyPolicyRecord>();
+  private sportsTicketSalePosts: SportsTicketSalePostRecord[] = [];
+  private sportsResaleSalePosts: SportsResaleSalePostRecord[] = [];
+  private sportsTurnstileScanPosts: SportsTurnstileScanPostRecord[] = [];
+  private sportsBroadcastingContracts: SportsBroadcastingContractRecord[] = [];
+  private sportsBiometricTrackingPosts: SportsBiometricTrackingPostRecord[] = [];
+  private sportsGateReconciliations: SportsGateReconciliationRecord[] = [];
+  private sportsNetVenueRealizations: SportsNetVenueRealizationRecord[] = [];
+  private sportsResaleRoyaltyApplications: SportsResaleRoyaltyApplicationRecord[] = [];
+  private sportsLeaguePoolDistributions: SportsLeaguePoolDistributionRecord[] = [];
+  private sportsGroupLicensingApplications: SportsGroupLicensingApplicationRecord[] = [];
+  private sportsNilDealReconciliations: SportsNilDealReconciliationRecord[] = [];
+  private sportsBiometricMicroPayoutApplications: SportsBiometricMicroPayoutApplicationRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -9915,6 +9956,658 @@ export class InMemoryStore implements Store {
     }
     row.journal_id = journalId;
     return { ...row };
+  }
+
+  // ------------------------------------------------------------------
+  // PR 50 — the sports lane (ticketing, turnstile, resale, league
+  // pools, group licensing, NIL reconciliation, biometric payouts).
+  // The queue module (sportsQueue.ts) is the only caller; the shape
+  // mirrors the energy lane: replay-guard posts, recompute-in-place
+  // positions of record, and fail-closed registry reads.
+  // ------------------------------------------------------------------
+
+  async upsertSportsStudentAthleteProfile(
+    row: Omit<SportsStudentAthleteProfileRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsStudentAthleteProfileRecord> {
+    const now = new Date().toISOString();
+    const existing = this.sportsStudentAthleteProfiles.get(row.athlete_glan);
+    const record: SportsStudentAthleteProfileRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsStudentAthleteProfiles.set(row.athlete_glan, record);
+    return { ...record };
+  }
+
+  async getSportsStudentAthleteProfile(
+    athleteGlan: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    const found = this.sportsStudentAthleteProfiles.get(athleteGlan);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async getSportsStudentAthleteProfileByNilAthleteId(
+    nilAthleteId: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    for (const record of this.sportsStudentAthleteProfiles.values()) {
+      if (record.nil_athlete_id === nilAthleteId) {
+        return { ...record };
+      }
+    }
+    return undefined;
+  }
+
+  async upsertSportsResaleRoyaltyPolicy(
+    row: Omit<SportsResaleRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsResaleRoyaltyPolicyRecord> {
+    const now = new Date().toISOString();
+    const key = `${row.venue_gln}|${row.league_rights_code}`;
+    const existing = this.sportsResaleRoyaltyPolicies.get(key);
+    const record: SportsResaleRoyaltyPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsResaleRoyaltyPolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getSportsResaleRoyaltyPolicy(
+    venueGln: string,
+    leagueRightsCode: string,
+  ): Promise<SportsResaleRoyaltyPolicyRecord | undefined> {
+    const found = this.sportsResaleRoyaltyPolicies.get(`${venueGln}|${leagueRightsCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSportsLeaguePoolPolicy(
+    row: Omit<SportsLeaguePoolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolPolicyRecord> {
+    const now = new Date().toISOString();
+    const existing = this.sportsLeaguePoolPolicies.get(row.league_rights_code);
+    const record: SportsLeaguePoolPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsLeaguePoolPolicies.set(row.league_rights_code, record);
+    return { ...record };
+  }
+
+  async getSportsLeaguePoolPolicy(
+    leagueRightsCode: string,
+  ): Promise<SportsLeaguePoolPolicyRecord | undefined> {
+    const found = this.sportsLeaguePoolPolicies.get(leagueRightsCode);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSportsLeagueTeam(
+    row: Omit<SportsLeagueTeamRegistrationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeagueTeamRegistrationRecord> {
+    const now = new Date().toISOString();
+    const key = `${row.league_rights_code}|${row.team_code}`;
+    const existing = this.sportsLeagueTeams.get(key);
+    const record: SportsLeagueTeamRegistrationRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsLeagueTeams.set(key, record);
+    return { ...record };
+  }
+
+  async listSportsLeagueTeams(
+    leagueRightsCode: string,
+  ): Promise<SportsLeagueTeamRegistrationRecord[]> {
+    const rows = [...this.sportsLeagueTeams.values()].filter(
+      (record) => record.league_rights_code === leagueRightsCode,
+    );
+    // Deterministic order — team_code ascending (matching the SQL
+    // backends' ORDER BY), so the distribution walk is stable in tests.
+    rows.sort((a, b) => (a.team_code < b.team_code ? -1 : a.team_code > b.team_code ? 1 : 0));
+    return rows.map((record) => ({ ...record }));
+  }
+
+  async upsertSportsBiometricRoyaltyPolicy(
+    row: Omit<SportsBiometricRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord> {
+    const now = new Date().toISOString();
+    const key = `${row.league_rights_code}|${row.licensee_class}`;
+    const existing = this.sportsBiometricRoyaltyPolicies.get(key);
+    const record: SportsBiometricRoyaltyPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsBiometricRoyaltyPolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getSportsBiometricRoyaltyPolicy(
+    leagueRightsCode: string,
+    licenseeClass: SportsLicenseeClass,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord | undefined> {
+    const found = this.sportsBiometricRoyaltyPolicies.get(
+      `${leagueRightsCode}|${licenseeClass}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsTicketSalePost(
+    row: Omit<SportsTicketSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTicketSalePostRecord> {
+    if (this.sportsTicketSalePosts.some((r) => r.source_event_id === row.source_event_id)) {
+      throw new Error(`sports_ticket_sale_post_conflict:${row.source_event_id}`);
+    }
+    const record: SportsTicketSalePostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsTicketSalePosts.push(record);
+    return { ...record };
+  }
+
+  async getSportsTicketSalePost(
+    sourceEventId: string,
+  ): Promise<SportsTicketSalePostRecord | undefined> {
+    const found = this.sportsTicketSalePosts.find((r) => r.source_event_id === sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsResaleSalePost(
+    row: Omit<SportsResaleSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleSalePostRecord> {
+    if (this.sportsResaleSalePosts.some((r) => r.source_event_id === row.source_event_id)) {
+      throw new Error(`sports_resale_sale_post_conflict:${row.source_event_id}`);
+    }
+    const record: SportsResaleSalePostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsResaleSalePosts.push(record);
+    return { ...record };
+  }
+
+  async getSportsResaleSalePost(
+    sourceEventId: string,
+  ): Promise<SportsResaleSalePostRecord | undefined> {
+    const found = this.sportsResaleSalePosts.find((r) => r.source_event_id === sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsTurnstileScanPost(
+    row: Omit<SportsTurnstileScanPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTurnstileScanPostRecord> {
+    if (this.sportsTurnstileScanPosts.some((r) => r.source_event_id === row.source_event_id)) {
+      throw new Error(`sports_turnstile_scan_post_conflict:${row.source_event_id}`);
+    }
+    const record: SportsTurnstileScanPostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsTurnstileScanPosts.push(record);
+    return { ...record };
+  }
+
+  async getSportsTurnstileScanPost(
+    sourceEventId: string,
+  ): Promise<SportsTurnstileScanPostRecord | undefined> {
+    const found = this.sportsTurnstileScanPosts.find((r) => r.source_event_id === sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsBiometricTrackingPost(
+    row: Omit<SportsBiometricTrackingPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricTrackingPostRecord> {
+    if (
+      this.sportsBiometricTrackingPosts.some((r) => r.source_event_id === row.source_event_id)
+    ) {
+      throw new Error(`sports_biometric_post_conflict:${row.source_event_id}`);
+    }
+    const record: SportsBiometricTrackingPostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsBiometricTrackingPosts.push(record);
+    return { ...record };
+  }
+
+  async getSportsBiometricTrackingPost(
+    sourceEventId: string,
+  ): Promise<SportsBiometricTrackingPostRecord | undefined> {
+    const found = this.sportsBiometricTrackingPosts.find(
+      (r) => r.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsBroadcastingContract(
+    row: Omit<SportsBroadcastingContractRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBroadcastingContractRecord> {
+    // The contract_ref is the replay key (UNIQUE in every backend) — a
+    // re-shipped contract is a conflict, not a second row.
+    if (
+      this.sportsBroadcastingContracts.some((r) => r.contract_ref === row.contract_ref)
+    ) {
+      throw new Error(`sports_broadcasting_contract_conflict:${row.contract_ref}`);
+    }
+    const record: SportsBroadcastingContractRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsBroadcastingContracts.push(record);
+    return { ...record };
+  }
+
+  async getSportsBroadcastingContract(
+    contractRef: string,
+  ): Promise<SportsBroadcastingContractRecord | undefined> {
+    const found = this.sportsBroadcastingContracts.find(
+      (r) => r.contract_ref === contractRef,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async sumSportsGateLegs(
+    nilContractId: string,
+    athleteGlan: string,
+    venueGln: string,
+    leagueRightsCode: string,
+    turnstileScanHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_ticket_revenue_cents: number;
+    facility_surcharges_cents: number;
+    municipal_taxes_cents: number;
+    insurance_reserves_cents: number;
+    processor_fee_cuts_cents: number;
+    ticket_count: number;
+  }> {
+    const legs = {
+      gross_ticket_revenue_cents: 0,
+      facility_surcharges_cents: 0,
+      municipal_taxes_cents: 0,
+      insurance_reserves_cents: 0,
+      processor_fee_cuts_cents: 0,
+      ticket_count: 0,
+    };
+    for (const post of this.sportsTicketSalePosts) {
+      if (
+        post.nil_contract_id === nilContractId &&
+        post.athlete_glan === athleteGlan &&
+        post.venue_gln === venueGln &&
+        post.league_rights_code === leagueRightsCode &&
+        post.turnstile_scan_hash === turnstileScanHash &&
+        post.period === period &&
+        post.currency === currency
+      ) {
+        legs.gross_ticket_revenue_cents += post.gross_ticket_revenue_cents;
+        legs.facility_surcharges_cents += post.facility_surcharges_cents;
+        legs.municipal_taxes_cents += post.municipal_taxes_cents;
+        legs.insurance_reserves_cents += post.insurance_reserves_cents;
+        legs.processor_fee_cuts_cents += post.processor_fee_cuts_cents;
+        legs.ticket_count += post.ticket_count;
+      }
+    }
+    return legs;
+  }
+
+  async listSportsTicketSaleKeysForHash(
+    venueGln: string,
+    turnstileScanHash: string,
+  ): Promise<
+    Array<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }>
+  > {
+    const keys: Array<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const post of this.sportsTicketSalePosts) {
+      if (post.venue_gln !== venueGln || post.turnstile_scan_hash !== turnstileScanHash) {
+        continue;
+      }
+      const key = [
+        post.nil_contract_id,
+        post.athlete_glan,
+        post.venue_gln,
+        post.league_rights_code,
+        post.turnstile_scan_hash,
+        post.period,
+        post.currency,
+      ].join('|');
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      keys.push({
+        nil_contract_id: post.nil_contract_id,
+        athlete_glan: post.athlete_glan,
+        venue_gln: post.venue_gln,
+        league_rights_code: post.league_rights_code,
+        turnstile_scan_hash: post.turnstile_scan_hash,
+        period: post.period,
+        currency: post.currency,
+      });
+    }
+    return keys;
+  }
+
+  async sumSportsGateReconciliationSides(
+    venueGln: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    ticket_count_sum: number;
+    scan_count_sum: number;
+    gross_ticket_revenue_cents: number;
+  }> {
+    let ticketCountSum = 0;
+    let grossTicketRevenueCents = 0;
+    for (const post of this.sportsTicketSalePosts) {
+      if (post.venue_gln === venueGln && post.period === period && post.currency === currency) {
+        ticketCountSum += post.ticket_count;
+        grossTicketRevenueCents += post.gross_ticket_revenue_cents;
+      }
+    }
+    let scanCountSum = 0;
+    for (const post of this.sportsTurnstileScanPosts) {
+      if (post.venue_gln === venueGln && post.period === period && post.currency === currency) {
+        scanCountSum += post.scan_count;
+      }
+    }
+    return {
+      ticket_count_sum: ticketCountSum,
+      scan_count_sum: scanCountSum,
+      gross_ticket_revenue_cents: grossTicketRevenueCents,
+    };
+  }
+
+  async upsertSportsGateReconciliation(
+    row: Omit<SportsGateReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsGateReconciliationRecord> {
+    const existing = this.sportsGateReconciliations.find(
+      (candidate) => candidate.source_event_id === row.source_event_id,
+    );
+    if (existing !== undefined) {
+      const merged: SportsGateReconciliationRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      this.sportsGateReconciliations[
+        this.sportsGateReconciliations.indexOf(existing)
+      ] = merged;
+      return { ...merged };
+    }
+    const record: SportsGateReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.sportsGateReconciliations.push(record);
+    return { ...record };
+  }
+
+  async getSportsGateReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsGateReconciliationRecord | undefined> {
+    const found = this.sportsGateReconciliations.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSportsNetVenueRealization(
+    row: Omit<SportsNetVenueRealizationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNetVenueRealizationRecord> {
+    // The realization position of record — UNIQUE per source_event_id
+    // (the founder tuple); the recompute replaces the sums in place
+    // (no id in the conflict payload — the PR 33 lesson).
+    const existing = this.sportsNetVenueRealizations.find(
+      (candidate) => candidate.source_event_id === row.source_event_id,
+    );
+    if (existing !== undefined) {
+      const merged: SportsNetVenueRealizationRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      this.sportsNetVenueRealizations[
+        this.sportsNetVenueRealizations.indexOf(existing)
+      ] = merged;
+      return { ...merged };
+    }
+    const record: SportsNetVenueRealizationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.sportsNetVenueRealizations.push(record);
+    return { ...record };
+  }
+
+  async getSportsNetVenueRealization(
+    sourceEventId: string,
+  ): Promise<SportsNetVenueRealizationRecord | undefined> {
+    const found = this.sportsNetVenueRealizations.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsResaleRoyaltyApplication(
+    row: Omit<SportsResaleRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleRoyaltyApplicationRecord> {
+    if (
+      this.sportsResaleRoyaltyApplications.some((r) => r.source_event_id === row.source_event_id)
+    ) {
+      throw new Error(`sports_resale_royalty_conflict:${row.source_event_id}`);
+    }
+    const record: SportsResaleRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsResaleRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async getSportsResaleRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    const found = this.sportsResaleRoyaltyApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async sumSportsLeaguePoolContractGross(
+    leagueRightsCode: string,
+    period: string,
+    currency: string,
+  ): Promise<number> {
+    return this.sportsBroadcastingContracts
+      .filter(
+        (contract) =>
+          contract.league_rights_code === leagueRightsCode &&
+          contract.period === period &&
+          contract.currency === currency,
+      )
+      .reduce((sum, contract) => sum + contract.contract_gross_cents, 0);
+  }
+
+  async upsertSportsLeaguePoolDistribution(
+    row: Omit<SportsLeaguePoolDistributionRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolDistributionRecord> {
+    const existing = this.sportsLeaguePoolDistributions.find(
+      (candidate) => candidate.source_event_id === row.source_event_id,
+    );
+    if (existing !== undefined) {
+      const merged: SportsLeaguePoolDistributionRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      this.sportsLeaguePoolDistributions[
+        this.sportsLeaguePoolDistributions.indexOf(existing)
+      ] = merged;
+      return { ...merged };
+    }
+    const record: SportsLeaguePoolDistributionRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.sportsLeaguePoolDistributions.push(record);
+    return { ...record };
+  }
+
+  async getSportsLeaguePoolDistribution(
+    sourceEventId: string,
+  ): Promise<SportsLeaguePoolDistributionRecord | undefined> {
+    const found = this.sportsLeaguePoolDistributions.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsGroupLicensingApplication(
+    row: Omit<SportsGroupLicensingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsGroupLicensingApplicationRecord> {
+    if (
+      this.sportsGroupLicensingApplications.some((r) => r.source_event_id === row.source_event_id)
+    ) {
+      throw new Error(`sports_group_licensing_conflict:${row.source_event_id}`);
+    }
+    const record: SportsGroupLicensingApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsGroupLicensingApplications.push(record);
+    return { ...record };
+  }
+
+  async getSportsGroupLicensingApplication(
+    sourceEventId: string,
+  ): Promise<SportsGroupLicensingApplicationRecord | undefined> {
+    const found = this.sportsGroupLicensingApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listNilPayoutApplicationsForAthlete(
+    athleteId: string,
+    period: string,
+  ): Promise<NilPayoutApplicationRecord[]> {
+    const rows = [...this.nilPayoutApplications.values()].filter(
+      (application) => application.athlete_id === athleteId && application.period === period,
+    );
+    // Deterministic order — source_event_id ascending.
+    rows.sort((a, b) => (a.source_event_id < b.source_event_id ? -1 : 1));
+    return rows.map((record) => ({ ...record }));
+  }
+
+  async upsertSportsNilDealReconciliation(
+    row: Omit<SportsNilDealReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNilDealReconciliationRecord> {
+    const existing = this.sportsNilDealReconciliations.find(
+      (candidate) => candidate.source_event_id === row.source_event_id,
+    );
+    if (existing !== undefined) {
+      const merged: SportsNilDealReconciliationRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      this.sportsNilDealReconciliations[
+        this.sportsNilDealReconciliations.indexOf(existing)
+      ] = merged;
+      return { ...merged };
+    }
+    const record: SportsNilDealReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.sportsNilDealReconciliations.push(record);
+    return { ...record };
+  }
+
+  async getSportsNilDealReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsNilDealReconciliationRecord | undefined> {
+    const found = this.sportsNilDealReconciliations.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSportsBiometricMicroPayoutApplication(
+    row: Omit<SportsBiometricMicroPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord> {
+    if (
+      this.sportsBiometricMicroPayoutApplications.some(
+        (r) => r.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(`sports_biometric_payout_conflict:${row.source_event_id}`);
+    }
+    const record: SportsBiometricMicroPayoutApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.sportsBiometricMicroPayoutApplications.push(record);
+    return { ...record };
+  }
+
+  async getSportsBiometricMicroPayoutApplication(
+    sourceEventId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    const found = this.sportsBiometricMicroPayoutApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
   }
 }
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */

@@ -67,6 +67,40 @@ export const UNIQUE_COLUMNS: Record<string, string[][]> = {
   ],
   energy_resource_audit_escrow_reconciliations: [["reserve_ledger_id"]],
   energy_resource_payout_gate_states: [["payee_id", "parcel_id"]],
+  // Sports lane replay-guard posts and recompute-in-place rows
+  // (migration 0054's unique constraints, mirrored exactly).
+  sports_ticket_sale_posts: [["source_event_id"]],
+  sports_resale_sale_posts: [["source_event_id"]],
+  sports_turnstile_scan_posts: [["source_event_id"]],
+  sports_biometric_tracking_posts: [["source_event_id"]],
+  sports_broadcasting_contracts: [["contract_ref"]],
+  sports_gate_reconciliations: [
+    ["source_event_id"],
+    ["venue_gln", "period", "currency"],
+  ],
+  sports_net_venue_realizations: [
+    ["source_event_id"],
+    [
+      "nil_contract_id",
+      "athlete_glan",
+      "venue_gln",
+      "league_rights_code",
+      "turnstile_scan_hash",
+      "period",
+      "currency",
+    ],
+  ],
+  sports_resale_royalty_applications: [["source_event_id"]],
+  sports_league_pool_distributions: [
+    ["source_event_id"],
+    ["league_rights_code", "period", "currency"],
+  ],
+  sports_group_licensing_applications: [["source_event_id"]],
+  sports_nil_deal_reconciliations: [
+    ["source_event_id"],
+    ["nil_contract_id", "athlete_glan", "period"],
+  ],
+  sports_biometric_micro_payout_applications: [["source_event_id"]],
 };
 
 export class FakeTable {

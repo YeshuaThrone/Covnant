@@ -25,6 +25,12 @@ import type {
   RightsPipeline,
 } from "@/modules/sdk/records";
 import type { SpatialZoneRowClass } from "@/modules/spatial/records";
+import type {
+  SportsLicenseeClass,
+  SportsContractClass,
+  SportsTrackingModality,
+  SportsUnionCode,
+} from "@/modules/sports/records";
 
 // The worker lanes on the SDK's four-pipeline vocabulary verbatim — one
 // definition, no worker-local shadow.
@@ -171,7 +177,21 @@ export type StatementProfileKind =
   | "energy_scada_meter_sales_csv"
   | "energy_gpu_utilization_csv"
   | "energy_pipeline_flow_meter_csv"
-  | "energy_carbon_offset_mints_csv";
+  | "energy_carbon_offset_mints_csv"
+  // The sports lane (PR 50, the founder sports directive) — the eight
+  // strict senders the directive names (the three primary ticketers'
+  // settlement sheets, the two secondary marketplaces' resale sheets,
+  // venue turnstile telemetry, league broadcasting and group-licensing
+  // contracts, and biometric performance tracking feeds), one strict
+  // profile per sender's sheet.
+  | "sports_ticketmaster_sales_csv"
+  | "sports_axs_sales_csv"
+  | "sports_seatgeek_sales_csv"
+  | "sports_stubhub_resale_csv"
+  | "sports_vividseats_resale_csv"
+  | "sports_turnstile_telemetry_csv"
+  | "sports_league_contracts_csv"
+  | "sports_biometric_tracking_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -1088,6 +1108,14 @@ export interface ParsedStatementLine {
    * lane discriminator. Optional for the same reason as
    * hardwareDetail. */
   energyDetail?: EnergyLineDetail | null;
+
+  /** Sports lane context (PR 50, the founder sports directive — the
+   * statement sender, the sender row id of record, the founder-specified
+   * five-column identity tuple the Net Venue Realization calculator keys
+   * on, and the sender family's money, count, contract, or quantity
+   * legs); null on every non-sports line — the presence IS the lane
+   * discriminator. Optional for the same reason as energyDetail. */
+  sportsDetail?: SportsLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1816,6 +1844,114 @@ export type EnergyCarbonOffsetMintDetail = {
    * quantity parse: 1 unit = 1e8 micros) — the micro-royalty's
    * quantity leg. */
   readonly tonnesVerifiedMicros: number;
+};
+
+/** The sports lane's per-line context (PR 50, the founder sports
+ * directive) — one discriminated shape per sender family: the three
+ * primary ticketers share the settlement anatomy (the Net Venue
+ * Realization's five money legs keyed on the founder's five identity
+ * columns), the two secondary marketplaces share the resale anatomy
+ * (the royalty application's gross), the turnstile rows carry the scan
+ * counts the gate reconciliation reconciles, the contract rows carry
+ * the league pool and group licensing terms, and the biometric rows
+ * carry the licensed quantities the micro-payout policy prices. */
+export type SportsLineDetail =
+  | SportsTicketSaleDetail
+  | SportsResaleSaleDetail
+  | SportsTurnstileScanDetail
+  | SportsLeagueContractDetail
+  | SportsBiometricTrackingDetail;
+
+export type SportsTicketSaleDetail = {
+  readonly sender: "ticketmaster" | "axs" | "seatgeek";
+  /** The sender's settlement row id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** THE FOUNDER'S FIVE IDENTITY COLUMNS — the Net Venue Realization
+   * tuple (the NIL contract and athlete GLAN are '' where the gate is
+   * not NIL-linked; the scan hash is '' where the settlement carries no
+   * turnstile batch — the NULL-distinctness avoidance). */
+  readonly nilContractId: string;
+  readonly athleteGlan: string;
+  readonly venueGln: string;
+  readonly leagueRightsCode: string;
+  readonly turnstileScanHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The realization's five money legs of record (exact cents). */
+  readonly grossTicketRevenueCents: number;
+  readonly facilitySurchargesCents: number;
+  readonly municipalTaxesCents: number;
+  readonly insuranceReservesCents: number;
+  readonly processorFeeCutsCents: number;
+  readonly ticketCount: number;
+};
+
+export type SportsResaleSaleDetail = {
+  readonly sender: "stubhub" | "vivid_seats";
+  /** The sender's resale order id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** The royalty policy's scope — venue and league of record. */
+  readonly venueGln: string;
+  readonly leagueRightsCode: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The resale gross the royalty cut prices (exact cents). */
+  readonly resaleGrossCents: number;
+};
+
+export type SportsTurnstileScanDetail = {
+  readonly sender: "turnstile_telemetry";
+  /** The sender's scan batch id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  readonly venueGln: string;
+  /** The scan batch's hash of record — the reconciliation's telemetry
+   * identity. */
+  readonly turnstileScanHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The batch's scan count of record — the receipts reconciliation's
+   * telemetry side. */
+  readonly scanCount: number;
+};
+
+export type SportsLeagueContractDetail = {
+  readonly sender: "league_contracts";
+  /** The sender's contract reference of record — the contract
+   * registry's natural key. */
+  readonly senderRowId: string;
+  readonly leagueRightsCode: string;
+  readonly contractClass: SportsContractClass;
+  /** The contract's gross (the league pool's contribution) and the
+   * group licensing royalty pot (exact cents). */
+  readonly contractGrossCents: number;
+  readonly royaltyPoolCents: number;
+  /** 'none' rides the league pool classes — no union ledger leg. */
+  readonly unionCode: SportsUnionCode;
+  readonly unionShareBps: number;
+  /** The group licensing roster — the athlete GLANs the royalties walk
+   * to ('' for the league pool classes). */
+  readonly athleteRosterJson: string;
+  readonly period: string;
+  readonly currency: string;
+};
+
+export type SportsBiometricTrackingDetail = {
+  readonly sender: "biometric_tracking";
+  /** The sender's telemetry event id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  readonly athleteGlan: string;
+  readonly leagueRightsCode: string;
+  readonly trackingModality: SportsTrackingModality;
+  readonly licenseeClass: SportsLicenseeClass;
+  /** The licensed quantity in statement micros (the house quantity
+   * parse: 1 unit = 1e8 micros) — the micro-payout's quantity leg. */
+  readonly licensedQuantityMicros: number;
+  readonly period: string;
+  readonly currency: string;
 };
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'

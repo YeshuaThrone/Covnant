@@ -181,6 +181,26 @@ import type {
   NilStateRuleRecord,
 } from '@/modules/nil/records';
 import type {
+  SportsBiometricRoyaltyPolicyRecord,
+  SportsBiometricTrackingPostRecord,
+  SportsBiometricMicroPayoutApplicationRecord,
+  SportsBroadcastingContractRecord,
+  SportsGateReconciliationRecord,
+  SportsLeaguePoolDistributionRecord,
+  SportsLeaguePoolPolicyRecord,
+  SportsLeagueTeamRegistrationRecord,
+  SportsLicenseeClass,
+  SportsNetVenueRealizationRecord,
+  SportsNilDealReconciliationRecord,
+  SportsResaleRoyaltyApplicationRecord,
+  SportsResaleRoyaltyPolicyRecord,
+  SportsStudentAthleteProfileRecord,
+  SportsTicketSalePostRecord,
+  SportsResaleSalePostRecord,
+  SportsTurnstileScanPostRecord,
+  SportsGroupLicensingApplicationRecord,
+} from '@/modules/sports/records';
+import type {
   SpatialAuditEscrowDrawdownRecord,
   SpatialAuditEscrowPolicyRecord,
   SpatialAuditEscrowReconciliationRecord,
@@ -766,6 +786,26 @@ const TABLES = {
   resourceAuditEscrowDrawdowns: 'energy_resource_audit_escrow_drawdowns',
   resourceAuditEscrowReconciliations: 'energy_resource_audit_escrow_reconciliations',
   resourcePayoutGateStates: 'energy_resource_payout_gate_states',
+
+  // PR 50 — the sports lane (mirrors the SQLite DDL table names).
+  sportsStudentAthleteProfiles: 'sports_student_athlete_profiles',
+  sportsResaleRoyaltyPolicies: 'sports_resale_royalty_policies',
+  sportsLeaguePoolPolicies: 'sports_league_pool_policies',
+  sportsLeagueTeamRegistrations: 'sports_league_team_registrations',
+  sportsBiometricRoyaltyPolicies: 'sports_biometric_royalty_policies',
+  sportsTicketSalePosts: 'sports_ticket_sale_posts',
+  sportsResaleSalePosts: 'sports_resale_sale_posts',
+  sportsTurnstileScanPosts: 'sports_turnstile_scan_posts',
+  sportsBiometricTrackingPosts: 'sports_biometric_tracking_posts',
+  sportsBroadcastingContracts: 'sports_broadcasting_contracts',
+  sportsGateReconciliations: 'sports_gate_reconciliations',
+  sportsNetVenueRealizations: 'sports_net_venue_realizations',
+  sportsResaleRoyaltyApplications: 'sports_resale_royalty_applications',
+  sportsLeaguePoolDistributions: 'sports_league_pool_distributions',
+  sportsGroupLicensingApplications: 'sports_group_licensing_applications',
+  sportsNilDealReconciliations: 'sports_nil_deal_reconciliations',
+  sportsBiometricMicroPayoutApplications:
+    'sports_biometric_micro_payout_applications',
 } as const;
 
 /**
@@ -10974,5 +11014,699 @@ export class SupabaseStore implements Store {
       throw new Error(`setEnergyComputeGridSplitJournal failed: ${error.message}`);
     }
     return (data?.[0] as EnergyComputeGridSplitApplicationRecord | undefined) ?? undefined;
+  }
+
+  // ------------------------------------------------------------------
+  // PR 50 — the sports lane. The Supabase mirror of the sports store
+  // seam: registry upserts converge on their natural keys, posts are
+  // replay-guarded by UNIQUE(source_event_id) (contract_ref for the
+  // contracts), and the positions of record replace in place — no id
+  // in any conflict payload (the PR 33 lesson). Aggregates select the
+  // amount columns alone and sum exactly in JS (integer cents — never
+  // a page of full rows).
+  // ------------------------------------------------------------------
+
+  async upsertSportsStudentAthleteProfile(
+    row: Omit<SportsStudentAthleteProfileRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsStudentAthleteProfileRecord> {
+    return this.oneStrict<SportsStudentAthleteProfileRecord>(
+      this.client
+        .from(TABLES.sportsStudentAthleteProfiles)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'athlete_glan' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsStudentAthleteProfile',
+    );
+  }
+
+  async getSportsStudentAthleteProfile(
+    athleteGlan: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    return this.one<SportsStudentAthleteProfileRecord>(
+      this.client
+        .from(TABLES.sportsStudentAthleteProfiles)
+        .select()
+        .eq('athlete_glan', athleteGlan)
+        .maybeSingle(),
+      'getSportsStudentAthleteProfile',
+    );
+  }
+
+  async getSportsStudentAthleteProfileByNilAthleteId(
+    nilAthleteId: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    return this.one<SportsStudentAthleteProfileRecord>(
+      this.client
+        .from(TABLES.sportsStudentAthleteProfiles)
+        .select()
+        .eq('nil_athlete_id', nilAthleteId)
+        .maybeSingle(),
+      'getSportsStudentAthleteProfileByNilAthleteId',
+    );
+  }
+
+  async upsertSportsResaleRoyaltyPolicy(
+    row: Omit<SportsResaleRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsResaleRoyaltyPolicyRecord> {
+    return this.oneStrict<SportsResaleRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.sportsResaleRoyaltyPolicies)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'venue_gln,league_rights_code' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsResaleRoyaltyPolicy',
+    );
+  }
+
+  async getSportsResaleRoyaltyPolicy(
+    venueGln: string,
+    leagueRightsCode: string,
+  ): Promise<SportsResaleRoyaltyPolicyRecord | undefined> {
+    return this.one<SportsResaleRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.sportsResaleRoyaltyPolicies)
+        .select()
+        .eq('venue_gln', venueGln)
+        .eq('league_rights_code', leagueRightsCode)
+        .maybeSingle(),
+      'getSportsResaleRoyaltyPolicy',
+    );
+  }
+
+  async upsertSportsLeaguePoolPolicy(
+    row: Omit<SportsLeaguePoolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolPolicyRecord> {
+    return this.oneStrict<SportsLeaguePoolPolicyRecord>(
+      this.client
+        .from(TABLES.sportsLeaguePoolPolicies)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'league_rights_code' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsLeaguePoolPolicy',
+    );
+  }
+
+  async getSportsLeaguePoolPolicy(
+    leagueRightsCode: string,
+  ): Promise<SportsLeaguePoolPolicyRecord | undefined> {
+    return this.one<SportsLeaguePoolPolicyRecord>(
+      this.client
+        .from(TABLES.sportsLeaguePoolPolicies)
+        .select()
+        .eq('league_rights_code', leagueRightsCode)
+        .maybeSingle(),
+      'getSportsLeaguePoolPolicy',
+    );
+  }
+
+  async upsertSportsLeagueTeam(
+    row: Omit<SportsLeagueTeamRegistrationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeagueTeamRegistrationRecord> {
+    return this.oneStrict<SportsLeagueTeamRegistrationRecord>(
+      this.client
+        .from(TABLES.sportsLeagueTeamRegistrations)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'league_rights_code,team_code' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsLeagueTeam',
+    );
+  }
+
+  async listSportsLeagueTeams(
+    leagueRightsCode: string,
+  ): Promise<SportsLeagueTeamRegistrationRecord[]> {
+    return this.many<SportsLeagueTeamRegistrationRecord>(
+      this.client
+        .from(TABLES.sportsLeagueTeamRegistrations)
+        .select()
+        .eq('league_rights_code', leagueRightsCode)
+        .order('team_code'),
+      'listSportsLeagueTeams',
+    );
+  }
+
+  async upsertSportsBiometricRoyaltyPolicy(
+    row: Omit<SportsBiometricRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord> {
+    return this.oneStrict<SportsBiometricRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.sportsBiometricRoyaltyPolicies)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'league_rights_code,licensee_class' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsBiometricRoyaltyPolicy',
+    );
+  }
+
+  async getSportsBiometricRoyaltyPolicy(
+    leagueRightsCode: string,
+    licenseeClass: SportsLicenseeClass,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord | undefined> {
+    return this.one<SportsBiometricRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.sportsBiometricRoyaltyPolicies)
+        .select()
+        .eq('league_rights_code', leagueRightsCode)
+        .eq('licensee_class', licenseeClass)
+        .maybeSingle(),
+      'getSportsBiometricRoyaltyPolicy',
+    );
+  }
+
+  async insertSportsTicketSalePost(
+    row: Omit<SportsTicketSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTicketSalePostRecord> {
+    // UNIQUE per source_event_id — the replay guard. A duplicate walks
+    // into the thrown unique-violation (the InMemory/SQLite parity).
+    return this.oneStrict<SportsTicketSalePostRecord>(
+      this.client
+        .from(TABLES.sportsTicketSalePosts)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsTicketSalePost',
+    );
+  }
+
+  async getSportsTicketSalePost(
+    sourceEventId: string,
+  ): Promise<SportsTicketSalePostRecord | undefined> {
+    return this.one<SportsTicketSalePostRecord>(
+      this.client
+        .from(TABLES.sportsTicketSalePosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsTicketSalePost',
+    );
+  }
+
+  async insertSportsResaleSalePost(
+    row: Omit<SportsResaleSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleSalePostRecord> {
+    return this.oneStrict<SportsResaleSalePostRecord>(
+      this.client
+        .from(TABLES.sportsResaleSalePosts)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsResaleSalePost',
+    );
+  }
+
+  async getSportsResaleSalePost(
+    sourceEventId: string,
+  ): Promise<SportsResaleSalePostRecord | undefined> {
+    return this.one<SportsResaleSalePostRecord>(
+      this.client
+        .from(TABLES.sportsResaleSalePosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsResaleSalePost',
+    );
+  }
+
+  async insertSportsTurnstileScanPost(
+    row: Omit<SportsTurnstileScanPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTurnstileScanPostRecord> {
+    return this.oneStrict<SportsTurnstileScanPostRecord>(
+      this.client
+        .from(TABLES.sportsTurnstileScanPosts)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsTurnstileScanPost',
+    );
+  }
+
+  async getSportsTurnstileScanPost(
+    sourceEventId: string,
+  ): Promise<SportsTurnstileScanPostRecord | undefined> {
+    return this.one<SportsTurnstileScanPostRecord>(
+      this.client
+        .from(TABLES.sportsTurnstileScanPosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsTurnstileScanPost',
+    );
+  }
+
+  async insertSportsBiometricTrackingPost(
+    row: Omit<SportsBiometricTrackingPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricTrackingPostRecord> {
+    return this.oneStrict<SportsBiometricTrackingPostRecord>(
+      this.client
+        .from(TABLES.sportsBiometricTrackingPosts)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsBiometricTrackingPost',
+    );
+  }
+
+  async getSportsBiometricTrackingPost(
+    sourceEventId: string,
+  ): Promise<SportsBiometricTrackingPostRecord | undefined> {
+    return this.one<SportsBiometricTrackingPostRecord>(
+      this.client
+        .from(TABLES.sportsBiometricTrackingPosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsBiometricTrackingPost',
+    );
+  }
+
+  async insertSportsBroadcastingContract(
+    row: Omit<SportsBroadcastingContractRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBroadcastingContractRecord> {
+    // UNIQUE per contract_ref — the replay guard (the contract's own
+    // reference, not a source event id).
+    return this.oneStrict<SportsBroadcastingContractRecord>(
+      this.client
+        .from(TABLES.sportsBroadcastingContracts)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsBroadcastingContract',
+    );
+  }
+
+  async getSportsBroadcastingContract(
+    contractRef: string,
+  ): Promise<SportsBroadcastingContractRecord | undefined> {
+    return this.one<SportsBroadcastingContractRecord>(
+      this.client
+        .from(TABLES.sportsBroadcastingContracts)
+        .select()
+        .eq('contract_ref', contractRef)
+        .maybeSingle(),
+      'getSportsBroadcastingContract',
+    );
+  }
+
+  async sumSportsGateLegs(
+    nilContractId: string,
+    athleteGlan: string,
+    venueGln: string,
+    leagueRightsCode: string,
+    turnstileScanHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_ticket_revenue_cents: number;
+    facility_surcharges_cents: number;
+    municipal_taxes_cents: number;
+    insurance_reserves_cents: number;
+    processor_fee_cuts_cents: number;
+    ticket_count: number;
+  }> {
+    // The realization recompute's aggregation — the amount columns alone,
+    // summed exactly (never a page of full rows).
+    const rows = await this.many<{
+      gross_ticket_revenue_cents: number;
+      facility_surcharges_cents: number;
+      municipal_taxes_cents: number;
+      insurance_reserves_cents: number;
+      processor_fee_cuts_cents: number;
+      ticket_count: number;
+    }>(
+      this.client
+        .from(TABLES.sportsTicketSalePosts)
+        .select(
+          'gross_ticket_revenue_cents,facility_surcharges_cents,municipal_taxes_cents,insurance_reserves_cents,processor_fee_cuts_cents,ticket_count',
+        )
+        .eq('nil_contract_id', nilContractId)
+        .eq('athlete_glan', athleteGlan)
+        .eq('venue_gln', venueGln)
+        .eq('league_rights_code', leagueRightsCode)
+        .eq('turnstile_scan_hash', turnstileScanHash)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumSportsGateLegs',
+    );
+    return rows.reduce(
+      (acc, row) => ({
+        gross_ticket_revenue_cents:
+          acc.gross_ticket_revenue_cents + row.gross_ticket_revenue_cents,
+        facility_surcharges_cents:
+          acc.facility_surcharges_cents + row.facility_surcharges_cents,
+        municipal_taxes_cents: acc.municipal_taxes_cents + row.municipal_taxes_cents,
+        insurance_reserves_cents:
+          acc.insurance_reserves_cents + row.insurance_reserves_cents,
+        processor_fee_cuts_cents:
+          acc.processor_fee_cuts_cents + row.processor_fee_cuts_cents,
+        ticket_count: acc.ticket_count + row.ticket_count,
+      }),
+      {
+        gross_ticket_revenue_cents: 0,
+        facility_surcharges_cents: 0,
+        municipal_taxes_cents: 0,
+        insurance_reserves_cents: 0,
+        processor_fee_cuts_cents: 0,
+        ticket_count: 0,
+      },
+    );
+  }
+
+  async listSportsTicketSaleKeysForHash(
+    venueGln: string,
+    turnstileScanHash: string,
+  ): Promise<
+    Array<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }>
+  > {
+    const rows = await this.many<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }>(
+      this.client
+        .from(TABLES.sportsTicketSalePosts)
+        .select(
+          'nil_contract_id,athlete_glan,venue_gln,league_rights_code,turnstile_scan_hash,period,currency',
+        )
+        .eq('venue_gln', venueGln)
+        .eq('turnstile_scan_hash', turnstileScanHash),
+      'listSportsTicketSaleKeysForHash',
+    );
+    // PostgREST has no SELECT DISTINCT — dedupe on the joined identity.
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = [
+        row.nil_contract_id,
+        row.athlete_glan,
+        row.venue_gln,
+        row.league_rights_code,
+        row.turnstile_scan_hash,
+        row.period,
+        row.currency,
+      ].join('\u0000');
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+
+  async sumSportsGateReconciliationSides(
+    venueGln: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    ticket_count_sum: number;
+    scan_count_sum: number;
+    gross_ticket_revenue_cents: number;
+  }> {
+    const ticketRows = await this.many<{
+      ticket_count: number;
+      gross_ticket_revenue_cents: number;
+    }>(
+      this.client
+        .from(TABLES.sportsTicketSalePosts)
+        .select('ticket_count,gross_ticket_revenue_cents')
+        .eq('venue_gln', venueGln)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumSportsGateReconciliationSides/tickets',
+    );
+    const scanRows = await this.many<{ scan_count: number }>(
+      this.client
+        .from(TABLES.sportsTurnstileScanPosts)
+        .select('scan_count')
+        .eq('venue_gln', venueGln)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumSportsGateReconciliationSides/scans',
+    );
+    return {
+      ticket_count_sum: ticketRows.reduce((sum, row) => sum + row.ticket_count, 0),
+      scan_count_sum: scanRows.reduce((sum, row) => sum + row.scan_count, 0),
+      gross_ticket_revenue_cents: ticketRows.reduce(
+        (sum, row) => sum + row.gross_ticket_revenue_cents,
+        0,
+      ),
+    };
+  }
+
+  async upsertSportsGateReconciliation(
+    row: Omit<SportsGateReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsGateReconciliationRecord> {
+    return this.oneStrict<SportsGateReconciliationRecord>(
+      this.client
+        .from(TABLES.sportsGateReconciliations)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'venue_gln,period,currency' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsGateReconciliation',
+    );
+  }
+
+  async getSportsGateReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsGateReconciliationRecord | undefined> {
+    return this.one<SportsGateReconciliationRecord>(
+      this.client
+        .from(TABLES.sportsGateReconciliations)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsGateReconciliation',
+    );
+  }
+
+  async upsertSportsNetVenueRealization(
+    row: Omit<SportsNetVenueRealizationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNetVenueRealizationRecord> {
+    // The realization position of record — UNIQUE per the founder's
+    // tuple; the recompute replaces the sums in place (no id in the
+    // conflict payload — the PR 33 lesson).
+    return this.oneStrict<SportsNetVenueRealizationRecord>(
+      this.client
+        .from(TABLES.sportsNetVenueRealizations)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          {
+            onConflict:
+              'nil_contract_id,athlete_glan,venue_gln,league_rights_code,turnstile_scan_hash,period,currency',
+          },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsNetVenueRealization',
+    );
+  }
+
+  async getSportsNetVenueRealization(
+    sourceEventId: string,
+  ): Promise<SportsNetVenueRealizationRecord | undefined> {
+    return this.one<SportsNetVenueRealizationRecord>(
+      this.client
+        .from(TABLES.sportsNetVenueRealizations)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsNetVenueRealization',
+    );
+  }
+
+  async insertSportsResaleRoyaltyApplication(
+    row: Omit<SportsResaleRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleRoyaltyApplicationRecord> {
+    return this.oneStrict<SportsResaleRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.sportsResaleRoyaltyApplications)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsResaleRoyaltyApplication',
+    );
+  }
+
+  async getSportsResaleRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    return this.one<SportsResaleRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.sportsResaleRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsResaleRoyaltyApplication',
+    );
+  }
+
+  async sumSportsLeaguePoolContractGross(
+    leagueRightsCode: string,
+    period: string,
+    currency: string,
+  ): Promise<number> {
+    const rows = await this.many<{ contract_gross_cents: number }>(
+      this.client
+        .from(TABLES.sportsBroadcastingContracts)
+        .select('contract_gross_cents')
+        .eq('league_rights_code', leagueRightsCode)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumSportsLeaguePoolContractGross',
+    );
+    return rows.reduce((sum, row) => sum + row.contract_gross_cents, 0);
+  }
+
+  async upsertSportsLeaguePoolDistribution(
+    row: Omit<SportsLeaguePoolDistributionRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolDistributionRecord> {
+    return this.oneStrict<SportsLeaguePoolDistributionRecord>(
+      this.client
+        .from(TABLES.sportsLeaguePoolDistributions)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'league_rights_code,period,currency' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsLeaguePoolDistribution',
+    );
+  }
+
+  async getSportsLeaguePoolDistribution(
+    sourceEventId: string,
+  ): Promise<SportsLeaguePoolDistributionRecord | undefined> {
+    return this.one<SportsLeaguePoolDistributionRecord>(
+      this.client
+        .from(TABLES.sportsLeaguePoolDistributions)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsLeaguePoolDistribution',
+    );
+  }
+
+  async insertSportsGroupLicensingApplication(
+    row: Omit<SportsGroupLicensingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsGroupLicensingApplicationRecord> {
+    return this.oneStrict<SportsGroupLicensingApplicationRecord>(
+      this.client
+        .from(TABLES.sportsGroupLicensingApplications)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsGroupLicensingApplication',
+    );
+  }
+
+  async getSportsGroupLicensingApplication(
+    sourceEventId: string,
+  ): Promise<SportsGroupLicensingApplicationRecord | undefined> {
+    return this.one<SportsGroupLicensingApplicationRecord>(
+      this.client
+        .from(TABLES.sportsGroupLicensingApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsGroupLicensingApplication',
+    );
+  }
+
+  async listNilPayoutApplicationsForAthlete(
+    athleteId: string,
+    period: string,
+  ): Promise<NilPayoutApplicationRecord[]> {
+    return this.many<NilPayoutApplicationRecord>(
+      this.client
+        .from('nil_payout_applications')
+        .select()
+        .eq('athlete_id', athleteId)
+        .eq('period', period)
+        .order('source_event_id'),
+      'listNilPayoutApplicationsForAthlete',
+    );
+  }
+
+  async upsertSportsNilDealReconciliation(
+    row: Omit<SportsNilDealReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNilDealReconciliationRecord> {
+    return this.oneStrict<SportsNilDealReconciliationRecord>(
+      this.client
+        .from(TABLES.sportsNilDealReconciliations)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'nil_contract_id,athlete_glan,period' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertSportsNilDealReconciliation',
+    );
+  }
+
+  async getSportsNilDealReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsNilDealReconciliationRecord | undefined> {
+    return this.one<SportsNilDealReconciliationRecord>(
+      this.client
+        .from(TABLES.sportsNilDealReconciliations)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsNilDealReconciliation',
+    );
+  }
+
+  async insertSportsBiometricMicroPayoutApplication(
+    row: Omit<SportsBiometricMicroPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord> {
+    return this.oneStrict<SportsBiometricMicroPayoutApplicationRecord>(
+      this.client
+        .from(TABLES.sportsBiometricMicroPayoutApplications)
+        .insert({ ...row, created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSportsBiometricMicroPayoutApplication',
+    );
+  }
+
+  async getSportsBiometricMicroPayoutApplication(
+    sourceEventId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    return this.one<SportsBiometricMicroPayoutApplicationRecord>(
+      this.client
+        .from(TABLES.sportsBiometricMicroPayoutApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getSportsBiometricMicroPayoutApplication',
+    );
   }
 }

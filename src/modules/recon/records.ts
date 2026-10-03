@@ -726,6 +726,43 @@ export interface ReconJobResult {
   energy_gpu_yield_cents?: number;
   energy_grid_split_cents?: number;
   energy_carbon_payout_total_cents?: number;
+  /** Sports lane (PR 50, the founder sports directive): the walks —
+   * committed / counted replay no-ops / fail-closed skips, per walk
+   * (gate reconciliations, Net Venue Realizations, resale royalties,
+   * league pool distributions, group licensing, NIL profile
+   * reconciliations, biometric micro-payouts). The row replay counter
+   * rides the senders' replay guards — a re-shipped sheet replays
+   * every row behind it. Skips are the fail-closed direction: no
+   * policy of record or no eligible profile holds the money rather
+   * than guesses a routing. */
+  sports_gate_reconciliations_committed?: number;
+  sports_realizations_committed?: number;
+  sports_realizations_held_negative_net?: number;
+  sports_rows_replayed?: number;
+  sports_resale_royalties_committed?: number;
+  sports_resale_royalties_skipped_no_policy?: number;
+  sports_league_pools_committed?: number;
+  sports_league_pools_skipped_no_policy?: number;
+  sports_league_pools_skipped_no_teams?: number;
+  sports_group_licensing_committed?: number;
+  sports_group_licensing_skipped_no_profile?: number;
+  sports_group_licensing_skipped_union_mismatch?: number;
+  sports_nil_reconciliations_committed?: number;
+  sports_nil_reconciliations_unmatched_profile?: number;
+  sports_nil_reconciliations_profile_ineligible?: number;
+  sports_biometric_payouts_committed?: number;
+  sports_biometric_payouts_skipped_no_policy?: number;
+  sports_biometric_payouts_skipped_no_profile?: number;
+  /** Sports lane: the committed money, integer cents — the pass's
+   * Net Gate Pool DELTA (the per-tuple after − before of record,
+   * additive across jobs; includes held negative nets) and every leg
+   * the walks priced. */
+  sports_net_gate_pool_delta_cents?: number;
+  sports_resale_royalty_cents?: number;
+  sports_league_pool_distributed_cents?: number;
+  sports_group_licensing_union_cents?: number;
+  sports_group_licensing_athlete_cents?: number;
+  sports_biometric_payout_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

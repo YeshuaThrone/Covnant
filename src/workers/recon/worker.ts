@@ -69,7 +69,9 @@ import { writeDeveloperRowsToStore } from "./developerQueue";
 import { isHardwareProfileKind } from "./hardwareProfiles";
 import { writeHardwareRowsToStore } from "./hardwareQueue";
 import { isEnergyProfileKind } from "./energyProfiles";
+import { isSportsProfileKind } from "./sportsProfiles";
 import { writeEnergyRowsToStore } from "./energyQueue";
+import { writeSportsRowsToStore } from "./sportsQueue";
 import { writeServiceRowsToStore } from "./serviceQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
@@ -396,6 +398,9 @@ async function processJobBody(
     // lane's money of record; match_queue never sees an energy row.
     if (isEnergyProfileKind(matchedProfile.kind)) {
       return await parseEnergy(deps, matchedProfile, content);
+    }
+    if (isSportsProfileKind(matchedProfile.kind)) {
+      return await parseSports(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1454,6 +1459,72 @@ async function parseEnergy(
     energy_gpu_yield_cents: counts.gpuYieldCents,
     energy_grid_split_cents: counts.gridSplitCents,
     energy_carbon_payout_total_cents: counts.carbonPayoutTotalCents,
+  };
+}
+
+/**
+ * The sports lane (PR 50, the founder sports directive): the primary
+ * ticketers' rows (Ticketmaster, AXS, SeatGeek), the secondary
+ * marketplaces' rows (StubHub, Vivid Seats), the venue turnstile
+ * telemetry, the league broadcasting contracts, and the biometric
+ * tracking feeds convert through the Net Venue Realization calculator
+ * (gross ticket revenue − facility surcharges − municipal taxes −
+ * insurance reserves − payment processor fee cuts = the Net Gate
+ * Pool), the turnstile-to-receipt reconciliation that gates
+ * realization, the perpetual 5–10% resale royalty splits, the
+ * league-wide pool waterfalls (market-size balance offsets, salary
+ * cap thresholds, performance incentives), the union group-licensing
+ * routing onward to athlete digital wallets, the NIL profile
+ * reconciliations, and the per-license biometric micro-payouts. No
+ * match_queue row, no holding post: replay guards and the fail-closed
+ * policies of record govern everything. The result's sports_* block
+ * is absent on every other lane — its presence is the discriminator.
+ */
+async function parseSports(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeSportsRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.gateReconciliationsWritten +
+      counts.realizationsWritten +
+      counts.resaleRoyaltiesWritten +
+      counts.leaguePoolsWritten +
+      counts.groupLicensingWritten +
+      counts.nilReconciliationsWritten +
+      counts.biometricPayoutsWritten,
+    matched: 0, // no vault matching on this lane — the sports tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    sports_gate_reconciliations_committed: counts.gateReconciliationsWritten,
+    sports_realizations_committed: counts.realizationsWritten,
+    sports_realizations_held_negative_net: counts.realizationsHeldNegativeNet,
+    sports_rows_replayed: counts.rowsReplayed,
+    sports_resale_royalties_committed: counts.resaleRoyaltiesWritten,
+    sports_resale_royalties_skipped_no_policy: counts.resaleRoyaltiesSkippedNoPolicy,
+    sports_league_pools_committed: counts.leaguePoolsWritten,
+    sports_league_pools_skipped_no_policy: counts.leaguePoolsSkippedNoPolicy,
+    sports_league_pools_skipped_no_teams: counts.leaguePoolsSkippedNoTeams,
+    sports_group_licensing_committed: counts.groupLicensingWritten,
+    sports_group_licensing_skipped_no_profile: counts.groupLicensingSkippedNoProfile,
+    sports_group_licensing_skipped_union_mismatch: counts.groupLicensingSkippedUnionMismatch,
+    sports_nil_reconciliations_committed: counts.nilReconciliationsWritten,
+    sports_nil_reconciliations_unmatched_profile: counts.nilReconciliationsUnmatchedProfile,
+    sports_nil_reconciliations_profile_ineligible: counts.nilReconciliationsProfileIneligible,
+    sports_biometric_payouts_committed: counts.biometricPayoutsWritten,
+    sports_biometric_payouts_skipped_no_policy: counts.biometricPayoutsSkippedNoPolicy,
+    sports_biometric_payouts_skipped_no_profile: counts.biometricPayoutsSkippedNoProfile,
+    sports_net_gate_pool_delta_cents: counts.netGatePoolDeltaCents,
+    sports_resale_royalty_cents: counts.resaleRoyaltyCents,
+    sports_league_pool_distributed_cents: counts.leaguePoolDistributedCents,
+    sports_group_licensing_union_cents: counts.groupLicensingUnionCents,
+    sports_group_licensing_athlete_cents: counts.groupLicensingAthleteCents,
+    sports_biometric_payout_cents: counts.biometricPayoutCents,
   };
 }
 

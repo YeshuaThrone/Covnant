@@ -1,0 +1,5 @@
+Telemetry Event ID,Athlete GLAN,League Rights Code,Tracking Modality,Licensee Class,Licensed Quantity,Currency,Reporting Period
+BIO-2026-03-0001,athlete:qb-one,NFL-LIC-2026,wearable,sportsbook,5000000000,USD,2026-03
+BIO-2026-03-0002,athlete:qb-one,NFL-LIC-2026,optical,media_network,2500000000,USD,2026-03
+BIO-2026-03-0003,athlete:rb-three,NFL-LIC-2026,wearable,health_tech,1000000000,USD,2026-03
+BIO-2026-03-0004,athlete:ghost,NFL-LIC-2026,optical,sportsbook,1000000000,USD,2026-03
