@@ -15,6 +15,9 @@ import {
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
   licensingMgShortfallIncomeGlAccount,
+  nilAuditEscrowGlAccount,
+  nilUnearnedClawbackReceivableGlAccount,
+  nilUnearnedClawbackRecoveryGlAccount,
   merchReturnsReserveGlAccount,
   promoterSettlementGlAccount,
   bookReturnsReserveGlAccount,
@@ -362,6 +365,56 @@ export function licensingMgShortfallIncomeCredit(
 ): GlLegInput {
   return {
     account: licensingMgShortfallIncomeGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// NIL audit escrow legs (PR 35): the per-scope NIL_AUDIT_ESCROW obligation
+// account — the audit-reserve legs' mirror at (payee, school) scope. A
+// routed athletic department distribution's reserve locks here against
+// the holding account's debit; mid-season NCAA Transfer Portal
+// reconciliations and tax withholdings debit it back to FBO cash; the
+// verified release debits it into the athlete's payout legs — never the
+// dust payee's account, never the unclaimed holding account, never any
+// other escrow's account.
+export function nilAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: nilAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function nilAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: nilAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Transfer portal clawback legs (PR 35): the pro-rated unearned advance
+// hold of record — the athlete's clawback debt rises as a receivable
+// asset (debit) against the advance-recovery income of record (credit).
+// Balanced legs; no cash moves until the hold settles.
+export function nilUnearnedClawbackReceivableDebit(
+  athleteId: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: nilUnearnedClawbackReceivableGlAccount(athleteId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function nilUnearnedClawbackRecoveryCredit(
+  athleteId: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: nilUnearnedClawbackRecoveryGlAccount(athleteId),
     debit_cents: 0,
     credit_cents: amountCents,
   };

@@ -277,6 +277,46 @@ export function licensingMgShortfallIncomeGlAccount(scopeKey: string): string {
   return `licensing_mg_shortfall_income:${scopeKey}`;
 }
 
+// --- The NIL audit escrow (PR 35, the founder NIL directive) ---
+//
+// The athlete-side twin of the licensing audit reserve: 5–10% of an
+// athletic department distribution (a NIL pool or media-rights credit)
+// holds in an NIL_AUDIT_ESCROW per (payee, school) scope while the
+// athlete's compliance exposure runs. Mid-season NCAA Transfer Portal
+// reconciliations and tax withholdings draw it down, and the verified
+// reconciliation of record opens the release. Sentinel payee + GL account
+// per scope key — the same no-fold discipline: the escrow is its own
+// escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const NIL_AUDIT_ESCROW_PAYEE_PREFIX = "nil_audit_escrow";
+export function nilAuditEscrowPayeeId(scopeKey: string): string {
+  return `${NIL_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function nilAuditEscrowPayeeName(scopeKey: string): string {
+  return `NIL Audit Escrow — ${scopeKey}`;
+}
+export function nilAuditEscrowGlAccount(scopeKey: string): string {
+  return `nil_audit_escrow:${scopeKey}`;
+}
+// The founder's band, enforced at registration AND at use: a 5–10% share
+// of the athletic department distribution. Anything outside the band is a
+// hostile policy, refused.
+export const NIL_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const NIL_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
+
+// The transfer portal clawback (PR 35): an athlete entering the portal
+// prior to contract completion owes back the pro-rated unearned NIL
+// advance — the debit hold of record. The GL pair per athlete — the
+// receivable asset rises (debit) and the advance-recovery income of
+// record rises (credit); balanced legs, no cash movement until the hold
+// settles.
+export function nilUnearnedClawbackReceivableGlAccount(athleteId: string): string {
+  return `nil_unearned_clawback_receivable:${athleteId}`;
+}
+export function nilUnearnedClawbackRecoveryGlAccount(athleteId: string): string {
+  return `nil_unearned_clawback_recovery:${athleteId}`;
+}
+
 // The studio role-group vocabulary — the three bands' keys. A schedule role
 // outside the vocabulary is a hostile registration.
 export const WEBTOON_STUDIO_ROLE_GROUPS = [
@@ -504,6 +544,19 @@ export const JOURNAL_KINDS = [
   // rises, balanced legs priced from the append-only recoupment truth.
   // Additive only.
   "licensing_mg_shortfall_invoice",
+  // NIL audit escrow (PR 35): an athletic department distribution's
+  // release splits the held credit — the 5–10% NIL reserve locks into the
+  // per-scope escrow (route), mid-season NCAA Transfer Portal
+  // reconciliations and tax withholdings draw it down (drawdown), and the
+  // verified reconciliation of record opens the release that pays the
+  // remaining escrow through the taxed cascade (release). The transfer
+  // portal clawback hold posts its own balanced legs — the pro-rated
+  // unearned advance debits as the receivable of record and the
+  // advance-recovery income rises (clawback hold). Additive only.
+  "nil_audit_escrow_route",
+  "nil_audit_escrow_drawdown",
+  "nil_audit_escrow_release",
+  "nil_unearned_clawback_hold",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

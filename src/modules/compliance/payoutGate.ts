@@ -6,6 +6,7 @@ import type {
   TheatricalPayoutGateStateRecord,
 } from "@/modules/don/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
+import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -439,6 +440,46 @@ export async function resolveLicensingVerticalComplianceState(
     territory_cleared: record.territory_state === "cleared",
     category_exclusivity_verified:
       record.category_exclusivity_state === "verified",
+  };
+}
+
+/**
+ * The NIL vertical's compliance state, resolved from the NIL payout-gate
+ * state of record (migration 0038) — the store-backed reader the NIL
+ * payout path uses for the 'nil' vertical (the licensing resolver's
+ * pattern, scoped per athlete × school). FAIL-CLOSED on both failure
+ * modes the directive names: an ABSENT record returns null (the gate
+ * refuses with vertical_state_unknown), and an 'unknown' stored state
+ * maps to false (the gate refuses the specific condition —
+ * nil_not_cleared / nil_compliance_unverified /
+ * nil_title_ix_proportionality_not_cleared). The booleans are true ONLY on
+ * the nil_cleared / verified / cleared states of record — nothing
+ * defaults to allowing. The associated-entity holdback passes through the
+ * same fail-closed mapping: an unknown backing reads as backed (the cap
+ * condition then refuses until verified), and only an explicit false —
+ * a direct, unassociated deal — skips the cap check.
+ */
+export async function resolveNilVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  schoolId: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "nil" }> | null> {
+  const record: NilPayoutGateStateRecord | undefined = await store.getNilPayoutGateState(
+    payeeId,
+    schoolId,
+  );
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "nil",
+    nil_cleared: record.nil_clearance_state === "nil_cleared",
+    compliance_verified: record.compliance_state === "verified",
+    title_ix_proportionality_cleared: record.title_ix_state === "cleared",
+    // An UNKNOWN backing stays fail-closed: true forces the cap
+    // condition to be verified before anything releases.
+    collective_or_booster_backed: record.collective_or_booster_backed !== false,
+    institutional_cap_verified: record.institutional_cap_state === "verified",
   };
 }
 

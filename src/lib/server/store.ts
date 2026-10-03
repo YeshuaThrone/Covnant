@@ -158,6 +158,10 @@ import type {
   LicensingSubLicenseReportRecord,
 } from '@/modules/licensing/records';
 import type {
+  NilAuditEscrowDrawdownRecord,
+  NilAuditEscrowPolicyRecord,
+  NilAuditEscrowReconciliationRecord,
+  NilAdvanceScheduleRecord,
   NilCapVerificationRecord,
   NilDealComplianceAuditRecord,
   NilGroupSplitRecord,
@@ -168,6 +172,8 @@ import type {
   NilRosterWaterfallRecord,
   NilSchoolCapRecord,
   NilStateRuleRecord,
+  NilTransferPortalEntryRecord,
+  NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
   MatchQueueRecord,
@@ -2834,6 +2840,99 @@ export interface Store {
     payeeId: string,
     schoolId: string,
   ): Promise<NilPayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the NIL audit escrow's founder-banded rate of
+   * record for one scope (migration 0039) — upsert converges: the newest
+   * rate governs the next routing.
+   */
+  upsertNilAuditEscrowPolicy(
+    row: Omit<NilAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the routing
+   * lane refuses fail-closed (no policy, no routing). */
+  getNilAuditEscrowPolicy(scopeKey: string): Promise<NilAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0039) — UNIQUE
+   * per (reserve_ledger_id, source_event_id) is the replay guard, UNIQUE
+   * per (reserve_ledger_id, drawn_before_cents) is the position lock: a
+   * replayed draw or a lost race throws here, never a double drawdown.
+   */
+  insertNilAuditEscrowDrawdown(
+    row: Omit<NilAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listNilAuditEscrowDrawdowns(reserveLedgerId: string): Promise<NilAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0039) — insert-as-lock, UNIQUE per reserve_ledger_id: the
+   * FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertNilAuditEscrowReconciliation(
+    row: Omit<NilAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getNilAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `nil_audit_escrow` bucket row — the single-statement
+   * CAS: the row flips only while it is still held; the caller that lost
+   * the race (or replayed) reads undefined.
+   */
+  settleNilAuditEscrow(id: string, settledAt: string): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the NIL advance of record for one contract
+   * (migration 0039) — upsert converges: the newest terms govern the
+   * next pro-rated clawback calculation.
+   */
+  upsertNilAdvanceSchedule(
+    row: Omit<NilAdvanceScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAdvanceScheduleRecord>;
+
+  /** One contract's advance terms of record; undefined when none — the
+   * portal-entry lane computes nothing without them. */
+  getNilAdvanceSchedule(nilContractId: string): Promise<NilAdvanceScheduleRecord | undefined>;
+
+  /**
+   * Records the transfer portal entry of record for one (contract,
+   * athlete) (migration 0039) — insert-as-lock, UNIQUE per (contract,
+   * athlete): the FIRST entry wins; a re-shipped sheet or a lost race
+   * throws (the caller reads the winner through the getter).
+   */
+  insertNilTransferPortalEntry(
+    row: Omit<NilTransferPortalEntryRecord, 'id' | 'created_at'>,
+  ): Promise<NilTransferPortalEntryRecord>;
+
+  /** One (contract, athlete)'s portal entry of record; undefined when
+   * none — the replay guard's read. */
+  getNilTransferPortalEntry(
+    nilContractId: string,
+    athleteId: string,
+  ): Promise<NilTransferPortalEntryRecord | undefined>;
+
+  /**
+   * Records the pro-rated unearned-advance clawback of record for one
+   * portal entry (migration 0039) — UNIQUE per portal_entry_id: the
+   * calculation and its `nil_unearned_clawback` debit hold land once;
+   * a concurrent second insert throws.
+   */
+  insertNilUnearnedClawback(
+    row: Omit<NilUnearnedClawbackRecord, 'id' | 'created_at'>,
+  ): Promise<NilUnearnedClawbackRecord>;
+
+  /** One portal entry's clawback of record; undefined when none. */
+  getNilUnearnedClawback(portalEntryId: string): Promise<NilUnearnedClawbackRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

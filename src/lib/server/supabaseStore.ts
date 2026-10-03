@@ -168,6 +168,12 @@ import type {
   NilGroupSplitRecord,
   NilPayoutApplicationRecord,
   NilPayoutGateStateRecord,
+  NilAuditEscrowDrawdownRecord,
+  NilAuditEscrowPolicyRecord,
+  NilAuditEscrowReconciliationRecord,
+  NilAdvanceScheduleRecord,
+  NilTransferPortalEntryRecord,
+  NilUnearnedClawbackRecord,
   NilPoolApplicationRecord,
   NilRevenueShareProgramRecord,
   NilRosterWaterfallRecord,
@@ -438,6 +444,12 @@ const TABLES = {
   nilGroupSplits: 'nil_group_splits',
   nilStateRules: 'nil_state_rules',
   nilPayoutGateStates: 'nil_payout_gate_states',
+  nilAuditEscrowPolicies: 'nil_audit_escrow_policies',
+  nilAuditEscrowDrawdowns: 'nil_audit_escrow_drawdowns',
+  nilAuditEscrowReconciliations: 'nil_audit_escrow_reconciliations',
+  nilAdvanceSchedules: 'nil_advance_schedules',
+  nilTransferPortalEntries: 'nil_transfer_portal_entries',
+  nilUnearnedClawbacks: 'nil_unearned_clawbacks',
 } as const;
 
 /**
@@ -4009,6 +4021,211 @@ export class SupabaseStore implements Store {
         .eq('school_id', schoolId)
         .maybeSingle(),
       'getNilPayoutGateState',
+    );
+  }
+
+  // --- NIL audit escrow + transfer portal clawback (PR 35, migration 0039) ---
+
+  async upsertNilAuditEscrowPolicy(
+    row: Omit<NilAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — an upsert converges: a re-registration
+    // replaces the rate of record atomically. No id in the payload — the
+    // id is server-assigned on insert and must not rotate on conflict
+    // (the PR 33 parity lesson).
+    return this.oneStrict<NilAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowPolicies)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'scope_key',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertNilAuditEscrowPolicy',
+    );
+  }
+
+  async getNilAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<NilAuditEscrowPolicyRecord | undefined> {
+    return this.one<NilAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getNilAuditEscrowPolicy',
+    );
+  }
+
+  async insertNilAuditEscrowDrawdown(
+    row: Omit<NilAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowDrawdownRecord> {
+    // Insert-as-lock — UNIQUE per (reserve_ledger_id, source_event_id) is
+    // the replay guard and UNIQUE per (reserve_ledger_id,
+    // drawn_before_cents) is the position lock: a replayed event or a
+    // lost race throws here, never a double drawdown.
+    return this.oneStrict<NilAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertNilAuditEscrowDrawdown',
+    );
+  }
+
+  async listNilAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowDrawdownRecord[]> {
+    return this.many<NilAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowDrawdowns)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .order('created_at', { ascending: true }),
+      'listNilAuditEscrowDrawdowns',
+    );
+  }
+
+  async insertNilAuditEscrowReconciliation(
+    row: Omit<NilAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<NilAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertNilAuditEscrowReconciliation',
+    );
+  }
+
+  async getNilAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowReconciliationRecord | undefined> {
+    return this.one<NilAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.nilAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getNilAuditEscrowReconciliation',
+    );
+  }
+
+  async settleNilAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update IS the CAS — a single statement that only
+    // flips the row while it is still the held escrow state; the caller
+    // that lost the race (or replayed) reads undefined.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'nil_audit_escrow')
+        .select()
+        .maybeSingle(),
+      'settleNilAuditEscrow',
+    );
+  }
+
+  async upsertNilAdvanceSchedule(
+    row: Omit<NilAdvanceScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAdvanceScheduleRecord> {
+    // UNIQUE per nil_contract_id — an upsert converges: re-registered
+    // terms replace the row atomically. No id in the payload — the id is
+    // server-assigned on insert and must not rotate on conflict (the
+    // PR 33 parity lesson).
+    return this.oneStrict<NilAdvanceScheduleRecord>(
+      this.client
+        .from(TABLES.nilAdvanceSchedules)
+        .upsert({ ...row, updated_at: new Date().toISOString() }, {
+          onConflict: 'nil_contract_id',
+        })
+        .select()
+        .maybeSingle(),
+      'upsertNilAdvanceSchedule',
+    );
+  }
+
+  async getNilAdvanceSchedule(
+    nilContractId: string,
+  ): Promise<NilAdvanceScheduleRecord | undefined> {
+    return this.one<NilAdvanceScheduleRecord>(
+      this.client
+        .from(TABLES.nilAdvanceSchedules)
+        .select()
+        .eq('nil_contract_id', nilContractId)
+        .maybeSingle(),
+      'getNilAdvanceSchedule',
+    );
+  }
+
+  async insertNilTransferPortalEntry(
+    row: Omit<NilTransferPortalEntryRecord, 'id' | 'created_at'>,
+  ): Promise<NilTransferPortalEntryRecord> {
+    // Insert-as-lock — UNIQUE per (nil_contract_id, athlete_id): the
+    // FIRST portal entry of record wins; a re-shipped sheet or a lost
+    // race throws here (the caller reads the winner through the getter).
+    return this.oneStrict<NilTransferPortalEntryRecord>(
+      this.client
+        .from(TABLES.nilTransferPortalEntries)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertNilTransferPortalEntry',
+    );
+  }
+
+  async getNilTransferPortalEntry(
+    nilContractId: string,
+    athleteId: string,
+  ): Promise<NilTransferPortalEntryRecord | undefined> {
+    return this.one<NilTransferPortalEntryRecord>(
+      this.client
+        .from(TABLES.nilTransferPortalEntries)
+        .select()
+        .eq('nil_contract_id', nilContractId)
+        .eq('athlete_id', athleteId)
+        .maybeSingle(),
+      'getNilTransferPortalEntry',
+    );
+  }
+
+  async insertNilUnearnedClawback(
+    row: Omit<NilUnearnedClawbackRecord, 'id' | 'created_at'>,
+  ): Promise<NilUnearnedClawbackRecord> {
+    // UNIQUE per portal_entry_id — the calculation and its
+    // nil_unearned_clawback debit hold land once; a concurrent second
+    // insert throws here (the caller reads the winner through the
+    // getter).
+    return this.oneStrict<NilUnearnedClawbackRecord>(
+      this.client
+        .from(TABLES.nilUnearnedClawbacks)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertNilUnearnedClawback',
+    );
+  }
+
+  async getNilUnearnedClawback(
+    portalEntryId: string,
+  ): Promise<NilUnearnedClawbackRecord | undefined> {
+    return this.one<NilUnearnedClawbackRecord>(
+      this.client
+        .from(TABLES.nilUnearnedClawbacks)
+        .select()
+        .eq('portal_entry_id', portalEntryId)
+        .maybeSingle(),
+      'getNilUnearnedClawback',
     );
   }
 

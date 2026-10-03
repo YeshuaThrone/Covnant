@@ -167,6 +167,10 @@ import type {
   LicensingSubLicenseReportRecord,
 } from '@/modules/licensing/records';
 import type {
+  NilAuditEscrowDrawdownRecord,
+  NilAuditEscrowPolicyRecord,
+  NilAuditEscrowReconciliationRecord,
+  NilAdvanceScheduleRecord,
   NilCapVerificationRecord,
   NilDealComplianceAuditRecord,
   NilGroupSplitRecord,
@@ -177,6 +181,8 @@ import type {
   NilRosterWaterfallRecord,
   NilSchoolCapRecord,
   NilStateRuleRecord,
+  NilTransferPortalEntryRecord,
+  NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 import type {
@@ -356,6 +362,21 @@ export class InMemoryStore implements Store {
   private nilGroupSplits = new Map<string, NilGroupSplitRecord>();
   private nilStateRules = new Map<string, NilStateRuleRecord>();
   private nilPayoutGateStates = new Map<string, NilPayoutGateStateRecord>();
+  // Migration 0039 — the NIL audit escrow and transfer portal clawback:
+  // the founder-banded escrow rate per scope, the position-locked escrow
+  // drawdowns (the append-only spend truth), the verified reconciliations
+  // of record per escrow, the NIL advance of record per contract, the
+  // portal entries of record per (contract, athlete), and the pro-rated
+  // clawbacks of record per portal entry.
+  private nilAuditEscrowPolicies = new Map<string, NilAuditEscrowPolicyRecord>();
+  private nilAuditEscrowDrawdowns: NilAuditEscrowDrawdownRecord[] = [];
+  private nilAuditEscrowReconciliations = new Map<
+    string,
+    NilAuditEscrowReconciliationRecord
+  >();
+  private nilAdvanceSchedules = new Map<string, NilAdvanceScheduleRecord>();
+  private nilTransferPortalEntries = new Map<string, NilTransferPortalEntryRecord>();
+  private nilUnearnedClawbacks = new Map<string, NilUnearnedClawbackRecord>();
   private licensingAuditReserveDrawdowns: LicensingAuditReserveDrawdownRecord[] = [];
   private licensingPayoutGateStates = new Map<string, LicensingPayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
@@ -3352,6 +3373,197 @@ export class InMemoryStore implements Store {
     schoolId: string,
   ): Promise<NilPayoutGateStateRecord | undefined> {
     const found = this.nilPayoutGateStates.get(`${payeeId}:${schoolId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // --- NIL audit escrow + transfer portal clawback (PR 35, migration 0039) ---
+
+  async upsertNilAuditEscrowPolicy(
+    row: Omit<NilAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registration converges (the newest rate
+    // governs the next routing).
+    const key = row.scope_key;
+    const now = new Date().toISOString();
+    const existing = this.nilAuditEscrowPolicies.get(key);
+    const record: NilAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilAuditEscrowPolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getNilAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<NilAuditEscrowPolicyRecord | undefined> {
+    const found = this.nilAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilAuditEscrowDrawdown(
+    row: Omit<NilAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+    // UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+    // lock — a replayed event or a lost race throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    if (
+      this.nilAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('nil_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.nilAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('nil_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: NilAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listNilAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowDrawdownRecord[]> {
+    // created_at ASC — the append-only truth in spend order.
+    return this.nilAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async insertNilAuditEscrowReconciliation(
+    row: Omit<NilAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.nilAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('nil_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: NilAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getNilAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowReconciliationRecord | undefined> {
+    const found = this.nilAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleNilAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — the row flips only while it is
+    // still the held escrow state; the caller that lost the race (or
+    // replayed) reads undefined.
+    if (row === undefined || row.status !== 'nil_audit_escrow') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async upsertNilAdvanceSchedule(
+    row: Omit<NilAdvanceScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAdvanceScheduleRecord> {
+    // UNIQUE per nil_contract_id — a re-registration converges (the newest
+    // terms govern the next pro-rated clawback calculation).
+    const key = row.nil_contract_id;
+    const now = new Date().toISOString();
+    const existing = this.nilAdvanceSchedules.get(key);
+    const record: NilAdvanceScheduleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilAdvanceSchedules.set(key, record);
+    return { ...record };
+  }
+
+  async getNilAdvanceSchedule(
+    nilContractId: string,
+  ): Promise<NilAdvanceScheduleRecord | undefined> {
+    const found = this.nilAdvanceSchedules.get(nilContractId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilTransferPortalEntry(
+    row: Omit<NilTransferPortalEntryRecord, 'id' | 'created_at'>,
+  ): Promise<NilTransferPortalEntryRecord> {
+    // Insert-as-lock — UNIQUE per (nil_contract_id, athlete_id): the FIRST
+    // portal entry of record wins; a re-shipped sheet or a lost race
+    // throws here (the caller reads the winner through the getter).
+    const key = `${row.nil_contract_id}:${row.athlete_id}`;
+    if (this.nilTransferPortalEntries.has(key)) {
+      uniqueViolation('nil_transfer_portal_entries.nil_contract_id,athlete_id');
+    }
+    const record: NilTransferPortalEntryRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilTransferPortalEntries.set(key, record);
+    return { ...record };
+  }
+
+  async getNilTransferPortalEntry(
+    nilContractId: string,
+    athleteId: string,
+  ): Promise<NilTransferPortalEntryRecord | undefined> {
+    const found = this.nilTransferPortalEntries.get(`${nilContractId}:${athleteId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilUnearnedClawback(
+    row: Omit<NilUnearnedClawbackRecord, 'id' | 'created_at'>,
+  ): Promise<NilUnearnedClawbackRecord> {
+    // UNIQUE per portal_entry_id — the calculation and its
+    // nil_unearned_clawback debit hold land once; a concurrent second
+    // insert throws here (the caller reads the winner through the
+    // getter).
+    const key = row.portal_entry_id;
+    if (this.nilUnearnedClawbacks.has(key)) {
+      uniqueViolation('nil_unearned_clawbacks.portal_entry_id');
+    }
+    const record: NilUnearnedClawbackRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilUnearnedClawbacks.set(key, record);
+    return { ...record };
+  }
+
+  async getNilUnearnedClawback(
+    portalEntryId: string,
+  ): Promise<NilUnearnedClawbackRecord | undefined> {
+    const found = this.nilUnearnedClawbacks.get(portalEntryId);
     return found === undefined ? undefined : { ...found };
   }
 
