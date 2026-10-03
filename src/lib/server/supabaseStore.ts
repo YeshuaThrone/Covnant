@@ -202,6 +202,24 @@ import type {
   SpatialZoneAssignmentRecord,
 } from '@/modules/spatial/records';
 import type {
+  FitnessAlgorithmPolicyRecord,
+  FitnessAlgorithmRoyaltyRecord,
+  FitnessCoBrandPartnershipRecord,
+  FitnessCocreationModuleRecord,
+  FitnessCocreationApplicationRecord,
+  FitnessCompletionMonthRecord,
+  FitnessFranchiseApplicationRecord,
+  FitnessFranchiseClassMonthRecord,
+  FitnessFranchisePolicyRecord,
+  FitnessCobrandSplitApplicationRecord,
+  FitnessLiveLoadPolicyRecord,
+  FitnessLiveResidualApplicationRecord,
+  FitnessRealizationApplicationRecord,
+  FitnessSyncMusicPolicyRecord,
+  FitnessTrainerRoyaltyApplicationRecord,
+  FitnessTrainerTierScheduleRecord,
+} from '@/modules/fitness/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -490,6 +508,23 @@ const TABLES = {
   spatialAuditEscrowDrawdowns: 'spatial_audit_escrow_drawdowns',
   spatialAuditEscrowReconciliations: 'spatial_audit_escrow_reconciliations',
   spatialPayoutGateStates: 'spatial_payout_gate_states',
+  // Migration 0042 — the fitness lane.
+  fitnessTrainerTierSchedules: 'fitness_trainer_tier_schedules',
+  fitnessCompletionMonths: 'fitness_completion_months',
+  fitnessSyncMusicPolicies: 'fitness_sync_music_policies',
+  fitnessLiveLoadPolicies: 'fitness_live_load_policies',
+  fitnessFranchisePolicies: 'fitness_franchise_policies',
+  fitnessFranchiseClassMonths: 'fitness_franchise_class_months',
+  fitnessCoBrandPartnerships: 'fitness_co_brand_partnerships',
+  fitnessAlgorithmPolicies: 'fitness_algorithm_policies',
+  fitnessCocreationModules: 'fitness_cocreation_modules',
+  fitnessRealizationApplications: 'fitness_realization_applications',
+  fitnessTrainerRoyaltyApplications: 'fitness_trainer_royalty_applications',
+  fitnessLiveResidualApplications: 'fitness_live_residual_applications',
+  fitnessFranchiseApplications: 'fitness_franchise_applications',
+  fitnessCobrandSplitApplications: 'fitness_cobrand_split_applications',
+  fitnessAlgorithmRoyaltyLedger: 'fitness_algorithm_royalty_ledger',
+  fitnessCocreationApplications: 'fitness_cocreation_applications',
 } as const;
 
 /**
@@ -4944,6 +4979,489 @@ export class SupabaseStore implements Store {
         .eq('venue_id', venueId)
         .maybeSingle(),
       'getSpatialPayoutGateState',
+    );
+  }
+
+  // --- The fitness lane (PR 38, migration 0042) ---
+
+  async upsertFitnessTrainerTierSchedule(
+    row: Omit<FitnessTrainerTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessTrainerTierScheduleRecord> {
+    // UNIQUE per (trainer_id, program_id) — the newest schedule governs the
+    // next walk. HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict — the PR 33 lesson).
+    return this.oneStrict<FitnessTrainerTierScheduleRecord>(
+      this.client
+        .from(TABLES.fitnessTrainerTierSchedules)
+        .upsert(row, { onConflict: 'trainer_id,program_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessTrainerTierSchedule',
+    );
+  }
+
+  async getFitnessTrainerTierSchedule(
+    trainerId: string,
+    programId: string,
+  ): Promise<FitnessTrainerTierScheduleRecord | undefined> {
+    return this.one<FitnessTrainerTierScheduleRecord>(
+      this.client
+        .from(TABLES.fitnessTrainerTierSchedules)
+        .select()
+        .eq('trainer_id', trainerId)
+        .eq('program_id', programId)
+        .maybeSingle(),
+      'getFitnessTrainerTierSchedule',
+    );
+  }
+
+  async upsertFitnessSyncMusicPolicy(
+    row: Omit<FitnessSyncMusicPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessSyncMusicPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges. HARDENED
+    // UPSERT: no id in the payload.
+    return this.oneStrict<FitnessSyncMusicPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessSyncMusicPolicies)
+        .upsert(row, { onConflict: 'program_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessSyncMusicPolicy',
+    );
+  }
+
+  async getFitnessSyncMusicPolicy(
+    programId: string,
+  ): Promise<FitnessSyncMusicPolicyRecord | undefined> {
+    return this.one<FitnessSyncMusicPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessSyncMusicPolicies)
+        .select()
+        .eq('program_id', programId)
+        .maybeSingle(),
+      'getFitnessSyncMusicPolicy',
+    );
+  }
+
+  async upsertFitnessLiveLoadPolicy(
+    row: Omit<FitnessLiveLoadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveLoadPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges. HARDENED
+    // UPSERT: no id in the payload.
+    return this.oneStrict<FitnessLiveLoadPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessLiveLoadPolicies)
+        .upsert(row, { onConflict: 'program_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessLiveLoadPolicy',
+    );
+  }
+
+  async getFitnessLiveLoadPolicy(
+    programId: string,
+  ): Promise<FitnessLiveLoadPolicyRecord | undefined> {
+    return this.one<FitnessLiveLoadPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessLiveLoadPolicies)
+        .select()
+        .eq('program_id', programId)
+        .maybeSingle(),
+      'getFitnessLiveLoadPolicy',
+    );
+  }
+
+  async upsertFitnessFranchisePolicy(
+    row: Omit<FitnessFranchisePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessFranchisePolicyRecord> {
+    // UNIQUE per studio_franchise_code — a re-registration converges.
+    // HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FitnessFranchisePolicyRecord>(
+      this.client
+        .from(TABLES.fitnessFranchisePolicies)
+        .upsert(row, { onConflict: 'studio_franchise_code' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessFranchisePolicy',
+    );
+  }
+
+  async getFitnessFranchisePolicy(
+    studioFranchiseCode: string,
+  ): Promise<FitnessFranchisePolicyRecord | undefined> {
+    return this.one<FitnessFranchisePolicyRecord>(
+      this.client
+        .from(TABLES.fitnessFranchisePolicies)
+        .select()
+        .eq('studio_franchise_code', studioFranchiseCode)
+        .maybeSingle(),
+      'getFitnessFranchisePolicy',
+    );
+  }
+
+  async upsertFitnessCoBrandPartnership(
+    row: Omit<FitnessCoBrandPartnershipRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCoBrandPartnershipRecord> {
+    // UNIQUE per studio_franchise_code — a re-registration converges.
+    // HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FitnessCoBrandPartnershipRecord>(
+      this.client
+        .from(TABLES.fitnessCoBrandPartnerships)
+        .upsert(row, { onConflict: 'studio_franchise_code' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessCoBrandPartnership',
+    );
+  }
+
+  async getFitnessCoBrandPartnership(
+    studioFranchiseCode: string,
+  ): Promise<FitnessCoBrandPartnershipRecord | undefined> {
+    return this.one<FitnessCoBrandPartnershipRecord>(
+      this.client
+        .from(TABLES.fitnessCoBrandPartnerships)
+        .select()
+        .eq('studio_franchise_code', studioFranchiseCode)
+        .maybeSingle(),
+      'getFitnessCoBrandPartnership',
+    );
+  }
+
+  async upsertFitnessAlgorithmPolicy(
+    row: Omit<FitnessAlgorithmPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAlgorithmPolicyRecord> {
+    // UNIQUE per program_id — a re-registration converges. HARDENED
+    // UPSERT: no id in the payload.
+    return this.oneStrict<FitnessAlgorithmPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessAlgorithmPolicies)
+        .upsert(row, { onConflict: 'program_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessAlgorithmPolicy',
+    );
+  }
+
+  async getFitnessAlgorithmPolicy(
+    programId: string,
+  ): Promise<FitnessAlgorithmPolicyRecord | undefined> {
+    return this.one<FitnessAlgorithmPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessAlgorithmPolicies)
+        .select()
+        .eq('program_id', programId)
+        .maybeSingle(),
+      'getFitnessAlgorithmPolicy',
+    );
+  }
+
+  async upsertFitnessCocreationModule(
+    row: Omit<FitnessCocreationModuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCocreationModuleRecord> {
+    // UNIQUE per (program_id, module_id) — a re-registration converges.
+    // HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FitnessCocreationModuleRecord>(
+      this.client
+        .from(TABLES.fitnessCocreationModules)
+        .upsert(row, { onConflict: 'program_id,module_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessCocreationModule',
+    );
+  }
+
+  async listFitnessCocreationModules(
+    programId: string,
+  ): Promise<FitnessCocreationModuleRecord[]> {
+    // Registration order (the insertion order the waterfall walk reads).
+    const { data, error } = await this.client
+      .from(TABLES.fitnessCocreationModules)
+      .select()
+      .eq('program_id', programId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listFitnessCocreationModules failed: ${error.message}`);
+    }
+    return (data ?? []) as FitnessCocreationModuleRecord[];
+  }
+
+  async advanceFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+    completionsAdded: number,
+  ): Promise<FitnessCompletionMonthRecord> {
+    // UNIQUE per (trainer_id, program_id, month) — the tracker converges.
+    // The cumulative walk is serialized per trainer-program-month by the
+    // recon lane (one event at a time), so a read-modify-upsert carries
+    // the same position arithmetic the SQLite backend expresses additively
+    // in its ON CONFLICT arm. No id in the payload.
+    const existing = await this.getFitnessCompletionMonth(trainerId, programId, month);
+    return this.oneStrict<FitnessCompletionMonthRecord>(
+      this.client
+        .from(TABLES.fitnessCompletionMonths)
+        .upsert(
+          {
+            trainer_id: trainerId,
+            program_id: programId,
+            month,
+            cumulative_completions: (existing?.cumulative_completions ?? 0) + completionsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'trainer_id,program_id,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceFitnessCompletionMonth',
+    );
+  }
+
+  async getFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+  ): Promise<FitnessCompletionMonthRecord | undefined> {
+    return this.one<FitnessCompletionMonthRecord>(
+      this.client
+        .from(TABLES.fitnessCompletionMonths)
+        .select()
+        .eq('trainer_id', trainerId)
+        .eq('program_id', programId)
+        .eq('month', month)
+        .maybeSingle(),
+      'getFitnessCompletionMonth',
+    );
+  }
+
+  async advanceFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+    classesAdded: number,
+  ): Promise<FitnessFranchiseClassMonthRecord> {
+    // UNIQUE per (studio_franchise_code, month) — the tracker converges;
+    // same read-modify-upsert as the completion tracker. No id in the
+    // payload.
+    const existing = await this.getFitnessFranchiseClassMonth(studioFranchiseCode, month);
+    return this.oneStrict<FitnessFranchiseClassMonthRecord>(
+      this.client
+        .from(TABLES.fitnessFranchiseClassMonths)
+        .upsert(
+          {
+            studio_franchise_code: studioFranchiseCode,
+            month,
+            cumulative_classes: (existing?.cumulative_classes ?? 0) + classesAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'studio_franchise_code,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceFitnessFranchiseClassMonth',
+    );
+  }
+
+  async getFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+  ): Promise<FitnessFranchiseClassMonthRecord | undefined> {
+    return this.one<FitnessFranchiseClassMonthRecord>(
+      this.client
+        .from(TABLES.fitnessFranchiseClassMonths)
+        .select()
+        .eq('studio_franchise_code', studioFranchiseCode)
+        .eq('month', month)
+        .maybeSingle(),
+      'getFitnessFranchiseClassMonth',
+    );
+  }
+
+  async insertFitnessRealizationApplication(
+    row: Omit<FitnessRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessRealizationApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard: a
+    // re-walked allocation throws here, never a double application.
+    return this.oneStrict<FitnessRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessRealizationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessRealizationApplication',
+    );
+  }
+
+  async getFitnessRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessRealizationApplicationRecord | undefined> {
+    return this.one<FitnessRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessRealizationApplication',
+    );
+  }
+
+  async insertFitnessTrainerRoyaltyApplication(
+    row: Omit<FitnessTrainerRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessTrainerRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessTrainerRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessTrainerRoyaltyApplication',
+    );
+  }
+
+  async getFitnessTrainerRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord | undefined> {
+    return this.one<FitnessTrainerRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessTrainerRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessTrainerRoyaltyApplication',
+    );
+  }
+
+  async insertFitnessLiveResidualApplication(
+    row: Omit<FitnessLiveResidualApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveResidualApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessLiveResidualApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessLiveResidualApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessLiveResidualApplication',
+    );
+  }
+
+  async getFitnessLiveResidualApplication(
+    sourceEventId: string,
+  ): Promise<FitnessLiveResidualApplicationRecord | undefined> {
+    return this.one<FitnessLiveResidualApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessLiveResidualApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessLiveResidualApplication',
+    );
+  }
+
+  async insertFitnessFranchiseApplication(
+    row: Omit<FitnessFranchiseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessFranchiseApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessFranchiseApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessFranchiseApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessFranchiseApplication',
+    );
+  }
+
+  async getFitnessFranchiseApplication(
+    sourceEventId: string,
+  ): Promise<FitnessFranchiseApplicationRecord | undefined> {
+    return this.one<FitnessFranchiseApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessFranchiseApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessFranchiseApplication',
+    );
+  }
+
+  async insertFitnessCobrandSplitApplication(
+    row: Omit<FitnessCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCobrandSplitApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessCobrandSplitApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessCobrandSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessCobrandSplitApplication',
+    );
+  }
+
+  async getFitnessCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCobrandSplitApplicationRecord | undefined> {
+    return this.one<FitnessCobrandSplitApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessCobrandSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessCobrandSplitApplication',
+    );
+  }
+
+  async insertFitnessAlgorithmRoyalty(
+    row: Omit<FitnessAlgorithmRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAlgorithmRoyaltyRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessAlgorithmRoyaltyRecord>(
+      this.client
+        .from(TABLES.fitnessAlgorithmRoyaltyLedger)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessAlgorithmRoyalty',
+    );
+  }
+
+  async getFitnessAlgorithmRoyalty(
+    sourceEventId: string,
+  ): Promise<FitnessAlgorithmRoyaltyRecord | undefined> {
+    return this.one<FitnessAlgorithmRoyaltyRecord>(
+      this.client
+        .from(TABLES.fitnessAlgorithmRoyaltyLedger)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessAlgorithmRoyalty',
+    );
+  }
+
+  async insertFitnessCocreationApplication(
+    row: Omit<FitnessCocreationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCocreationApplicationRecord> {
+    // Insert-as-lock — UNIQUE per source_event_id is the replay guard.
+    return this.oneStrict<FitnessCocreationApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessCocreationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessCocreationApplication',
+    );
+  }
+
+  async getFitnessCocreationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCocreationApplicationRecord | undefined> {
+    return this.one<FitnessCocreationApplicationRecord>(
+      this.client
+        .from(TABLES.fitnessCocreationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessCocreationApplication',
     );
   }
 

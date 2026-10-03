@@ -106,7 +106,17 @@ export type StatementProfileKind =
   | "spatial_attraction_pass_sales_csv"
   | "spatial_fnb_register_csv"
   | "spatial_retail_pos_csv"
-  | "spatial_rfid_wristband_telemetry_csv";
+  | "spatial_rfid_wristband_telemetry_csv"
+  // The fitness lane (PR 38, the founder fitness directive) — the five
+  // strict senders the directive names (digital stream starts, completed
+  // workout logs, connected bike and treadmill telemetry, studio class
+  // check-ins, app subscription allocations), one strict profile per
+  // sender's sheet.
+  | "fitness_stream_starts_csv"
+  | "fitness_completed_workouts_csv"
+  | "fitness_equipment_telemetry_csv"
+  | "fitness_studio_checkins_csv"
+  | "fitness_subscription_allocations_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -977,6 +987,13 @@ export interface ParsedStatementLine {
    * null on every non-spatial line — the presence IS the lane
    * discriminator. Optional for the same reason as bookDetail. */
   spatialDetail?: SpatialLineDetail | null;
+
+  /** Fitness lane context (the statement sender, the sender row id of
+   * record, the trainer/program/franchise keys the realization calculator
+   * and every walk key on, and the sender-specific money or usage legs);
+   * null on every non-fitness line — the presence IS the lane
+   * discriminator. Optional for the same reason as bookDetail. */
+  fitnessDetail?: FitnessLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1053,6 +1070,98 @@ export type SpatialLineDetail =
   | SpatialPassDetail
   | SpatialZoneSaleDetail
   | SpatialTelemetryDetail;
+
+/** The fitness lane's per-line context (PR 38, the founder fitness
+ * directive) — one discriminated shape per sender family: the stream-start
+ * rows carry the live-residual legs, the completion rows carry the tier
+ * walk and retention counts, the equipment telemetry rows carry the
+ * connected bike/treadmill session legs, the studio check-in rows carry
+ * the franchise class legs, and the allocation rows carry the recorded
+ * realization legs. Every sender repeats the three identity columns the
+ * founder's directive keys the lane on — trainer_id, program_id, and
+ * studio_franchise_code — plus the month period and the row currency. */
+export type FitnessStreamStartDetail = {
+  readonly sender: "stream_start";
+  readonly senderRowId: string;
+  readonly trainerId: string;
+  readonly programId: string;
+  readonly studioFranchiseCode: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly streamStarts: number;
+  readonly liveBroadcast: boolean;
+  /** The broadcast's peak simultaneous viewers of record — > 0 exactly
+   * when liveBroadcast is true (validated at parse). */
+  readonly peakSimultaneousViewers: number;
+  /** The live event's revenue of record — 0 on every non-live row. */
+  readonly liveEventRevenueCents: number;
+};
+
+export type FitnessWorkoutCompleteDetail = {
+  readonly sender: "workout_complete";
+  readonly senderRowId: string;
+  readonly trainerId: string;
+  readonly programId: string;
+  readonly studioFranchiseCode: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly completedWorkouts: number;
+  readonly subscriberRetained: boolean;
+  /** The row's class revenue of record (0 when the log carries none). */
+  readonly classRevenueCents: number;
+};
+
+export type FitnessEquipmentTelemetryDetail = {
+  readonly sender: "equipment_telemetry";
+  readonly senderRowId: string;
+  readonly trainerId: string;
+  readonly programId: string;
+  readonly studioFranchiseCode: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The connected equipment of record — the directive names the bike and
+   * the treadmill; anything else is outside the lane's vocabulary. */
+  readonly equipmentType: "connected_bike" | "treadmill";
+  readonly sessionCount: number;
+  readonly workoutMinutes: number;
+  /** The row's daily active feature usage of record — the wearable
+   * biometric / algorithm micro-royalty's basis. */
+  readonly wearableActiveUsers: number;
+};
+
+export type FitnessStudioCheckinDetail = {
+  readonly sender: "studio_checkin";
+  readonly senderRowId: string;
+  readonly trainerId: string;
+  readonly programId: string;
+  readonly studioFranchiseCode: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly classCheckins: number;
+  readonly classRevenueCents: number;
+  readonly certifiedChoreographyRevenueCents: number;
+  readonly certifiedAudioRevenueCents: number;
+};
+
+export type FitnessSubscriptionAllocationDetail = {
+  readonly sender: "subscription_allocation";
+  readonly senderRowId: string;
+  readonly trainerId: string;
+  readonly programId: string;
+  readonly studioFranchiseCode: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly grossSubscriptionPoolCents: number;
+  readonly appStoreEngineCutCents: number;
+  readonly digitalInfrastructureOverheadCents: number;
+};
+
+export type FitnessLineDetail =
+  | FitnessStreamStartDetail
+  | FitnessWorkoutCompleteDetail
+  | FitnessEquipmentTelemetryDetail
+  | FitnessStudioCheckinDetail
+  | FitnessSubscriptionAllocationDetail;
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

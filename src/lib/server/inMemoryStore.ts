@@ -215,6 +215,24 @@ import type {
   SpatialZoneAllocationRecord,
   SpatialZoneAssignmentRecord,
 } from '@/modules/spatial/records';
+import type {
+  FitnessAlgorithmPolicyRecord,
+  FitnessAlgorithmRoyaltyRecord,
+  FitnessCoBrandPartnershipRecord,
+  FitnessCocreationModuleRecord,
+  FitnessCocreationApplicationRecord,
+  FitnessCompletionMonthRecord,
+  FitnessFranchiseApplicationRecord,
+  FitnessFranchiseClassMonthRecord,
+  FitnessFranchisePolicyRecord,
+  FitnessCobrandSplitApplicationRecord,
+  FitnessLiveLoadPolicyRecord,
+  FitnessLiveResidualApplicationRecord,
+  FitnessRealizationApplicationRecord,
+  FitnessSyncMusicPolicyRecord,
+  FitnessTrainerRoyaltyApplicationRecord,
+  FitnessTrainerTierScheduleRecord,
+} from '@/modules/fitness/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -426,6 +444,32 @@ export class InMemoryStore implements Store {
     SpatialAuditEscrowReconciliationRecord
   >();
   private spatialPayoutGateStates = new Map<string, SpatialPayoutGateStateRecord>();
+  // Migration 0042 — the fitness lane's durable facts of record.
+  private fitnessTrainerTierSchedules = new Map<
+    string,
+    FitnessTrainerTierScheduleRecord
+  >();
+  private fitnessCompletionMonths = new Map<string, FitnessCompletionMonthRecord>();
+  private fitnessSyncMusicPolicies = new Map<string, FitnessSyncMusicPolicyRecord>();
+  private fitnessLiveLoadPolicies = new Map<string, FitnessLiveLoadPolicyRecord>();
+  private fitnessFranchisePolicies = new Map<string, FitnessFranchisePolicyRecord>();
+  private fitnessFranchiseClassMonths = new Map<
+    string,
+    FitnessFranchiseClassMonthRecord
+  >();
+  private fitnessCoBrandPartnerships = new Map<
+    string,
+    FitnessCoBrandPartnershipRecord
+  >();
+  private fitnessAlgorithmPolicies = new Map<string, FitnessAlgorithmPolicyRecord>();
+  private fitnessCocreationModules: FitnessCocreationModuleRecord[] = [];
+  private fitnessRealizationApplications: FitnessRealizationApplicationRecord[] = [];
+  private fitnessTrainerRoyaltyApplications: FitnessTrainerRoyaltyApplicationRecord[] = [];
+  private fitnessLiveResidualApplications: FitnessLiveResidualApplicationRecord[] = [];
+  private fitnessFranchiseApplications: FitnessFranchiseApplicationRecord[] = [];
+  private fitnessCobrandSplitApplications: FitnessCobrandSplitApplicationRecord[] = [];
+  private fitnessAlgorithmRoyaltyLedger: FitnessAlgorithmRoyaltyRecord[] = [];
+  private fitnessCocreationApplications: FitnessCocreationApplicationRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -5680,6 +5724,463 @@ export class InMemoryStore implements Store {
     venueId: string,
   ): Promise<SpatialPayoutGateStateRecord | undefined> {
     const found = this.spatialPayoutGateStates.get(`${payeeId}\u0000${venueId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 38 — the fitness lane (migration 0042). Policies and trackers upsert
+  // on their identities; the ledgers are append-only — a duplicate
+  // source_event_id throws, never a double application.
+  // ---------------------------------------------------------------------------
+
+  async upsertFitnessTrainerTierSchedule(
+    row: Omit<FitnessTrainerTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessTrainerTierScheduleRecord> {
+    const key = `${row.trainer_id}\u0000${row.program_id}`;
+    const now = new Date().toISOString();
+    const existing = this.fitnessTrainerTierSchedules.get(key);
+    const record: FitnessTrainerTierScheduleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessTrainerTierSchedules.set(key, record);
+    return { ...record };
+  }
+
+  async getFitnessTrainerTierSchedule(
+    trainerId: string,
+    programId: string,
+  ): Promise<FitnessTrainerTierScheduleRecord | undefined> {
+    const found = this.fitnessTrainerTierSchedules.get(`${trainerId}\u0000${programId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessSyncMusicPolicy(
+    row: Omit<FitnessSyncMusicPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessSyncMusicPolicyRecord> {
+    const now = new Date().toISOString();
+    const existing = this.fitnessSyncMusicPolicies.get(row.program_id);
+    const record: FitnessSyncMusicPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessSyncMusicPolicies.set(row.program_id, record);
+    return { ...record };
+  }
+
+  async getFitnessSyncMusicPolicy(
+    programId: string,
+  ): Promise<FitnessSyncMusicPolicyRecord | undefined> {
+    const found = this.fitnessSyncMusicPolicies.get(programId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessLiveLoadPolicy(
+    row: Omit<FitnessLiveLoadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveLoadPolicyRecord> {
+    const now = new Date().toISOString();
+    const existing = this.fitnessLiveLoadPolicies.get(row.program_id);
+    const record: FitnessLiveLoadPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessLiveLoadPolicies.set(row.program_id, record);
+    return { ...record };
+  }
+
+  async getFitnessLiveLoadPolicy(
+    programId: string,
+  ): Promise<FitnessLiveLoadPolicyRecord | undefined> {
+    const found = this.fitnessLiveLoadPolicies.get(programId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessFranchisePolicy(
+    row: Omit<FitnessFranchisePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessFranchisePolicyRecord> {
+    const now = new Date().toISOString();
+    const existing = this.fitnessFranchisePolicies.get(row.studio_franchise_code);
+    const record: FitnessFranchisePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessFranchisePolicies.set(row.studio_franchise_code, record);
+    return { ...record };
+  }
+
+  async getFitnessFranchisePolicy(
+    studioFranchiseCode: string,
+  ): Promise<FitnessFranchisePolicyRecord | undefined> {
+    const found = this.fitnessFranchisePolicies.get(studioFranchiseCode);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessCoBrandPartnership(
+    row: Omit<FitnessCoBrandPartnershipRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCoBrandPartnershipRecord> {
+    const now = new Date().toISOString();
+    const existing = this.fitnessCoBrandPartnerships.get(row.studio_franchise_code);
+    const record: FitnessCoBrandPartnershipRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessCoBrandPartnerships.set(row.studio_franchise_code, record);
+    return { ...record };
+  }
+
+  async getFitnessCoBrandPartnership(
+    studioFranchiseCode: string,
+  ): Promise<FitnessCoBrandPartnershipRecord | undefined> {
+    const found = this.fitnessCoBrandPartnerships.get(studioFranchiseCode);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessAlgorithmPolicy(
+    row: Omit<FitnessAlgorithmPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAlgorithmPolicyRecord> {
+    const now = new Date().toISOString();
+    const existing = this.fitnessAlgorithmPolicies.get(row.program_id);
+    const record: FitnessAlgorithmPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessAlgorithmPolicies.set(row.program_id, record);
+    return { ...record };
+  }
+
+  async getFitnessAlgorithmPolicy(
+    programId: string,
+  ): Promise<FitnessAlgorithmPolicyRecord | undefined> {
+    const found = this.fitnessAlgorithmPolicies.get(programId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessCocreationModule(
+    row: Omit<FitnessCocreationModuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessCocreationModuleRecord> {
+    const now = new Date().toISOString();
+    const index = this.fitnessCocreationModules.findIndex(
+      (module_) =>
+        module_.program_id === row.program_id && module_.module_id === row.module_id,
+    );
+    if (index >= 0) {
+      const existing = this.fitnessCocreationModules[index] as FitnessCocreationModuleRecord;
+      const record: FitnessCocreationModuleRecord = {
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: now,
+      };
+      this.fitnessCocreationModules[index] = record;
+      return { ...record };
+    }
+    const record: FitnessCocreationModuleRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.fitnessCocreationModules.push(record);
+    return { ...record };
+  }
+
+  async listFitnessCocreationModules(
+    programId: string,
+  ): Promise<FitnessCocreationModuleRecord[]> {
+    return this.fitnessCocreationModules
+      .filter((module_) => module_.program_id === programId)
+      .map((module_) => ({ ...module_ }));
+  }
+
+  async advanceFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+    completionsAdded: number,
+  ): Promise<FitnessCompletionMonthRecord> {
+    const key = `${trainerId}\u0000${programId}\u0000${month}`;
+    const now = new Date().toISOString();
+    const existing = this.fitnessCompletionMonths.get(key);
+    const record: FitnessCompletionMonthRecord = {
+      id: existing?.id ?? randomUUID(),
+      trainer_id: trainerId,
+      program_id: programId,
+      month,
+      cumulative_completions: (existing?.cumulative_completions ?? 0) + completionsAdded,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessCompletionMonths.set(key, record);
+    return { ...record };
+  }
+
+  async getFitnessCompletionMonth(
+    trainerId: string,
+    programId: string,
+    month: string,
+  ): Promise<FitnessCompletionMonthRecord | undefined> {
+    const found = this.fitnessCompletionMonths.get(
+      `${trainerId}\u0000${programId}\u0000${month}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+    classesAdded: number,
+  ): Promise<FitnessFranchiseClassMonthRecord> {
+    const key = `${studioFranchiseCode}\u0000${month}`;
+    const now = new Date().toISOString();
+    const existing = this.fitnessFranchiseClassMonths.get(key);
+    const record: FitnessFranchiseClassMonthRecord = {
+      id: existing?.id ?? randomUUID(),
+      studio_franchise_code: studioFranchiseCode,
+      month,
+      cumulative_classes: (existing?.cumulative_classes ?? 0) + classesAdded,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessFranchiseClassMonths.set(key, record);
+    return { ...record };
+  }
+
+  async getFitnessFranchiseClassMonth(
+    studioFranchiseCode: string,
+    month: string,
+  ): Promise<FitnessFranchiseClassMonthRecord | undefined> {
+    const found = this.fitnessFranchiseClassMonths.get(
+      `${studioFranchiseCode}\u0000${month}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessRealizationApplication(
+    row: Omit<FitnessRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessRealizationApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessRealizationApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_realization_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessRealizationApplicationRecord | undefined> {
+    const found = this.fitnessRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessTrainerRoyaltyApplication(
+    row: Omit<FitnessTrainerRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessTrainerRoyaltyApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_trainer_royalty_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessTrainerRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessTrainerRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessTrainerRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FitnessTrainerRoyaltyApplicationRecord | undefined> {
+    const found = this.fitnessTrainerRoyaltyApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessLiveResidualApplication(
+    row: Omit<FitnessLiveResidualApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveResidualApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessLiveResidualApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_live_residual_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessLiveResidualApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessLiveResidualApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessLiveResidualApplication(
+    sourceEventId: string,
+  ): Promise<FitnessLiveResidualApplicationRecord | undefined> {
+    const found = this.fitnessLiveResidualApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessFranchiseApplication(
+    row: Omit<FitnessFranchiseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessFranchiseApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessFranchiseApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_franchise_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessFranchiseApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessFranchiseApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessFranchiseApplication(
+    sourceEventId: string,
+  ): Promise<FitnessFranchiseApplicationRecord | undefined> {
+    const found = this.fitnessFranchiseApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessCobrandSplitApplication(
+    row: Omit<FitnessCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCobrandSplitApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessCobrandSplitApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_cobrand_split_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessCobrandSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessCobrandSplitApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCobrandSplitApplicationRecord | undefined> {
+    const found = this.fitnessCobrandSplitApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessAlgorithmRoyalty(
+    row: Omit<FitnessAlgorithmRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAlgorithmRoyaltyRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessAlgorithmRoyaltyLedger.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_algorithm_royalty_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessAlgorithmRoyaltyRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessAlgorithmRoyaltyLedger.push(record);
+    return { ...record };
+  }
+
+  async getFitnessAlgorithmRoyalty(
+    sourceEventId: string,
+  ): Promise<FitnessAlgorithmRoyaltyRecord | undefined> {
+    const found = this.fitnessAlgorithmRoyaltyLedger.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessCocreationApplication(
+    row: Omit<FitnessCocreationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessCocreationApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard.
+    if (
+      this.fitnessCocreationApplications.some(
+        (record) => record.source_event_id === row.source_event_id,
+      )
+    ) {
+      throw new Error(
+        `fitness_cocreation_replay_conflict: ${row.source_event_id} already applied`,
+      );
+    }
+    const record: FitnessCocreationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessCocreationApplications.push(record);
+    return { ...record };
+  }
+
+  async getFitnessCocreationApplication(
+    sourceEventId: string,
+  ): Promise<FitnessCocreationApplicationRecord | undefined> {
+    const found = this.fitnessCocreationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
     return found === undefined ? undefined : { ...found };
   }
 }
