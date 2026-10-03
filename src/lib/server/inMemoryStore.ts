@@ -152,6 +152,13 @@ import type {
   AiDatasetDeprecationRecord,
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
+import type {
+  LicensingRoyaltyDealRecord,
+  LicensingRoyaltyApplicationRecord,
+  LicensingTreatyRateRecord,
+  LicensingSubLicenseeRecord,
+  LicensingSubLicenseReportRecord,
+} from '@/modules/licensing/records';
 import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 import type {
   MatchQueueRecord,
@@ -297,6 +304,15 @@ export class InMemoryStore implements Store {
   private promoterSettlementAudits = new Map<string, PromoterSettlementAuditRecord>();
   private theatricalPayoutGateStates = new Map<string, TheatricalPayoutGateStateRecord>();
   private venueHallFeePolicies = new Map<string, VenueHallFeePolicyRecord>();
+  // Migration 0036 — the licensing lane's facts of record: the deal of record
+  // per license scope, the append-only royalty applications (walk commits),
+  // the treaty rates per (source, residence), the registered sub-licensees
+  // per (scope, sub-licensee), and the sub-license gross reports of record.
+  private licensingRoyaltyDeals = new Map<string, LicensingRoyaltyDealRecord>();
+  private licensingRoyaltyApplications: LicensingRoyaltyApplicationRecord[] = [];
+  private licensingTreatyRates = new Map<string, LicensingTreatyRateRecord>();
+  private licensingSubLicensees = new Map<string, LicensingSubLicenseeRecord>();
+  private licensingSubLicenseReports = new Map<string, LicensingSubLicenseReportRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -2589,6 +2605,194 @@ export class InMemoryStore implements Store {
   ): Promise<VenueHallFeePolicyRecord | undefined> {
     const found = this.venueHallFeePolicies.get(`${tourId}:${venueId}`);
     return found === undefined ? undefined : { ...found };
+  }
+
+  // --- Brand licensing: Net Sales + tiered royalties + sub-license cascade
+  // --- (PR 32, migration 0036) ---
+
+  async upsertLicensingRoyaltyDeal(
+    row: Omit<LicensingRoyaltyDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingRoyaltyDealRecord> {
+    // UNIQUE per scope_key — a re-registration replaces the row atomically
+    // (the caller increments version and preserves the counters; this
+    // method never touches them).
+    const now = new Date().toISOString();
+    const existing = this.licensingRoyaltyDeals.get(row.scope_key);
+    const record: LicensingRoyaltyDealRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingRoyaltyDeals.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getLicensingRoyaltyDeal(
+    scopeKey: string,
+  ): Promise<LicensingRoyaltyDealRecord | undefined> {
+    const found = this.licensingRoyaltyDeals.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertLicensingRoyaltyApplication(
+    row: Omit<LicensingRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingRoyaltyApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id) is the replay guard; UNIQUE
+    // per (deal_id, cumulative_before_cents) is the position lock — a
+    // replayed walk or a lost position race throws here, never a double
+    // application; the caller retries at the advanced position.
+    if (
+      this.licensingRoyaltyApplications.some(
+        (existing) =>
+          existing.deal_id === row.deal_id && existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('licensing_royalty_applications.deal_id,source_event_id');
+    }
+    if (
+      this.licensingRoyaltyApplications.some(
+        (existing) =>
+          existing.deal_id === row.deal_id &&
+          existing.cumulative_before_cents === row.cumulative_before_cents,
+      )
+    ) {
+      uniqueViolation('licensing_royalty_applications.deal_id,cumulative_before_cents');
+    }
+    const record: LicensingRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.licensingRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async listLicensingRoyaltyApplications(
+    dealId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord[]> {
+    // created_at ASC — the cumulative ledger in walk order.
+    return this.licensingRoyaltyApplications
+      .filter((row) => row.deal_id === dealId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertLicensingTreatyRate(
+    row: Omit<LicensingTreatyRateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingTreatyRateRecord> {
+    // UNIQUE per (source_country, residence_country) — a re-registration
+    // converges (the newest rate governs the next walk).
+    const key = `${row.source_country}:${row.residence_country}`;
+    const now = new Date().toISOString();
+    const existing = this.licensingTreatyRates.get(key);
+    const record: LicensingTreatyRateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingTreatyRates.set(key, record);
+    return { ...record };
+  }
+
+  async getLicensingTreatyRate(
+    sourceCountry: string,
+    residenceCountry: string,
+  ): Promise<LicensingTreatyRateRecord | undefined> {
+    const found = this.licensingTreatyRates.get(`${sourceCountry}:${residenceCountry}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertLicensingSubLicensee(
+    row: Omit<LicensingSubLicenseeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseeRecord> {
+    // UNIQUE per (scope_key, sub_licensee_id) — an upsert converges (the
+    // newest override governs the next report).
+    const key = `${row.scope_key}:${row.sub_licensee_id}`;
+    const now = new Date().toISOString();
+    const existing = this.licensingSubLicensees.get(key);
+    const record: LicensingSubLicenseeRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingSubLicensees.set(key, record);
+    return { ...record };
+  }
+
+  async getLicensingSubLicensee(
+    scopeKey: string,
+    subLicenseeId: string,
+  ): Promise<LicensingSubLicenseeRecord | undefined> {
+    const found = this.licensingSubLicensees.get(`${scopeKey}:${subLicenseeId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listLicensingSubLicensees(scopeKey: string): Promise<LicensingSubLicenseeRecord[]> {
+    // created_at ASC — the registered regional parties in registration order.
+    return [...this.licensingSubLicensees.values()]
+      .filter((row) => row.scope_key === scopeKey)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertLicensingSubLicenseReport(
+    row: Omit<LicensingSubLicenseReportRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseReportRecord> {
+    // UNIQUE per source_event_id — a re-shipped manifest converges, never
+    // a double report row. The CAS reconcile (below) is the ONLY writer of
+    // the 'reconciled' audit state; this upsert never flips it.
+    const now = new Date().toISOString();
+    const existing = this.licensingSubLicenseReports.get(row.source_event_id);
+    const record: LicensingSubLicenseReportRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingSubLicenseReports.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getLicensingSubLicenseReport(
+    sourceEventId: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    const found = this.licensingSubLicenseReports.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listLicensingSubLicenseReports(
+    scopeKey: string,
+  ): Promise<LicensingSubLicenseReportRecord[]> {
+    // created_at ASC — the audit trail the release path replays.
+    return [...this.licensingSubLicenseReports.values()]
+      .filter((row) => row.scope_key === scopeKey)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async reconcileLicensingSubLicenseReport(
+    id: string,
+    evidenceRef: string,
+    reconciledBy: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    // The evidenced audit CAS — flips ONE row 'unknown' → 'reconciled';
+    // the caller that lost the race (or replayed) reads undefined.
+    for (const [key, row] of this.licensingSubLicenseReports) {
+      if (row.id !== id || row.audit_state !== 'unknown') continue;
+      const reconciled: LicensingSubLicenseReportRecord = {
+        ...row,
+        audit_state: 'reconciled',
+        evidence_ref: evidenceRef,
+        reconciled_by: reconciledBy,
+        updated_at: new Date().toISOString(),
+      };
+      this.licensingSubLicenseReports.set(key, reconciled);
+      return { ...reconciled };
+    }
+    return undefined;
   }
 
   async listTranslationLocalizationEscrowCredits(

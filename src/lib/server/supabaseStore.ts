@@ -149,6 +149,13 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingRoyaltyDealRecord,
+  LicensingRoyaltyApplicationRecord,
+  LicensingTreatyRateRecord,
+  LicensingSubLicenseeRecord,
+  LicensingSubLicenseReportRecord,
+} from '@/modules/licensing/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -386,6 +393,11 @@ const TABLES = {
   promoterSettlementAudits: 'promoter_settlement_audits',
   theatricalPayoutGateStates: 'theatrical_payout_gate_states',
   venueHallFeePolicies: 'venue_hall_fee_policies',
+  licensingRoyaltyDeals: 'licensing_royalty_deals',
+  licensingRoyaltyApplications: 'licensing_royalty_applications',
+  licensingTreatyRates: 'licensing_treaty_rates',
+  licensingSubLicensees: 'licensing_sub_licensees',
+  licensingSubLicenseReports: 'licensing_sub_license_reports',
 } as const;
 
 /**
@@ -3134,6 +3146,221 @@ export class SupabaseStore implements Store {
         .eq('venue_id', venueId)
         .maybeSingle(),
       'getVenueHallFeePolicy',
+    );
+  }
+
+  // --- Brand licensing: Net Sales + tiered royalties + sub-license cascade
+  // --- (PR 32, migration 0036) ---
+
+  async upsertLicensingRoyaltyDeal(
+    row: Omit<LicensingRoyaltyDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingRoyaltyDealRecord> {
+    // UNIQUE per scope_key — a re-registration replaces the row atomically
+    // (the caller increments version and preserves the counters; this
+    // method never touches them).
+    return this.oneStrict<LicensingRoyaltyDealRecord>(
+      this.client
+        .from(TABLES.licensingRoyaltyDeals)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'scope_key' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingRoyaltyDeal',
+    );
+  }
+
+  async getLicensingRoyaltyDeal(
+    scopeKey: string,
+  ): Promise<LicensingRoyaltyDealRecord | undefined> {
+    return this.one<LicensingRoyaltyDealRecord>(
+      this.client
+        .from(TABLES.licensingRoyaltyDeals)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getLicensingRoyaltyDeal',
+    );
+  }
+
+  async insertLicensingRoyaltyApplication(
+    row: Omit<LicensingRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingRoyaltyApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id) is the replay guard; UNIQUE
+    // per (deal_id, cumulative_before_cents) is the position lock — a
+    // replayed walk or a lost position race throws here, never a double
+    // application; the caller retries at the advanced position.
+    return this.oneStrict<LicensingRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.licensingRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertLicensingRoyaltyApplication',
+    );
+  }
+
+  async listLicensingRoyaltyApplications(
+    dealId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord[]> {
+    // created_at ASC — the cumulative ledger in walk order.
+    return this.many<LicensingRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.licensingRoyaltyApplications)
+        .select()
+        .eq('deal_id', dealId)
+        .order('created_at', { ascending: true }),
+      'listLicensingRoyaltyApplications',
+    );
+  }
+
+  async upsertLicensingTreatyRate(
+    row: Omit<LicensingTreatyRateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingTreatyRateRecord> {
+    // UNIQUE per (source_country, residence_country) — a re-registration
+    // converges (the newest rate governs the next walk).
+    return this.oneStrict<LicensingTreatyRateRecord>(
+      this.client
+        .from(TABLES.licensingTreatyRates)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'source_country,residence_country' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingTreatyRate',
+    );
+  }
+
+  async getLicensingTreatyRate(
+    sourceCountry: string,
+    residenceCountry: string,
+  ): Promise<LicensingTreatyRateRecord | undefined> {
+    return this.one<LicensingTreatyRateRecord>(
+      this.client
+        .from(TABLES.licensingTreatyRates)
+        .select()
+        .eq('source_country', sourceCountry)
+        .eq('residence_country', residenceCountry)
+        .maybeSingle(),
+      'getLicensingTreatyRate',
+    );
+  }
+
+  async upsertLicensingSubLicensee(
+    row: Omit<LicensingSubLicenseeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseeRecord> {
+    // UNIQUE per (scope_key, sub_licensee_id) — an upsert converges (the
+    // newest override governs the next report).
+    return this.oneStrict<LicensingSubLicenseeRecord>(
+      this.client
+        .from(TABLES.licensingSubLicensees)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'scope_key,sub_licensee_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingSubLicensee',
+    );
+  }
+
+  async getLicensingSubLicensee(
+    scopeKey: string,
+    subLicenseeId: string,
+  ): Promise<LicensingSubLicenseeRecord | undefined> {
+    return this.one<LicensingSubLicenseeRecord>(
+      this.client
+        .from(TABLES.licensingSubLicensees)
+        .select()
+        .eq('scope_key', scopeKey)
+        .eq('sub_licensee_id', subLicenseeId)
+        .maybeSingle(),
+      'getLicensingSubLicensee',
+    );
+  }
+
+  async listLicensingSubLicensees(scopeKey: string): Promise<LicensingSubLicenseeRecord[]> {
+    // created_at ASC — the registered regional parties in registration order.
+    return this.many<LicensingSubLicenseeRecord>(
+      this.client
+        .from(TABLES.licensingSubLicensees)
+        .select()
+        .eq('scope_key', scopeKey)
+        .order('created_at', { ascending: true }),
+      'listLicensingSubLicensees',
+    );
+  }
+
+  async upsertLicensingSubLicenseReport(
+    row: Omit<LicensingSubLicenseReportRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseReportRecord> {
+    // UNIQUE per source_event_id — a re-shipped manifest converges, never
+    // a double report row. The CAS reconcile (below) is the ONLY writer of
+    // the 'reconciled' audit state; this upsert never flips it.
+    return this.oneStrict<LicensingSubLicenseReportRecord>(
+      this.client
+        .from(TABLES.licensingSubLicenseReports)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'source_event_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingSubLicenseReport',
+    );
+  }
+
+  async getLicensingSubLicenseReport(
+    sourceEventId: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    return this.one<LicensingSubLicenseReportRecord>(
+      this.client
+        .from(TABLES.licensingSubLicenseReports)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getLicensingSubLicenseReport',
+    );
+  }
+
+  async listLicensingSubLicenseReports(
+    scopeKey: string,
+  ): Promise<LicensingSubLicenseReportRecord[]> {
+    // created_at ASC — the audit trail the release path replays.
+    return this.many<LicensingSubLicenseReportRecord>(
+      this.client
+        .from(TABLES.licensingSubLicenseReports)
+        .select()
+        .eq('scope_key', scopeKey)
+        .order('created_at', { ascending: true }),
+      'listLicensingSubLicenseReports',
+    );
+  }
+
+  async reconcileLicensingSubLicenseReport(
+    id: string,
+    evidenceRef: string,
+    reconciledBy: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    // The evidenced audit CAS — flips ONE row 'unknown' → 'reconciled' in
+    // a single conditional statement; the caller that lost the race (or
+    // replayed) reads undefined.
+    return this.one<LicensingSubLicenseReportRecord>(
+      this.client
+        .from(TABLES.licensingSubLicenseReports)
+        .update({
+          audit_state: 'reconciled',
+          evidence_ref: evidenceRef,
+          reconciled_by: reconciledBy,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('audit_state', 'unknown')
+        .select()
+        .maybeSingle(),
+      'reconcileLicensingSubLicenseReport',
     );
   }
 

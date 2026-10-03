@@ -339,6 +339,45 @@ export interface ReconJobResult {
   /** Theatrical lane: stops that crossed the capitalization budget — the
    * automatic 50/50 switchover events. */
   theatrical_recoupment_switchovers?: number;
+  /** Licensing lane (PR 32): write-pass counts and the addendum 12 triple's
+   * honest classification (every validated row carries one). */
+  licensing_written?: number;
+  licensing_replayed?: number;
+  licensing_matched?: number;
+  licensing_unmatched?: number;
+  /** Licensing lane: quarantined rows — negative nets visible, zero nets
+   * recorded, never walked, never posted. */
+  licensing_held_negative_net?: number;
+  licensing_zero_net?: number;
+  /** Licensing lane: holding posts of the computed Net Licensed Sales. */
+  licensing_holding_posted?: number;
+  licensing_holding_replayed?: number;
+  /** Licensing lane: the deduction legs recorded across rows, verbatim
+   * fixed-point micros as text (the Net Sales gap of record). */
+  licensing_net_sales_deduction_micros?: string;
+  /** Licensing lane: the tier walk's commits and counted replay no-ops. */
+  licensing_applications_committed?: number;
+  licensing_applications_replayed?: number;
+  /** Licensing lane: fail-closed skips — no deal of record, or a currency
+   * the deal of record does not price. */
+  licensing_skipped_no_deal?: number;
+  licensing_currency_mismatch?: number;
+  /** Licensing lane: the sub-license cascade — reports written and replayed,
+   * the audit gate's held reports, and the releases posted (only ever from
+   * 'reconciled' reports of record). */
+  licensing_sub_reports_written?: number;
+  licensing_sub_reports_replayed?: number;
+  licensing_sub_held_pending_audit?: number;
+  licensing_sub_releases_posted?: number;
+  licensing_sub_releases_replayed?: number;
+  licensing_skipped_no_sub_licensee?: number;
+  /** Licensing lane: the walk's earned gross royalties, the agency
+   * commission deducted, and the treaty withholding held back, integer
+   * cents; payout legs HELD for uncovered international pairs. */
+  licensing_royalty_gross_cents?: number;
+  licensing_agency_commission_cents?: number;
+  licensing_withheld_cents?: number;
+  licensing_payout_legs_held?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

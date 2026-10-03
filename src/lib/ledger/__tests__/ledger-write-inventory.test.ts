@@ -360,6 +360,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // universal_royalty_ledger — the escrow rides the existing ledger
       // kind/status vocabulary, and the referencing pin below holds.
       '0035_promoter_settlement_escrow_theater_gates_comedy_audio.sql',
+      '0036_licensing_net_sales_tiered_royalties_sublicense.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

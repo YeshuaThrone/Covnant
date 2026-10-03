@@ -78,7 +78,15 @@ export type StatementProfileKind =
   | "theatrical_axs_settlement_csv"
   | "theatrical_ticketmaster_settlement_csv"
   | "theatrical_eventbrite_payout_csv"
-  | "theatrical_venuepos_settlement_csv";
+  | "theatrical_venuepos_settlement_csv"
+  // The brand-licensing lane (PR 32) — the four statement senders the
+  // founder directive names (retail sales reports, master licensee
+  // sell-through logs, e-commerce POS feeds, wholesale distributor
+  // manifests), one strict profile per sender's sheet.
+  | "licensing_retail_sales_csv"
+  | "licensing_sellthrough_log_csv"
+  | "licensing_ecommerce_pos_csv"
+  | "licensing_wholesale_manifest_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -813,6 +821,36 @@ export type TheatricalLineDetail = {
   readonly period: string;
 };
 
+/**
+ * The brand-licensing lane's per-line context (PR 32, founder brand-licensing
+ * directive). Null on every non-licensing line — the field's PRESENCE is the
+ * lane discriminator. One union, sender-discriminated: the four statement
+ * layouts normalize onto the same Net Sales legs.
+ */
+export type LicensingLineDetail = {
+  /** The statement sender — its own event-id space per sender. */
+  readonly sender: "retail" | "sellthrough" | "ecommerce" | "wholesale";
+  /** The addendum 12 triple — the deal-of-record and queue keys. */
+  readonly licenseId: string;
+  readonly categoryCode: string;
+  readonly territoryIso: string;
+  /** The sender's row id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The wholesale manifest's sub-licensee attribution; null elsewhere. */
+  readonly subLicenseeId: string | null;
+  /** The gross revenue leg, exact micros text. */
+  readonly grossRevenueMicros: string;
+  /** The approved deduction legs, exact micros text, recorded verbatim. */
+  readonly tradeDiscountMicros: string;
+  readonly returnedGoodsMicros: string;
+  readonly shippingFreightMicros: string;
+  readonly vatMicros: string;
+  /** The wholesale manifest's self-reconciled reported net; null elsewhere. */
+  readonly reportedNetMicros: string | null;
+  /** The statement's period (reporting month, YYYY-MM). */
+  readonly period: string;
+};
+
 /** One normalized statement line — the worker's parse vocabulary. */
 export interface ParsedStatementLine {
   /** 1-based data-row number within the statement (header excluded). */
@@ -897,6 +935,13 @@ export interface ParsedStatementLine {
    * on every non-theatrical line — the presence IS the lane discriminator.
    * Optional for the same reason as bookDetail. */
   theatricalDetail?: TheatricalLineDetail | null;
+
+  /** Brand-licensing lane context (the statement sender, the addendum 12
+   * triple, the sender row id of record, the Net Sales legs, the wholesale
+   * sub-licensee attribution and self-reconciliation cells); null on every
+   * non-licensing line — the presence IS the lane discriminator. Optional
+   * for the same reason as bookDetail. */
+  licensingDetail?: LicensingLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

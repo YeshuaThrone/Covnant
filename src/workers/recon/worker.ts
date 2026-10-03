@@ -53,6 +53,10 @@ import { isArtProfileKind } from "./artProfiles";
 import { isTheatricalProfileKind } from "./theatricalProfiles";
 import { writeTheatricalLinesToMatchQueue } from "./theatricalQueue";
 import { postTheatricalNetsToHolding } from "./theatricalPosting";
+import { isLicensingProfileKind } from "./licensingProfiles";
+import { writeLicensingLinesToMatchQueue } from "./licensingQueue";
+import { postLicensingNetsToHolding } from "./licensingPosting";
+import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
 import { runArtWaterfallPass } from "@/lib/server/artMarketCascade";
 import { runBookEditorialSplitPass } from "@/lib/server/bookEditorialCascade";
@@ -235,6 +239,17 @@ async function processJobBody(
     // editorial cascade, or the art fabrication waterfalls.
     if (isTheatricalProfileKind(matchedProfile.kind)) {
       return await parseTheatrical(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The brand-licensing lane branches the same way (PR 32): its rows are
+    // the four strict senders' sales/sell-through/POS/manifest events whose
+    // money runs the Net Sales realization, the cumulative tier walk, the
+    // agency commission, the dual-IP split, the treaty withholding, and the
+    // sub-license override — never the music queue's split math, the gaming
+    // accumulator, the livestream escrow, the webtoon conversions, the
+    // merch COGS deduction, the AI split, the book editorial cascade, the
+    // art fabrication waterfalls, or the theatrical deal classes.
+    if (isLicensingProfileKind(matchedProfile.kind)) {
+      return await parseLicensing(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -725,6 +740,64 @@ async function parseTheatrical(
     theatrical_venue_expense_capped_cents: waterfall.venueExpenseCappedCents,
     theatrical_deal_payout_cents: waterfall.dealPayoutCents,
     theatrical_recoupment_switchovers: waterfall.switchovers,
+  };
+}
+
+/**
+ * The brand-licensing lane (PR 32): strict-profile parse → match_queue
+ * write (the addendum 12 deal-of-record triple on every row, the Net
+ * Licensed Sales computed once at write time from the row's recorded legs)
+ * → holding posting (money dispositions only) → the royalty cascade pass —
+ * the tier walk from the deal's cumulative position, the agency commission
+ * ordering before the splits, the co-branded 50-50 dual-IP split, the
+ * treaty withholding by source territory, and the sub-license override
+ * with its audit-gated release (the isolation firewall). Every pass is
+ * idempotent (replays are counted no-ops through the per-source UNIQUE
+ * guards); a pass failure throws — the job fails with its row-scoped
+ * reason and a retry heals idempotently.
+ */
+async function parseLicensing(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeLicensingLinesToMatchQueue(deps.store, ingestId, lines);
+  const posting = await postLicensingNetsToHolding(deps.store, counts, now);
+  const cascade = await runLicensingRoyaltyCascadePass(deps.store, counts.lineOutcomes, now);
+
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    licensing_written: counts.written,
+    licensing_replayed: counts.alreadyPresent,
+    licensing_matched: counts.matched,
+    licensing_unmatched: counts.unmatched,
+    licensing_held_negative_net: counts.heldNegativeNet,
+    licensing_zero_net: counts.zeroNet,
+    licensing_holding_posted: posting.posted,
+    licensing_holding_replayed: posting.alreadyPosted,
+    licensing_net_sales_deduction_micros: counts.netSalesDeductionMicros.toString(),
+    licensing_applications_committed: cascade.applicationsCommitted,
+    licensing_applications_replayed: cascade.applicationsReplayed,
+    licensing_skipped_no_deal: cascade.skippedNoDeal,
+    licensing_currency_mismatch: cascade.skippedCurrencyMismatch,
+    licensing_sub_reports_written: cascade.subReportsWritten,
+    licensing_sub_reports_replayed: cascade.subReportsReplayed,
+    licensing_sub_held_pending_audit: cascade.subHeldPendingAudit,
+    licensing_sub_releases_posted: cascade.subReleasesPosted,
+    licensing_sub_releases_replayed: cascade.subReleasesReplayed,
+    licensing_skipped_no_sub_licensee: cascade.skippedNoSubLicensee,
+    licensing_royalty_gross_cents: cascade.royaltyGrossCents,
+    licensing_agency_commission_cents: cascade.agencyCommissionCents,
+    licensing_withheld_cents: cascade.withheldCents,
+    licensing_payout_legs_held: cascade.payoutLegsHeld,
   };
 }
 

@@ -154,6 +154,15 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingRoyaltyDealRecord,
+  LicensingRoyaltyApplicationRecord,
+  LicensingTierSlice,
+  LicensingTierSpec,
+  LicensingTreatyRateRecord,
+  LicensingSubLicenseeRecord,
+  LicensingSubLicenseReportRecord,
+} from '@/modules/licensing/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -1469,6 +1478,105 @@ CREATE TABLE IF NOT EXISTS venue_hall_fee_policies (
   UNIQUE (tour_id, venue_id)
 );
 
+-- Brand licensing: Net Sales realization, tiered royalties, dual-IP splits,
+-- treaty withholding, sub-license cascade (migration 0036, PR 32). The
+-- deal of record per license scope (the marginal tier schedule and the
+-- dual-IP licensor payees pack as TEXT JSON), the append-only per-event
+-- tier walks (the cumulative state's commit), the treaty rates per
+-- (source, residence), the registered regional sub-licensees, and the
+-- sub-license gross reports of record (the fail-closed audit gate).
+CREATE TABLE IF NOT EXISTS licensing_royalty_deals (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  license_id TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  tiers TEXT NOT NULL,
+  agency_commission_bps INTEGER,
+  licensor_a_payee_id TEXT NOT NULL,
+  licensor_a_payee_name TEXT NOT NULL,
+  licensor_a_country TEXT NOT NULL,
+  licensor_b_payee_id TEXT,
+  licensor_b_payee_name TEXT,
+  licensor_b_country TEXT,
+  withholding_default_bps INTEGER,
+  cumulative_net_sales_cents INTEGER NOT NULL DEFAULT 0,
+  cumulative_royalty_cents INTEGER NOT NULL DEFAULT 0,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS licensing_royalty_applications (
+  id TEXT PRIMARY KEY,
+  deal_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  period TEXT,
+  net_sales_cents INTEGER NOT NULL,
+  cumulative_before_cents INTEGER NOT NULL,
+  royalty_cents INTEGER NOT NULL,
+  slices TEXT NOT NULL,
+  agency_commission_cents INTEGER NOT NULL DEFAULT 0,
+  licensor_a_gross_cents INTEGER NOT NULL,
+  licensor_b_gross_cents INTEGER NOT NULL DEFAULT 0,
+  dust_cents INTEGER NOT NULL DEFAULT 0,
+  withholding_rate_bps INTEGER,
+  licensor_a_withheld_cents INTEGER,
+  licensor_b_withheld_cents INTEGER,
+  withholding_ref TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (deal_id, source_event_id),
+  UNIQUE (deal_id, cumulative_before_cents)
+);
+
+CREATE TABLE IF NOT EXISTS licensing_treaty_rates (
+  id TEXT PRIMARY KEY,
+  source_country TEXT NOT NULL,
+  residence_country TEXT NOT NULL,
+  rate_bps INTEGER NOT NULL,
+  treaty_ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source_country, residence_country)
+);
+
+CREATE TABLE IF NOT EXISTS licensing_sub_licensees (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  sub_licensee_id TEXT NOT NULL,
+  region_code TEXT NOT NULL,
+  master_override_bps INTEGER NOT NULL,
+  payee_id TEXT NOT NULL,
+  payee_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key, sub_licensee_id)
+);
+
+CREATE TABLE IF NOT EXISTS licensing_sub_license_reports (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  sub_licensee_id TEXT NOT NULL,
+  region_code TEXT NOT NULL,
+  period TEXT,
+  source_event_id TEXT NOT NULL UNIQUE,
+  gross_cents INTEGER NOT NULL,
+  trade_discount_cents INTEGER NOT NULL DEFAULT 0,
+  returned_goods_cents INTEGER NOT NULL DEFAULT 0,
+  shipping_freight_cents INTEGER NOT NULL DEFAULT 0,
+  vat_cents INTEGER NOT NULL DEFAULT 0,
+  net_sales_cents INTEGER NOT NULL,
+  master_override_bps INTEGER NOT NULL,
+  master_royalty_cents INTEGER NOT NULL,
+  audit_state TEXT NOT NULL CHECK (audit_state IN ('unknown', 'reconciled')),
+  evidence_ref TEXT,
+  reconciled_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_sub_reports_scope
+  ON licensing_sub_license_reports (scope_key);
+
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
 -- allocations (the author-first reservation order — rowid ASC is this
@@ -2207,6 +2315,57 @@ function matchQueueFromSqliteRow(row: MatchQueueSqliteRow): MatchQueueRecord {
     is_cover_version: booleanFromSqlite(row.is_cover_version),
     foreign_tax_withheld: booleanFromSqlite(row.foreign_tax_withheld),
   };
+}
+
+// --- Brand licensing (migration 0036, PR 32) — row projection helpers ---
+//
+// The deal's tier schedule and the application's tier slices pack as TEXT
+// JSON (the film-waterfall distribution's discipline); unpacking is
+// fail-closed: a corrupt mirror throws rather than silently yielding an
+// empty schedule.
+
+type LicensingRoyaltyDealDbRow = Omit<LicensingRoyaltyDealRecord, 'tiers'> & { tiers: string };
+
+function licensingDealToDbRow(record: LicensingRoyaltyDealRecord): LicensingRoyaltyDealDbRow {
+  return { ...record, tiers: JSON.stringify(record.tiers) };
+}
+
+function licensingDealFromDbRow(row: LicensingRoyaltyDealDbRow): LicensingRoyaltyDealRecord {
+  let tiers: LicensingTierSpec[];
+  try {
+    tiers = JSON.parse(row.tiers) as LicensingTierSpec[];
+  } catch (error) {
+    throw new Error(
+      `licensing_royalty_deals.tiers for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, tiers };
+}
+
+type LicensingRoyaltyApplicationDbRow = Omit<LicensingRoyaltyApplicationRecord, 'slices'> & {
+  slices: string;
+};
+
+function licensingApplicationToDbRow(
+  record: LicensingRoyaltyApplicationRecord,
+): LicensingRoyaltyApplicationDbRow {
+  return { ...record, slices: JSON.stringify(record.slices) };
+}
+
+function licensingApplicationFromDbRow(
+  row: LicensingRoyaltyApplicationDbRow,
+): LicensingRoyaltyApplicationRecord {
+  let slices: LicensingTierSlice[];
+  try {
+    slices = JSON.parse(row.slices) as LicensingTierSlice[];
+  } catch (error) {
+    throw new Error(
+      `licensing_royalty_applications.slices for ${row.id} is not valid JSON — SQLite mirror corrupt`,
+      { cause: error },
+    );
+  }
+  return { ...row, slices };
 }
 
 export class SqliteStore implements Store {
@@ -4999,6 +5158,311 @@ export class SqliteStore implements Store {
       this.db
         .prepare(`SELECT * FROM venue_hall_fee_policies WHERE tour_id = ? AND venue_id = ?`)
         .get(tourId, venueId) as VenueHallFeePolicyRecord | undefined,
+    );
+  }
+
+  // --- Brand licensing: Net Sales + tiered royalties + sub-license cascade
+  // --- (PR 32, migration 0036) ---
+
+  async upsertLicensingRoyaltyDeal(
+    row: Omit<LicensingRoyaltyDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingRoyaltyDealRecord> {
+    // UNIQUE per scope_key — a re-registration replaces the row atomically
+    // (the caller increments version and preserves the counters; this
+    // method never touches them).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(`SELECT * FROM licensing_royalty_deals WHERE scope_key = ?`)
+      .get(row.scope_key) as LicensingRoyaltyDealRecord | undefined;
+    const record: LicensingRoyaltyDealRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_royalty_deals
+           (id, scope_key, license_id, currency, tiers, agency_commission_bps,
+            licensor_a_payee_id, licensor_a_payee_name, licensor_a_country,
+            licensor_b_payee_id, licensor_b_payee_name, licensor_b_country,
+            withholding_default_bps, cumulative_net_sales_cents, cumulative_royalty_cents,
+            version, created_at, updated_at)
+         VALUES (@id, @scope_key, @license_id, @currency, @tiers, @agency_commission_bps,
+            @licensor_a_payee_id, @licensor_a_payee_name, @licensor_a_country,
+            @licensor_b_payee_id, @licensor_b_payee_name, @licensor_b_country,
+            @withholding_default_bps, @cumulative_net_sales_cents, @cumulative_royalty_cents,
+            @version, @created_at, @updated_at)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           license_id = excluded.license_id,
+           currency = excluded.currency,
+           tiers = excluded.tiers,
+           agency_commission_bps = excluded.agency_commission_bps,
+           licensor_a_payee_id = excluded.licensor_a_payee_id,
+           licensor_a_payee_name = excluded.licensor_a_payee_name,
+           licensor_a_country = excluded.licensor_a_country,
+           licensor_b_payee_id = excluded.licensor_b_payee_id,
+           licensor_b_payee_name = excluded.licensor_b_payee_name,
+           licensor_b_country = excluded.licensor_b_country,
+           withholding_default_bps = excluded.withholding_default_bps,
+           cumulative_net_sales_cents = excluded.cumulative_net_sales_cents,
+           cumulative_royalty_cents = excluded.cumulative_royalty_cents,
+           version = excluded.version,
+           updated_at = excluded.updated_at`,
+      )
+      .run(licensingDealToDbRow(record) as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getLicensingRoyaltyDeal(
+    scopeKey: string,
+  ): Promise<LicensingRoyaltyDealRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_royalty_deals WHERE scope_key = ?`)
+      .get(scopeKey) as LicensingRoyaltyDealDbRow | undefined;
+    return Promise.resolve(row === undefined ? undefined : licensingDealFromDbRow(row));
+  }
+
+  async insertLicensingRoyaltyApplication(
+    row: Omit<LicensingRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingRoyaltyApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id) is the replay guard; UNIQUE
+    // per (deal_id, cumulative_before_cents) is the position lock — a
+    // replayed walk or a lost position race throws here (the raw SQLite
+    // unique violation, this backend's convention), never a double
+    // application; the caller retries at the advanced position.
+    const record: LicensingRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_royalty_applications
+           (id, deal_id, scope_key, source_event_id, period, net_sales_cents,
+            cumulative_before_cents, royalty_cents, slices, agency_commission_cents,
+            licensor_a_gross_cents, licensor_b_gross_cents, dust_cents,
+            withholding_rate_bps, licensor_a_withheld_cents, licensor_b_withheld_cents,
+            withholding_ref, created_at)
+         VALUES (@id, @deal_id, @scope_key, @source_event_id, @period, @net_sales_cents,
+            @cumulative_before_cents, @royalty_cents, @slices, @agency_commission_cents,
+            @licensor_a_gross_cents, @licensor_b_gross_cents, @dust_cents,
+            @withholding_rate_bps, @licensor_a_withheld_cents, @licensor_b_withheld_cents,
+            @withholding_ref, @created_at)`,
+      )
+      .run(licensingApplicationToDbRow(record) as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listLicensingRoyaltyApplications(
+    dealId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord[]> {
+    // created_at ASC — the cumulative ledger in walk order.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM licensing_royalty_applications
+         WHERE deal_id = ? ORDER BY created_at ASC`,
+      )
+      .all(dealId) as LicensingRoyaltyApplicationDbRow[];
+    return Promise.resolve(rows.map(licensingApplicationFromDbRow));
+  }
+
+  async upsertLicensingTreatyRate(
+    row: Omit<LicensingTreatyRateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingTreatyRateRecord> {
+    // UNIQUE per (source_country, residence_country) — a re-registration
+    // converges (the newest rate governs the next walk).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM licensing_treaty_rates
+         WHERE source_country = ? AND residence_country = ?`,
+      )
+      .get(row.source_country, row.residence_country) as LicensingTreatyRateRecord | undefined;
+    const record: LicensingTreatyRateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_treaty_rates
+           (id, source_country, residence_country, rate_bps, treaty_ref, created_at, updated_at)
+         VALUES (@id, @source_country, @residence_country, @rate_bps, @treaty_ref, @created_at, @updated_at)
+         ON CONFLICT (source_country, residence_country) DO UPDATE SET
+           rate_bps = excluded.rate_bps,
+           treaty_ref = excluded.treaty_ref,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getLicensingTreatyRate(
+    sourceCountry: string,
+    residenceCountry: string,
+  ): Promise<LicensingTreatyRateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM licensing_treaty_rates
+         WHERE source_country = ? AND residence_country = ?`,
+        )
+        .get(sourceCountry, residenceCountry) as LicensingTreatyRateRecord | undefined,
+    );
+  }
+
+  async upsertLicensingSubLicensee(
+    row: Omit<LicensingSubLicenseeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseeRecord> {
+    // UNIQUE per (scope_key, sub_licensee_id) — an upsert converges (the
+    // newest override governs the next report).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM licensing_sub_licensees WHERE scope_key = ? AND sub_licensee_id = ?`,
+      )
+      .get(row.scope_key, row.sub_licensee_id) as LicensingSubLicenseeRecord | undefined;
+    const record: LicensingSubLicenseeRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_sub_licensees
+           (id, scope_key, sub_licensee_id, region_code, master_override_bps,
+            payee_id, payee_name, created_at, updated_at)
+         VALUES (@id, @scope_key, @sub_licensee_id, @region_code, @master_override_bps,
+            @payee_id, @payee_name, @created_at, @updated_at)
+         ON CONFLICT (scope_key, sub_licensee_id) DO UPDATE SET
+           region_code = excluded.region_code,
+           master_override_bps = excluded.master_override_bps,
+           payee_id = excluded.payee_id,
+           payee_name = excluded.payee_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getLicensingSubLicensee(
+    scopeKey: string,
+    subLicenseeId: string,
+  ): Promise<LicensingSubLicenseeRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM licensing_sub_licensees WHERE scope_key = ? AND sub_licensee_id = ?`,
+        )
+        .get(scopeKey, subLicenseeId) as LicensingSubLicenseeRecord | undefined,
+    );
+  }
+
+  async listLicensingSubLicensees(scopeKey: string): Promise<LicensingSubLicenseeRecord[]> {
+    // created_at ASC — the registered regional parties in registration order.
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM licensing_sub_licensees WHERE scope_key = ? ORDER BY created_at ASC`)
+        .all(scopeKey) as LicensingSubLicenseeRecord[],
+    );
+  }
+
+  async upsertLicensingSubLicenseReport(
+    row: Omit<LicensingSubLicenseReportRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseReportRecord> {
+    // UNIQUE per source_event_id — a re-shipped manifest converges, never
+    // a double report row. The CAS reconcile (below) is the ONLY writer of
+    // the 'reconciled' audit state; this upsert never flips it.
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(`SELECT * FROM licensing_sub_license_reports WHERE source_event_id = ?`)
+      .get(row.source_event_id) as LicensingSubLicenseReportRecord | undefined;
+    const record: LicensingSubLicenseReportRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_sub_license_reports
+           (id, scope_key, sub_licensee_id, region_code, period, source_event_id,
+            gross_cents, trade_discount_cents, returned_goods_cents,
+            shipping_freight_cents, vat_cents, net_sales_cents,
+            master_override_bps, master_royalty_cents, audit_state,
+            evidence_ref, reconciled_by, created_at, updated_at)
+         VALUES (@id, @scope_key, @sub_licensee_id, @region_code, @period, @source_event_id,
+            @gross_cents, @trade_discount_cents, @returned_goods_cents,
+            @shipping_freight_cents, @vat_cents, @net_sales_cents,
+            @master_override_bps, @master_royalty_cents, @audit_state,
+            @evidence_ref, @reconciled_by, @created_at, @updated_at)
+         ON CONFLICT (source_event_id) DO UPDATE SET
+           scope_key = excluded.scope_key,
+           sub_licensee_id = excluded.sub_licensee_id,
+           region_code = excluded.region_code,
+           period = excluded.period,
+           gross_cents = excluded.gross_cents,
+           trade_discount_cents = excluded.trade_discount_cents,
+           returned_goods_cents = excluded.returned_goods_cents,
+           shipping_freight_cents = excluded.shipping_freight_cents,
+           vat_cents = excluded.vat_cents,
+           net_sales_cents = excluded.net_sales_cents,
+           master_override_bps = excluded.master_override_bps,
+           master_royalty_cents = excluded.master_royalty_cents,
+           audit_state = excluded.audit_state,
+           evidence_ref = excluded.evidence_ref,
+           reconciled_by = excluded.reconciled_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getLicensingSubLicenseReport(
+    sourceEventId: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM licensing_sub_license_reports WHERE source_event_id = ?`)
+        .get(sourceEventId) as LicensingSubLicenseReportRecord | undefined,
+    );
+  }
+
+  async listLicensingSubLicenseReports(
+    scopeKey: string,
+  ): Promise<LicensingSubLicenseReportRecord[]> {
+    // created_at ASC — the audit trail the release path replays.
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM licensing_sub_license_reports WHERE scope_key = ? ORDER BY created_at ASC`)
+        .all(scopeKey) as LicensingSubLicenseReportRecord[],
+    );
+  }
+
+  async reconcileLicensingSubLicenseReport(
+    id: string,
+    evidenceRef: string,
+    reconciledBy: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined> {
+    // The evidenced audit CAS — flips ONE row 'unknown' → 'reconciled' in
+    // a single conditional statement; the caller that lost the race (or
+    // replayed) reads undefined.
+    const result = this.db
+      .prepare(
+        `UPDATE licensing_sub_license_reports
+         SET audit_state = 'reconciled', evidence_ref = ?, reconciled_by = ?, updated_at = ?
+         WHERE id = ? AND audit_state = 'unknown'`,
+      )
+      .run(evidenceRef, reconciledBy, new Date().toISOString(), id);
+    if (result.changes === 0) return Promise.resolve(undefined);
+    return this.getLicensingSubLicenseReport(
+      // The CAS keyed on the row id; read it back by its event id.
+      (this.db
+        .prepare(`SELECT source_event_id FROM licensing_sub_license_reports WHERE id = ?`)
+        .get(id) as { source_event_id: string }).source_event_id,
     );
   }
 
