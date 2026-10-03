@@ -50,6 +50,10 @@ import { isBookProfileKind } from "./booksProfiles";
 import { writeArtLinesToMatchQueue } from "./artQueue";
 import { postArtNetsToHolding } from "./artPosting";
 import { isArtProfileKind } from "./artProfiles";
+import { isTheatricalProfileKind } from "./theatricalProfiles";
+import { writeTheatricalLinesToMatchQueue } from "./theatricalQueue";
+import { postTheatricalNetsToHolding } from "./theatricalPosting";
+import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
 import { runArtWaterfallPass } from "@/lib/server/artMarketCascade";
 import { runBookEditorialSplitPass } from "@/lib/server/bookEditorialCascade";
 import { StatementParseError } from "./records";
@@ -221,6 +225,16 @@ async function processJobBody(
     // the book editorial cascade.
     if (isArtProfileKind(matchedProfile.kind)) {
       return await parseArt(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The theatrical lane branches the same way (PR 30): its rows are the
+    // four strict ticketing senders' per-stop settlement events whose money
+    // runs the AGBOR calculator, the capped venue-expense recoupment, and
+    // the box office deal waterfalls — never the music queue's split math,
+    // the gaming accumulator, the livestream escrow, the webtoon
+    // conversions, the merch COGS deduction, the AI split, the book
+    // editorial cascade, or the art fabrication waterfalls.
+    if (isTheatricalProfileKind(matchedProfile.kind)) {
+      return await parseTheatrical(deps, job.ingest_id, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -651,6 +665,66 @@ async function parseArt(
     art_split_accruals_replayed: waterfall.splitAccrualsReplayed,
     art_skipped_no_pool: waterfall.skippedNoPool + waterfall.skippedCurrencyMismatch,
     art_skipped_no_schedule: waterfall.skippedNoSchedule,
+  };
+}
+
+/**
+ * The theatrical lane (PR 30): strict-profile parse → match_queue write
+ * (the addendum 11 reconciliation triple on every row, AGBOR computed once
+ * at write time from the row's recorded legs) → holding posting (money
+ * dispositions only) → the box office waterfall pass — Grand Rights
+ * licensing deductions top-line before the production profit splits, the
+ * local promoter expense caps bounding venue-expense recoupment, and the
+ * deal classes walking their own math (the comedy greater-of guarantee;
+ * the theatrical investor recoupment tiers with the automatic 50/50
+ * switchover — the isolation firewall). Every pass is idempotent (replays
+ * are counted no-ops through the per-source UNIQUE guards); a pass failure
+ * throws — the job fails with its row-scoped reason and a retry heals
+ * idempotently.
+ */
+async function parseTheatrical(
+  deps: ReconWorkerDeps,
+  ingestId: string,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const now = (deps.now ?? (() => new Date()))();
+  const counts = await writeTheatricalLinesToMatchQueue(deps.store, ingestId, lines);
+  const posting = await postTheatricalNetsToHolding(deps.store, counts, now);
+  const waterfall = await runTheatricalWaterfallPass(deps.store, counts.lineOutcomes, now);
+
+  // The lane's money aggregates — the stops' GBOR and AGBOR legs aggregated
+  // from the write pass's own outcomes (never recomputed).
+  let gborMicros = 0n;
+  for (const outcome of counts.lineOutcomes) {
+    gborMicros += BigInt(outcome.detail.gborMicros);
+  }
+  const agborMicros = gborMicros - counts.agborDeductionMicros;
+
+  return {
+    events_written: counts.written,
+    matched: counts.matched,
+    unmatched: counts.unmatched,
+    engine_used: null,
+    holding_posted: posting.posted,
+    holding_replayed: posting.alreadyPosted,
+    theatrical_written: counts.written,
+    theatrical_replayed: counts.alreadyPresent,
+    theatrical_matched: counts.matched,
+    theatrical_unmatched: counts.unmatched,
+    theatrical_held_negative_net: counts.heldNegativeNet,
+    theatrical_zero_net: counts.zeroNet,
+    theatrical_holding_posted: posting.posted,
+    theatrical_holding_replayed: posting.alreadyPosted,
+    theatrical_gbor_micros: gborMicros.toString(),
+    theatrical_deductions_micros: counts.agborDeductionMicros.toString(),
+    theatrical_agbor_micros: agborMicros.toString(),
+    theatrical_grand_rights_cents: waterfall.grandRightsCents,
+    theatrical_venue_expense_recouped_cents: waterfall.venueExpenseRecoupedCents,
+    theatrical_venue_expense_capped_cents: waterfall.venueExpenseCappedCents,
+    theatrical_deal_payout_cents: waterfall.dealPayoutCents,
+    theatrical_recoupment_switchovers: waterfall.switchovers,
   };
 }
 

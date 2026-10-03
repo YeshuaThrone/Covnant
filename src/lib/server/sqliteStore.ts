@@ -118,6 +118,10 @@ import type {
   EstateSuccessionTransitionRecord,
   EstateSplitAccrualRecord,
   EstatePayoutGateStateRecord,
+  TheatricalProductionDealRecord,
+  TheatricalStopSettlementRecord,
+  TheatricalRecoupmentApplicationRecord,
+  TheatricalSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1323,6 +1327,99 @@ CREATE TABLE IF NOT EXISTS estate_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- AGBOR box office + theatrical recoupment (migration 0034, PR 30). The
+-- versioned box office deal of record per production scope, the per-stop
+-- settlement sheets keyed on the addendum 11 (production, venue, show
+-- date) triple, the append-only investor recoupment applications (the
+-- position lock is the books/art discipline), and the executed payout
+-- designations — the mirrors of the Supabase migration.
+CREATE TABLE IF NOT EXISTS theatrical_production_deals (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  deal_class TEXT NOT NULL CHECK (deal_class IN ('comedy_guarantee', 'theatrical_recoupment')),
+  grand_rights_rate_bps INTEGER
+    CHECK (grand_rights_rate_bps IS NULL OR (grand_rights_rate_bps >= 600 AND grand_rights_rate_bps <= 1000)),
+  publisher_code TEXT
+    CHECK (publisher_code IS NULL OR publisher_code IN ('concord', 'mti', 'rodgers_hammerstein')),
+  publisher_payee_id TEXT,
+  publisher_payee_name TEXT,
+  artist_payee_id TEXT,
+  artist_payee_name TEXT,
+  producer_payee_id TEXT,
+  producer_payee_name TEXT,
+  investor_payee_id TEXT,
+  investor_payee_name TEXT,
+  flat_guarantee_cents INTEGER CHECK (flat_guarantee_cents IS NULL OR flat_guarantee_cents > 0),
+  guarantee_percentage_bps INTEGER
+    CHECK (guarantee_percentage_bps IS NULL OR (guarantee_percentage_bps >= 0 AND guarantee_percentage_bps <= 10000)),
+  capitalization_budget_cents INTEGER
+    CHECK (capitalization_budget_cents IS NULL OR capitalization_budget_cents > 0),
+  recouped_cents INTEGER NOT NULL CHECK (recouped_cents >= 0),
+  currency TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS theatrical_stop_settlements (
+  id TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL,
+  venue_id TEXT NOT NULL,
+  show_date TEXT NOT NULL CHECK (length(show_date) = 10),
+  source_event_id TEXT NOT NULL,
+  settlement_id TEXT NOT NULL,
+  sender_code TEXT NOT NULL CHECK (sender_code IN ('axs', 'ticketmaster', 'eventbrite', 'venuepos')),
+  city TEXT NOT NULL,
+  gbor_cents INTEGER NOT NULL CHECK (gbor_cents > 0),
+  sales_tax_cents INTEGER NOT NULL CHECK (sales_tax_cents >= 0),
+  card_fees_cents INTEGER NOT NULL CHECK (card_fees_cents >= 0),
+  facility_fee_cents INTEGER NOT NULL CHECK (facility_fee_cents >= 0),
+  ffe_fee_cents INTEGER NOT NULL CHECK (ffe_fee_cents >= 0),
+  group_discount_cents INTEGER NOT NULL CHECK (group_discount_cents >= 0),
+  agbor_cents INTEGER NOT NULL CHECK (agbor_cents >= 0),
+  grand_rights_cents INTEGER NOT NULL CHECK (grand_rights_cents >= 0),
+  venue_expense_cents INTEGER NOT NULL CHECK (venue_expense_cents >= 0),
+  promoter_expense_cap_cents INTEGER NOT NULL CHECK (promoter_expense_cap_cents >= 0),
+  venue_expense_recouped_cents INTEGER NOT NULL CHECK (venue_expense_recouped_cents >= 0),
+  venue_expense_capped_cents INTEGER NOT NULL CHECK (venue_expense_capped_cents >= 0),
+  deal_payout_cents INTEGER NOT NULL CHECK (deal_payout_cents >= 0),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS theatrical_stop_settlements_production_idx
+  ON theatrical_stop_settlements (production_id, show_date);
+
+CREATE TABLE IF NOT EXISTS theatrical_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  deal_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  recouped_before_cents INTEGER NOT NULL CHECK (recouped_before_cents >= 0),
+  applied_cents INTEGER NOT NULL CHECK (applied_cents >= 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (deal_id, source_event_id),
+  UNIQUE (deal_id, recouped_before_cents)
+);
+CREATE INDEX IF NOT EXISTS theatrical_recoupment_applications_deal_idx
+  ON theatrical_recoupment_applications (deal_id);
+
+CREATE TABLE IF NOT EXISTS theatrical_split_accruals (
+  id TEXT PRIMARY KEY,
+  deal_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  deal_class TEXT NOT NULL CHECK (deal_class IN ('comedy_guarantee', 'theatrical_recoupment')),
+  source_event_id TEXT NOT NULL,
+  basis_cents INTEGER NOT NULL CHECK (basis_cents >= 0),
+  allocations TEXT NOT NULL,
+  dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (deal_id, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS theatrical_split_accruals_deal_idx
+  ON theatrical_split_accruals (deal_id);
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
@@ -4484,6 +4581,199 @@ export class SqliteStore implements Store {
       this.db
         .prepare(`SELECT * FROM estate_payout_gate_states WHERE payee_id = ?`)
         .get(payeeId) as EstatePayoutGateStateRecord | undefined,
+    );
+  }
+
+  async upsertTheatricalProductionDeal(
+    row: TheatricalProductionDealRecord,
+  ): Promise<TheatricalProductionDealRecord> {
+    // One deal of record per scope_key — INSERT ON CONFLICT replaces the
+    // row atomically (the caller preserves identity + version).
+    this.db
+      .prepare(
+        `INSERT INTO theatrical_production_deals
+           (id, scope_key, deal_class, grand_rights_rate_bps, publisher_code, publisher_payee_id, publisher_payee_name,
+            artist_payee_id, artist_payee_name, producer_payee_id, producer_payee_name, investor_payee_id, investor_payee_name,
+            flat_guarantee_cents, guarantee_percentage_bps, capitalization_budget_cents, recouped_cents, currency, version, created_at, updated_at)
+         VALUES (@id, @scope_key, @deal_class, @grand_rights_rate_bps, @publisher_code, @publisher_payee_id, @publisher_payee_name,
+            @artist_payee_id, @artist_payee_name, @producer_payee_id, @producer_payee_name, @investor_payee_id, @investor_payee_name,
+            @flat_guarantee_cents, @guarantee_percentage_bps, @capitalization_budget_cents, @recouped_cents, @currency, @version, @created_at, @updated_at)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           deal_class = excluded.deal_class,
+           grand_rights_rate_bps = excluded.grand_rights_rate_bps,
+           publisher_code = excluded.publisher_code,
+           publisher_payee_id = excluded.publisher_payee_id,
+           publisher_payee_name = excluded.publisher_payee_name,
+           artist_payee_id = excluded.artist_payee_id,
+           artist_payee_name = excluded.artist_payee_name,
+           producer_payee_id = excluded.producer_payee_id,
+           producer_payee_name = excluded.producer_payee_name,
+           investor_payee_id = excluded.investor_payee_id,
+           investor_payee_name = excluded.investor_payee_name,
+           flat_guarantee_cents = excluded.flat_guarantee_cents,
+           guarantee_percentage_bps = excluded.guarantee_percentage_bps,
+           capitalization_budget_cents = excluded.capitalization_budget_cents,
+           recouped_cents = excluded.recouped_cents,
+           currency = excluded.currency,
+           version = excluded.version,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(row as unknown as Record<string, unknown>);
+    return Promise.resolve(row);
+  }
+
+  async getTheatricalProductionDeal(
+    productionId: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM theatrical_production_deals WHERE scope_key = ?`)
+        .get(`production:${productionId}`) as
+        | TheatricalProductionDealRecord
+        | undefined,
+    );
+  }
+
+  async insertTheatricalStopSettlement(
+    row: Omit<TheatricalStopSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalStopSettlementRecord> {
+    // UNIQUE per source_event_id — a replayed settlement row is the unique
+    // violation, never a double stop.
+    const record: TheatricalStopSettlementRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO theatrical_stop_settlements
+           (id, production_id, venue_id, show_date, source_event_id, settlement_id, sender_code, city,
+            gbor_cents, sales_tax_cents, card_fees_cents, facility_fee_cents, ffe_fee_cents, group_discount_cents,
+            agbor_cents, grand_rights_cents, venue_expense_cents, promoter_expense_cap_cents,
+            venue_expense_recouped_cents, venue_expense_capped_cents, deal_payout_cents, currency, created_at)
+         VALUES (@id, @production_id, @venue_id, @show_date, @source_event_id, @settlement_id, @sender_code, @city,
+            @gbor_cents, @sales_tax_cents, @card_fees_cents, @facility_fee_cents, @ffe_fee_cents, @group_discount_cents,
+            @agbor_cents, @grand_rights_cents, @venue_expense_cents, @promoter_expense_cap_cents,
+            @venue_expense_recouped_cents, @venue_expense_capped_cents, @deal_payout_cents, @currency, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listTheatricalStopSettlements(
+    productionId: string,
+  ): Promise<TheatricalStopSettlementRecord[]> {
+    // show_date then created_at — the tour book in stop order (rowid ASC
+    // the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM theatrical_stop_settlements
+         WHERE production_id = ?
+         ORDER BY show_date ASC, created_at ASC, rowid ASC`,
+        )
+        .all(productionId) as TheatricalStopSettlementRecord[],
+    );
+  }
+
+  async updateTheatricalDealRecoupment(
+    id: string,
+    recoupedCents: number,
+    updatedAt: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    // One conditional statement — the WHERE clause bounds the counter to
+    // the capitalization budget (the CAS; the pool discipline). changes = 0
+    // means the deal is absent or the caller's value regressed.
+    const result = this.db
+      .prepare(
+        `UPDATE theatrical_production_deals
+         SET recouped_cents = ?, updated_at = ?
+         WHERE id = ?
+           AND recouped_cents < ?
+           AND recouped_cents + ? <= capitalization_budget_cents`,
+      )
+      .run(recoupedCents, updatedAt, id, recoupedCents, recoupedCents);
+    if (result.changes === 0) return undefined;
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM theatrical_production_deals WHERE id = ?`)
+        .get(id) as TheatricalProductionDealRecord | undefined,
+    );
+  }
+
+  async insertTheatricalRecoupmentApplication(
+    row: Omit<TheatricalRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalRecoupmentApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id) — a replayed application is the
+    // unique violation. UNIQUE per (deal_id, recouped_before_cents) — the
+    // POSITION lock (the books/art discipline).
+    const record: TheatricalRecoupmentApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO theatrical_recoupment_applications
+           (id, deal_id, scope_key, source_event_id, recouped_before_cents, applied_cents, remaining_cents, created_at)
+         VALUES (@id, @deal_id, @scope_key, @source_event_id, @recouped_before_cents, @applied_cents, @remaining_cents, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listTheatricalRecoupmentApplications(
+    dealId: string,
+  ): Promise<TheatricalRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order (rowid
+    // ASC the strict tiebreak).
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM theatrical_recoupment_applications
+         WHERE deal_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(dealId) as TheatricalRecoupmentApplicationRecord[],
+    );
+  }
+
+  async insertTheatricalSplitAccrual(
+    row: Omit<TheatricalSplitAccrualRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalSplitAccrualRecord> {
+    // UNIQUE per (deal_id, source_event_id) — a replayed accrual is the
+    // unique violation, never a double designation.
+    const record: TheatricalSplitAccrualRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO theatrical_split_accruals
+           (id, deal_id, scope_key, deal_class, source_event_id, basis_cents, allocations, dust_cents, created_at)
+         VALUES (@id, @deal_id, @scope_key, @deal_class, @source_event_id, @basis_cents, @allocations, @dust_cents, @created_at)`,
+      )
+      .run({
+        ...record,
+        allocations: JSON.stringify(record.allocations),
+      } as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listTheatricalSplitAccruals(dealId: string): Promise<TheatricalSplitAccrualRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM theatrical_split_accruals
+         WHERE deal_id = ? ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(dealId) as (TheatricalSplitAccrualRecord & { allocations: string })[];
+    return Promise.resolve(
+      rows.map((row) => ({
+        ...row,
+        allocations: JSON.parse(row.allocations) as TheatricalSplitAccrualRecord['allocations'],
+      })),
     );
   }
 

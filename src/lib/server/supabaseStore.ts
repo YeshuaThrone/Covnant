@@ -113,6 +113,10 @@ import type {
   EstateSuccessionTransitionRecord,
   EstateSplitAccrualRecord,
   EstatePayoutGateStateRecord,
+  TheatricalProductionDealRecord,
+  TheatricalStopSettlementRecord,
+  TheatricalRecoupmentApplicationRecord,
+  TheatricalSplitAccrualRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -365,6 +369,13 @@ const TABLES = {
   // decisions behind the cross-collateralization firewall.
   filmTerritoryWithholdings: 'film_territory_withholdings',
   filmTerritoryDistributions: 'film_territory_distributions',
+  // Migration 0034 — the AGBOR box office + theatrical recoupment tables
+  // (PR 30). Versioned production deals of record, per-stop settlement
+  // sheets, investor recoupment applications, and split accruals.
+  theatricalProductionDeals: 'theatrical_production_deals',
+  theatricalStopSettlements: 'theatrical_stop_settlements',
+  theatricalRecoupmentApplications: 'theatrical_recoupment_applications',
+  theatricalSplitAccruals: 'theatrical_split_accruals',
 } as const;
 
 /**
@@ -2831,6 +2842,147 @@ export class SupabaseStore implements Store {
         .eq('payee_id', payeeId)
         .maybeSingle(),
       'getEstatePayoutGateState',
+    );
+  }
+
+  // --- AGBOR box office + theatrical recoupment (PR 30, migration 0034) ---
+
+  async upsertTheatricalProductionDeal(
+    row: TheatricalProductionDealRecord,
+  ): Promise<TheatricalProductionDealRecord> {
+    // One deal of record per scope_key — the upsert targets the key, so a
+    // re-registration (identity + version preserved by the caller)
+    // replaces the row atomically.
+    return this.oneStrict<TheatricalProductionDealRecord>(
+      this.client
+        .from(TABLES.theatricalProductionDeals)
+        .upsert({ ...row }, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertTheatricalProductionDeal',
+    );
+  }
+
+  async getTheatricalProductionDeal(
+    productionId: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    return this.one<TheatricalProductionDealRecord>(
+      this.client
+        .from(TABLES.theatricalProductionDeals)
+        .select()
+        .eq('scope_key', `production:${productionId}`)
+        .maybeSingle(),
+      'getTheatricalProductionDeal',
+    );
+  }
+
+  async insertTheatricalStopSettlement(
+    row: Omit<TheatricalStopSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalStopSettlementRecord> {
+    // UNIQUE per source_event_id: a replayed settlement row throws here —
+    // the once-only replay guard, never a double stop.
+    return this.oneStrict<TheatricalStopSettlementRecord>(
+      this.client
+        .from(TABLES.theatricalStopSettlements)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertTheatricalStopSettlement',
+    );
+  }
+
+  async listTheatricalStopSettlements(
+    productionId: string,
+  ): Promise<TheatricalStopSettlementRecord[]> {
+    // show_date then created_at — the tour book in stop order.
+    return this.many<TheatricalStopSettlementRecord>(
+      this.client
+        .from(TABLES.theatricalStopSettlements)
+        .select()
+        .eq('production_id', productionId)
+        .order('show_date', { ascending: true })
+        .order('created_at', { ascending: true }),
+      'listTheatricalStopSettlements',
+    );
+  }
+
+  async updateTheatricalDealRecoupment(
+    id: string,
+    recoupedCents: number,
+    updatedAt: string,
+  ): Promise<TheatricalProductionDealRecord | undefined> {
+    // The deal CAS: one conditional update — the counter only advances and
+    // never past the capitalization budget. changes=0 (no returned row)
+    // means the deal is absent or the caller's value regressed.
+    return this.one<TheatricalProductionDealRecord>(
+      this.client
+        .from(TABLES.theatricalProductionDeals)
+        .update({ recouped_cents: recoupedCents, updated_at: updatedAt })
+        .eq('id', id)
+        // The advance guarantee is the CAS filter; the budget bound is the
+        // engine's math (it computes the bounded target before calling) —
+        // PostgREST filters cannot compare two columns of the same row.
+        .lt('recouped_cents', recoupedCents)
+        .select()
+        .maybeSingle(),
+      'updateTheatricalDealRecoupment',
+    );
+  }
+
+  async insertTheatricalRecoupmentApplication(
+    row: Omit<TheatricalRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalRecoupmentApplicationRecord> {
+    // UNIQUE per (deal_id, source_event_id): the replay guard; UNIQUE per
+    // (deal_id, recouped_before_cents): the position lock (the books/art
+    // insert-as-lock arbiter).
+    return this.oneStrict<TheatricalRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.theatricalRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertTheatricalRecoupmentApplication',
+    );
+  }
+
+  async listTheatricalRecoupmentApplications(
+    dealId: string,
+  ): Promise<TheatricalRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return this.many<TheatricalRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.theatricalRecoupmentApplications)
+        .select()
+        .eq('deal_id', dealId)
+        .order('created_at', { ascending: true }),
+      'listTheatricalRecoupmentApplications',
+    );
+  }
+
+  async insertTheatricalSplitAccrual(
+    row: Omit<TheatricalSplitAccrualRecord, 'id' | 'created_at'>,
+  ): Promise<TheatricalSplitAccrualRecord> {
+    // UNIQUE per (deal_id, source_event_id): a replayed accrual throws
+    // here — the once-only designation guard, never a double split.
+    return this.oneStrict<TheatricalSplitAccrualRecord>(
+      this.client
+        .from(TABLES.theatricalSplitAccruals)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertTheatricalSplitAccrual',
+    );
+  }
+
+  async listTheatricalSplitAccruals(dealId: string): Promise<TheatricalSplitAccrualRecord[]> {
+    // created_at ASC — the executed designations in execution order.
+    return this.many<TheatricalSplitAccrualRecord>(
+      this.client
+        .from(TABLES.theatricalSplitAccruals)
+        .select()
+        .eq('deal_id', dealId)
+        .order('created_at', { ascending: true }),
+      'listTheatricalSplitAccruals',
     );
   }
 
