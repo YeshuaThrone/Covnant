@@ -164,6 +164,16 @@ describe('don constants', () => {
       // policy of record, and posted to the sensor licensor + platform
       // variance the moment the walk reaches the row.
       'hardware_ota_unlock_settlement_post',
+      // PR 47 (the founder FRAND litigation directive): the
+      // PATENT_LITIGATION_ESCROW journals — the 10–15% hardware patent
+      // payout's automatic escrow routing, the global-court-rate-
+      // redetermination/anti-suit-injunction/cross-border-validity
+      // drawdown, and the verified-reconciliation release — plus the
+      // cross-license netting execution's single net dispatch.
+      'patent_litigation_escrow_route',
+      'patent_litigation_escrow_drawdown',
+      'patent_litigation_escrow_release',
+      'cross_license_net_dispatch',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

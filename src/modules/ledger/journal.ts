@@ -15,6 +15,9 @@ import {
   culinaryAuditEscrowGlAccount,
   serviceAuditEscrowGlAccount,
   softwareAuditEscrowGlAccount,
+  patentLitigationEscrowGlAccount,
+  crossLicenseNettingPositionGlAccount,
+  crossLicenseLiabilityGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
@@ -562,6 +565,81 @@ export function softwareAuditEscrowDebit(scopeKey: string, amountCents: number):
 export function softwareAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: softwareAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// PATENT_LITIGATION_ESCROW legs (PR 47, the founder hardware directive) —
+// the software twin's shape over the hardware scope's own GL account. The
+// route locks the founder-banded ELEVATED share with a credit leg, the
+// drawdown and the release debit it back out; nothing else ever touches
+// the account.
+export function patentLitigationEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: patentLitigationEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function patentLitigationEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: patentLitigationEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Cross-license net settlement legs (PR 47): the signed movement legs of a
+// net-dispatch execution. Each side's gross liability of record moves
+// through the period position account — a side's growth charges its
+// liability account (debit) against the position (credit), a side's
+// reversal charges the position (debit) back to the liability account
+// (credit) — and the dispatch leg settles the position's net to the
+// receiving payee's vault (funded by the position when the dispatch pays
+// the net out, by FBO cash when a re-net routes a refund back). The
+// dispatch rows' cumulative cleared columns reconcile the cross-licensing
+// ledgers to the settlement of record; on refund executions the position
+// account carries the gross-offset residue while every journal still
+// balances to the cent.
+export function crossLicenseLiabilityDebit(
+  agreementRef: string,
+  period: string,
+  side: "a" | "b",
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: crossLicenseLiabilityGlAccount(agreementRef, period, side),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function crossLicenseLiabilityCredit(
+  agreementRef: string,
+  period: string,
+  side: "a" | "b",
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: crossLicenseLiabilityGlAccount(agreementRef, period, side),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+export function crossLicensePositionDebit(agreementRef: string, period: string, amountCents: number): GlLegInput {
+  return {
+    account: crossLicenseNettingPositionGlAccount(agreementRef, period),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function crossLicensePositionCredit(agreementRef: string, period: string, amountCents: number): GlLegInput {
+  return {
+    account: crossLicenseNettingPositionGlAccount(agreementRef, period),
     debit_cents: 0,
     credit_cents: amountCents,
   };

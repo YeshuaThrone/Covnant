@@ -281,6 +281,13 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  HardwareCrossLicenseNetDispatchRecord,
+  HardwarePayoutGateStateRecord,
+  PatentLitigationEscrowDrawdownRecord,
+  PatentLitigationEscrowPolicyRecord,
+  PatentLitigationEscrowReconciliationRecord,
+} from '@/modules/hardware/records';
+import type {
   SoftwareAuditEscrowDrawdownRecord,
   SoftwareAuditEscrowPolicyRecord,
   SoftwareAuditEscrowReconciliationRecord,
@@ -698,6 +705,18 @@ export class InMemoryStore implements Store {
   private hardwareTelemetryRoyaltyApplications: HardwareTelemetryRoyaltyApplicationRecord[] = [];
   private hardwareOtaUnlockApplications: HardwareOtaUnlockApplicationRecord[] = [];
   private hardwareCrossLicenseNetSettlements: HardwareCrossLicenseNetSettlementRecord[] = [];
+  // PR 47 — the patent litigation escrow, the hardware payout gate
+  // states, and the cross-license net dispatches (migration 0051): the
+  // software twins' in-memory shapes over the hardware lane's own
+  // identity space.
+  private patentLitigationEscrowPolicies = new Map<string, PatentLitigationEscrowPolicyRecord>();
+  private patentLitigationEscrowDrawdowns: PatentLitigationEscrowDrawdownRecord[] = [];
+  private patentLitigationEscrowReconciliations = new Map<
+    string,
+    PatentLitigationEscrowReconciliationRecord
+  >();
+  private hardwarePayoutGateStates = new Map<string, HardwarePayoutGateStateRecord>();
+  private hardwareCrossLicenseNetDispatches: HardwareCrossLicenseNetDispatchRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -7057,6 +7076,198 @@ export class InMemoryStore implements Store {
       `${payeeId}|${apiEndpointId}`,
     );
     return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertPatentLitigationEscrowPolicy(
+    row: Omit<PatentLitigationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PatentLitigationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.patentLitigationEscrowPolicies.get(row.scope_key);
+    const record: PatentLitigationEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.patentLitigationEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getPatentLitigationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<PatentLitigationEscrowPolicyRecord | undefined> {
+    const found = this.patentLitigationEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertPatentLitigationEscrowDrawdown(
+    row: Omit<PatentLitigationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.patentLitigationEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_patent_litigation_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.patentLitigationEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('hardware_patent_litigation_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: PatentLitigationEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.patentLitigationEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listPatentLitigationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.patentLitigationEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertPatentLitigationEscrowReconciliation(
+    row: Omit<PatentLitigationEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.patentLitigationEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('hardware_patent_litigation_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: PatentLitigationEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.patentLitigationEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getPatentLitigationEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowReconciliationRecord | undefined> {
+    const found = this.patentLitigationEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settlePatentLitigationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'patent_litigation_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertHardwarePayoutGateState(
+    row: Omit<HardwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, sep_pool_code) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.sep_pool_code}`;
+    const existing = this.hardwarePayoutGateStates.get(key);
+    const record: HardwarePayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.hardwarePayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getHardwarePayoutGateState(
+    payeeId: string,
+    sepPoolCode: string,
+  ): Promise<HardwarePayoutGateStateRecord | undefined> {
+    const found = this.hardwarePayoutGateStates.get(`${payeeId}|${sepPoolCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwareCrossLicenseNetDispatch(
+    row: Omit<HardwareCrossLicenseNetDispatchRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord> {
+    // UNIQUE per (agreement_ref, period, net_before_cents,
+    // net_after_cents) — the replay guard AND the concurrency arbiter
+    // (insert-as-lock): a replayed trigger at the same settlement state
+    // or a lost race throws here, never a double dispatch. net_before is
+    // in the tuple so a re-net that revisits an earlier net cannot
+    // collide with the row that first reached it.
+    if (
+      this.hardwareCrossLicenseNetDispatches.some(
+        (existing) =>
+          existing.agreement_ref === row.agreement_ref &&
+          existing.period === row.period &&
+          existing.net_before_cents === row.net_before_cents &&
+          existing.net_after_cents === row.net_after_cents,
+      )
+    ) {
+      uniqueViolation(
+        'hardware_cross_license_net_dispatches.agreement_ref,period,net_before_cents,net_after_cents',
+      );
+    }
+    const record: HardwareCrossLicenseNetDispatchRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareCrossLicenseNetDispatches.push(record);
+    return { ...record };
+  }
+
+  async listHardwareCrossLicenseNetDispatches(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord[]> {
+    // Chronological execution order: created_at ASC with net_before_cents
+    // ASC as the tiebreak — the cumulative dispatched position strictly
+    // advances as dispatches land.
+    return this.hardwareCrossLicenseNetDispatches
+      .filter((row) => row.agreement_ref === agreementRef && row.period === period)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) || a.net_before_cents - b.net_before_cents,
+      )
+      .map((row) => ({ ...row }));
   }
 
   async upsertFitnessLiveEventBonusPolicy(

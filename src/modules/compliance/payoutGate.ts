@@ -9,6 +9,7 @@ import type { FitnessPayoutGateStateRecord } from "@/modules/fitness/records";
 import type { CulinaryPayoutGateStateRecord } from "@/modules/culinary/records";
 import type { ServicesPayoutGateStateRecord } from "@/modules/service/records";
 import type { SoftwarePayoutGateStateRecord } from "@/modules/software/records";
+import type { HardwarePayoutGateStateRecord } from "@/modules/hardware/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -618,6 +619,28 @@ export async function resolveSoftwareVerticalComplianceState(
     vertical: "software",
     api_uptime_sla_verified: record.api_uptime_sla_state === "verified",
     software_security_audit_cleared: record.security_audit_state === "verified",
+  };
+}
+
+/** The hardware payout gate's durable states of record (PR 47, migration
+ * 0051): the FRAND rate court determination and the SEP essentiality audit
+ * per (licensor payee, SEP pool). Fail-closed by construction — an absent
+ * record resolves null (the payout refuses vertical_state_unknown) and an
+ * 'unknown' state resolves false (the specific refusal names it). */
+export async function resolveHardwareVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  sepPoolCode: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "hardware" }> | null> {
+  const record: HardwarePayoutGateStateRecord | undefined =
+    await store.getHardwarePayoutGateState(payeeId, sepPoolCode);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "hardware",
+    frand_rate_court_determination_cleared: record.frand_determination_state === "cleared",
+    sep_essentiality_audit_verified: record.essentiality_audit_state === "verified",
   };
 }
 

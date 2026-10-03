@@ -213,6 +213,10 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   // taxed payout cascade — the sensor licensor's share and the platform
   // residual land as one journal pair per unlock.
   hardware_ota_unlock_settlement_post: 'Instant OTA unlock settlement posted',
+  patent_litigation_escrow_route: 'Patent litigation escrow locked',
+  patent_litigation_escrow_drawdown: 'Patent litigation escrow drawn down',
+  patent_litigation_escrow_release: 'Patent litigation escrow released',
+  cross_license_net_dispatch: 'Cross-license net dispatched',
   // PR 37 — the spatial commitments lane (the founder spatial directive):
   // park-earnings routing locks the founder-banded audit escrow, drawdowns
   // spend it on local taxes, safety holdbacks, and concession

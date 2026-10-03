@@ -111,6 +111,150 @@ export type HardwareSepTierBand = {
 };
 
 // ---------------------------------------------------------------------------
+// PR 47 — the patent litigation escrow, the hardware payout gate states, and
+// the cross-license net dispatches. The patent escrow is the hardware twin of
+// the audit escrows at the founder's ELEVATED band (1000–1500 bps — double
+// the standard 5–10% verticals, litigation exposure prices higher), the gate
+// states are the two durable facts the hardware patent payout gate reads
+// fail-closed, and the dispatches are the append-only net-clearing executions.
+// ---------------------------------------------------------------------------
+
+/** The PATENT_LITIGATION_ESCROW's three drawdown classes of record — exactly
+ * the litigation exposures the founder directive names: global court rate
+ * redeterminations, anti-suit injunction penalties, and cross-border patent
+ * validity challenges. Anything else refuses. This array is the TS side of
+ * the vocabulary the SQL CHECKs enforce byte-identically (migration 0051;
+ * the PR 129/130 lesson — verified byte-identical before CI). */
+export const PATENT_LITIGATION_ESCROW_DRAWDOWN_CLASSES = [
+  "global_court_rate_redetermination",
+  "anti_suit_injunction_penalty",
+  "cross_border_patent_validity_challenge",
+] as const;
+export type PatentLitigationEscrowDrawdownClass =
+  (typeof PATENT_LITIGATION_ESCROW_DRAWDOWN_CLASSES)[number];
+
+/** The hardware payout gate's states of record for one licensor payee on one
+ * SEP pool (migration 0051) — the two states the payout gate's hardware case
+ * reads, fail-closed: `frand_rate_court_determination_cleared` is true only
+ * when the determination state is 'cleared',
+ * `sep_essentiality_audit_verified` is true only when the audit state is
+ * 'verified'; an absent record resolves null and 'unknown' resolves false. */
+export interface HardwarePayoutGateStateRecord {
+  readonly id: string;
+  /** The payout's beneficiary of record (the patent licensor). */
+  readonly payee_id: string;
+  /** The SEP pool whose FRAND determination governs the payout. */
+  readonly sep_pool_code: string;
+  /** The FRAND rate court determination over the pool. */
+  readonly frand_determination_state: "unknown" | "cleared";
+  /** The SEP essentiality audit over the licensor's families. */
+  readonly essentiality_audit_state: "unknown" | "verified";
+  /** The verification evidence of record. */
+  readonly evidence_ref: string;
+  /** Who verified the states of record. */
+  readonly verified_by: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One scope's patent litigation escrow rate of record (migration 0051) — a
+ * founder-banded 1000–1500 bps share of the scope's hardware patent payouts
+ * that locks into the PATENT_LITIGATION_ESCROW bucket at routing. */
+export interface PatentLitigationEscrowPolicyRecord {
+  readonly id: string;
+  /** `licensor:{licensorPayeeId}:pool:{sepPoolCode}` — the scope key the
+   * escrow's sentinel payee and GL account cite (the hardware lane's own
+   * identifier space, the same payee/pool identity the 0050 tables key
+   * on). */
+  readonly scope_key: string;
+  /** The founder band: 1000–1500 bps, checked at registration and again
+   * at use (a hostile policy out-of-band refuses). */
+  readonly reserve_rate_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One position-locked escrow drawdown (migration 0051) — append-only.
+ * UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+ * UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position lock
+ * the balance is derived from. */
+export interface PatentLitigationEscrowDrawdownRecord {
+  readonly id: string;
+  /** The escrow bucket's ledger_transactions row of record. */
+  readonly reserve_ledger_id: string;
+  readonly scope_key: string;
+  readonly drawdown_class: PatentLitigationEscrowDrawdownClass;
+  /** The drawing event's identity of record — the replay guard. */
+  readonly source_event_id: string;
+  /** The bucket balance this draw was taken against (the spend position). */
+  readonly drawn_before_cents: number;
+  /** The drawn amount: 0 < drawn_cents <= drawn_before_cents. */
+  readonly drawn_cents: number;
+  /** drawn_before_cents - drawn_cents, pinned in a CHECK. */
+  readonly remaining_cents: number;
+  readonly created_at: string;
+}
+
+/** The verified reconciliation of record for one escrow bucket (migration
+ * 0051) — insert-as-lock, one per bucket: the release refuses fail-closed
+ * until this row exists. */
+export interface PatentLitigationEscrowReconciliationRecord {
+  readonly id: string;
+  readonly reserve_ledger_id: string;
+  /** The reconciliation evidence of record (court redetermination report
+   * ref, injunction ruling export hash). */
+  readonly evidence_ref: string;
+  /** Who verified the reconciliation of record. */
+  readonly reconciled_by: string;
+  readonly created_at: string;
+}
+
+/** One executed cross-license net dispatch (migration 0051) — the
+ * append-only clearing execution of record: the delta the execution moved
+ * against the period's netting position, with the cumulative gross
+ * liabilities cleared after this dispatch. UNIQUE per (agreement_ref,
+ * period, net_before_cents, net_after_cents) is the replay guard AND the
+ * concurrency arbiter (insert-as-lock: two executions of the same
+ * settlement state cannot both clear; net_before is included so a re-net
+ * that revisits an earlier net cannot collide with the row that first
+ * reached it). */
+export interface HardwareCrossLicenseNetDispatchRecord {
+  readonly id: string;
+  readonly agreement_ref: string;
+  readonly company_a_id: string;
+  readonly company_b_id: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The net of record already dispatched BEFORE this execution
+   * (the sum of every earlier dispatch's delta). */
+  readonly net_before_cents: number;
+  /** The settlement of record's net at this execution. */
+  readonly net_after_cents: number;
+  /** The money that moved THIS dispatch: signed (positive pays B,
+   * negative pays A), exact integer cents. */
+  readonly dispatched_delta_cents: number;
+  /** The cumulative gross liabilities cleared after this dispatch. */
+  readonly a_gross_cleared_cents: number;
+  readonly b_gross_cleared_cents: number;
+  /** The direction of THIS dispatch's delta. */
+  readonly direction: HardwareNetDirection;
+  /** The journal of the dispatch posting (null when nothing moved). */
+  readonly journal_id: string | null;
+  readonly created_at: string;
+}
+
+/** The patent litigation escrow's scope key — injective in the (licensor
+ * payee, SEP pool) pair, the same identifier space the 0050 hardware
+ * tables key on. The sentinel payee id, GL account, and policy row all
+ * cite it. */
+export function patentLitigationEscrowScopeKey(
+  licensorPayeeId: string,
+  sepPoolCode: string,
+): string {
+  return `licensor:${licensorPayeeId}:pool:${sepPoolCode}`;
+}
+
+// ---------------------------------------------------------------------------
 // Registries — the policies and routings of record.
 // ---------------------------------------------------------------------------
 
