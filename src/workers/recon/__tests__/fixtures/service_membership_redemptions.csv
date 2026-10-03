@@ -1,0 +1,4 @@
+Redemption ID,Member ID,Home Location ID,Visiting Location ID,Service Allocation Fee,Currency,Reporting Period
+RED-2026-03-0001,member-m1,LOC-AUSTIN,LOC-DALLAS,75.00,USD,2026-03
+RED-2026-03-0002,member-m2,LOC-AUSTIN,LOC-VEGAS,33.33,USD,2026-03
+RED-2026-03-0003,member-m3,LOC-RENO,LOC-DALLAS,50.00,USD,2026-03

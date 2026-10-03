@@ -1,0 +1,4 @@
+Folio Charge ID,Hotel Location ID,Stylist ID,Protocol ID,Salon Location ID,Gross Service Charge,Backbar Product COGS,Card Processing Engine Cut,Service and Sales Taxes,Currency,Reporting Period
+FOLIO-2026-03-0001,HOTEL-W,stylist-ava,proto-glow-facial,LOC-AUSTIN,400.00,30.00,12.00,33.00,USD,2026-03
+FOLIO-2026-03-0002,HOTEL-W,stylist-dana,proto-silk-keratin,LOC-AUSTIN,150.00,20.00,4.50,15.00,USD,2026-03
+FOLIO-2026-03-0001,HOTEL-E,stylist-dana,proto-glow-facial,LOC-DALLAS,90.00,8.00,2.70,7.40,USD,2026-03

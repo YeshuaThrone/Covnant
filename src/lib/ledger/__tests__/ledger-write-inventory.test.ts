@@ -430,6 +430,17 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // write-off of record); still no DDL on universal_royalty_ledger —
       // the referencing pin below holds.
       '0045_culinary_audit_escrow_gate_states.sql',
+      // PR 42 (the founder service directive): thirteen additive tables for
+      // the salon/med-spa franchise schedules (the 5/45/50 three-way
+      // partition), the per-treatment protocol micro-royalty policies in
+      // statement micros, the cross-location redemption and membership
+      // breakage split policies, the distributor rebate waterfalls, the
+      // booth-lease isolation policies, and the seven replay-guarded
+      // application ledgers (realization, franchise split, protocol
+      // micro-royalty, redemption split, breakage allocation, rebate
+      // routing, booth-lease split); still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0046_service_pos_membership_splits_protocol_micro_royalties.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

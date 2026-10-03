@@ -243,6 +243,21 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceBoothLeasePolicyRecord,
+  ServiceBoothLeaseApplicationRecord,
+  ServiceBreakageAllocationRecord,
+  ServiceBreakagePolicyRecord,
+  ServiceFranchiseScheduleRecord,
+  ServiceFranchiseSplitApplicationRecord,
+  ServiceProtocolMicroRoyaltyRecord,
+  ServiceProtocolPolicyRecord,
+  ServiceRealizationApplicationRecord,
+  ServiceRebateApplicationRecord,
+  ServiceRebateWaterfallRecord,
+  ServiceRedemptionPolicyRecord,
+  ServiceRedemptionSplitApplicationRecord,
+} from '@/modules/service/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -4012,6 +4027,208 @@ export interface Store {
   getFoodSupplierRebateApplication(
     sourceEventId: string,
   ): Promise<FoodSupplierRebateApplicationRecord | undefined>;
+
+  // ------------------------------------------------------------------
+  // The service lane (PR 42) — the policies of record, the waterfalls,
+  // and the seven application ledgers. Every application is UNIQUE per
+  // source_event_id (the replay guard); every policy upsert converges
+  // per its natural key and NEVER puts the id column in the conflict
+  // payload (the parity lesson from PR 33).
+  // ------------------------------------------------------------------
+
+  /**
+   * Registers one location's franchise contract schedule of record —
+   * the three-way gross partition (the founder's 5% / 45% / 50%
+   * example). UNIQUE per salon_location_id: a re-registration
+   * converges.
+   */
+  upsertServiceFranchiseSchedule(
+    row: Omit<ServiceFranchiseScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceFranchiseScheduleRecord>;
+
+  /** One location's franchise schedule of record; undefined when none
+   * — the walk's read. */
+  getServiceFranchiseSchedule(
+    salonLocationId: string,
+  ): Promise<ServiceFranchiseScheduleRecord | undefined>;
+
+  /**
+   * Registers one protocol's execution micro-royalty policy of record —
+   * the per-treatment license fee and its payee (the creator). UNIQUE
+   * per protocol_id: a re-registration converges.
+   */
+  upsertServiceProtocolPolicy(
+    row: Omit<ServiceProtocolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceProtocolPolicyRecord>;
+
+  /** One protocol's micro-royalty policy of record; undefined when
+   * none — the walk's read. */
+  getServiceProtocolPolicy(
+    protocolId: string,
+  ): Promise<ServiceProtocolPolicyRecord | undefined>;
+
+  /**
+   * Registers one home location's cross-location redemption policy of
+   * record. UNIQUE per home_location_id: a re-registration converges.
+   */
+  upsertServiceRedemptionPolicy(
+    row: Omit<ServiceRedemptionPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRedemptionPolicyRecord>;
+
+  /** One home location's redemption policy of record; undefined when
+   * none — the walk's read. */
+  getServiceRedemptionPolicy(
+    homeLocationId: string,
+  ): Promise<ServiceRedemptionPolicyRecord | undefined>;
+
+  /**
+   * Registers one home location's breakage split policy of record.
+   * UNIQUE per home_location_id: a re-registration converges.
+   */
+  upsertServiceBreakagePolicy(
+    row: Omit<ServiceBreakagePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBreakagePolicyRecord>;
+
+  /** One home location's breakage policy of record; undefined when
+   * none — the walk's read. */
+  getServiceBreakagePolicy(
+    homeLocationId: string,
+  ): Promise<ServiceBreakagePolicyRecord | undefined>;
+
+  /**
+   * Registers one leg of a location's vendor rebate waterfall of
+   * record — UNIQUE per (salon_location_id, ledger_id): a
+   * re-registration converges.
+   */
+  upsertServiceRebateWaterfallLeg(
+    row: Omit<ServiceRebateWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRebateWaterfallRecord>;
+
+  /** One location's registered rebate waterfall legs of record, in
+   * registration order; empty when none registered. */
+  listServiceRebateWaterfallLegs(
+    salonLocationId: string,
+  ): Promise<ServiceRebateWaterfallRecord[]>;
+
+  /**
+   * Registers one hybrid salon's booth-lease policy of record — the
+   * retail commission rate and the studio-owner payee identity. UNIQUE
+   * per salon_location_id: a re-registration converges.
+   */
+  upsertServiceBoothLeasePolicy(
+    row: Omit<ServiceBoothLeasePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBoothLeasePolicyRecord>;
+
+  /** One location's booth-lease policy of record; undefined when none
+   * — the walk's read. */
+  getServiceBoothLeasePolicy(
+    salonLocationId: string,
+  ): Promise<ServiceBoothLeasePolicyRecord | undefined>;
+
+  /**
+   * Appends one executed Net Service Realization — the founder's exact
+   * identity on the ticket's or folio's own legs (migration 0046).
+   * UNIQUE per source_event_id is the replay guard — a re-shipped
+   * sheet throws, never a double application.
+   */
+  insertServiceRealizationApplication(
+    row: Omit<ServiceRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getServiceRealizationApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed franchise three-way gross partition (migration
+   * 0046). UNIQUE per source_event_id is the replay guard.
+   */
+  insertServiceFranchiseSplitApplication(
+    row: Omit<ServiceFranchiseSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceFranchiseSplitApplicationRecord>;
+
+  /** One franchise split application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getServiceFranchiseSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceFranchiseSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed protocol micro-royalty — the per-treatment
+   * fee at the policy of record (migration 0046). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertServiceProtocolMicroRoyalty(
+    row: Omit<ServiceProtocolMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord>;
+
+  /** One protocol micro-royalty of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getServiceProtocolMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord | undefined>;
+
+  /**
+   * Appends one executed cross-location redemption split — the fee's
+   * three routes (migration 0046). UNIQUE per source_event_id is the
+   * replay guard.
+   */
+  insertServiceRedemptionSplitApplication(
+    row: Omit<ServiceRedemptionSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRedemptionSplitApplicationRecord>;
+
+  /** One redemption split application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getServiceRedemptionSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRedemptionSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed breakage allocation — the unredeemed funds'
+   * two routes (migration 0046). UNIQUE per source_event_id is the
+   * replay guard.
+   */
+  insertServiceBreakageAllocation(
+    row: Omit<ServiceBreakageAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBreakageAllocationRecord>;
+
+  /** One breakage allocation of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getServiceBreakageAllocation(
+    sourceEventId: string,
+  ): Promise<ServiceBreakageAllocationRecord | undefined>;
+
+  /**
+   * Appends one executed vendor rebate routing — the volume kickback
+   * routed proportionally to the location's ledgers, conserved exactly
+   * (migration 0046). UNIQUE per source_event_id is the replay guard.
+   */
+  insertServiceRebateApplication(
+    row: Omit<ServiceRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRebateApplicationRecord>;
+
+  /** One rebate application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getServiceRebateApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRebateApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed booth-lease leg — the isolated flat rent or
+   * retail commission route (migration 0046). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertServiceBoothLeaseApplication(
+    row: Omit<ServiceBoothLeaseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBoothLeaseApplicationRecord>;
+
+  /** One booth-lease application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getServiceBoothLeaseApplication(
+    sourceEventId: string,
+  ): Promise<ServiceBoothLeaseApplicationRecord | undefined>;
 }
 
 

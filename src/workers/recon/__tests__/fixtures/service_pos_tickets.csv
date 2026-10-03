@@ -1,0 +1,6 @@
+Ticket ID,Platform,Stylist ID,Protocol ID,Salon Location ID,Gross Service Ticket,Backbar Product COGS,Card Processing Engine Cut,Service and Sales Taxes,Currency,Reporting Period
+TICK-2026-03-0001,mindbody,stylist-ava,proto-glow-facial,LOC-AUSTIN,1000.00,120.50,29.40,82.60,USD,2026-03
+TICK-2026-03-0002,boulevard,stylist-bruno,proto-silk-keratin,LOC-AUSTIN,250.00,40.00,7.50,20.00,USD,2026-03
+TICK-2026-03-0003,zenoti,stylist-ava,proto-glow-facial,LOC-DALLAS,80.00,10.00,2.40,6.60,USD,2026-03
+TICK-2026-03-0004,square,stylist-chiara,proto-glow-facial,LOC-AUSTIN,60.00,50.00,8.00,9.00,USD,2026-03
+TICK-2026-03-0005,mindbody,stylist-ava,proto-unknown,LOC-AUSTIN,100.00,5.00,3.00,7.00,USD,2026-03

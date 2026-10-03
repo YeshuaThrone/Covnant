@@ -1,0 +1,5 @@
+Rebate ID,Distributor,Salon Location ID,Rebate Basis Purchases,Volume Rebate Amount,Currency,Reporting Period
+REB-2026-03-0001,loreal,LOC-AUSTIN,5000.00,750.00,USD,2026-03
+REB-2026-03-0002,estee_lauder,LOC-AUSTIN,2000.00,333.33,USD,2026-03
+REB-2026-03-0003,loreal,LOC-RENO,1000.00,100.00,USD,2026-03
+REB-2026-03-0004,loreal,LOC-BADWATER,1000.00,100.00,USD,2026-03
