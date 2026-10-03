@@ -188,6 +188,16 @@ import type {
   NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialMicroPolicyRecord,
+  SpatialMicroRoyaltyRecord,
+  SpatialOccupancyTierScheduleRecord,
+  SpatialOverheadPolicyRecord,
+  SpatialRoyaltyApplicationRecord,
+  SpatialThroughputYearRecord,
+  SpatialZoneAllocationRecord,
+  SpatialZoneAssignmentRecord,
+} from '@/modules/spatial/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -1942,6 +1952,163 @@ CREATE TABLE IF NOT EXISTS nil_unearned_clawbacks (
   clawback_ledger_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE (portal_entry_id)
+);
+
+-- Spatial POS + occupancy royalties + zone allocation (PR 36, migration
+-- 0040). The founder spatial directive's durable facts: the occupancy
+-- royalty schedule of record per (venue, year) (the sliding-scale tier
+-- bands, keyed on annual throughput or footprint), the shared facility
+-- overhead policy of record (the three park-wide bps legs), the assigned
+-- IP owner per (venue, zone), the micro-royalty rates per (venue, zone),
+-- the cumulative annual throughput tracker, and the three append-only
+-- application ledgers (replay-guarded per source event).
+CREATE TABLE IF NOT EXISTS spatial_occupancy_tier_schedules (
+  id TEXT PRIMARY KEY,
+  venue_id TEXT NOT NULL,
+  year TEXT NOT NULL,
+  basis TEXT NOT NULL CHECK (basis IN ('annual_throughput', 'footprint_sqft')),
+  bands TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_id, year)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_overhead_policies (
+  id TEXT PRIMARY KEY,
+  venue_id TEXT NOT NULL,
+  year TEXT NOT NULL,
+  security_bps INTEGER NOT NULL CHECK (security_bps >= 0 AND security_bps <= 10000),
+  wristband_maintenance_bps INTEGER NOT NULL CHECK (wristband_maintenance_bps >= 0 AND wristband_maintenance_bps <= 10000),
+  ticketing_platform_bps INTEGER NOT NULL CHECK (ticketing_platform_bps >= 0 AND ticketing_platform_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_id, year)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_zone_assignments (
+  id TEXT PRIMARY KEY,
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  assigned_ip_owner_id TEXT NOT NULL,
+  royalty_bps INTEGER NOT NULL CHECK (royalty_bps >= 0 AND royalty_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_id, zone_code)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_micro_policies (
+  id TEXT PRIMARY KEY,
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  micros_per_dwell_minute INTEGER NOT NULL CHECK (micros_per_dwell_minute >= 0),
+  micros_per_ride_session INTEGER NOT NULL CHECK (micros_per_ride_session >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_id, zone_code)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_throughput_years (
+  id TEXT PRIMARY KEY,
+  venue_id TEXT NOT NULL,
+  year TEXT NOT NULL,
+  cumulative_entries INTEGER NOT NULL CHECK (cumulative_entries >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_id, year)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL CHECK (sender IN ('turnstile', 'pass')),
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  spatial_footprint_sqft INTEGER NOT NULL CHECK (spatial_footprint_sqft > 0),
+  period TEXT NOT NULL,
+  ticket_revenue_cents INTEGER NOT NULL CHECK (ticket_revenue_cents >= 0),
+  merch_revenue_cents INTEGER NOT NULL CHECK (merch_revenue_cents >= 0),
+  gross_revenue_cents INTEGER NOT NULL CHECK (gross_revenue_cents >= 0),
+  occupancy_tax_cents INTEGER NOT NULL CHECK (occupancy_tax_cents >= 0),
+  infrastructure_cogs_cents INTEGER NOT NULL CHECK (infrastructure_cogs_cents >= 0),
+  group_tour_discount_cents INTEGER NOT NULL CHECK (group_tour_discount_cents >= 0),
+  net_spatial_licensed_revenue_cents INTEGER NOT NULL,
+  overhead_security_cents INTEGER NOT NULL CHECK (overhead_security_cents >= 0),
+  overhead_wristband_cents INTEGER NOT NULL CHECK (overhead_wristband_cents >= 0),
+  overhead_ticketing_cents INTEGER NOT NULL CHECK (overhead_ticketing_cents >= 0),
+  overhead_total_cents INTEGER NOT NULL CHECK (overhead_total_cents >= 0),
+  royalty_basis_cents INTEGER NOT NULL CHECK (royalty_basis_cents >= 0),
+  tier_basis TEXT NOT NULL CHECK (tier_basis IN ('annual_throughput', 'footprint_sqft')),
+  tier_schedule_ref TEXT,
+  tier_legs TEXT NOT NULL,
+  entries_count INTEGER NOT NULL CHECK (entries_count >= 0),
+  entries_before INTEGER,
+  entries_after INTEGER,
+  occupancy_royalty_cents INTEGER NOT NULL CHECK (occupancy_royalty_cents >= 0),
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (ck_spatial_royalty_applications_calculator_identity
+    = (net_spatial_licensed_revenue_cents
+       = ticket_revenue_cents + merch_revenue_cents
+         - occupancy_tax_cents - infrastructure_cogs_cents - group_tour_discount_cents)),
+  CHECK (ck_spatial_royalty_applications_overhead_ordering
+    = (royalty_basis_cents = net_spatial_licensed_revenue_cents - overhead_total_cents)),
+  CHECK (ck_spatial_royalty_applications_overhead_legs
+    = (overhead_total_cents
+       = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents))
+);
+
+CREATE TABLE IF NOT EXISTS spatial_zone_allocations (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  row_class TEXT NOT NULL CHECK (row_class IN ('fnb', 'retail')),
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  gross_cents INTEGER NOT NULL CHECK (gross_cents >= 0),
+  overhead_security_cents INTEGER NOT NULL CHECK (overhead_security_cents >= 0),
+  overhead_wristband_cents INTEGER NOT NULL CHECK (overhead_wristband_cents >= 0),
+  overhead_ticketing_cents INTEGER NOT NULL CHECK (overhead_ticketing_cents >= 0),
+  overhead_total_cents INTEGER NOT NULL CHECK (overhead_total_cents >= 0),
+  allocated_basis_cents INTEGER NOT NULL CHECK (allocated_basis_cents >= 0),
+  assigned_ip_owner_id TEXT NOT NULL,
+  royalty_bps INTEGER NOT NULL CHECK (royalty_bps >= 0 AND royalty_bps <= 10000),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (ck_spatial_zone_allocations_overhead_ordering
+    = (allocated_basis_cents = gross_cents - overhead_total_cents)),
+  CHECK (ck_spatial_zone_allocations_overhead_legs
+    = (overhead_total_cents
+       = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents))
+);
+
+CREATE TABLE IF NOT EXISTS spatial_micro_royalty_ledger (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  wristband_id TEXT NOT NULL,
+  sensor_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  dwell_minutes INTEGER NOT NULL CHECK (dwell_minutes >= 0),
+  ride_sessions INTEGER NOT NULL CHECK (ride_sessions >= 0),
+  micros_per_dwell_minute INTEGER NOT NULL CHECK (micros_per_dwell_minute >= 0),
+  micros_per_ride_session INTEGER NOT NULL CHECK (micros_per_ride_session >= 0),
+  dwell_royalty_micros INTEGER NOT NULL CHECK (dwell_royalty_micros >= 0),
+  session_royalty_micros INTEGER NOT NULL CHECK (session_royalty_micros >= 0),
+  total_royalty_micros INTEGER NOT NULL CHECK (total_royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (ck_spatial_micro_royalty_dwell_leg
+    = (dwell_royalty_micros = dwell_minutes * micros_per_dwell_minute)),
+  CHECK (ck_spatial_micro_royalty_session_leg
+    = (session_royalty_micros = ride_sessions * micros_per_ride_session)),
+  CHECK (ck_spatial_micro_royalty_total
+    = (total_royalty_micros = dwell_royalty_micros + session_royalty_micros)),
+  CHECK (ck_spatial_micro_royalty_cents
+    = (royalty_cents = total_royalty_micros / 1000000))
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -9599,6 +9766,534 @@ export class SqliteStore implements Store {
    */
   async listAdminActions(): Promise<AdminActionRecord[]> {
     return Promise.resolve([]);
+  }
+
+  // --- Spatial POS + occupancy royalties + zone allocation (migration 0040) ---
+
+  async upsertSpatialOccupancyTierSchedule(
+    row: Omit<SpatialOccupancyTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOccupancyTierScheduleRecord> {
+    // UNIQUE per (venue_id, year) — a re-registration converges (the
+    // newest schedule governs the next walk); the id never rides the
+    // conflict payload (the id rotates on conflict — the PR 33 lesson).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_occupancy_tier_schedules
+           (id, venue_id, year, basis, bands, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_id, year) DO UPDATE SET
+           basis = excluded.basis,
+           bands = excluded.bands,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.venue_id,
+        record.year,
+        record.basis,
+        record.bands,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialOccupancyTierSchedule(
+      record.venue_id,
+      record.year,
+    ) as Promise<SpatialOccupancyTierScheduleRecord>;
+  }
+
+  async getSpatialOccupancyTierSchedule(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOccupancyTierScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_occupancy_tier_schedules WHERE venue_id = ? AND year = ?`)
+      .get(venueId, year) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      year: row.year as string,
+      basis: row.basis as SpatialOccupancyTierScheduleRecord['basis'],
+      bands: row.bands as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSpatialOverheadPolicy(
+    row: Omit<SpatialOverheadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOverheadPolicyRecord> {
+    // UNIQUE per (venue_id, year) — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_overhead_policies
+           (id, venue_id, year, security_bps, wristband_maintenance_bps,
+            ticketing_platform_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_id, year) DO UPDATE SET
+           security_bps = excluded.security_bps,
+           wristband_maintenance_bps = excluded.wristband_maintenance_bps,
+           ticketing_platform_bps = excluded.ticketing_platform_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.venue_id,
+        record.year,
+        record.security_bps,
+        record.wristband_maintenance_bps,
+        record.ticketing_platform_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialOverheadPolicy(
+      record.venue_id,
+      record.year,
+    ) as Promise<SpatialOverheadPolicyRecord>;
+  }
+
+  async getSpatialOverheadPolicy(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOverheadPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_overhead_policies WHERE venue_id = ? AND year = ?`)
+      .get(venueId, year) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      year: row.year as string,
+      security_bps: row.security_bps as number,
+      wristband_maintenance_bps: row.wristband_maintenance_bps as number,
+      ticketing_platform_bps: row.ticketing_platform_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSpatialZoneAssignment(
+    row: Omit<SpatialZoneAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialZoneAssignmentRecord> {
+    // UNIQUE per (venue_id, zone_code) — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_zone_assignments
+           (id, venue_id, zone_code, assigned_ip_owner_id, royalty_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_id, zone_code) DO UPDATE SET
+           assigned_ip_owner_id = excluded.assigned_ip_owner_id,
+           royalty_bps = excluded.royalty_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.venue_id,
+        record.zone_code,
+        record.assigned_ip_owner_id,
+        record.royalty_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialZoneAssignment(
+      record.venue_id,
+      record.zone_code,
+    ) as Promise<SpatialZoneAssignmentRecord>;
+  }
+
+  async getSpatialZoneAssignment(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialZoneAssignmentRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_zone_assignments WHERE venue_id = ? AND zone_code = ?`)
+      .get(venueId, zoneCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      assigned_ip_owner_id: row.assigned_ip_owner_id as string,
+      royalty_bps: row.royalty_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSpatialMicroPolicy(
+    row: Omit<SpatialMicroPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMicroPolicyRecord> {
+    // UNIQUE per (venue_id, zone_code) — a re-registration converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_micro_policies
+           (id, venue_id, zone_code, micros_per_dwell_minute, micros_per_ride_session,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_id, zone_code) DO UPDATE SET
+           micros_per_dwell_minute = excluded.micros_per_dwell_minute,
+           micros_per_ride_session = excluded.micros_per_ride_session,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.venue_id,
+        record.zone_code,
+        record.micros_per_dwell_minute,
+        record.micros_per_ride_session,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialMicroPolicy(
+      record.venue_id,
+      record.zone_code,
+    ) as Promise<SpatialMicroPolicyRecord>;
+  }
+
+  async getSpatialMicroPolicy(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialMicroPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_micro_policies WHERE venue_id = ? AND zone_code = ?`)
+      .get(venueId, zoneCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      micros_per_dwell_minute: row.micros_per_dwell_minute as number,
+      micros_per_ride_session: row.micros_per_ride_session as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceSpatialThroughputYear(
+    venueId: string,
+    year: string,
+    entriesAdded: number,
+  ): Promise<SpatialThroughputYearRecord> {
+    // UNIQUE per (venue_id, year) — the tracker converges: the conflict
+    // arm ADDS the row's entries to the standing position, never a second
+    // row for the same venue-year.
+    const record = {
+      id: randomUUID(),
+      venue_id: venueId,
+      year,
+      cumulative_entries: entriesAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_throughput_years
+           (id, venue_id, year, cumulative_entries, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_id, year) DO UPDATE SET
+           cumulative_entries = cumulative_entries + excluded.cumulative_entries,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.venue_id,
+        record.year,
+        record.cumulative_entries,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialThroughputYear(
+      record.venue_id,
+      record.year,
+    ) as Promise<SpatialThroughputYearRecord>;
+  }
+
+  async getSpatialThroughputYear(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialThroughputYearRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_throughput_years WHERE venue_id = ? AND year = ?`)
+      .get(venueId, year) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      year: row.year as string,
+      cumulative_entries: row.cumulative_entries as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSpatialRoyaltyApplication(
+    row: Omit<SpatialRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked event
+    // throws here, never a double royalty.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_royalty_applications
+           (id, source_event_id, sender, venue_id, zone_code, spatial_footprint_sqft,
+            period, ticket_revenue_cents, merch_revenue_cents, gross_revenue_cents,
+            occupancy_tax_cents, infrastructure_cogs_cents, group_tour_discount_cents,
+            net_spatial_licensed_revenue_cents, overhead_security_cents,
+            overhead_wristband_cents, overhead_ticketing_cents, overhead_total_cents,
+            royalty_basis_cents, tier_basis, tier_schedule_ref, tier_legs,
+            entries_count, entries_before, entries_after, occupancy_royalty_cents,
+            verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.venue_id,
+        record.zone_code,
+        record.spatial_footprint_sqft,
+        record.period,
+        record.ticket_revenue_cents,
+        record.merch_revenue_cents,
+        record.gross_revenue_cents,
+        record.occupancy_tax_cents,
+        record.infrastructure_cogs_cents,
+        record.group_tour_discount_cents,
+        record.net_spatial_licensed_revenue_cents,
+        record.overhead_security_cents,
+        record.overhead_wristband_cents,
+        record.overhead_ticketing_cents,
+        record.overhead_total_cents,
+        record.royalty_basis_cents,
+        record.tier_basis,
+        record.tier_schedule_ref,
+        record.tier_legs,
+        record.entries_count,
+        record.entries_before,
+        record.entries_after,
+        record.occupancy_royalty_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSpatialRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_royalty_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as SpatialRoyaltyApplicationRecord['sender'],
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      spatial_footprint_sqft: row.spatial_footprint_sqft as number,
+      period: row.period as string,
+      ticket_revenue_cents: row.ticket_revenue_cents as number,
+      merch_revenue_cents: row.merch_revenue_cents as number,
+      gross_revenue_cents: row.gross_revenue_cents as number,
+      occupancy_tax_cents: row.occupancy_tax_cents as number,
+      infrastructure_cogs_cents: row.infrastructure_cogs_cents as number,
+      group_tour_discount_cents: row.group_tour_discount_cents as number,
+      net_spatial_licensed_revenue_cents: row.net_spatial_licensed_revenue_cents as number,
+      overhead_security_cents: row.overhead_security_cents as number,
+      overhead_wristband_cents: row.overhead_wristband_cents as number,
+      overhead_ticketing_cents: row.overhead_ticketing_cents as number,
+      overhead_total_cents: row.overhead_total_cents as number,
+      royalty_basis_cents: row.royalty_basis_cents as number,
+      tier_basis: row.tier_basis as SpatialRoyaltyApplicationRecord['tier_basis'],
+      tier_schedule_ref: (row.tier_schedule_ref as string | null) ?? null,
+      tier_legs: row.tier_legs as string,
+      entries_count: row.entries_count as number,
+      entries_before: (row.entries_before as number | null) ?? null,
+      entries_after: (row.entries_after as number | null) ?? null,
+      occupancy_royalty_cents: row.occupancy_royalty_cents as number,
+      verdict: row.verdict as SpatialRoyaltyApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertSpatialZoneAllocation(
+    row: Omit<SpatialZoneAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialZoneAllocationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked sale
+    // throws here, never a double allocation.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_zone_allocations
+           (id, source_event_id, row_class, venue_id, zone_code, period, gross_cents,
+            overhead_security_cents, overhead_wristband_cents, overhead_ticketing_cents,
+            overhead_total_cents, allocated_basis_cents, assigned_ip_owner_id,
+            royalty_bps, royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.row_class,
+        record.venue_id,
+        record.zone_code,
+        record.period,
+        record.gross_cents,
+        record.overhead_security_cents,
+        record.overhead_wristband_cents,
+        record.overhead_ticketing_cents,
+        record.overhead_total_cents,
+        record.allocated_basis_cents,
+        record.assigned_ip_owner_id,
+        record.royalty_bps,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSpatialZoneAllocation(
+    sourceEventId: string,
+  ): Promise<SpatialZoneAllocationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_zone_allocations WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      row_class: row.row_class as SpatialZoneAllocationRecord['row_class'],
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      period: row.period as string,
+      gross_cents: row.gross_cents as number,
+      overhead_security_cents: row.overhead_security_cents as number,
+      overhead_wristband_cents: row.overhead_wristband_cents as number,
+      overhead_ticketing_cents: row.overhead_ticketing_cents as number,
+      overhead_total_cents: row.overhead_total_cents as number,
+      allocated_basis_cents: row.allocated_basis_cents as number,
+      assigned_ip_owner_id: row.assigned_ip_owner_id as string,
+      royalty_bps: row.royalty_bps as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertSpatialMicroRoyalty(
+    row: Omit<SpatialMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialMicroRoyaltyRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked
+    // telemetry event throws here, never a double micro-payout.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_micro_royalty_ledger
+           (id, source_event_id, venue_id, zone_code, wristband_id, sensor_id, period,
+            dwell_minutes, ride_sessions, micros_per_dwell_minute, micros_per_ride_session,
+            dwell_royalty_micros, session_royalty_micros, total_royalty_micros,
+            royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.venue_id,
+        record.zone_code,
+        record.wristband_id,
+        record.sensor_id,
+        record.period,
+        record.dwell_minutes,
+        record.ride_sessions,
+        record.micros_per_dwell_minute,
+        record.micros_per_ride_session,
+        record.dwell_royalty_micros,
+        record.session_royalty_micros,
+        record.total_royalty_micros,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSpatialMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<SpatialMicroRoyaltyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_micro_royalty_ledger WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      wristband_id: row.wristband_id as string,
+      sensor_id: row.sensor_id as string,
+      period: row.period as string,
+      dwell_minutes: row.dwell_minutes as number,
+      ride_sessions: row.ride_sessions as number,
+      micros_per_dwell_minute: row.micros_per_dwell_minute as number,
+      micros_per_ride_session: row.micros_per_ride_session as number,
+      dwell_royalty_micros: row.dwell_royalty_micros as number,
+      session_royalty_micros: row.session_royalty_micros as number,
+      total_royalty_micros: row.total_royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
   }
 }
 

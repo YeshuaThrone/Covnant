@@ -194,6 +194,16 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type {
+  SpatialMicroPolicyRecord,
+  SpatialMicroRoyaltyRecord,
+  SpatialOccupancyTierScheduleRecord,
+  SpatialOverheadPolicyRecord,
+  SpatialRoyaltyApplicationRecord,
+  SpatialThroughputYearRecord,
+  SpatialZoneAllocationRecord,
+  SpatialZoneAssignmentRecord,
+} from '@/modules/spatial/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -379,6 +389,18 @@ export class InMemoryStore implements Store {
   private nilUnearnedClawbacks = new Map<string, NilUnearnedClawbackRecord>();
   private licensingAuditReserveDrawdowns: LicensingAuditReserveDrawdownRecord[] = [];
   private licensingPayoutGateStates = new Map<string, LicensingPayoutGateStateRecord>();
+  // Migration 0040 — the spatial lane (PR 36, the founder spatial
+  // directive): the schedules/policies/assignments the walks read (keyed
+  // per venue-year or venue-zone) and the three append-only application
+  // ledgers (replay-guarded per source event).
+  private spatialOccupancyTierSchedules = new Map<string, SpatialOccupancyTierScheduleRecord>();
+  private spatialOverheadPolicies = new Map<string, SpatialOverheadPolicyRecord>();
+  private spatialZoneAssignments = new Map<string, SpatialZoneAssignmentRecord>();
+  private spatialMicroPolicies = new Map<string, SpatialMicroPolicyRecord>();
+  private spatialThroughputYears = new Map<string, SpatialThroughputYearRecord>();
+  private spatialRoyaltyApplications = new Map<string, SpatialRoyaltyApplicationRecord>();
+  private spatialZoneAllocations = new Map<string, SpatialZoneAllocationRecord>();
+  private spatialMicroRoyalties = new Map<string, SpatialMicroRoyaltyRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -5048,6 +5070,207 @@ export class InMemoryStore implements Store {
    */
   async listAdminActions(): Promise<AdminActionRecord[]> {
     return [];
+  }
+
+  // --- Spatial POS + occupancy royalties + zone allocation (migration 0040) ---
+
+  async upsertSpatialOccupancyTierSchedule(
+    row: Omit<SpatialOccupancyTierScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOccupancyTierScheduleRecord> {
+    // UNIQUE per (venue_id, year) — an upsert converges (the newest
+    // schedule governs); never the id column in the conflict payload
+    // (the id rotates on conflict — the PR 33 parity lesson).
+    const key = `${row.venue_id}:${row.year}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialOccupancyTierSchedules.get(key);
+    const record: SpatialOccupancyTierScheduleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialOccupancyTierSchedules.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialOccupancyTierSchedule(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOccupancyTierScheduleRecord | undefined> {
+    const found = this.spatialOccupancyTierSchedules.get(`${venueId}:${year}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSpatialOverheadPolicy(
+    row: Omit<SpatialOverheadPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialOverheadPolicyRecord> {
+    const key = `${row.venue_id}:${row.year}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialOverheadPolicies.get(key);
+    const record: SpatialOverheadPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialOverheadPolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialOverheadPolicy(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialOverheadPolicyRecord | undefined> {
+    const found = this.spatialOverheadPolicies.get(`${venueId}:${year}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSpatialZoneAssignment(
+    row: Omit<SpatialZoneAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialZoneAssignmentRecord> {
+    const key = `${row.venue_id}:${row.zone_code}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialZoneAssignments.get(key);
+    const record: SpatialZoneAssignmentRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialZoneAssignments.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialZoneAssignment(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialZoneAssignmentRecord | undefined> {
+    const found = this.spatialZoneAssignments.get(`${venueId}:${zoneCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSpatialMicroPolicy(
+    row: Omit<SpatialMicroPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMicroPolicyRecord> {
+    const key = `${row.venue_id}:${row.zone_code}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialMicroPolicies.get(key);
+    const record: SpatialMicroPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialMicroPolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialMicroPolicy(
+    venueId: string,
+    zoneCode: string,
+  ): Promise<SpatialMicroPolicyRecord | undefined> {
+    const found = this.spatialMicroPolicies.get(`${venueId}:${zoneCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceSpatialThroughputYear(
+    venueId: string,
+    year: string,
+    entriesAdded: number,
+  ): Promise<SpatialThroughputYearRecord> {
+    const key = `${venueId}:${year}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialThroughputYears.get(key);
+    const record: SpatialThroughputYearRecord = {
+      id: existing?.id ?? randomUUID(),
+      venue_id: venueId,
+      year,
+      cumulative_entries: (existing?.cumulative_entries ?? 0) + entriesAdded,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialThroughputYears.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialThroughputYear(
+    venueId: string,
+    year: string,
+  ): Promise<SpatialThroughputYearRecord | undefined> {
+    const found = this.spatialThroughputYears.get(`${venueId}:${year}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSpatialRoyaltyApplication(
+    row: Omit<SpatialRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked event
+    // throws, never a double royalty.
+    if (this.spatialRoyaltyApplications.has(row.source_event_id)) {
+      uniqueViolation('spatial_royalty_applications.source_event_id');
+    }
+    const record: SpatialRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialRoyaltyApplications.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getSpatialRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord | undefined> {
+    const found = this.spatialRoyaltyApplications.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSpatialZoneAllocation(
+    row: Omit<SpatialZoneAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialZoneAllocationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked sale
+    // throws, never a double allocation.
+    if (this.spatialZoneAllocations.has(row.source_event_id)) {
+      uniqueViolation('spatial_zone_allocations.source_event_id');
+    }
+    const record: SpatialZoneAllocationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialZoneAllocations.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getSpatialZoneAllocation(
+    sourceEventId: string,
+  ): Promise<SpatialZoneAllocationRecord | undefined> {
+    const found = this.spatialZoneAllocations.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSpatialMicroRoyalty(
+    row: Omit<SpatialMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialMicroRoyaltyRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked
+    // telemetry event throws, never a double micro-payout.
+    if (this.spatialMicroRoyalties.has(row.source_event_id)) {
+      uniqueViolation('spatial_micro_royalty_ledger.source_event_id');
+    }
+    const record: SpatialMicroRoyaltyRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialMicroRoyalties.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getSpatialMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<SpatialMicroRoyaltyRecord | undefined> {
+    const found = this.spatialMicroRoyalties.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
   }
 }
 
