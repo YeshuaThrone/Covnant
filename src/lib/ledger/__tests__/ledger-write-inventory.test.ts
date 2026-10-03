@@ -352,6 +352,14 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // the split accruals; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0034_agbor_box_office_theatrical_recoupment.sql',
+      // Promoter settlement escrow + comedy audio rights (PR 31, the founder
+      // tour + live comedy directive): the per-stop night-of-show audit
+      // closes of record, the theatrical payout-gate states keyed per
+      // (payee, production), and the venue hall-fee policies in the
+      // founder-banded 1,500–2,500 bps range; still no DDL on
+      // universal_royalty_ledger — the escrow rides the existing ledger
+      // kind/status vocabulary, and the referencing pin below holds.
+      '0035_promoter_settlement_escrow_theater_gates_comedy_audio.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

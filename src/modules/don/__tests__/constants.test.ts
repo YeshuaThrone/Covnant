@@ -97,6 +97,13 @@ describe('don constants', () => {
       'book_reserve_drawdown',
       'book_returns_reserve_release',
       'book_print_net_release',
+      // The promoter box-office settlement escrow + comedy audio rights
+      // (PR 31, the founder tour + live comedy directive): the per-stop
+      // escrow posting/release journals and the isolated audio-rights
+      // posting journal.
+      'promoter_settlement_post',
+      'promoter_settlement_release',
+      'comedy_audio_rights_post',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

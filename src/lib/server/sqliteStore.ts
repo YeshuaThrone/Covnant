@@ -122,6 +122,9 @@ import type {
   TheatricalStopSettlementRecord,
   TheatricalRecoupmentApplicationRecord,
   TheatricalSplitAccrualRecord,
+  PromoterSettlementAuditRecord,
+  TheatricalPayoutGateStateRecord,
+  VenueHallFeePolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1420,6 +1423,51 @@ CREATE TABLE IF NOT EXISTS theatrical_split_accruals (
 );
 CREATE INDEX IF NOT EXISTS theatrical_split_accruals_deal_idx
   ON theatrical_split_accruals (deal_id);
+
+-- Promoter settlement escrow + theater gates + venue hall fees (migration
+-- 0035, PR 31). The final night-of-show audit closes of record per the
+-- addendum-11 triple (the escrow release's fail-closed gate), the theater
+-- payout gate states per (payee, production) — the grand_rights_cleared and
+-- venue_settlement_reconciled facts the theater vertical resolves through —
+-- and the founder-banded venue hall fee policies per (tour, venue).
+CREATE TABLE IF NOT EXISTS promoter_settlement_audits (
+  id TEXT PRIMARY KEY,
+  production_id TEXT NOT NULL,
+  venue_id TEXT NOT NULL,
+  show_date TEXT NOT NULL,
+  audit_state TEXT NOT NULL CHECK (audit_state IN ('unknown', 'closed')),
+  evidence_ref TEXT,
+  closed_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (production_id, venue_id, show_date)
+);
+
+CREATE TABLE IF NOT EXISTS theatrical_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  production_id TEXT NOT NULL,
+  grand_rights_state TEXT NOT NULL CHECK (grand_rights_state IN ('unknown', 'cleared')),
+  venue_settlement_state TEXT NOT NULL CHECK (venue_settlement_state IN ('unknown', 'reconciled')),
+  grand_rights_evidence_ref TEXT,
+  venue_settlement_evidence_ref TEXT,
+  verified_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, production_id)
+);
+
+CREATE TABLE IF NOT EXISTS venue_hall_fee_policies (
+  id TEXT PRIMARY KEY,
+  tour_id TEXT NOT NULL,
+  venue_id TEXT NOT NULL,
+  hall_fee_rate_bps INTEGER NOT NULL CHECK (hall_fee_rate_bps >= 1500 AND hall_fee_rate_bps <= 2500),
+  venue_payee_id TEXT NOT NULL,
+  venue_payee_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (tour_id, venue_id)
+);
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
@@ -4774,6 +4822,183 @@ export class SqliteStore implements Store {
         ...row,
         allocations: JSON.parse(row.allocations) as TheatricalSplitAccrualRecord['allocations'],
       })),
+    );
+  }
+
+  // --- Promoter settlement escrow + theater gates + comedy audio (PR 31,
+  // --- migration 0035) ---
+
+  async listPromoterSettlementEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM ledger_transactions
+         WHERE kind = 'promoter_box_office_settlement_pending' AND status = 'promoter_box_office_settlement_pending'
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?`,
+        )
+        .all(limit) as LedgerTransactionRecord[],
+    );
+  }
+
+  async settlePromoterSettlementEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // One conditional statement — the WHERE clause is the CAS, scoped to
+    // the promoter lock state only. changes = 0 means the row is absent or
+    // no longer locked; either way this call lost.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'promoter_box_office_settlement_pending'`,
+      )
+      .run(settledAt, id);
+    if (result.changes === 0) return undefined;
+    return this.getLedgerTransaction(id);
+  }
+
+  async upsertPromoterSettlementAudit(
+    row: Omit<PromoterSettlementAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PromoterSettlementAuditRecord> {
+    // UNIQUE per (production_id, venue_id, show_date) — a re-recording
+    // converges (the newest close governs the next release).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM promoter_settlement_audits
+         WHERE production_id = ? AND venue_id = ? AND show_date = ?`,
+      )
+      .get(row.production_id, row.venue_id, row.show_date) as
+      | PromoterSettlementAuditRecord
+      | undefined;
+    const record: PromoterSettlementAuditRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO promoter_settlement_audits
+           (id, production_id, venue_id, show_date, audit_state, evidence_ref, closed_by, created_at, updated_at)
+         VALUES (@id, @production_id, @venue_id, @show_date, @audit_state, @evidence_ref, @closed_by, @created_at, @updated_at)
+         ON CONFLICT (production_id, venue_id, show_date) DO UPDATE SET
+           audit_state = excluded.audit_state,
+           evidence_ref = excluded.evidence_ref,
+           closed_by = excluded.closed_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getPromoterSettlementAudit(
+    productionId: string,
+    venueId: string,
+    showDate: string,
+  ): Promise<PromoterSettlementAuditRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM promoter_settlement_audits
+         WHERE production_id = ? AND venue_id = ? AND show_date = ?`,
+        )
+        .get(productionId, venueId, showDate) as PromoterSettlementAuditRecord | undefined,
+    );
+  }
+
+  async upsertTheatricalPayoutGateState(
+    row: Omit<TheatricalPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<TheatricalPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, production_id) — an upsert converges (the newest
+    // states govern the next dispatch).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM theatrical_payout_gate_states WHERE payee_id = ? AND production_id = ?`,
+      )
+      .get(row.payee_id, row.production_id) as
+      | TheatricalPayoutGateStateRecord
+      | undefined;
+    const record: TheatricalPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO theatrical_payout_gate_states
+           (id, payee_id, production_id, grand_rights_state, venue_settlement_state,
+            grand_rights_evidence_ref, venue_settlement_evidence_ref, verified_by, created_at, updated_at)
+         VALUES (@id, @payee_id, @production_id, @grand_rights_state, @venue_settlement_state,
+                 @grand_rights_evidence_ref, @venue_settlement_evidence_ref, @verified_by, @created_at, @updated_at)
+         ON CONFLICT (payee_id, production_id) DO UPDATE SET
+           grand_rights_state = excluded.grand_rights_state,
+           venue_settlement_state = excluded.venue_settlement_state,
+           grand_rights_evidence_ref = excluded.grand_rights_evidence_ref,
+           venue_settlement_evidence_ref = excluded.venue_settlement_evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getTheatricalPayoutGateState(
+    payeeId: string,
+    productionId: string,
+  ): Promise<TheatricalPayoutGateStateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM theatrical_payout_gate_states WHERE payee_id = ? AND production_id = ?`,
+        )
+        .get(payeeId, productionId) as TheatricalPayoutGateStateRecord | undefined,
+    );
+  }
+
+  async upsertVenueHallFeePolicy(
+    row: Omit<VenueHallFeePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<VenueHallFeePolicyRecord> {
+    // UNIQUE per (tour_id, venue_id) — an upsert converges.
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(`SELECT * FROM venue_hall_fee_policies WHERE tour_id = ? AND venue_id = ?`)
+      .get(row.tour_id, row.venue_id) as VenueHallFeePolicyRecord | undefined;
+    const record: VenueHallFeePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO venue_hall_fee_policies
+           (id, tour_id, venue_id, hall_fee_rate_bps, venue_payee_id, venue_payee_name, created_at, updated_at)
+         VALUES (@id, @tour_id, @venue_id, @hall_fee_rate_bps, @venue_payee_id, @venue_payee_name, @created_at, @updated_at)
+         ON CONFLICT (tour_id, venue_id) DO UPDATE SET
+           hall_fee_rate_bps = excluded.hall_fee_rate_bps,
+           venue_payee_id = excluded.venue_payee_id,
+           venue_payee_name = excluded.venue_payee_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getVenueHallFeePolicy(
+    tourId: string,
+    venueId: string,
+  ): Promise<VenueHallFeePolicyRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM venue_hall_fee_policies WHERE tour_id = ? AND venue_id = ?`)
+        .get(tourId, venueId) as VenueHallFeePolicyRecord | undefined,
     );
   }
 

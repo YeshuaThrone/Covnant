@@ -1655,6 +1655,97 @@ export type TheatricalSplitAccrualRecord = {
   created_at: string;
 };
 
+// --- Promoter settlement escrow + theater gates + comedy audio (PR 31,
+// --- migration 0035) --------------------------------------------------------
+
+/**
+ * The final night-of-show audit close's stored states — the persisted fact
+ * the promoter settlement escrow's release reads (the AI payout-gate
+ * states' per-payee pattern, migration 0029; the estate's, 0033). UNIQUE
+ * per (production_id, venue_id, show_date): an upsert converges (the
+ * newest close governs the next release). The release reads these
+ * FAIL-CLOSED: an ABSENT record is unknown (the release refuses with
+ * `audit_close_not_verified`), an 'unknown' stored state maps to refusal,
+ * and only 'closed' passes — nothing defaults to allowing.
+ */
+export const PROMOTER_SETTLEMENT_AUDIT_STATES = ["unknown", "closed"] as const;
+export type PromoterSettlementAuditState =
+  (typeof PROMOTER_SETTLEMENT_AUDIT_STATES)[number];
+
+export function isPromoterSettlementAuditState(
+  value: string,
+): value is PromoterSettlementAuditState {
+  return (PROMOTER_SETTLEMENT_AUDIT_STATES as readonly string[]).includes(value);
+}
+
+export type PromoterSettlementAuditRecord = {
+  id: string;
+  /** The addendum-11 triple the stop's sheet and escrow payee key on. */
+  production_id: string;
+  venue_id: string;
+  show_date: string;
+  audit_state: PromoterSettlementAuditState;
+  /** The close evidence's provenance — required for 'closed'. */
+  evidence_ref: string | null;
+  /** The operator identity that recorded the close. */
+  closed_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The theater payout gate's stored states (migration 0035) — the persisted
+ * facts the THEATER vertical's compliance state resolves through (the AI
+ * and estate payout-gate states' pattern). UNIQUE per (payee_id,
+ * production_id): an upsert converges. The gate reads both states
+ * FAIL-CLOSED: an ABSENT record returns null (the gate refuses with
+ * `vertical_state_unknown`), an 'unknown' stored state maps to false (the
+ * gate refuses the specific condition — theater_grand_rights_not_cleared /
+ * theater_venue_settlement_unreconciled), and only 'cleared'/'reconciled'
+ * map to true — nothing defaults to allowing.
+ */
+export const THEATRICAL_GRAND_RIGHTS_GATE_STATES = ["unknown", "cleared"] as const;
+export type TheatricalGrandRightsGateState =
+  (typeof THEATRICAL_GRAND_RIGHTS_GATE_STATES)[number];
+
+export const THEATRICAL_VENUE_SETTLEMENT_GATE_STATES = [
+  "unknown",
+  "reconciled",
+] as const;
+export type TheatricalVenueSettlementGateState =
+  (typeof THEATRICAL_VENUE_SETTLEMENT_GATE_STATES)[number];
+
+export type TheatricalPayoutGateStateRecord = {
+  id: string;
+  /** The receiving payee whose theatrical payouts this gates. */
+  payee_id: string;
+  /** The production scope the states were recorded against. */
+  production_id: string;
+  grand_rights_state: TheatricalGrandRightsGateState;
+  venue_settlement_state: TheatricalVenueSettlementGateState;
+  /** The verified evidence references backing each state, when present. */
+  grand_rights_evidence_ref: string | null;
+  venue_settlement_evidence_ref: string | null;
+  verified_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The venue hall fee policy of record per (tour, venue) — the founder-
+ * banded 15–25% venue cut on tour merchandise, enforced at registration
+ * AND at use. The venue's cut deducts from gross merch sales BEFORE the
+ * artist's apparel net releases. */
+export type VenueHallFeePolicyRecord = {
+  id: string;
+  tour_id: string;
+  venue_id: string;
+  hall_fee_rate_bps: number;
+  venue_payee_id: string;
+  venue_payee_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // --- IP adaptation optioning (PR 21, migration 0025) -----------------------
 
 /**

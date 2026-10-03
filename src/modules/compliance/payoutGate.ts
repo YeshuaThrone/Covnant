@@ -1,6 +1,10 @@
 import type { Store } from "@/lib/server/store";
 import type { KycStatus } from "@/lib/don/types";
-import type { AiPayoutGateStateRecord, EstatePayoutGateStateRecord } from "@/modules/don/records";
+import type {
+  AiPayoutGateStateRecord,
+  EstatePayoutGateStateRecord,
+  TheatricalPayoutGateStateRecord,
+} from "@/modules/don/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -368,6 +372,39 @@ export async function resolveArtVerticalComplianceState(
   return {
     vertical: "art",
     estate_succession_verified: record.estate_succession_state === "verified",
+  };
+}
+
+/**
+ * The theater vertical's compliance state, resolved from the theatrical
+ * payout-gate state of record (migration 0035) — the store-backed reader
+ * the theatrical payout path uses for the 'theater' vertical (the AI and
+ * estate resolvers' pattern, scoped per payee × production). FAIL-CLOSED
+ * on both failure modes the directive names: an ABSENT record returns
+ * null (the gate refuses with vertical_state_unknown), and an 'unknown'
+ * stored state maps to false (the gate refuses the specific condition —
+ * theater_grand_rights_not_cleared / theater_venue_settlement_unreconciled).
+ * The booleans are true ONLY on the grand_rights_cleared /
+ * venue_settlement_reconciled states of record — nothing defaults to
+ * allowing.
+ */
+export async function resolveTheatricalVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  productionId: string,
+): Promise<Extract<
+  VerticalComplianceState,
+  { vertical: "theater" }
+> | null> {
+  const record: TheatricalPayoutGateStateRecord | undefined =
+    await store.getTheatricalPayoutGateState(payeeId, productionId);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "theater",
+    grand_rights_cleared: record.grand_rights_state === "cleared",
+    venue_settlement_reconciled: record.venue_settlement_state === "reconciled",
   };
 }
 
