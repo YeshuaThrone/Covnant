@@ -171,6 +171,31 @@ export const LEDGER_STATUSES = [
   // streams. Audio money is licensed-recording money; ticket money is box
   // office money; kind never lets a query fold one into the other.
   "comedy_audio_rights_pending",
+  // AUDIT_RESERVE_ESCROW (PR 33, the founder licensing-audit directive):
+  // the 5–10% (founder-banded, per-scope policy of record) of a licensing
+  // royalty credit that locks here — keyed per license scope by the escrow
+  // row's 'audit_reserve_escrow:{scopeKey}' sentinel payee — while the
+  // contract's audit exposure runs. Quarterly retail audit reconciliations
+  // and inventory write-offs draw it down position-locked; the verified
+  // reconciliation of record opens the release (fail-closed: no
+  // reconciliation of record, no release), and the released remainder
+  // settles it (status → 'settled'). Kind marks WHAT the row is for its
+  // whole life, the same division every escrow state above uses. No
+  // migration: ledger_transactions.status is free text (0006 has no check
+  // constraint), so the state extends the existing ledger contract in
+  // place, the film/esports/promoter precedent.
+  "audit_reserve_escrow",
+  // MG_SHORTFALL_DUE (PR 33, the founder licensing guarantee directive): a
+  // licensee's annual minimum-guarantee shortfall — the advance of record
+  // did not fully recoup at contract term close — debits here as the
+  // invoice of record AGAINST the licensee of record (payee = the
+  // licensee, the term-close id stamped in line_item_id). The row is the
+  // receivable's face on the Don ledger: visible, priced, and never a
+  // guessed amount (the shortfall derives from the append-only recoupment
+  // truth at close). Kind marks WHAT the row is for its whole life. No
+  // migration: ledger_transactions.status is free text, the same
+  // extension-in-place discipline as every escrow state above.
+  "mg_shortfall_due",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -241,6 +266,21 @@ export const LEDGER_KINDS = [
   // never a ticket-sales kind. Kind marks WHAT the row is for its whole
   // life, the same division every escrow state above uses.
   "comedy_audio_rights_pending",
+  // Audit reserve escrow (PR 33): the founder-banded 5–10% of a licensing
+  // royalty credit held per license scope for the contract's audit
+  // exposure — drawn down by quarterly retail audit reconciliations and
+  // inventory write-offs, released with a verified reconciliation of
+  // record. Kind marks WHAT the row is for its whole life (a released or
+  // fully-drawn reserve stays kind 'audit_reserve_escrow' with status
+  // 'settled'), the same division PR 7, PR 9, PR 13, PR 14, PR 15, PR 20,
+  // PR 23, PR 27, and PR 31 use.
+  "audit_reserve_escrow",
+  // Minimum-guarantee shortfall due (PR 33): the licensee's annual MG
+  // shortfall debited as the invoice of record at contract term close —
+  // the receivable's face on the Don ledger, priced from the append-only
+  // recoupment truth, never guessed. Kind marks WHAT the row is for its
+  // whole life, the same division every kind above uses.
+  "mg_shortfall_due",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

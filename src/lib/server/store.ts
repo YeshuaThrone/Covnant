@@ -141,8 +141,18 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingAuditReserveDrawdownClass,
+  LicensingAuditReserveDrawdownRecord,
+  LicensingAuditReservePolicyRecord,
+  LicensingAuditReserveReconciliationRecord,
+  LicensingCategoryExclusivityGateState,
+  LicensingMgCommitmentRecord,
+  LicensingMgRecoupmentApplicationRecord,
+  LicensingMgTermCloseRecord,
+  LicensingPayoutGateStateRecord,
   LicensingRoyaltyDealRecord,
   LicensingRoyaltyApplicationRecord,
+  LicensingTerritoryGateState,
   LicensingTreatyRateRecord,
   LicensingSubLicenseeRecord,
   LicensingSubLicenseReportRecord,
@@ -2482,6 +2492,168 @@ export interface Store {
     evidenceRef: string,
     reconciledBy: string,
   ): Promise<LicensingSubLicenseReportRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the advance / minimum-guarantee commitment of
+   * record for one (scope_key, commitment_ref) (migration 0037) — upsert
+   * converges: a re-registration replaces the row atomically (the
+   * option-agreement/agency-policy discipline). The recouped_cents counter
+   * is bookkeeping — the append-only applications are the truth.
+   */
+  upsertLicensingMgCommitment(
+    row: Omit<LicensingMgCommitmentRecord, 'id' | 'created_at' | 'updated_at' | 'recouped_cents'> & {
+      recouped_cents?: number;
+    },
+  ): Promise<LicensingMgCommitmentRecord>;
+
+  /** One (scope, commitment ref)'s advance of record; undefined when none
+   * — the recoupment and term-close lanes refuse (fail-closed). */
+  getLicensingMgCommitment(
+    scopeKey: string,
+    commitmentRef: string,
+  ): Promise<LicensingMgCommitmentRecord | undefined>;
+
+  /** Every advance registered under one license scope, created_at ASC —
+   * the recoupment pass's routing candidates. */
+  listLicensingMgCommitments(scopeKey: string): Promise<LicensingMgCommitmentRecord[]>;
+
+  /**
+   * Appends one executed recoupment application — an event's earned
+   * royalty offsetting one advance (migration 0037). UNIQUE per
+   * (commitment_id, source_event_id) is the replay guard; UNIQUE per
+   * (commitment_id, recouped_before_cents) is the POSITION LOCK — a
+   * replayed event or a lost position race throws the unique violation,
+   * never a double application; the caller retries at the advanced
+   * position.
+   */
+  insertLicensingMgRecoupmentApplication(
+    row: Omit<LicensingMgRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingMgRecoupmentApplicationRecord>;
+
+  /** One advance's executed recoupment applications, created_at ASC —
+   * the append-only truth the position derives from. */
+  listLicensingMgRecoupmentApplications(
+    commitmentId: string,
+  ): Promise<LicensingMgRecoupmentApplicationRecord[]>;
+
+  /**
+   * Records the contract term close of record per (commitment_id, term)
+   * (migration 0037) — upsert on the pair: the once-only close, a replay
+   * converges on the recorded shortfall and invoice of record.
+   */
+  upsertLicensingMgTermClose(
+    row: Omit<LicensingMgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingMgTermCloseRecord>;
+
+  /** One (commitment, term)'s close of record; undefined when the term is
+   * not closed — the shortfall invoice never guessed. */
+  getLicensingMgTermClose(
+    commitmentId: string,
+    term: string,
+  ): Promise<LicensingMgTermCloseRecord | undefined>;
+
+  /** Every term close filed under one license scope, created_at ASC —
+   * the audit trail of the guarantee's enforcement. */
+  listLicensingMgTermCloses(scopeKey: string): Promise<LicensingMgTermCloseRecord[]>;
+
+  /**
+   * Registers (or replaces) the audit reserve escrow's policy of record
+   * for one scope key (migration 0037) — upsert on scope_key: a
+   * re-registration converges (the newest rate governs the next routing).
+   */
+  upsertLicensingAuditReservePolicy(
+    row: Omit<LicensingAuditReservePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingAuditReservePolicyRecord>;
+
+  /** One scope's reserve policy of record; undefined when none — the
+   * routing lane routes nothing (fail-closed, never a guessed rate). */
+  getLicensingAuditReservePolicy(
+    scopeKey: string,
+  ): Promise<LicensingAuditReservePolicyRecord | undefined>;
+
+  /**
+   * Records the verified reconciliation of record for one reserve —
+   * insert-as-lock (UNIQUE per reserve_ledger_id): the FIRST reconciliation
+   * wins, a concurrent second insert throws the unique violation. The
+   * release reads this row FAIL-CLOSED — no reconciliation of record, no
+   * release.
+   */
+  insertLicensingAuditReserveReconciliation(
+    row: Omit<LicensingAuditReserveReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveReconciliationRecord>;
+
+  /** One reserve's reconciliation of record; undefined when none — the
+   * release refuses (fail-closed). */
+  getLicensingAuditReserveReconciliation(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveReconciliationRecord | undefined>;
+
+  /**
+   * Appends one position-locked reserve drawdown — a quarterly audit
+   * reconciliation or inventory write-off spending the escrow (migration
+   * 0037). UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock — a replayed event or a lost race throws the unique
+   * violation, never a double drawdown; the caller re-derives from the
+   * append-only truth.
+   */
+  insertLicensingAuditReserveDrawdown(
+    row: Omit<LicensingAuditReserveDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveDrawdownRecord>;
+
+  /** One reserve's drawdowns, created_at ASC — the append-only truth the
+   * remaining balance derives from. */
+  listLicensingAuditReserveDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveDrawdownRecord[]>;
+
+  /**
+   * Upserts the licensing payout gate's states of record for one payee in
+   * one license scope (migration 0037) — UNIQUE per (payee_id, scope_key):
+   * an upsert converges (the newest states govern the next dispatch).
+   */
+  upsertLicensingPayoutGateState(
+    row: Omit<
+      LicensingPayoutGateStateRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<LicensingPayoutGateStateRecord>;
+
+  /**
+   * One payee × scope's gate states of record; undefined when none — the
+   * licensing vertical's compliance state resolves fail-closed through
+   * this (absent → null → the gate refuses with vertical_state_unknown).
+   */
+  getLicensingPayoutGateState(
+    payeeId: string,
+    scopeKey: string,
+  ): Promise<LicensingPayoutGateStateRecord | undefined>;
+
+  /**
+   * Flips ONE audit-reserve escrow ledger row from status
+   * 'audit_reserve_escrow' to 'settled' (settled_at = the passed instant)
+   * in a single conditional statement. Returns the row only when THIS
+   * call won the transition; undefined when the id is unknown OR the
+   * reserve is no longer held — the concurrent release or full-drawdown
+   * loser reads exactly that and refuses. The flip happens BEFORE any
+   * money moves (insert-as-lock, the payout-reversal precedent), so a
+   * crash mid-release fails toward "nothing moved twice".
+   */
+  settleLicensingAuditReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * One royalty application of record by (deal_id, source_event_id);
+   * undefined when none — the recoupment pass reads the committed
+   * application the cascade wrote (the earnings of record), never a
+   * recomputation.
+   */
+  getLicensingRoyaltyApplication(
+    dealId: string,
+    sourceEventId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

@@ -361,6 +361,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // kind/status vocabulary, and the referencing pin below holds.
       '0035_promoter_settlement_escrow_theater_gates_comedy_audio.sql',
       '0036_licensing_net_sales_tiered_royalties_sublicense.sql',
+      // Advance/MG recoupment + audit reserve + payout gate states (PR 33,
+      // migration 0037): the commitment/application/term-close tables, the
+      // audit-reserve policy/drawdown/reconciliation tables, and the payout
+      // gate states of record; still no DDL on universal_royalty_ledger —
+      // the buckets and journals ride the existing ledger vocabulary, and
+      // the referencing pin below holds.
+      '0037_licensing_mg_recoupment_audit_reserve_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -8,10 +8,13 @@
 import {
   GL_ACCOUNT_FBO_CASH,
   GL_ACCOUNT_UNCLAIMED_HOLDING,
+  auditReserveEscrowGlAccount,
   comedyAudioRightsGlAccount,
   esportsPoolEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
+  licensingMgReceivableGlAccount,
+  licensingMgShortfallIncomeGlAccount,
   merchReturnsReserveGlAccount,
   promoterSettlementGlAccount,
   bookReturnsReserveGlAccount,
@@ -313,6 +316,52 @@ export function comedyAudioRightsDebit(specialId: string, amountCents: number): 
 export function comedyAudioRightsCredit(specialId: string, amountCents: number): GlLegInput {
   return {
     account: comedyAudioRightsGlAccount(specialId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Audit reserve escrow legs (PR 33): the per-scope AUDIT_RESERVE_ESCROW
+// obligation account — the book reserve legs' mirror at license-scope
+// scope. A routed royalty credit's reserve locks here against the holding
+// account's debit; audit reconciliations and write-offs debit it back to
+// FBO cash; the verified release debits it into the licensor's payout
+// legs — never the dust payee's account, never the unclaimed holding
+// account, never any other escrow's account.
+export function auditReserveEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: auditReserveEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function auditReserveEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: auditReserveEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Minimum-guarantee shortfall invoice legs (PR 33): the invoice of record
+// prices the receivable — the licensee's shortfall debt rises as a
+// receivable asset (debit) against the shortfall penalty income of record
+// (credit). Balanced legs; no cash moves until the invoice settles.
+export function licensingMgReceivableDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: licensingMgReceivableGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function licensingMgShortfallIncomeCredit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: licensingMgShortfallIncomeGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

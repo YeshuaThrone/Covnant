@@ -181,6 +181,11 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   promoter_settlement_post: 'Promoter box office net locked in settlement escrow',
   promoter_settlement_release: 'Promoter settlement released after audit close',
   comedy_audio_rights_post: 'Comedy special audio royalty received',
+  // PR 33 — the brand-licensing MG recoupment + audit-reserve lanes.
+  licensing_audit_reserve_route: 'Licensing audit reserve locked',
+  licensing_audit_reserve_drawdown: 'Licensing audit reserve drawn down',
+  licensing_audit_reserve_release: 'Licensing audit reserve released',
+  licensing_mg_shortfall_invoice: 'Licensing MG shortfall invoiced',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

@@ -154,6 +154,13 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingAuditReserveDrawdownRecord,
+  LicensingAuditReservePolicyRecord,
+  LicensingAuditReserveReconciliationRecord,
+  LicensingMgCommitmentRecord,
+  LicensingMgRecoupmentApplicationRecord,
+  LicensingMgTermCloseRecord,
+  LicensingPayoutGateStateRecord,
   LicensingRoyaltyDealRecord,
   LicensingRoyaltyApplicationRecord,
   LicensingTierSlice,
@@ -1576,6 +1583,112 @@ CREATE TABLE IF NOT EXISTS licensing_sub_license_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_licensing_sub_reports_scope
   ON licensing_sub_license_reports (scope_key);
+
+-- Advance / minimum-guarantee recoupment, shortfall invoices, audit reserve
+-- escrow, and payout gate states (PR 33, migration 0037) — the recoupment
+-- ledger and its automatic penalty, the founder-banded audit-reserve bucket,
+-- and the fail-closed gate states of record. Every business key an inline
+-- UNIQUE, no FOREIGN KEYs (the reconciliation-identifier discipline
+-- 0011/0036 use).
+CREATE TABLE IF NOT EXISTS licensing_mg_commitments (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  commitment_ref TEXT NOT NULL,
+  category_code TEXT NOT NULL,
+  collateralization TEXT NOT NULL CHECK (collateralization IN ('cross_collateralized', 'category_isolated')),
+  mg_amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  licensee_id TEXT NOT NULL,
+  licensee_name TEXT NOT NULL,
+  recouped_cents INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key, commitment_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_mg_commitments_scope
+  ON licensing_mg_commitments (scope_key);
+
+CREATE TABLE IF NOT EXISTS licensing_mg_recoupment_applications (
+  id TEXT PRIMARY KEY,
+  commitment_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  category_code TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  earned_royalty_cents INTEGER NOT NULL,
+  recouped_before_cents INTEGER NOT NULL,
+  recouped_cents INTEGER NOT NULL,
+  recouped_after_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (commitment_id, source_event_id),
+  UNIQUE (commitment_id, recouped_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_mg_recoup_commitment
+  ON licensing_mg_recoupment_applications (commitment_id);
+
+CREATE TABLE IF NOT EXISTS licensing_mg_term_closes (
+  id TEXT PRIMARY KEY,
+  commitment_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  term TEXT NOT NULL,
+  mg_due_cents INTEGER NOT NULL,
+  recouped_at_close_cents INTEGER NOT NULL,
+  shortfall_cents INTEGER NOT NULL,
+  invoice_ledger_id TEXT,
+  closed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (commitment_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_mg_term_closes_scope
+  ON licensing_mg_term_closes (scope_key);
+
+CREATE TABLE IF NOT EXISTS licensing_audit_reserve_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS licensing_audit_reserve_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS licensing_audit_reserve_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('quarterly_audit_reconciliation', 'inventory_write_off')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL,
+  remaining_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_audit_drawdowns_reserve
+  ON licensing_audit_reserve_drawdowns (reserve_ledger_id);
+
+CREATE TABLE IF NOT EXISTS licensing_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  territory_state TEXT NOT NULL CHECK (territory_state IN ('unknown', 'cleared')),
+  category_exclusivity_state TEXT NOT NULL CHECK (category_exclusivity_state IN ('unknown', 'verified')),
+  territory_evidence_ref TEXT,
+  category_exclusivity_evidence_ref TEXT,
+  verified_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, scope_key)
+);
+CREATE INDEX IF NOT EXISTS idx_licensing_gate_states_scope
+  ON licensing_payout_gate_states (scope_key);
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
@@ -5464,6 +5577,476 @@ export class SqliteStore implements Store {
         .prepare(`SELECT source_event_id FROM licensing_sub_license_reports WHERE id = ?`)
         .get(id) as { source_event_id: string }).source_event_id,
     );
+  }
+
+  // --- Advance / MG recoupment, shortfall invoices, audit reserve escrow,
+  // --- and payout gate states (PR 33, migration 0037) ---
+
+  async upsertLicensingMgCommitment(
+    row: Omit<LicensingMgCommitmentRecord, 'id' | 'created_at' | 'updated_at' | 'recouped_cents'> & {
+      recouped_cents?: number;
+    },
+  ): Promise<LicensingMgCommitmentRecord> {
+    // UNIQUE per (scope_key, commitment_ref) — a re-registration replaces
+    // the row atomically (the option-agreement discipline).
+    const record = {
+      ...row,
+      recouped_cents: row.recouped_cents ?? 0,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_mg_commitments
+           (id, scope_key, commitment_ref, category_code, collateralization,
+            mg_amount_cents, currency, licensee_id, licensee_name,
+            recouped_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key, commitment_ref) DO UPDATE SET
+           category_code = excluded.category_code,
+           collateralization = excluded.collateralization,
+           mg_amount_cents = excluded.mg_amount_cents,
+           currency = excluded.currency,
+           licensee_id = excluded.licensee_id,
+           licensee_name = excluded.licensee_name,
+           recouped_cents = excluded.recouped_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.commitment_ref,
+        record.category_code,
+        record.collateralization,
+        record.mg_amount_cents,
+        record.currency,
+        record.licensee_id,
+        record.licensee_name,
+        record.recouped_cents,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getLicensingMgCommitment(record.scope_key, record.commitment_ref) as Promise<
+      LicensingMgCommitmentRecord
+    >;
+  }
+
+  async getLicensingMgCommitment(
+    scopeKey: string,
+    commitmentRef: string,
+  ): Promise<LicensingMgCommitmentRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_mg_commitments WHERE scope_key = ? AND commitment_ref = ?`)
+      .get(scopeKey, commitmentRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return this.licensingMgCommitmentRow(row);
+  }
+
+  async listLicensingMgCommitments(scopeKey: string): Promise<LicensingMgCommitmentRecord[]> {
+    return (
+      this.db
+        .prepare(`SELECT * FROM licensing_mg_commitments WHERE scope_key = ? ORDER BY created_at ASC`)
+        .all(scopeKey) as Record<string, unknown>[]
+    ).map((row) => this.licensingMgCommitmentRow(row));
+  }
+
+  private licensingMgCommitmentRow(row: Record<string, unknown>): LicensingMgCommitmentRecord {
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      commitment_ref: row.commitment_ref as string,
+      category_code: row.category_code as string,
+      collateralization: row.collateralization as LicensingMgCommitmentRecord['collateralization'],
+      mg_amount_cents: Number(row.mg_amount_cents),
+      currency: row.currency as string,
+      licensee_id: row.licensee_id as string,
+      licensee_name: row.licensee_name as string,
+      recouped_cents: Number(row.recouped_cents),
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertLicensingMgRecoupmentApplication(
+    row: Omit<LicensingMgRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingMgRecoupmentApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard;
+    // UNIQUE per (commitment_id, recouped_before_cents) is the position
+    // lock — a replayed event or a lost position race throws here, never a
+    // double application; the caller retries at the advanced position.
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_mg_recoupment_applications
+           (id, commitment_id, scope_key, category_code, source_event_id,
+            earned_royalty_cents, recouped_before_cents, recouped_cents,
+            recouped_after_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.commitment_id,
+        record.scope_key,
+        record.category_code,
+        record.source_event_id,
+        record.earned_royalty_cents,
+        record.recouped_before_cents,
+        record.recouped_cents,
+        record.recouped_after_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listLicensingMgRecoupmentApplications(
+    commitmentId: string,
+  ): Promise<LicensingMgRecoupmentApplicationRecord[]> {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM licensing_mg_recoupment_applications
+           WHERE commitment_id = ? ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(commitmentId) as Record<string, unknown>[]
+    ).map((row) => ({
+      id: row.id as string,
+      commitment_id: row.commitment_id as string,
+      scope_key: row.scope_key as string,
+      category_code: row.category_code as string,
+      source_event_id: row.source_event_id as string,
+      earned_royalty_cents: Number(row.earned_royalty_cents),
+      recouped_before_cents: Number(row.recouped_before_cents),
+      recouped_cents: Number(row.recouped_cents),
+      recouped_after_cents: Number(row.recouped_after_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async upsertLicensingMgTermClose(
+    row: Omit<LicensingMgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingMgTermCloseRecord> {
+    // UNIQUE per (commitment_id, term) — the once-only close; a replay
+    // converges on the recorded shortfall and invoice of record.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_mg_term_closes
+           (id, commitment_id, scope_key, term, mg_due_cents,
+            recouped_at_close_cents, shortfall_cents, invoice_ledger_id,
+            closed_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (commitment_id, term) DO UPDATE SET
+           mg_due_cents = excluded.mg_due_cents,
+           recouped_at_close_cents = excluded.recouped_at_close_cents,
+           shortfall_cents = excluded.shortfall_cents,
+           invoice_ledger_id = excluded.invoice_ledger_id,
+           closed_by = excluded.closed_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.commitment_id,
+        record.scope_key,
+        record.term,
+        record.mg_due_cents,
+        record.recouped_at_close_cents,
+        record.shortfall_cents,
+        record.invoice_ledger_id,
+        record.closed_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getLicensingMgTermClose(record.commitment_id, record.term) as Promise<
+      LicensingMgTermCloseRecord
+    >;
+  }
+
+  async getLicensingMgTermClose(
+    commitmentId: string,
+    term: string,
+  ): Promise<LicensingMgTermCloseRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_mg_term_closes WHERE commitment_id = ? AND term = ?`)
+      .get(commitmentId, term) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      commitment_id: row.commitment_id as string,
+      scope_key: row.scope_key as string,
+      term: row.term as string,
+      mg_due_cents: Number(row.mg_due_cents),
+      recouped_at_close_cents: Number(row.recouped_at_close_cents),
+      shortfall_cents: Number(row.shortfall_cents),
+      invoice_ledger_id: (row.invoice_ledger_id as string | null) ?? null,
+      closed_by: row.closed_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listLicensingMgTermCloses(scopeKey: string): Promise<LicensingMgTermCloseRecord[]> {
+    const rows = this.db
+      .prepare(`SELECT * FROM licensing_mg_term_closes WHERE scope_key = ? ORDER BY created_at ASC`)
+      .all(scopeKey) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      commitment_id: row.commitment_id as string,
+      scope_key: row.scope_key as string,
+      term: row.term as string,
+      mg_due_cents: Number(row.mg_due_cents),
+      recouped_at_close_cents: Number(row.recouped_at_close_cents),
+      shortfall_cents: Number(row.shortfall_cents),
+      invoice_ledger_id: (row.invoice_ledger_id as string | null) ?? null,
+      closed_by: row.closed_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertLicensingAuditReservePolicy(
+    row: Omit<LicensingAuditReservePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingAuditReservePolicyRecord> {
+    // UNIQUE per scope_key — a re-registration converges (the newest rate
+    // governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_audit_reserve_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record.id, record.scope_key, record.reserve_rate_bps, record.created_at, record.updated_at);
+    return this.getLicensingAuditReservePolicy(record.scope_key) as Promise<
+      LicensingAuditReservePolicyRecord
+    >;
+  }
+
+  async getLicensingAuditReservePolicy(
+    scopeKey: string,
+  ): Promise<LicensingAuditReservePolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_audit_reserve_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: Number(row.reserve_rate_bps),
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertLicensingAuditReserveReconciliation(
+    row: Omit<LicensingAuditReserveReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_audit_reserve_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.reserve_ledger_id, record.evidence_ref, record.reconciled_by, record.created_at);
+    return record;
+  }
+
+  async getLicensingAuditReserveReconciliation(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_audit_reserve_reconciliations WHERE reserve_ledger_id = ?`)
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertLicensingAuditReserveDrawdown(
+    row: Omit<LicensingAuditReserveDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+    // UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+    // lock — a replayed event or a lost race throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_audit_reserve_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listLicensingAuditReserveDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveDrawdownRecord[]> {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM licensing_audit_reserve_drawdowns
+           WHERE reserve_ledger_id = ? ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(reserveLedgerId) as Record<string, unknown>[]
+    ).map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class: row.drawdown_class as LicensingAuditReserveDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: Number(row.drawn_before_cents),
+      drawn_cents: Number(row.drawn_cents),
+      remaining_cents: Number(row.remaining_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async upsertLicensingPayoutGateState(
+    row: Omit<LicensingPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, scope_key) — an upsert converges (the newest
+    // states govern the next dispatch).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO licensing_payout_gate_states
+           (id, payee_id, scope_key, territory_state, category_exclusivity_state,
+            territory_evidence_ref, category_exclusivity_evidence_ref,
+            verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, scope_key) DO UPDATE SET
+           territory_state = excluded.territory_state,
+           category_exclusivity_state = excluded.category_exclusivity_state,
+           territory_evidence_ref = excluded.territory_evidence_ref,
+           category_exclusivity_evidence_ref = excluded.category_exclusivity_evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.scope_key,
+        record.territory_state,
+        record.category_exclusivity_state,
+        record.territory_evidence_ref,
+        record.category_exclusivity_evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getLicensingPayoutGateState(record.payee_id, record.scope_key) as Promise<
+      LicensingPayoutGateStateRecord
+    >;
+  }
+
+  async getLicensingPayoutGateState(
+    payeeId: string,
+    scopeKey: string,
+  ): Promise<LicensingPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM licensing_payout_gate_states WHERE payee_id = ? AND scope_key = ?`)
+      .get(payeeId, scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      scope_key: row.scope_key as string,
+      territory_state: row.territory_state as LicensingPayoutGateStateRecord['territory_state'],
+      category_exclusivity_state: row
+        .category_exclusivity_state as LicensingPayoutGateStateRecord['category_exclusivity_state'],
+      territory_evidence_ref: (row.territory_evidence_ref as string | null) ?? null,
+      category_exclusivity_evidence_ref:
+        (row.category_exclusivity_evidence_ref as string | null) ?? null,
+      verified_by: (row.verified_by as string | null) ?? null,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async settleLicensingAuditReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the localization escrow settle rides: only the caller
+    // whose WHERE matched (the reserve was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'audit_reserve_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async getLicensingRoyaltyApplication(
+    dealId: string,
+    sourceEventId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM licensing_royalty_applications WHERE deal_id = ? AND source_event_id = ?`,
+      )
+      .get(dealId, sourceEventId) as LicensingRoyaltyApplicationDbRow | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(licensingApplicationFromDbRow(row));
   }
 
   async listTranslationLocalizationEscrowCredits(
