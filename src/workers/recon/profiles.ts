@@ -35,6 +35,7 @@ import { FITNESS_PROFILES } from "./fitnessProfiles";
 import { FOOD_PROFILES } from "./foodProfiles";
 import { SERVICE_PROFILES } from "./serviceProfiles";
 import { DEVELOPER_PROFILES } from "./developerProfiles";
+import { HARDWARE_PROFILES } from "./hardwareProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -618,6 +619,15 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // recoupment, and the agent tool-call settlements are developer-only,
   // and developer rows never touch the music split machinery).
   ...DEVELOPER_PROFILES,
+  // The hardware lane (PR 46, the founder hardware directive) — same
+  // dispatch opinion again: the worker branches on the profile kind
+  // before the music machinery (the Net Hardware Patent Realization
+  // calculator, the tiered FRAND SEP royalties, the automotive OEM pool
+  // routings, the essentiality-weighted pool waterfalls, the clean-tech
+  // telemetry micro-payouts, the cross-license nettings, and the OTA
+  // unlock instant settlements are hardware-only, and hardware rows
+  // never touch the music split machinery).
+  ...HARDWARE_PROFILES,
 ];
 
 /**

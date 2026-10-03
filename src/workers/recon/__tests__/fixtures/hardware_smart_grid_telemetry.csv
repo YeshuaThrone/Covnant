@@ -1,0 +1,4 @@
+Telemetry Event ID,Device Serial,Patent Family ID,Kilowatt Hours Delivered,Charge Cycles,Currency,Reporting Period
+TLM-2026-03-0001,meter-zenith-01,fam-solid-state-cell,3.75,34,USD,2026-03
+TLM-2026-03-0002,meter-zenith-02,fam-solid-state-cell,12.25,0,USD,2026-03
+TLM-2026-03-0003,meter-orion-09,fam-hydro-flow,8.00,5,USD,2026-03

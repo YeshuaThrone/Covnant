@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers seventy-three profiles in dispatch order", () => {
+  it("registers seventy-seven profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -155,6 +155,16 @@ describe("profile registry", () => {
       "developer_sbom_scans_csv",
       "developer_whitelabel_licenses_csv",
       "developer_agent_tool_calls_csv",
+      // The hardware lane (PR 46, the founder hardware directive) —
+      // dispatched last, after the developer lane: the four founder-named
+      // feeds (cellular device activations with IMEI/EID, MAC address
+      // logs, factory production serial counts, smart grid telemetry;
+      // OTA unlock events ride the cellular feed as their second
+      // activation kind).
+      "hardware_cellular_activations_csv",
+      "hardware_mac_address_logs_csv",
+      "hardware_production_serials_csv",
+      "hardware_smart_grid_telemetry_csv",
     ]);
   });
 

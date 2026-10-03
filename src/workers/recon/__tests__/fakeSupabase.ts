@@ -329,17 +329,104 @@ export class FakeSupabaseClient {
 
   /** The migration-0011 claim RPC — the store's ONLY rpc on this path. */
   async rpc(fn: string, args: Record<string, unknown>): Promise<FakeResult> {
-    if (fn !== "claim_royalty_recon_job") {
-      return {
-        data: null,
-        error: { message: `fake: rpc ${fn} not implemented`, code: "P0001" },
-      };
+    if (fn === "claim_royalty_recon_job") {
+      const claimed = this.table("royalty_recon_jobs").claimFirst(
+        String(args.p_now),
+        args.p_engine,
+      );
+      return { data: claimed, error: null };
     }
-    const claimed = this.table("royalty_recon_jobs").claimFirst(
-      String(args.p_now),
-      args.p_engine,
-    );
-    return { data: claimed, error: null };
+    // The migration-0009 vault-delta RPC (H1 guard): the credit paths'
+    // applyVaultDelta — mint-or-add with floor guards, mirroring the SQL
+    // function's outcome envelope exactly.
+    if (fn === "apply_vault_delta") {
+      return { data: this.applyVaultDelta(args), error: null };
+    }
+    return {
+      data: null,
+      error: { message: `fake: rpc ${fn} not implemented`, code: "P0001" },
+    };
+  }
+
+  /**
+   * The behavioral apply_vault_delta (migration 0009): with
+   * create_if_missing the mint is credits-only (a negative delta or a
+   * floor the minted-from-zero balances cannot satisfy is refused up
+   * front) and the insert rides its ON CONFLICT arm — the add applies
+   * only when the summed balances clear every floor, so an existing
+   * vault's rejection is guard_failed, not a mint. Without minting, the
+   * UPDATE's WHERE is the real floor check; a rejected add on an
+   * existing vault is guard_failed, a missing vault is not_found.
+   */
+  private applyVaultDelta(args: Record<string, unknown>): unknown {
+    const payeeId = String(args.p_payee_id);
+    const deltas = {
+      available_balance: Number(args.p_available_delta),
+      pending_balance: Number(args.p_pending_delta),
+      reserve_balance: Number(args.p_reserve_delta),
+    };
+    const min = {
+      available_balance: args.p_min_available,
+      pending_balance: args.p_min_pending,
+      reserve_balance: args.p_min_reserve,
+    } as Record<string, number | null>;
+    const floorsHold = (balances: Record<string, number>): boolean =>
+      Object.keys(min).every(
+        (bucket) =>
+          min[bucket] === null ||
+          min[bucket] === undefined ||
+          balances[bucket] >= (min[bucket] as number),
+      );
+
+    const table = this.table("sovereign_vaults");
+    const existing = table
+      .select()
+      .find((row) => row.payee_id === payeeId);
+
+    if (args.p_create_if_missing === true) {
+      if (deltas.available_balance < 0 || deltas.pending_balance < 0 || deltas.reserve_balance < 0) {
+        return { outcome: "not_found" };
+      }
+      if (!floorsHold(deltas)) {
+        return { outcome: "guard_failed" };
+      }
+      if (existing === undefined) {
+        const minted = {
+          payee_id: payeeId,
+          payee_name: args.p_payee_name,
+          ...deltas,
+          updated_at: args.p_updated_at,
+        };
+        table.insert(minted);
+        return { outcome: "applied", vault: { ...minted } };
+      }
+      const summed = {
+        available_balance: Number(existing.available_balance) + deltas.available_balance,
+        pending_balance: Number(existing.pending_balance) + deltas.pending_balance,
+        reserve_balance: Number(existing.reserve_balance) + deltas.reserve_balance,
+      };
+      if (!floorsHold(summed)) {
+        return { outcome: "guard_failed" };
+      }
+      const updated = { ...existing, ...summed, updated_at: args.p_updated_at };
+      table.updateReturning(updated, [["payee_id", payeeId]]);
+      return { outcome: "applied", vault: { ...updated } };
+    }
+
+    if (existing === undefined) {
+      return { outcome: "not_found" };
+    }
+    const summed = {
+      available_balance: Number(existing.available_balance) + deltas.available_balance,
+      pending_balance: Number(existing.pending_balance) + deltas.pending_balance,
+      reserve_balance: Number(existing.reserve_balance) + deltas.reserve_balance,
+    };
+    if (!floorsHold(summed)) {
+      return { outcome: "guard_failed" };
+    }
+    const updated = { ...existing, ...summed, updated_at: args.p_updated_at };
+    table.updateReturning(updated, [["payee_id", payeeId]]);
+    return { outcome: "applied", vault: { ...updated } };
   }
 }
 

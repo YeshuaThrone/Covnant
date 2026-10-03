@@ -282,6 +282,23 @@ import type {
   DeveloperWhitelabelUsageMonthRecord,
 } from '@/modules/developer/records';
 import type {
+  HardwareAutomotivePoolAssignmentRecord,
+  HardwareCleanTechRoyaltyPolicyRecord,
+  HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetSettlementRecord,
+  HardwareOtaUnlockApplicationRecord,
+  HardwareOtaUnlockPolicyRecord,
+  HardwarePatentPoolRecord,
+  HardwarePoolHolderLegRecord,
+  HardwarePoolRoutingApplicationRecord,
+  HardwarePoolWaterfallApplicationRecord,
+  HardwareRealizationApplicationRecord,
+  HardwareSepRoyaltyApplicationRecord,
+  HardwareSepRoyaltyPolicyRecord,
+  HardwareSepUnitMonthRecord,
+  HardwareTelemetryRoyaltyApplicationRecord,
+} from '@/modules/hardware/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -670,6 +687,24 @@ const TABLES = {
   developerWhitelabelLicenseApplications: 'developer_whitelabel_license_applications',
   developerWhitelabelUsageMonths: 'developer_whitelabel_usage_months',
   developerAgentToolCallApplications: 'developer_agent_tool_call_applications',
+
+  // The hardware patent lane (migration 0050, PR 46, the founder hardware
+  // directive) — the registries, tracker, and application ledgers.
+  hardwarePatentPools: 'hardware_patent_pools',
+  hardwarePoolHolderLegs: 'hardware_pool_holder_legs',
+  hardwareSepRoyaltyPolicies: 'hardware_sep_royalty_policies',
+  hardwareAutomotivePoolAssignments: 'hardware_automotive_pool_assignments',
+  hardwareCleanTechRoyaltyPolicies: 'hardware_cleantech_royalty_policies',
+  hardwareOtaUnlockPolicies: 'hardware_ota_unlock_policies',
+  hardwareCrossLicenseAgreements: 'hardware_cross_license_agreements',
+  hardwareSepUnitMonths: 'hardware_sep_unit_months',
+  hardwareRealizationApplications: 'hardware_realization_applications',
+  hardwareSepRoyaltyApplications: 'hardware_sep_royalty_applications',
+  hardwarePoolRoutingApplications: 'hardware_pool_routing_applications',
+  hardwarePoolWaterfallApplications: 'hardware_pool_waterfall_applications',
+  hardwareTelemetryRoyaltyApplications: 'hardware_telemetry_royalty_applications',
+  hardwareOtaUnlockApplications: 'hardware_ota_unlock_applications',
+  hardwareCrossLicenseNetSettlements: 'hardware_cross_license_net_settlements',
 } as const;
 
 /**
@@ -9386,5 +9421,492 @@ export class SupabaseStore implements Store {
         .maybeSingle(),
       'getDeveloperToolCallApplication',
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // The hardware patent lane (PR 46, migration 0050) — the founder
+  // hardware directive's registries, tracker, and application ledgers.
+  // HARDENED UPSERTS: no id in any conflict payload (the PR 33 lesson).
+  // -------------------------------------------------------------------------
+
+  async upsertHardwarePatentPool(
+    row: Omit<HardwarePatentPoolRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePatentPoolRecord> {
+    // One pool of record per pool_code.
+    return this.oneStrict<HardwarePatentPoolRecord>(
+      this.client
+        .from(TABLES.hardwarePatentPools)
+        .upsert(row, { onConflict: 'pool_code' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwarePatentPool',
+    );
+  }
+
+  async getHardwarePatentPool(poolCode: string): Promise<HardwarePatentPoolRecord | undefined> {
+    return this.one<HardwarePatentPoolRecord>(
+      this.client
+        .from(TABLES.hardwarePatentPools)
+        .select()
+        .eq('pool_code', poolCode)
+        .maybeSingle(),
+      'getHardwarePatentPool',
+    );
+  }
+
+  async upsertHardwarePoolHolderLeg(
+    row: Omit<HardwarePoolHolderLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePoolHolderLegRecord> {
+    // One verified weighting per (pool_code, holder_payee_id).
+    return this.oneStrict<HardwarePoolHolderLegRecord>(
+      this.client
+        .from(TABLES.hardwarePoolHolderLegs)
+        .upsert(row, { onConflict: 'pool_code,holder_payee_id' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwarePoolHolderLeg',
+    );
+  }
+
+  async getHardwarePoolHolderLeg(
+    poolCode: string,
+    holderPayeeId: string,
+  ): Promise<HardwarePoolHolderLegRecord | undefined> {
+    return this.one<HardwarePoolHolderLegRecord>(
+      this.client
+        .from(TABLES.hardwarePoolHolderLegs)
+        .select()
+        .eq('pool_code', poolCode)
+        .eq('holder_payee_id', holderPayeeId)
+        .maybeSingle(),
+      'getHardwarePoolHolderLeg',
+    );
+  }
+
+  async listHardwarePoolHolderLegs(poolCode: string): Promise<HardwarePoolHolderLegRecord[]> {
+    // Registration order (the insertion order the waterfall reads).
+    const { data, error } = await this.client
+      .from(TABLES.hardwarePoolHolderLegs)
+      .select()
+      .eq('pool_code', poolCode)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listHardwarePoolHolderLegs failed: ${error.message}`);
+    }
+    return (data ?? []) as HardwarePoolHolderLegRecord[];
+  }
+
+  async upsertHardwareSepRoyaltyPolicy(
+    row: Omit<HardwareSepRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareSepRoyaltyPolicyRecord> {
+    // One policy of record per (patent_family_id, sep_pool_code).
+    return this.oneStrict<HardwareSepRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareSepRoyaltyPolicies)
+        .upsert(row, { onConflict: 'patent_family_id,sep_pool_code' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareSepRoyaltyPolicy',
+    );
+  }
+
+  async getHardwareSepRoyaltyPolicy(
+    patentFamilyId: string,
+    sepPoolCode: string,
+  ): Promise<HardwareSepRoyaltyPolicyRecord | undefined> {
+    return this.one<HardwareSepRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareSepRoyaltyPolicies)
+        .select()
+        .eq('patent_family_id', patentFamilyId)
+        .eq('sep_pool_code', sepPoolCode)
+        .maybeSingle(),
+      'getHardwareSepRoyaltyPolicy',
+    );
+  }
+
+  async upsertHardwareAutomotivePoolAssignment(
+    row: Omit<HardwareAutomotivePoolAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord> {
+    // One routing of record per (oem_id, line_id).
+    return this.oneStrict<HardwareAutomotivePoolAssignmentRecord>(
+      this.client
+        .from(TABLES.hardwareAutomotivePoolAssignments)
+        .upsert(row, { onConflict: 'oem_id,line_id' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareAutomotivePoolAssignment',
+    );
+  }
+
+  async getHardwareAutomotivePoolAssignment(
+    oemId: string,
+    lineId: string,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord | undefined> {
+    return this.one<HardwareAutomotivePoolAssignmentRecord>(
+      this.client
+        .from(TABLES.hardwareAutomotivePoolAssignments)
+        .select()
+        .eq('oem_id', oemId)
+        .eq('line_id', lineId)
+        .maybeSingle(),
+      'getHardwareAutomotivePoolAssignment',
+    );
+  }
+
+  async upsertHardwareCleanTechRoyaltyPolicy(
+    row: Omit<HardwareCleanTechRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord> {
+    // One policy of record per patent_family_id.
+    return this.oneStrict<HardwareCleanTechRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareCleanTechRoyaltyPolicies)
+        .upsert(row, { onConflict: 'patent_family_id' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareCleanTechRoyaltyPolicy',
+    );
+  }
+
+  async getHardwareCleanTechRoyaltyPolicy(
+    patentFamilyId: string,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord | undefined> {
+    return this.one<HardwareCleanTechRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareCleanTechRoyaltyPolicies)
+        .select()
+        .eq('patent_family_id', patentFamilyId)
+        .maybeSingle(),
+      'getHardwareCleanTechRoyaltyPolicy',
+    );
+  }
+
+  async upsertHardwareOtaUnlockPolicy(
+    row: Omit<HardwareOtaUnlockPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareOtaUnlockPolicyRecord> {
+    // One policy of record per feature_code.
+    return this.oneStrict<HardwareOtaUnlockPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareOtaUnlockPolicies)
+        .upsert(row, { onConflict: 'feature_code' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareOtaUnlockPolicy',
+    );
+  }
+
+  async getHardwareOtaUnlockPolicy(
+    featureCode: string,
+  ): Promise<HardwareOtaUnlockPolicyRecord | undefined> {
+    return this.one<HardwareOtaUnlockPolicyRecord>(
+      this.client
+        .from(TABLES.hardwareOtaUnlockPolicies)
+        .select()
+        .eq('feature_code', featureCode)
+        .maybeSingle(),
+      'getHardwareOtaUnlockPolicy',
+    );
+  }
+
+  async upsertHardwareCrossLicenseAgreement(
+    row: Omit<HardwareCrossLicenseAgreementRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCrossLicenseAgreementRecord> {
+    // One agreement of record per (company_a_id, company_b_id) — the
+    // canonical pair orientation.
+    return this.oneStrict<HardwareCrossLicenseAgreementRecord>(
+      this.client
+        .from(TABLES.hardwareCrossLicenseAgreements)
+        .upsert(row, { onConflict: 'company_a_id,company_b_id' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareCrossLicenseAgreement',
+    );
+  }
+
+  async getHardwareCrossLicenseAgreement(
+    companyAId: string,
+    companyBId: string,
+  ): Promise<HardwareCrossLicenseAgreementRecord | undefined> {
+    return this.one<HardwareCrossLicenseAgreementRecord>(
+      this.client
+        .from(TABLES.hardwareCrossLicenseAgreements)
+        .select()
+        .eq('company_a_id', companyAId)
+        .eq('company_b_id', companyBId)
+        .maybeSingle(),
+      'getHardwareCrossLicenseAgreement',
+    );
+  }
+
+  async advanceHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<HardwareSepUnitMonthRecord> {
+    // UNIQUE per (licensee_id, patent_family_id, sep_pool_code, month) —
+    // the tracker converges. The cumulative walk is serialized per
+    // licensee-family-pool-month by the recon lane (one event at a
+    // time), so a read-modify-upsert carries the same position
+    // arithmetic the SQLite backend expresses additively in its ON
+    // CONFLICT arm. No id in the payload.
+    const existing = await this.getHardwareSepUnitMonth(
+      licenseeId,
+      patentFamilyId,
+      sepPoolCode,
+      month,
+    );
+    return this.oneStrict<HardwareSepUnitMonthRecord>(
+      this.client
+        .from(TABLES.hardwareSepUnitMonths)
+        .upsert(
+          {
+            licensee_id: licenseeId,
+            patent_family_id: patentFamilyId,
+            sep_pool_code: sepPoolCode,
+            month,
+            cumulative_units: (existing?.cumulative_units ?? 0) + unitsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'licensee_id,patent_family_id,sep_pool_code,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceHardwareSepUnitMonth',
+    );
+  }
+
+  async getHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+  ): Promise<HardwareSepUnitMonthRecord | undefined> {
+    return this.one<HardwareSepUnitMonthRecord>(
+      this.client
+        .from(TABLES.hardwareSepUnitMonths)
+        .select()
+        .eq('licensee_id', licenseeId)
+        .eq('patent_family_id', patentFamilyId)
+        .eq('sep_pool_code', sepPoolCode)
+        .eq('month', month)
+        .maybeSingle(),
+      'getHardwareSepUnitMonth',
+    );
+  }
+
+  async insertHardwareRealizationApplication(
+    row: Omit<HardwareRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<HardwareRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareRealizationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwareRealizationApplication',
+    );
+  }
+
+  async getHardwareRealizationApplication(
+    sourceEventId: string,
+  ): Promise<HardwareRealizationApplicationRecord | undefined> {
+    return this.one<HardwareRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getHardwareRealizationApplication',
+    );
+  }
+
+  async insertHardwareSepRoyaltyApplication(
+    row: Omit<HardwareSepRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareSepRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<HardwareSepRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareSepRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwareSepRoyaltyApplication',
+    );
+  }
+
+  async getHardwareSepRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareSepRoyaltyApplicationRecord | undefined> {
+    return this.one<HardwareSepRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareSepRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getHardwareSepRoyaltyApplication',
+    );
+  }
+
+  async insertHardwarePoolRoutingApplication(
+    row: Omit<HardwarePoolRoutingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolRoutingApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<HardwarePoolRoutingApplicationRecord>(
+      this.client
+        .from(TABLES.hardwarePoolRoutingApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwarePoolRoutingApplication',
+    );
+  }
+
+  async getHardwarePoolRoutingApplication(
+    sourceEventId: string,
+  ): Promise<HardwarePoolRoutingApplicationRecord | undefined> {
+    return this.one<HardwarePoolRoutingApplicationRecord>(
+      this.client
+        .from(TABLES.hardwarePoolRoutingApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getHardwarePoolRoutingApplication',
+    );
+  }
+
+  async insertHardwarePoolWaterfallApplication(
+    row: Omit<HardwarePoolWaterfallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolWaterfallApplicationRecord> {
+    // UNIQUE per (routing_source_event_id, pool_code) — the replay guard.
+    return this.oneStrict<HardwarePoolWaterfallApplicationRecord>(
+      this.client
+        .from(TABLES.hardwarePoolWaterfallApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwarePoolWaterfallApplication',
+    );
+  }
+
+  async getHardwarePoolWaterfallApplication(
+    routingSourceEventId: string,
+    poolCode: string,
+  ): Promise<HardwarePoolWaterfallApplicationRecord | undefined> {
+    return this.one<HardwarePoolWaterfallApplicationRecord>(
+      this.client
+        .from(TABLES.hardwarePoolWaterfallApplications)
+        .select()
+        .eq('routing_source_event_id', routingSourceEventId)
+        .eq('pool_code', poolCode)
+        .maybeSingle(),
+      'getHardwarePoolWaterfallApplication',
+    );
+  }
+
+  async insertHardwareTelemetryRoyaltyApplication(
+    row: Omit<HardwareTelemetryRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<HardwareTelemetryRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareTelemetryRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwareTelemetryRoyaltyApplication',
+    );
+  }
+
+  async getHardwareTelemetryRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord | undefined> {
+    return this.one<HardwareTelemetryRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareTelemetryRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getHardwareTelemetryRoyaltyApplication',
+    );
+  }
+
+  async insertHardwareOtaUnlockApplication(
+    row: Omit<HardwareOtaUnlockApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareOtaUnlockApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<HardwareOtaUnlockApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareOtaUnlockApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwareOtaUnlockApplication',
+    );
+  }
+
+  async getHardwareOtaUnlockApplication(
+    sourceEventId: string,
+  ): Promise<HardwareOtaUnlockApplicationRecord | undefined> {
+    return this.one<HardwareOtaUnlockApplicationRecord>(
+      this.client
+        .from(TABLES.hardwareOtaUnlockApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getHardwareOtaUnlockApplication',
+    );
+  }
+
+  async upsertHardwareCrossLicenseNetSettlement(
+    row: Omit<HardwareCrossLicenseNetSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord> {
+    // One net clearing of record per (agreement_ref, period) — the
+    // walk's recompute replaces the sums in place. No id in the payload
+    // (the PR 33 lesson): the id of record survives the conflict.
+    return this.oneStrict<HardwareCrossLicenseNetSettlementRecord>(
+      this.client
+        .from(TABLES.hardwareCrossLicenseNetSettlements)
+        .upsert(row, { onConflict: 'agreement_ref,period' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwareCrossLicenseNetSettlement',
+    );
+  }
+
+  async getHardwareCrossLicenseNetSettlement(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord | undefined> {
+    return this.one<HardwareCrossLicenseNetSettlementRecord>(
+      this.client
+        .from(TABLES.hardwareCrossLicenseNetSettlements)
+        .select()
+        .eq('agreement_ref', agreementRef)
+        .eq('period', period)
+        .maybeSingle(),
+      'getHardwareCrossLicenseNetSettlement',
+    );
+  }
+
+  async sumHardwareSepRoyaltiesBetween(
+    licenseeId: string,
+    payeeId: string,
+    period: string,
+  ): Promise<number> {
+    // The netting walk's liability aggregation — the amount column alone,
+    // summed exactly (never a page of full rows).
+    const rows = await this.many<{ royalty_cents: number }>(
+      this.client
+        .from(TABLES.hardwareSepRoyaltyApplications)
+        .select('royalty_cents')
+        .eq('licensee_id', licenseeId)
+        .eq('payee_id', payeeId)
+        .eq('period', period),
+      'sumHardwareSepRoyaltiesBetween',
+    );
+    return rows.reduce((total, row) => total + row.royalty_cents, 0);
   }
 }

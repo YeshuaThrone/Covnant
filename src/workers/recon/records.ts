@@ -153,7 +153,16 @@ export type StatementProfileKind =
   | "developer_copackage_revenue_csv"
   | "developer_sbom_scans_csv"
   | "developer_whitelabel_licenses_csv"
-  | "developer_agent_tool_calls_csv";
+  | "developer_agent_tool_calls_csv"
+  // The hardware lane (PR 46, the founder hardware directive) — the four
+  // strict senders the directive names (cellular device activation feeds
+  // carrying IMEI and EID identity, hardware MAC address logs, factory
+  // production line serial counts, and smart grid IoT telemetry), one
+  // strict profile per sender's sheet.
+  | "hardware_cellular_activations_csv"
+  | "hardware_mac_address_logs_csv"
+  | "hardware_production_serials_csv"
+  | "hardware_smart_grid_telemetry_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -1053,6 +1062,14 @@ export interface ParsedStatementLine {
    * usage legs); null on every non-developer line — the presence IS the
    * lane discriminator. Optional for the same reason as bookDetail. */
   developerDetail?: DeveloperLineDetail | null;
+
+  /** Hardware lane context (the statement sender, the sender row id of
+   * record, the founder-specified realization keys the Net Hardware
+   * Patent Realization calculator and every walk key on, and the
+   * sender-specific money or usage legs); null on every non-hardware
+   * line — the presence IS the lane discriminator. Optional for the same
+   * reason as developerDetail. */
+  hardwareDetail?: HardwareLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1608,6 +1625,102 @@ export type DeveloperLineDetail =
   | DeveloperSbomScanDetail
   | DeveloperWhitelabelLicenseDetail
   | DeveloperAgentToolCallDetail;
+
+/**
+ * The hardware lane's per-line context (PR 46, the founder hardware
+ * directive) — the four strict senders' identity and money legs. The
+ * founder-specified realization keys (patent_family_id, sep_pool_code,
+ * device_imei_mac) ride every activation row; the money basis rides the
+ * row's own detail legs (the realization's three legs, the MAC log's
+ * per-unit basis, the production batch's per-vehicle fees, the telemetry
+ * row's delivered energy and cycles).
+ */
+export type HardwareLineDetail =
+  | HardwareCellularActivationDetail
+  | HardwareMacAddressLogDetail
+  | HardwareProductionSerialDetail
+  | HardwareSmartGridTelemetryDetail;
+
+export type HardwareCellularActivationDetail = {
+  readonly sender: "cellular_activation";
+  /** The sender's activation event id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** The event kind of record (bounded vocabulary): the founder's device
+   * activations and the OTA feature-unlock purchases that activate
+   * hardware functionality over the air. */
+  readonly activationKind: "device_activation" | "ota_feature_unlock";
+  /** The device identity of record — the IMEI on cellular devices. */
+  readonly deviceImeiMac: string;
+  /** The eSIM's EID of record (null where the activation carries none). */
+  readonly eid: string | null;
+  /** THE REALIZATION KEYS — the founder-specified columns every
+   * realization application keys on. */
+  readonly patentFamilyId: string;
+  readonly sepPoolCode: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The realization's three money legs of record (the OTA unlock rows
+   * carry zeros — their money is the per-unlock policy's own pricing). */
+  readonly deviceWholesaleAspCents: number;
+  readonly componentCogsBaseCents: number;
+  readonly nonEssentialBomCents: number;
+  /** The OTA feature code of record (null on device activations). */
+  readonly featureCode: string | null;
+};
+
+export type HardwareMacAddressLogDetail = {
+  readonly sender: "mac_address_log";
+  /** The sender's log event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The connected device's MAC of record. */
+  readonly deviceMac: string;
+  /** The licensee of record — the device maker whose cumulative unit
+   * position the tier walk prices from. */
+  readonly licenseeId: string;
+  readonly patentFamilyId: string;
+  readonly sepPoolCode: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The row's connected unit count — the royalty's usage leg. */
+  readonly connectedUnits: number;
+  /** The per-unit royalty basis of record (the module's net selling
+   * price of record, exact cents). */
+  readonly royaltyBasisCents: number;
+};
+
+export type HardwareProductionSerialDetail = {
+  readonly sender: "production_serial";
+  /** The sender's production batch id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  readonly oemId: string;
+  /** The production line id of record — the routing assignment's key. */
+  readonly lineId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The batch's serial count and per-vehicle licensing fees of record. */
+  readonly serialsProduced: number;
+  readonly cellularFeePerVehicleCents: number;
+  readonly navigationFeePerVehicleCents: number;
+};
+
+export type HardwareSmartGridTelemetryDetail = {
+  readonly sender: "smart_grid_telemetry";
+  /** The sender's telemetry event id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** The metering device's serial of record. */
+  readonly deviceSerial: string;
+  /** The clean-tech patent family of record — the policy's key. */
+  readonly patentFamilyId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The delivered energy of record (statement micros of kWh) and the
+   * completed charge cycles — the micro-payout's legs. */
+  readonly kwhMicros: number;
+  readonly chargeCycles: number;
+};
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

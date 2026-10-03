@@ -651,6 +651,46 @@ export interface ReconJobResult {
   developer_whitelabel_overage_royalty_cents?: number;
   developer_tool_call_builder_cents?: number;
   developer_tool_call_platform_cents?: number;
+  /** Hardware lane (PR 46, the founder hardware directive): the seven
+   * walks — committed / counted replay no-ops / fail-closed skips, per
+   * walk (realizations, SEP royalties, OEM routings, pool waterfalls,
+   * telemetry royalties, cross-license nettings, OTA unlock
+   * settlements). */
+  hardware_realizations_committed?: number;
+  hardware_realizations_replayed?: number;
+  hardware_realization_held_non_positive_net?: number;
+  hardware_sep_royalties_committed?: number;
+  hardware_sep_royalties_replayed?: number;
+  hardware_sep_skipped_no_policy?: number;
+  hardware_oem_routings_committed?: number;
+  hardware_oem_routings_replayed?: number;
+  hardware_oem_skipped_no_assignment?: number;
+  hardware_pool_waterfalls_committed?: number;
+  hardware_pool_waterfalls_replayed?: number;
+  hardware_pool_skipped_no_pool?: number;
+  hardware_telemetry_royalties_committed?: number;
+  hardware_telemetry_royalties_replayed?: number;
+  hardware_telemetry_skipped_no_policy?: number;
+  hardware_cross_license_nettings_committed?: number;
+  hardware_cross_license_nettings_replayed?: number;
+  hardware_cross_license_skipped_no_agreement?: number;
+  hardware_ota_unlock_settlements_committed?: number;
+  hardware_ota_unlock_settlements_replayed?: number;
+  hardware_ota_unlock_skipped_no_policy?: number;
+  /** Hardware lane (PR 46): the instant postings — journals written the
+   * moment an OTA unlock priced (the PR 45 precedent). */
+  hardware_ota_unlock_instant_postings?: number;
+  /** Hardware lane: the committed money, integer cents — the realization
+   * value bases and every leg the walks priced (the cross-license net
+   * dispatch is the NETTED settlement, not the gross liabilities). */
+  hardware_net_patentable_value_base_cents?: number;
+  hardware_sep_royalty_cents?: number;
+  hardware_oem_routed_cents?: number;
+  hardware_pool_distributed_cents?: number;
+  hardware_telemetry_royalty_cents?: number;
+  hardware_cross_license_net_dispatch_cents?: number;
+  hardware_ota_licensor_cents?: number;
+  hardware_ota_platform_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

@@ -66,6 +66,8 @@ import { writeFoodRowsToStore } from "./foodQueue";
 import { isServiceProfileKind } from "./serviceProfiles";
 import { isDeveloperProfileKind } from "./developerProfiles";
 import { writeDeveloperRowsToStore } from "./developerQueue";
+import { isHardwareProfileKind } from "./hardwareProfiles";
+import { writeHardwareRowsToStore } from "./hardwareQueue";
 import { writeServiceRowsToStore } from "./serviceQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
@@ -360,6 +362,22 @@ async function processJobBody(
     // match_queue never sees a developer row.
     if (isDeveloperProfileKind(matchedProfile.kind)) {
       return await parseDeveloper(deps, matchedProfile, content);
+    }
+    // The hardware lane branches the same way (PR 46, the founder
+    // hardware directive): its rows are the four strict senders'
+    // cellular-activation (device and OTA-unlock) / MAC-address-log /
+    // production-serial / smart-grid-telemetry lines whose money runs
+    // the Net Hardware Patent Realization identity (device wholesale ASP
+    // − component COGS base − non-essential BOM = the Net Patentable
+    // Device Value Base), the tiered FRAND SEP royalties, the automotive
+    // OEM pool routings, the essentiality-weighted pool waterfalls, the
+    // clean-tech telemetry micro-payouts, the cross-license nettings,
+    // and the OTA unlock instant settlements — never the music queue's
+    // split math, the developer walks, or any other lane's machinery.
+    // The store applications ARE the lane's money of record; match_queue
+    // never sees a hardware row.
+    if (isHardwareProfileKind(matchedProfile.kind)) {
+      return await parseHardware(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1288,6 +1306,74 @@ async function parseDeveloper(
     developer_whitelabel_overage_royalty_cents: counts.whitelabelOverageRoyaltyCents,
     developer_tool_call_builder_cents: counts.toolCallBuilderCents,
     developer_tool_call_platform_cents: counts.toolCallPlatformCents,
+  };
+}
+
+/**
+ * The hardware lane (PR 46, the founder hardware directive): the four
+ * strict senders' rows (cellular device activation feeds carrying IMEI
+ * and EID identity — including the OTA feature-unlock purchase rows —
+ * hardware MAC address logs, factory production line serial counts, and
+ * smart grid IoT telemetry) convert through the Net Hardware Patent
+ * Realization calculator, the tiered FRAND SEP royalties, the automotive
+ * OEM pool routings, the essentiality-weighted pool waterfalls, the
+ * clean-tech telemetry micro-payouts, the cross-license nettings, and
+ * the OTA unlock instant settlements. No match_queue row, no holding
+ * post: replay guards and the fail-closed policies of record govern
+ * everything. The result's hardware_* block is absent on every other
+ * lane — its presence is the discriminator.
+ */
+async function parseHardware(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeHardwareRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationsWritten +
+      counts.sepRoyaltiesWritten +
+      counts.oemRoutingsWritten +
+      counts.poolWaterfallsWritten +
+      counts.telemetryRoyaltiesWritten +
+      counts.crossLicenseNettingsWritten +
+      counts.otaUnlockSettlementsWritten,
+    matched: 0, // no vault matching on this lane — the hardware tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    hardware_realizations_committed: counts.realizationsWritten,
+    hardware_realizations_replayed: counts.realizationsReplayed,
+    hardware_realization_held_non_positive_net: counts.realizationsHeldNonPositiveNet,
+    hardware_sep_royalties_committed: counts.sepRoyaltiesWritten,
+    hardware_sep_royalties_replayed: counts.sepRoyaltiesReplayed,
+    hardware_sep_skipped_no_policy: counts.sepSkippedNoPolicy,
+    hardware_oem_routings_committed: counts.oemRoutingsWritten,
+    hardware_oem_routings_replayed: counts.oemRoutingsReplayed,
+    hardware_oem_skipped_no_assignment: counts.oemSkippedNoAssignment,
+    hardware_pool_waterfalls_committed: counts.poolWaterfallsWritten,
+    hardware_pool_waterfalls_replayed: counts.poolWaterfallsReplayed,
+    hardware_pool_skipped_no_pool: counts.poolSkippedNoPool,
+    hardware_telemetry_royalties_committed: counts.telemetryRoyaltiesWritten,
+    hardware_telemetry_royalties_replayed: counts.telemetryRoyaltiesReplayed,
+    hardware_telemetry_skipped_no_policy: counts.telemetrySkippedNoPolicy,
+    hardware_cross_license_nettings_committed: counts.crossLicenseNettingsWritten,
+    hardware_cross_license_nettings_replayed: counts.crossLicenseNettingsReplayed,
+    hardware_cross_license_skipped_no_agreement: counts.crossLicenseSkippedNoAgreement,
+    hardware_ota_unlock_settlements_committed: counts.otaUnlockSettlementsWritten,
+    hardware_ota_unlock_settlements_replayed: counts.otaUnlockSettlementsReplayed,
+    hardware_ota_unlock_skipped_no_policy: counts.otaUnlockSkippedNoPolicy,
+    hardware_ota_unlock_instant_postings: counts.otaUnlockInstantPostings,
+    hardware_net_patentable_value_base_cents: counts.netPatentableValueBaseCents,
+    hardware_sep_royalty_cents: counts.sepRoyaltyCents,
+    hardware_oem_routed_cents: counts.oemRoutedCents,
+    hardware_pool_distributed_cents: counts.poolDistributedCents,
+    hardware_telemetry_royalty_cents: counts.telemetryRoyaltyCents,
+    hardware_cross_license_net_dispatch_cents: counts.crossLicenseNetDispatchCents,
+    hardware_ota_licensor_cents: counts.otaLicensorCents,
+    hardware_ota_platform_cents: counts.otaPlatformCents,
   };
 }
 

@@ -289,6 +289,23 @@ import type {
   DeveloperWhitelabelUsageMonthRecord,
 } from '@/modules/developer/records';
 import type {
+  HardwareAutomotivePoolAssignmentRecord,
+  HardwareCleanTechRoyaltyPolicyRecord,
+  HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetSettlementRecord,
+  HardwareOtaUnlockApplicationRecord,
+  HardwareOtaUnlockPolicyRecord,
+  HardwarePatentPoolRecord,
+  HardwarePoolHolderLegRecord,
+  HardwarePoolRoutingApplicationRecord,
+  HardwarePoolWaterfallApplicationRecord,
+  HardwareRealizationApplicationRecord,
+  HardwareSepRoyaltyApplicationRecord,
+  HardwareSepRoyaltyPolicyRecord,
+  HardwareSepUnitMonthRecord,
+  HardwareTelemetryRoyaltyApplicationRecord,
+} from '@/modules/hardware/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -3660,6 +3677,301 @@ CREATE TABLE IF NOT EXISTS software_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (payee_id, api_endpoint_id)
+);
+
+-- The hardware patent lane (migration 0050, PR 46, the founder hardware
+-- directive): the patent pools of record (the MPEG-LA / Avanci shape),
+-- their verified essentiality holder weightings, the tiered FRAND SEP
+-- royalty policies (each band a FRAND rate bps + per-unit cap), the
+-- automotive OEM pool routings, the clean-tech telemetry policies, the
+-- OTA unlock split policies, the cross-licensing agreements (canonical
+-- pair orientation), the cumulative monthly unit tracker, and the seven
+-- append-only application ledgers (realization, SEP royalty, pool
+-- routing, pool waterfall, telemetry royalty, OTA unlock split, and
+-- cross-license net settlement). The CHECK vocabularies are byte-
+-- identical to the TS-side arrays in modules/hardware/records.ts (the
+-- PR 129/130/133/134 lesson); the identities pin the founder's exact
+-- money math at the database.
+CREATE TABLE IF NOT EXISTS hardware_patent_pools (
+  id TEXT PRIMARY KEY,
+  pool_code TEXT NOT NULL UNIQUE,
+  pool_name TEXT NOT NULL CHECK (length(pool_name) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_pool_holder_legs (
+  id TEXT PRIMARY KEY,
+  pool_code TEXT NOT NULL,
+  holder_payee_id TEXT NOT NULL CHECK (length(holder_payee_id) > 0),
+  -- The verified essentiality score (1–100) — the waterfall's weight.
+  essentiality_score INTEGER NOT NULL CHECK (essentiality_score >= 1 AND essentiality_score <= 100),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (pool_code, holder_payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hardware_pool_holder_legs_pool
+  ON hardware_pool_holder_legs (pool_code);
+
+CREATE TABLE IF NOT EXISTS hardware_sep_royalty_policies (
+  id TEXT PRIMARY KEY,
+  patent_family_id TEXT NOT NULL,
+  sep_pool_code TEXT NOT NULL,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  -- The tier bands of record (JSON text, ascending, open top last).
+  tier_bands TEXT NOT NULL CHECK (length(tier_bands) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (patent_family_id, sep_pool_code)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_automotive_pool_assignments (
+  id TEXT PRIMARY KEY,
+  oem_id TEXT NOT NULL,
+  line_id TEXT NOT NULL,
+  cellular_pool_code TEXT NOT NULL CHECK (length(cellular_pool_code) > 0),
+  navigation_pool_code TEXT NOT NULL CHECK (length(navigation_pool_code) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (oem_id, line_id)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_cleantech_royalty_policies (
+  id TEXT PRIMARY KEY,
+  patent_family_id TEXT NOT NULL UNIQUE,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  -- Statement micros per delivered kilowatt-hour / completed cycle.
+  micros_per_kwh INTEGER NOT NULL CHECK (micros_per_kwh >= 0),
+  micros_per_charge_cycle INTEGER NOT NULL CHECK (micros_per_charge_cycle >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_ota_unlock_policies (
+  id TEXT PRIMARY KEY,
+  feature_code TEXT NOT NULL UNIQUE,
+  sensor_licensor_payee_id TEXT NOT NULL CHECK (length(sensor_licensor_payee_id) > 0),
+  -- Statement micros per unlock event (> 0 — a policy pricing nothing
+  -- is a hostile registration).
+  micros_per_unlock INTEGER NOT NULL CHECK (micros_per_unlock > 0),
+  -- The licensor's share bps; the residual is the platform's.
+  licensor_share_bps INTEGER NOT NULL CHECK (licensor_share_bps >= 0 AND licensor_share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_cross_license_agreements (
+  id TEXT PRIMARY KEY,
+  agreement_ref TEXT NOT NULL UNIQUE,
+  -- The pair stored canonically (a < b) so the netting walk reads one
+  -- direction of identity.
+  company_a_id TEXT NOT NULL,
+  company_b_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (company_a_id, company_b_id),
+  CHECK (company_a_id < company_b_id),
+  CHECK (company_a_id <> company_b_id)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_sep_unit_months (
+  id TEXT PRIMARY KEY,
+  licensee_id TEXT NOT NULL,
+  patent_family_id TEXT NOT NULL,
+  sep_pool_code TEXT NOT NULL,
+  month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  cumulative_units INTEGER NOT NULL CHECK (cumulative_units > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (licensee_id, patent_family_id, sep_pool_code, month)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  -- The founder-specified realization keys of record.
+  patent_family_id TEXT NOT NULL CHECK (length(patent_family_id) > 0),
+  sep_pool_code TEXT NOT NULL CHECK (length(sep_pool_code) > 0),
+  device_imei_mac TEXT NOT NULL CHECK (length(device_imei_mac) > 0),
+  eid TEXT,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  device_wholesale_asp_cents INTEGER NOT NULL CHECK (device_wholesale_asp_cents >= 0),
+  component_cogs_base_cents INTEGER NOT NULL CHECK (component_cogs_base_cents >= 0),
+  non_essential_bom_cents INTEGER NOT NULL CHECK (non_essential_bom_cents >= 0),
+  net_patentable_device_value_base_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id),
+  -- THE NET HARDWARE PATENT REALIZATION, pinned: device wholesale ASP
+  -- minus component COGS base minus non-essential BOM = the Net
+  -- Patentable Device Value Base; the held verdict records the
+  -- negative net.
+  CHECK (
+    net_patentable_device_value_base_cents
+    = device_wholesale_asp_cents - component_cogs_base_cents - non_essential_bom_cents
+  ),
+  CHECK (
+    (net_patentable_device_value_base_cents < 0 AND verdict = 'held_negative_net')
+    OR (net_patentable_device_value_base_cents >= 0 AND verdict = 'paid')
+  )
+);
+
+CREATE TABLE IF NOT EXISTS hardware_sep_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  licensee_id TEXT NOT NULL CHECK (length(licensee_id) > 0),
+  patent_family_id TEXT NOT NULL CHECK (length(patent_family_id) > 0),
+  sep_pool_code TEXT NOT NULL CHECK (length(sep_pool_code) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  policy_ref TEXT NOT NULL,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  device_mac TEXT NOT NULL CHECK (length(device_mac) > 0),
+  connected_units INTEGER NOT NULL CHECK (connected_units > 0),
+  -- The per-unit royalty basis of record (exact cents).
+  royalty_basis_cents INTEGER NOT NULL CHECK (royalty_basis_cents >= 0),
+  tier_legs TEXT NOT NULL CHECK (length(tier_legs) > 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  cumulative_units_before INTEGER NOT NULL CHECK (cumulative_units_before >= 0),
+  cumulative_units_after INTEGER NOT NULL CHECK (cumulative_units_after > 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id),
+  -- The cumulative position, pinned.
+  CHECK (cumulative_units_after = cumulative_units_before + connected_units)
+);
+CREATE INDEX IF NOT EXISTS idx_hardware_sep_royalty_applications_netting
+  ON hardware_sep_royalty_applications (licensee_id, payee_id, period);
+
+CREATE TABLE IF NOT EXISTS hardware_pool_routing_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  oem_id TEXT NOT NULL CHECK (length(oem_id) > 0),
+  line_id TEXT NOT NULL CHECK (length(line_id) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  assignment_ref TEXT NOT NULL,
+  serials_produced INTEGER NOT NULL CHECK (serials_produced > 0),
+  cellular_pool_code TEXT NOT NULL CHECK (length(cellular_pool_code) > 0),
+  navigation_pool_code TEXT NOT NULL CHECK (length(navigation_pool_code) > 0),
+  cellular_fee_per_vehicle_cents INTEGER NOT NULL CHECK (cellular_fee_per_vehicle_cents >= 0),
+  navigation_fee_per_vehicle_cents INTEGER NOT NULL CHECK (navigation_fee_per_vehicle_cents >= 0),
+  cellular_routed_cents INTEGER NOT NULL CHECK (cellular_routed_cents >= 0),
+  navigation_routed_cents INTEGER NOT NULL CHECK (navigation_routed_cents >= 0),
+  total_routed_cents INTEGER NOT NULL CHECK (total_routed_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id),
+  -- THE AUTOMOTIVE POOL ROUTING, pinned: serials × per-vehicle fees,
+  -- integer-exact; the routed legs sum to the total.
+  CHECK (cellular_routed_cents = serials_produced * cellular_fee_per_vehicle_cents),
+  CHECK (navigation_routed_cents = serials_produced * navigation_fee_per_vehicle_cents),
+  CHECK (total_routed_cents = cellular_routed_cents + navigation_routed_cents)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_pool_waterfall_applications (
+  id TEXT PRIMARY KEY,
+  routing_source_event_id TEXT NOT NULL,
+  pool_code TEXT NOT NULL CHECK (length(pool_code) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  -- The essentiality-weighted split legs of record (JSON text).
+  split_legs TEXT NOT NULL CHECK (length(split_legs) > 0),
+  pool_fee_pot_cents INTEGER NOT NULL CHECK (pool_fee_pot_cents > 0),
+  allocated_total_cents INTEGER NOT NULL CHECK (allocated_total_cents > 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (routing_source_event_id, pool_code) — the replay guard.
+  UNIQUE (routing_source_event_id, pool_code),
+  -- THE ESSENTIALITY WATERFALL, pinned: the pot conserves exactly (the
+  -- dust rides the highest-scored holders).
+  CHECK (allocated_total_cents = pool_fee_pot_cents)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_telemetry_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  patent_family_id TEXT NOT NULL CHECK (length(patent_family_id) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  policy_ref TEXT NOT NULL,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  device_serial TEXT NOT NULL CHECK (length(device_serial) > 0),
+  -- The delivered energy of record (statement micros of kWh).
+  kwh_micros INTEGER NOT NULL CHECK (kwh_micros >= 0),
+  charge_cycles INTEGER NOT NULL CHECK (charge_cycles >= 0),
+  micros_per_kwh INTEGER NOT NULL CHECK (micros_per_kwh >= 0),
+  micros_per_charge_cycle INTEGER NOT NULL CHECK (micros_per_charge_cycle >= 0),
+  royalty_micros INTEGER NOT NULL CHECK (royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id),
+  -- THE CLEAN-TECH TELEMETRY MICRO-PAYOUT, pinned: the energy leg's
+  -- product divides back down by 1e8 (kwh_micros prices the energy at
+  -- 1e8 statement micros per kWh — without the division the product
+  -- double-scales 1e8x); the cycle leg is a plain count x micro-dollars
+  -- per cycle. Integer division floors the energy leg.
+  CHECK (
+    royalty_micros
+      = (kwh_micros * micros_per_kwh) / 100000000
+        + charge_cycles * micros_per_charge_cycle
+  ),
+  CHECK (royalty_cents = royalty_micros / 1000000)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_ota_unlock_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  feature_code TEXT NOT NULL CHECK (length(feature_code) > 0),
+  policy_ref TEXT NOT NULL,
+  sensor_licensor_payee_id TEXT NOT NULL CHECK (length(sensor_licensor_payee_id) > 0),
+  device_imei_mac TEXT NOT NULL CHECK (length(device_imei_mac) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  micros_per_unlock INTEGER NOT NULL CHECK (micros_per_unlock > 0),
+  licensor_share_bps INTEGER NOT NULL CHECK (licensor_share_bps >= 0 AND licensor_share_bps <= 10000),
+  settlement_micros INTEGER NOT NULL CHECK (settlement_micros > 0),
+  settlement_cents INTEGER NOT NULL CHECK (settlement_cents >= 0),
+  licensor_cents INTEGER NOT NULL CHECK (licensor_cents >= 0),
+  platform_cents INTEGER NOT NULL CHECK (platform_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id),
+  -- THE OTA UNLOCK SPLIT, pinned: the pot floors micros/1,000,000; the
+  -- licensor's bps share; licensor + platform === the pot, ALWAYS
+  -- (one cent = 1,000,000 statement micros).
+  CHECK (settlement_cents = settlement_micros / 1000000),
+  CHECK (licensor_cents = (settlement_cents * licensor_share_bps) / 10000),
+  CHECK (licensor_cents + platform_cents = settlement_cents)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_cross_license_net_settlements (
+  id TEXT PRIMARY KEY,
+  agreement_ref TEXT NOT NULL,
+  company_a_id TEXT NOT NULL,
+  company_b_id TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  owed_a_to_b_cents INTEGER NOT NULL CHECK (owed_a_to_b_cents >= 0),
+  owed_b_to_a_cents INTEGER NOT NULL CHECK (owed_b_to_a_cents >= 0),
+  net_cents INTEGER NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('a_to_b', 'b_to_a', 'balanced')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (agreement_ref, period) — one net clearing of record per
+  -- agreement per period; the walk's recompute replaces the sums in
+  -- place.
+  UNIQUE (agreement_ref, period),
+  -- THE CROSS-LICENSING NET OFFSET, pinned: the mutual liabilities net,
+  -- the direction naming the dispatch (the founder example: $12M owed
+  -- by A minus $8M owed by A = $4M dispatching to B).
+  CHECK (net_cents = owed_a_to_b_cents - owed_b_to_a_cents),
+  CHECK (
+    (net_cents > 0 AND direction = 'a_to_b')
+    OR (net_cents < 0 AND direction = 'b_to_a')
+    OR (net_cents = 0 AND direction = 'balanced')
+  )
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -17303,6 +17615,926 @@ export class SqliteStore implements Store {
       platform_cents: row.platform_cents as number,
       created_at: row.created_at as string,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // The hardware patent lane (PR 46, migration 0050) — the founder
+  // hardware directive's registries, tracker, and application ledgers.
+  // -------------------------------------------------------------------------
+
+  async upsertHardwarePatentPool(
+    row: Omit<HardwarePatentPoolRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePatentPoolRecord> {
+    // One pool of record per pool_code — INSERT ON CONFLICT replaces the
+    // row atomically (the id rotates; never send one in the payload).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_patent_pools (id, pool_code, pool_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (pool_code) DO UPDATE SET
+           pool_name = excluded.pool_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(id, row.pool_code, row.pool_name, now, now);
+    return this.getHardwarePatentPool(row.pool_code) as Promise<HardwarePatentPoolRecord>;
+  }
+
+  async getHardwarePatentPool(
+    poolCode: string,
+  ): Promise<HardwarePatentPoolRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_patent_pools WHERE pool_code = ?`)
+      .get(poolCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      pool_code: row.pool_code as string,
+      pool_name: row.pool_name as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertHardwarePoolHolderLeg(
+    row: Omit<HardwarePoolHolderLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePoolHolderLegRecord> {
+    // One verified weighting per (pool_code, holder_payee_id).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_pool_holder_legs
+           (id, pool_code, holder_payee_id, essentiality_score, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (pool_code, holder_payee_id) DO UPDATE SET
+           essentiality_score = excluded.essentiality_score,
+           updated_at = excluded.updated_at`,
+      )
+      .run(id, row.pool_code, row.holder_payee_id, row.essentiality_score, now, now);
+    const found = await this.getHardwarePoolHolderLeg(row.pool_code, row.holder_payee_id);
+    if (found === undefined) {
+      throw new Error('hardware_pool_holder_leg_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwarePoolHolderLeg(
+    poolCode: string,
+    holderPayeeId: string,
+  ): Promise<HardwarePoolHolderLegRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_pool_holder_legs
+         WHERE pool_code = ? AND holder_payee_id = ?`,
+      )
+      .get(poolCode, holderPayeeId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      pool_code: row.pool_code as string,
+      holder_payee_id: row.holder_payee_id as string,
+      essentiality_score: row.essentiality_score as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listHardwarePoolHolderLegs(poolCode: string): Promise<HardwarePoolHolderLegRecord[]> {
+    // Registration order — rowid ASC is this backend's insertion_order.
+    const rows = this.db
+      .prepare(`SELECT * FROM hardware_pool_holder_legs WHERE pool_code = ? ORDER BY rowid ASC`)
+      .all(poolCode) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      pool_code: row.pool_code as string,
+      holder_payee_id: row.holder_payee_id as string,
+      essentiality_score: row.essentiality_score as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertHardwareSepRoyaltyPolicy(
+    row: Omit<HardwareSepRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareSepRoyaltyPolicyRecord> {
+    // One policy of record per (patent_family_id, sep_pool_code).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_sep_royalty_policies
+           (id, patent_family_id, sep_pool_code, payee_id, tier_bands, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (patent_family_id, sep_pool_code) DO UPDATE SET
+           payee_id = excluded.payee_id,
+           tier_bands = excluded.tier_bands,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.patent_family_id,
+        row.sep_pool_code,
+        row.payee_id,
+        row.tier_bands,
+        now,
+        now,
+      );
+    const found = await this.getHardwareSepRoyaltyPolicy(
+      row.patent_family_id,
+      row.sep_pool_code,
+    );
+    if (found === undefined) {
+      throw new Error('hardware_sep_royalty_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwareSepRoyaltyPolicy(
+    patentFamilyId: string,
+    sepPoolCode: string,
+  ): Promise<HardwareSepRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_sep_royalty_policies
+         WHERE patent_family_id = ? AND sep_pool_code = ?`,
+      )
+      .get(patentFamilyId, sepPoolCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      patent_family_id: row.patent_family_id as string,
+      sep_pool_code: row.sep_pool_code as string,
+      payee_id: row.payee_id as string,
+      tier_bands: row.tier_bands as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertHardwareAutomotivePoolAssignment(
+    row: Omit<HardwareAutomotivePoolAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord> {
+    // One routing of record per (oem_id, line_id).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_automotive_pool_assignments
+           (id, oem_id, line_id, cellular_pool_code, navigation_pool_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (oem_id, line_id) DO UPDATE SET
+           cellular_pool_code = excluded.cellular_pool_code,
+           navigation_pool_code = excluded.navigation_pool_code,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.oem_id,
+        row.line_id,
+        row.cellular_pool_code,
+        row.navigation_pool_code,
+        now,
+        now,
+      );
+    const found = await this.getHardwareAutomotivePoolAssignment(row.oem_id, row.line_id);
+    if (found === undefined) {
+      throw new Error('hardware_automotive_pool_assignment_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwareAutomotivePoolAssignment(
+    oemId: string,
+    lineId: string,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_automotive_pool_assignments
+         WHERE oem_id = ? AND line_id = ?`,
+      )
+      .get(oemId, lineId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      oem_id: row.oem_id as string,
+      line_id: row.line_id as string,
+      cellular_pool_code: row.cellular_pool_code as string,
+      navigation_pool_code: row.navigation_pool_code as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertHardwareCleanTechRoyaltyPolicy(
+    row: Omit<HardwareCleanTechRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord> {
+    // One policy of record per patent_family_id.
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_cleantech_royalty_policies
+           (id, patent_family_id, payee_id, micros_per_kwh, micros_per_charge_cycle, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (patent_family_id) DO UPDATE SET
+           payee_id = excluded.payee_id,
+           micros_per_kwh = excluded.micros_per_kwh,
+           micros_per_charge_cycle = excluded.micros_per_charge_cycle,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.patent_family_id,
+        row.payee_id,
+        row.micros_per_kwh,
+        row.micros_per_charge_cycle,
+        now,
+        now,
+      );
+    const found = await this.getHardwareCleanTechRoyaltyPolicy(row.patent_family_id);
+    if (found === undefined) {
+      throw new Error('hardware_cleantech_royalty_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwareCleanTechRoyaltyPolicy(
+    patentFamilyId: string,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_cleantech_royalty_policies WHERE patent_family_id = ?`,
+      )
+      .get(patentFamilyId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      patent_family_id: row.patent_family_id as string,
+      payee_id: row.payee_id as string,
+      micros_per_kwh: row.micros_per_kwh as number,
+      micros_per_charge_cycle: row.micros_per_charge_cycle as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertHardwareOtaUnlockPolicy(
+    row: Omit<HardwareOtaUnlockPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareOtaUnlockPolicyRecord> {
+    // One policy of record per feature_code.
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_ota_unlock_policies
+           (id, feature_code, sensor_licensor_payee_id, micros_per_unlock, licensor_share_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (feature_code) DO UPDATE SET
+           sensor_licensor_payee_id = excluded.sensor_licensor_payee_id,
+           micros_per_unlock = excluded.micros_per_unlock,
+           licensor_share_bps = excluded.licensor_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.feature_code,
+        row.sensor_licensor_payee_id,
+        row.micros_per_unlock,
+        row.licensor_share_bps,
+        now,
+        now,
+      );
+    const found = await this.getHardwareOtaUnlockPolicy(row.feature_code);
+    if (found === undefined) {
+      throw new Error('hardware_ota_unlock_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwareOtaUnlockPolicy(
+    featureCode: string,
+  ): Promise<HardwareOtaUnlockPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_ota_unlock_policies WHERE feature_code = ?`)
+      .get(featureCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      feature_code: row.feature_code as string,
+      sensor_licensor_payee_id: row.sensor_licensor_payee_id as string,
+      micros_per_unlock: row.micros_per_unlock as number,
+      licensor_share_bps: row.licensor_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertHardwareCrossLicenseAgreement(
+    row: Omit<HardwareCrossLicenseAgreementRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCrossLicenseAgreementRecord> {
+    // One agreement of record per (company_a_id, company_b_id) — the
+    // canonical pair orientation (the CHECK pins a < b).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_cross_license_agreements
+           (id, agreement_ref, company_a_id, company_b_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (company_a_id, company_b_id) DO UPDATE SET
+           agreement_ref = excluded.agreement_ref,
+           updated_at = excluded.updated_at`,
+      )
+      .run(id, row.agreement_ref, row.company_a_id, row.company_b_id, now, now);
+    const found = await this.getHardwareCrossLicenseAgreement(
+      row.company_a_id,
+      row.company_b_id,
+    );
+    if (found === undefined) {
+      throw new Error('hardware_cross_license_agreement_upsert_failed');
+    }
+    return found;
+  }
+
+  async getHardwareCrossLicenseAgreement(
+    companyAId: string,
+    companyBId: string,
+  ): Promise<HardwareCrossLicenseAgreementRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_cross_license_agreements
+         WHERE company_a_id = ? AND company_b_id = ?`,
+      )
+      .get(companyAId, companyBId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      agreement_ref: row.agreement_ref as string,
+      company_a_id: row.company_a_id as string,
+      company_b_id: row.company_b_id as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<HardwareSepUnitMonthRecord> {
+    // The cumulative monthly tracker of record — an upsert that ADDS the
+    // row's units to the (licensee, family, pool, month) position.
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_sep_unit_months
+           (id, licensee_id, patent_family_id, sep_pool_code, month, cumulative_units, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (licensee_id, patent_family_id, sep_pool_code, month) DO UPDATE SET
+           cumulative_units = cumulative_units + excluded.cumulative_units,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        licenseeId,
+        patentFamilyId,
+        sepPoolCode,
+        month,
+        unitsAdded,
+        now,
+        now,
+      );
+    const found = await this.getHardwareSepUnitMonth(
+      licenseeId,
+      patentFamilyId,
+      sepPoolCode,
+      month,
+    );
+    if (found === undefined) {
+      throw new Error('hardware_sep_unit_month_advance_failed');
+    }
+    return found;
+  }
+
+  async getHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+  ): Promise<HardwareSepUnitMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_sep_unit_months
+         WHERE licensee_id = ? AND patent_family_id = ? AND sep_pool_code = ? AND month = ?`,
+      )
+      .get(licenseeId, patentFamilyId, sepPoolCode, month) as
+      | Record<string, unknown>
+      | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      licensee_id: row.licensee_id as string,
+      patent_family_id: row.patent_family_id as string,
+      sep_pool_code: row.sep_pool_code as string,
+      month: row.month as string,
+      cumulative_units: row.cumulative_units as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertHardwareRealizationApplication(
+    row: Omit<HardwareRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard (the DDL's UNIQUE
+    // clause is the concurrent backstop).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_realization_applications
+           (id, source_event_id, patent_family_id, sep_pool_code, device_imei_mac, eid,
+            period, currency, device_wholesale_asp_cents, component_cogs_base_cents,
+            non_essential_bom_cents, net_patentable_device_value_base_cents, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.patent_family_id,
+        record.sep_pool_code,
+        record.device_imei_mac,
+        record.eid,
+        record.period,
+        record.currency,
+        record.device_wholesale_asp_cents,
+        record.component_cogs_base_cents,
+        record.non_essential_bom_cents,
+        record.net_patentable_device_value_base_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwareRealizationApplication(
+    sourceEventId: string,
+  ): Promise<HardwareRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_realization_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      patent_family_id: row.patent_family_id as string,
+      sep_pool_code: row.sep_pool_code as string,
+      device_imei_mac: row.device_imei_mac as string,
+      eid: (row.eid as string | null) ?? null,
+      period: row.period as string,
+      currency: row.currency as string,
+      device_wholesale_asp_cents: row.device_wholesale_asp_cents as number,
+      component_cogs_base_cents: row.component_cogs_base_cents as number,
+      non_essential_bom_cents: row.non_essential_bom_cents as number,
+      net_patentable_device_value_base_cents: row.net_patentable_device_value_base_cents as number,
+      verdict: row.verdict as HardwareRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertHardwareSepRoyaltyApplication(
+    row: Omit<HardwareSepRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareSepRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_sep_royalty_applications
+           (id, source_event_id, licensee_id, patent_family_id, sep_pool_code, period, currency,
+            policy_ref, payee_id, device_mac, connected_units, royalty_basis_cents, tier_legs,
+            royalty_cents, cumulative_units_before, cumulative_units_after, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.licensee_id,
+        record.patent_family_id,
+        record.sep_pool_code,
+        record.period,
+        record.currency,
+        record.policy_ref,
+        record.payee_id,
+        record.device_mac,
+        record.connected_units,
+        record.royalty_basis_cents,
+        record.tier_legs,
+        record.royalty_cents,
+        record.cumulative_units_before,
+        record.cumulative_units_after,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwareSepRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareSepRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_sep_royalty_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      licensee_id: row.licensee_id as string,
+      patent_family_id: row.patent_family_id as string,
+      sep_pool_code: row.sep_pool_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      policy_ref: row.policy_ref as string,
+      payee_id: row.payee_id as string,
+      device_mac: row.device_mac as string,
+      connected_units: row.connected_units as number,
+      royalty_basis_cents: row.royalty_basis_cents as number,
+      tier_legs: row.tier_legs as string,
+      royalty_cents: row.royalty_cents as number,
+      cumulative_units_before: row.cumulative_units_before as number,
+      cumulative_units_after: row.cumulative_units_after as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertHardwarePoolRoutingApplication(
+    row: Omit<HardwarePoolRoutingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolRoutingApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_pool_routing_applications
+           (id, source_event_id, oem_id, line_id, period, currency, assignment_ref,
+            serials_produced, cellular_pool_code, navigation_pool_code,
+            cellular_fee_per_vehicle_cents, navigation_fee_per_vehicle_cents,
+            cellular_routed_cents, navigation_routed_cents, total_routed_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.oem_id,
+        record.line_id,
+        record.period,
+        record.currency,
+        record.assignment_ref,
+        record.serials_produced,
+        record.cellular_pool_code,
+        record.navigation_pool_code,
+        record.cellular_fee_per_vehicle_cents,
+        record.navigation_fee_per_vehicle_cents,
+        record.cellular_routed_cents,
+        record.navigation_routed_cents,
+        record.total_routed_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwarePoolRoutingApplication(
+    sourceEventId: string,
+  ): Promise<HardwarePoolRoutingApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_pool_routing_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      oem_id: row.oem_id as string,
+      line_id: row.line_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      assignment_ref: row.assignment_ref as string,
+      serials_produced: row.serials_produced as number,
+      cellular_pool_code: row.cellular_pool_code as string,
+      navigation_pool_code: row.navigation_pool_code as string,
+      cellular_fee_per_vehicle_cents: row.cellular_fee_per_vehicle_cents as number,
+      navigation_fee_per_vehicle_cents: row.navigation_fee_per_vehicle_cents as number,
+      cellular_routed_cents: row.cellular_routed_cents as number,
+      navigation_routed_cents: row.navigation_routed_cents as number,
+      total_routed_cents: row.total_routed_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertHardwarePoolWaterfallApplication(
+    row: Omit<HardwarePoolWaterfallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolWaterfallApplicationRecord> {
+    // UNIQUE per (routing_source_event_id, pool_code) — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_pool_waterfall_applications
+           (id, routing_source_event_id, pool_code, period, currency, split_legs,
+            pool_fee_pot_cents, allocated_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.routing_source_event_id,
+        record.pool_code,
+        record.period,
+        record.currency,
+        record.split_legs,
+        record.pool_fee_pot_cents,
+        record.allocated_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwarePoolWaterfallApplication(
+    routingSourceEventId: string,
+    poolCode: string,
+  ): Promise<HardwarePoolWaterfallApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_pool_waterfall_applications
+         WHERE routing_source_event_id = ? AND pool_code = ?`,
+      )
+      .get(routingSourceEventId, poolCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      routing_source_event_id: row.routing_source_event_id as string,
+      pool_code: row.pool_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      split_legs: row.split_legs as string,
+      pool_fee_pot_cents: row.pool_fee_pot_cents as number,
+      allocated_total_cents: row.allocated_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertHardwareTelemetryRoyaltyApplication(
+    row: Omit<HardwareTelemetryRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_telemetry_royalty_applications
+           (id, source_event_id, patent_family_id, period, currency, policy_ref, payee_id,
+            device_serial, kwh_micros, charge_cycles, micros_per_kwh, micros_per_charge_cycle,
+            royalty_micros, royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.patent_family_id,
+        record.period,
+        record.currency,
+        record.policy_ref,
+        record.payee_id,
+        record.device_serial,
+        record.kwh_micros,
+        record.charge_cycles,
+        record.micros_per_kwh,
+        record.micros_per_charge_cycle,
+        record.royalty_micros,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwareTelemetryRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_telemetry_royalty_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      patent_family_id: row.patent_family_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      policy_ref: row.policy_ref as string,
+      payee_id: row.payee_id as string,
+      device_serial: row.device_serial as string,
+      kwh_micros: row.kwh_micros as number,
+      charge_cycles: row.charge_cycles as number,
+      micros_per_kwh: row.micros_per_kwh as number,
+      micros_per_charge_cycle: row.micros_per_charge_cycle as number,
+      royalty_micros: row.royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertHardwareOtaUnlockApplication(
+    row: Omit<HardwareOtaUnlockApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareOtaUnlockApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_ota_unlock_applications
+           (id, source_event_id, feature_code, policy_ref, sensor_licensor_payee_id,
+            device_imei_mac, period, currency, micros_per_unlock, licensor_share_bps,
+            settlement_micros, settlement_cents, licensor_cents, platform_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.feature_code,
+        record.policy_ref,
+        record.sensor_licensor_payee_id,
+        record.device_imei_mac,
+        record.period,
+        record.currency,
+        record.micros_per_unlock,
+        record.licensor_share_bps,
+        record.settlement_micros,
+        record.settlement_cents,
+        record.licensor_cents,
+        record.platform_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getHardwareOtaUnlockApplication(
+    sourceEventId: string,
+  ): Promise<HardwareOtaUnlockApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_ota_unlock_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      feature_code: row.feature_code as string,
+      policy_ref: row.policy_ref as string,
+      sensor_licensor_payee_id: row.sensor_licensor_payee_id as string,
+      device_imei_mac: row.device_imei_mac as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      micros_per_unlock: row.micros_per_unlock as number,
+      licensor_share_bps: row.licensor_share_bps as number,
+      settlement_micros: row.settlement_micros as number,
+      settlement_cents: row.settlement_cents as number,
+      licensor_cents: row.licensor_cents as number,
+      platform_cents: row.platform_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async upsertHardwareCrossLicenseNetSettlement(
+    row: Omit<HardwareCrossLicenseNetSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord> {
+    // One net clearing of record per (agreement_ref, period) — the walk's
+    // recompute replaces the sums in place (the founder example's
+    // full-period netting); the id and created_at of record survive.
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO hardware_cross_license_net_settlements
+           (id, agreement_ref, company_a_id, company_b_id, period, currency,
+            owed_a_to_b_cents, owed_b_to_a_cents, net_cents, direction, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (agreement_ref, period) DO UPDATE SET
+           company_a_id = excluded.company_a_id,
+           company_b_id = excluded.company_b_id,
+           currency = excluded.currency,
+           owed_a_to_b_cents = excluded.owed_a_to_b_cents,
+           owed_b_to_a_cents = excluded.owed_b_to_a_cents,
+           net_cents = excluded.net_cents,
+           direction = excluded.direction`,
+      )
+      .run(
+        id,
+        row.agreement_ref,
+        row.company_a_id,
+        row.company_b_id,
+        row.period,
+        row.currency,
+        row.owed_a_to_b_cents,
+        row.owed_b_to_a_cents,
+        row.net_cents,
+        row.direction,
+        createdAt,
+      );
+    return this.getHardwareCrossLicenseNetSettlement(
+      row.agreement_ref,
+      row.period,
+    ) as Promise<HardwareCrossLicenseNetSettlementRecord>;
+  }
+
+  async getHardwareCrossLicenseNetSettlement(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_cross_license_net_settlements
+         WHERE agreement_ref = ? AND period = ?`,
+      )
+      .get(agreementRef, period) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      agreement_ref: row.agreement_ref as string,
+      company_a_id: row.company_a_id as string,
+      company_b_id: row.company_b_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      owed_a_to_b_cents: row.owed_a_to_b_cents as number,
+      owed_b_to_a_cents: row.owed_b_to_a_cents as number,
+      net_cents: row.net_cents as number,
+      direction: row.direction as HardwareCrossLicenseNetSettlementRecord['direction'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async sumHardwareSepRoyaltiesBetween(
+    licenseeId: string,
+    payeeId: string,
+    period: string,
+  ): Promise<number> {
+    // The netting walk's liability aggregation — exact integer cents.
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(royalty_cents), 0) AS total
+         FROM hardware_sep_royalty_applications
+         WHERE licensee_id = ? AND payee_id = ? AND period = ?`,
+      )
+      .get(licenseeId, payeeId, period) as Record<string, unknown> | undefined;
+    return (row?.total as number) ?? 0;
   }
 }
 

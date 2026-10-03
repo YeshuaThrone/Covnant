@@ -305,6 +305,23 @@ import type {
   DistributorConnectionUpsert,
   DistributorTraversalOutcome,
 } from '@/modules/vault/records';
+import type {
+  HardwareAutomotivePoolAssignmentRecord,
+  HardwareCleanTechRoyaltyPolicyRecord,
+  HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetSettlementRecord,
+  HardwareOtaUnlockApplicationRecord,
+  HardwareOtaUnlockPolicyRecord,
+  HardwarePatentPoolRecord,
+  HardwarePoolHolderLegRecord,
+  HardwarePoolRoutingApplicationRecord,
+  HardwarePoolWaterfallApplicationRecord,
+  HardwareRealizationApplicationRecord,
+  HardwareSepRoyaltyApplicationRecord,
+  HardwareSepRoyaltyPolicyRecord,
+  HardwareSepUnitMonthRecord,
+  HardwareTelemetryRoyaltyApplicationRecord,
+} from '@/modules/hardware/records';
 import {
   createAdminClient as createSupabaseAdminClient,
   readSupabaseEnv,
@@ -4664,6 +4681,264 @@ export interface Store {
   getDeveloperToolCallApplication(
     sourceEventId: string,
   ): Promise<DeveloperAgentToolCallApplicationRecord | undefined>;
+
+  // -------------------------------------------------------------------------
+  // The hardware patent lane (PR 46, migration 0050) — the founder
+  // hardware directive's registries, tracker, and application ledgers.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Registers one patent pool of record — the MPEG-LA / Avanci-shaped
+   * multi-owner pool. UNIQUE per pool_code: a re-registration converges.
+   */
+  upsertHardwarePatentPool(
+    row: Omit<HardwarePatentPoolRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePatentPoolRecord>;
+
+  /** One patent pool of record by its SEP pool code; undefined when
+   * none — the waterfall's read. */
+  getHardwarePatentPool(
+    poolCode: string,
+  ): Promise<HardwarePatentPoolRecord | undefined>;
+
+  /**
+   * Registers one pool holder's verified essentiality weighting — the
+   * waterfall's leg. UNIQUE per (pool_code, holder_payee_id): a
+   * re-registration converges.
+   */
+  upsertHardwarePoolHolderLeg(
+    row: Omit<HardwarePoolHolderLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePoolHolderLegRecord>;
+
+  /** One pool's registered holder weightings of record, in
+   * registration order; empty when none registered. */
+  listHardwarePoolHolderLegs(poolCode: string): Promise<HardwarePoolHolderLegRecord[]>;
+
+  /**
+   * Registers one patent family's tiered FRAND royalty policy of record
+   * — the tier ladder (each band: FRAND rate bps + per-unit cap) and
+   * the holder payee. UNIQUE per (patent_family_id, sep_pool_code): a
+   * re-registration converges.
+   */
+  upsertHardwareSepRoyaltyPolicy(
+    row: Omit<HardwareSepRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareSepRoyaltyPolicyRecord>;
+
+  /** One family-and-pool's royalty policy of record; undefined when
+   * none — the walk's read. */
+  getHardwareSepRoyaltyPolicy(
+    patentFamilyId: string,
+    sepPoolCode: string,
+  ): Promise<HardwareSepRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Registers one OEM production line's pool routing of record — the
+   * pools the line's per-vehicle cellular and navigation fees flow to.
+   * UNIQUE per (oem_id, line_id): a re-registration converges.
+   */
+  upsertHardwareAutomotivePoolAssignment(
+    row: Omit<HardwareAutomotivePoolAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord>;
+
+  /** One OEM line's pool routing of record; undefined when none —
+   * the walk's read. */
+  getHardwareAutomotivePoolAssignment(
+    oemId: string,
+    lineId: string,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord | undefined>;
+
+  /**
+   * Registers one clean-tech patent family's telemetry micro-royalty
+   * policy of record — the per-kilowatt-hour and per-charge-cycle
+   * micros and the holder payee. UNIQUE per patent_family_id.
+   */
+  upsertHardwareCleanTechRoyaltyPolicy(
+    row: Omit<HardwareCleanTechRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord>;
+
+  /** One family's telemetry royalty policy of record; undefined when
+   * none — the walk's read. */
+  getHardwareCleanTechRoyaltyPolicy(
+    patentFamilyId: string,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Registers one OTA feature's per-unlock royalty split policy of
+   * record — the sensor licensor's payee, the per-unlock micros, and
+   * the licensor's share bps. UNIQUE per feature_code.
+   */
+  upsertHardwareOtaUnlockPolicy(
+    row: Omit<HardwareOtaUnlockPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareOtaUnlockPolicyRecord>;
+
+  /** One feature's unlock royalty policy of record; undefined when
+   * none — the settlement's read. */
+  getHardwareOtaUnlockPolicy(
+    featureCode: string,
+  ): Promise<HardwareOtaUnlockPolicyRecord | undefined>;
+
+  /**
+   * Registers one cross-licensing pair's agreement of record — the
+   * pair stored canonically (company_a < company_b). UNIQUE per
+   * (company_a_id, company_b_id).
+   */
+  upsertHardwareCrossLicenseAgreement(
+    row: Omit<HardwareCrossLicenseAgreementRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCrossLicenseAgreementRecord>;
+
+  /** One pair's agreement of record; undefined when none — the
+   * netting walk's read. */
+  getHardwareCrossLicenseAgreement(
+    companyAId: string,
+    companyBId: string,
+  ): Promise<HardwareCrossLicenseAgreementRecord | undefined>;
+
+  /**
+   * Advances the cumulative monthly connected-unit tracker of record
+   * for one (licensee, patent family, pool, month) by the row's units
+   * — UNIQUE per that four-tuple: the tracker converges (an upsert
+   * adds); the walk reads the position BEFORE this advance through the
+   * getter.
+   */
+  advanceHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<HardwareSepUnitMonthRecord>;
+
+  /** One licensee-family-pool-month's cumulative connected units of
+   * record; undefined when no row has advanced yet. */
+  getHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+  ): Promise<HardwareSepUnitMonthRecord | undefined>;
+
+  /**
+   * Appends one executed Net Hardware Patent Realization — the
+   * founder's exact identity keyed on the patent_family_id,
+   * sep_pool_code, and device_imei_mac columns (migration 0050).
+   * UNIQUE per source_event_id is the replay guard.
+   */
+  insertHardwareRealizationApplication(
+    row: Omit<HardwareRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getHardwareRealizationApplication(
+    sourceEventId: string,
+  ): Promise<HardwareRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed tiered FRAND SEP micro-royalty — the per-unit
+   * tier walk on the cumulative monthly position, capped per band
+   * (migration 0050). UNIQUE per source_event_id is the replay guard.
+   */
+  insertHardwareSepRoyaltyApplication(
+    row: Omit<HardwareSepRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareSepRoyaltyApplicationRecord>;
+
+  /** One SEP royalty application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getHardwareSepRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareSepRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed automotive pool routing — the batch's fees ×
+   * the production serials, routed to the line's pools (migration
+   * 0050). UNIQUE per source_event_id is the replay guard.
+   */
+  insertHardwarePoolRoutingApplication(
+    row: Omit<HardwarePoolRoutingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolRoutingApplicationRecord>;
+
+  /** One pool routing application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getHardwarePoolRoutingApplication(
+    sourceEventId: string,
+  ): Promise<HardwarePoolRoutingApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed essentiality-weighted pool waterfall — the
+   * routing's pool fee pot split across the verified holders
+   * (migration 0050). UNIQUE per (routing_source_event_id, pool_code)
+   * is the replay guard.
+   */
+  insertHardwarePoolWaterfallApplication(
+    row: Omit<HardwarePoolWaterfallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolWaterfallApplicationRecord>;
+
+  /** One pool waterfall application of record by its routing event id
+   * and pool; undefined when none — the replay check's read. */
+  getHardwarePoolWaterfallApplication(
+    routingSourceEventId: string,
+    poolCode: string,
+  ): Promise<HardwarePoolWaterfallApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed clean-tech telemetry micro-payout — the
+   * per-kilowatt-hour and per-charge-cycle micros at the policy of
+   * record (migration 0050). UNIQUE per source_event_id is the replay
+   * guard.
+   */
+  insertHardwareTelemetryRoyaltyApplication(
+    row: Omit<HardwareTelemetryRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord>;
+
+  /** One telemetry royalty application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getHardwareTelemetryRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed OTA feature-unlock split — the per-unlock
+   * royalty between the sensor patent licensor and the platform
+   * (migration 0050). UNIQUE per source_event_id is the replay guard.
+   */
+  insertHardwareOtaUnlockApplication(
+    row: Omit<HardwareOtaUnlockApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareOtaUnlockApplicationRecord>;
+
+  /** One OTA unlock application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getHardwareOtaUnlockApplication(
+    sourceEventId: string,
+  ): Promise<HardwareOtaUnlockApplicationRecord | undefined>;
+
+  /**
+   * Upserts one executed cross-license net balance clearing — the
+   * mutual SEP royalty liabilities netted per agreement and period
+   * (migration 0050). UNIQUE per (agreement_ref, period); the walk's
+   * recompute replaces the sums in place (the id and created_at of
+   * record survive — the PR 33 lesson, no id in the conflict payload).
+   */
+  upsertHardwareCrossLicenseNetSettlement(
+    row: Omit<HardwareCrossLicenseNetSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord>;
+
+  /** One net settlement of record by its agreement reference and
+   * period; undefined when none — the replay check's read. */
+  getHardwareCrossLicenseNetSettlement(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord | undefined>;
+
+  /**
+   * Sums the executed SEP royalty applications between one licensee and
+   * one holder payee for one period — the netting walk's liability
+   * aggregation (exact integer cents, zero when none).
+   */
+  sumHardwareSepRoyaltiesBetween(
+    licenseeId: string,
+    payeeId: string,
+    period: string,
+  ): Promise<number>;
 }
 
 

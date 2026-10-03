@@ -303,6 +303,23 @@ import type {
   DeveloperWhitelabelLicenseDealRecord,
   DeveloperWhitelabelUsageMonthRecord,
 } from '@/modules/developer/records';
+import type {
+  HardwareAutomotivePoolAssignmentRecord,
+  HardwareCleanTechRoyaltyPolicyRecord,
+  HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetSettlementRecord,
+  HardwareOtaUnlockApplicationRecord,
+  HardwareOtaUnlockPolicyRecord,
+  HardwarePatentPoolRecord,
+  HardwarePoolHolderLegRecord,
+  HardwarePoolRoutingApplicationRecord,
+  HardwarePoolWaterfallApplicationRecord,
+  HardwareRealizationApplicationRecord,
+  HardwareSepRoyaltyApplicationRecord,
+  HardwareSepRoyaltyPolicyRecord,
+  HardwareSepUnitMonthRecord,
+  HardwareTelemetryRoyaltyApplicationRecord,
+} from '@/modules/hardware/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -663,6 +680,24 @@ export class InMemoryStore implements Store {
   private developerDependencyFees: DeveloperDependencyFeeApplicationRecord[] = [];
   private developerWhitelabelLicenses: DeveloperWhitelabelLicenseApplicationRecord[] = [];
   private developerToolCallApplications: DeveloperAgentToolCallApplicationRecord[] = [];
+
+  // The hardware patent lane (PR 46, migration 0050) — the founder
+  // hardware directive's registries, tracker, and application ledgers.
+  private hardwarePatentPools: HardwarePatentPoolRecord[] = [];
+  private hardwarePoolHolderLegs: HardwarePoolHolderLegRecord[] = [];
+  private hardwareSepRoyaltyPolicies: HardwareSepRoyaltyPolicyRecord[] = [];
+  private hardwareAutomotivePoolAssignments: HardwareAutomotivePoolAssignmentRecord[] = [];
+  private hardwareCleanTechRoyaltyPolicies: HardwareCleanTechRoyaltyPolicyRecord[] = [];
+  private hardwareOtaUnlockPolicies: HardwareOtaUnlockPolicyRecord[] = [];
+  private hardwareCrossLicenseAgreements: HardwareCrossLicenseAgreementRecord[] = [];
+  private hardwareSepUnitMonths: HardwareSepUnitMonthRecord[] = [];
+  private hardwareRealizationApplications: HardwareRealizationApplicationRecord[] = [];
+  private hardwareSepRoyaltyApplications: HardwareSepRoyaltyApplicationRecord[] = [];
+  private hardwarePoolRoutingApplications: HardwarePoolRoutingApplicationRecord[] = [];
+  private hardwarePoolWaterfallApplications: HardwarePoolWaterfallApplicationRecord[] = [];
+  private hardwareTelemetryRoyaltyApplications: HardwareTelemetryRoyaltyApplicationRecord[] = [];
+  private hardwareOtaUnlockApplications: HardwareOtaUnlockApplicationRecord[] = [];
+  private hardwareCrossLicenseNetSettlements: HardwareCrossLicenseNetSettlementRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -8229,6 +8264,547 @@ export class InMemoryStore implements Store {
       (record) => record.source_event_id === sourceEventId,
     );
     return found === undefined ? undefined : { ...found };
+  }
+
+  // -------------------------------------------------------------------------
+  // The hardware patent lane (PR 46, migration 0050) — the founder
+  // hardware directive's registries, tracker, and application ledgers.
+  // -------------------------------------------------------------------------
+
+  async upsertHardwarePatentPool(
+    row: Omit<HardwarePatentPoolRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePatentPoolRecord> {
+    // One pool of record per pool_code — INSERT ON CONFLICT replaces the
+    // row atomically.
+    const existing = this.hardwarePatentPools.find(
+      (candidate) => candidate.pool_code === row.pool_code,
+    );
+    const now = new Date().toISOString();
+    const record: HardwarePatentPoolRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwarePatentPools[this.hardwarePatentPools.indexOf(existing)] = record;
+    } else {
+      this.hardwarePatentPools.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwarePatentPool(
+    poolCode: string,
+  ): Promise<HardwarePatentPoolRecord | undefined> {
+    const found = this.hardwarePatentPools.find(
+      (record) => record.pool_code === poolCode,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwarePoolHolderLeg(
+    row: Omit<HardwarePoolHolderLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePoolHolderLegRecord> {
+    // One verified weighting per (pool_code, holder_payee_id) — the
+    // re-registration converges.
+    const existing = this.hardwarePoolHolderLegs.find(
+      (candidate) =>
+        candidate.pool_code === row.pool_code &&
+        candidate.holder_payee_id === row.holder_payee_id,
+    );
+    const now = new Date().toISOString();
+    const record: HardwarePoolHolderLegRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwarePoolHolderLegs[this.hardwarePoolHolderLegs.indexOf(existing)] = record;
+    } else {
+      this.hardwarePoolHolderLegs.push(record);
+    }
+    return { ...record };
+  }
+
+  async listHardwarePoolHolderLegs(poolCode: string): Promise<HardwarePoolHolderLegRecord[]> {
+    // Registration order — the waterfall's deterministic leg order.
+    return this.hardwarePoolHolderLegs
+      .filter((record) => record.pool_code === poolCode)
+      .map((record) => ({ ...record }));
+  }
+
+  async upsertHardwareSepRoyaltyPolicy(
+    row: Omit<HardwareSepRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareSepRoyaltyPolicyRecord> {
+    // One policy of record per (patent_family_id, sep_pool_code).
+    const existing = this.hardwareSepRoyaltyPolicies.find(
+      (candidate) =>
+        candidate.patent_family_id === row.patent_family_id &&
+        candidate.sep_pool_code === row.sep_pool_code,
+    );
+    const now = new Date().toISOString();
+    const record: HardwareSepRoyaltyPolicyRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwareSepRoyaltyPolicies[this.hardwareSepRoyaltyPolicies.indexOf(existing)] = record;
+    } else {
+      this.hardwareSepRoyaltyPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwareSepRoyaltyPolicy(
+    patentFamilyId: string,
+    sepPoolCode: string,
+  ): Promise<HardwareSepRoyaltyPolicyRecord | undefined> {
+    const found = this.hardwareSepRoyaltyPolicies.find(
+      (record) =>
+        record.patent_family_id === patentFamilyId && record.sep_pool_code === sepPoolCode,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwareAutomotivePoolAssignment(
+    row: Omit<HardwareAutomotivePoolAssignmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord> {
+    // One routing of record per (oem_id, line_id).
+    const existing = this.hardwareAutomotivePoolAssignments.find(
+      (candidate) => candidate.oem_id === row.oem_id && candidate.line_id === row.line_id,
+    );
+    const now = new Date().toISOString();
+    const record: HardwareAutomotivePoolAssignmentRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwareAutomotivePoolAssignments[
+        this.hardwareAutomotivePoolAssignments.indexOf(existing)
+      ] = record;
+    } else {
+      this.hardwareAutomotivePoolAssignments.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwareAutomotivePoolAssignment(
+    oemId: string,
+    lineId: string,
+  ): Promise<HardwareAutomotivePoolAssignmentRecord | undefined> {
+    const found = this.hardwareAutomotivePoolAssignments.find(
+      (record) => record.oem_id === oemId && record.line_id === lineId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwareCleanTechRoyaltyPolicy(
+    row: Omit<HardwareCleanTechRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord> {
+    // One policy of record per patent_family_id.
+    const existing = this.hardwareCleanTechRoyaltyPolicies.find(
+      (candidate) => candidate.patent_family_id === row.patent_family_id,
+    );
+    const now = new Date().toISOString();
+    const record: HardwareCleanTechRoyaltyPolicyRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwareCleanTechRoyaltyPolicies[
+        this.hardwareCleanTechRoyaltyPolicies.indexOf(existing)
+      ] = record;
+    } else {
+      this.hardwareCleanTechRoyaltyPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwareCleanTechRoyaltyPolicy(
+    patentFamilyId: string,
+  ): Promise<HardwareCleanTechRoyaltyPolicyRecord | undefined> {
+    const found = this.hardwareCleanTechRoyaltyPolicies.find(
+      (record) => record.patent_family_id === patentFamilyId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwareOtaUnlockPolicy(
+    row: Omit<HardwareOtaUnlockPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareOtaUnlockPolicyRecord> {
+    // One policy of record per feature_code.
+    const existing = this.hardwareOtaUnlockPolicies.find(
+      (candidate) => candidate.feature_code === row.feature_code,
+    );
+    const now = new Date().toISOString();
+    const record: HardwareOtaUnlockPolicyRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwareOtaUnlockPolicies[this.hardwareOtaUnlockPolicies.indexOf(existing)] = record;
+    } else {
+      this.hardwareOtaUnlockPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwareOtaUnlockPolicy(
+    featureCode: string,
+  ): Promise<HardwareOtaUnlockPolicyRecord | undefined> {
+    const found = this.hardwareOtaUnlockPolicies.find(
+      (record) => record.feature_code === featureCode,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwareCrossLicenseAgreement(
+    row: Omit<HardwareCrossLicenseAgreementRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwareCrossLicenseAgreementRecord> {
+    // One agreement of record per (company_a_id, company_b_id) — the
+    // canonical pair orientation.
+    const existing = this.hardwareCrossLicenseAgreements.find(
+      (candidate) =>
+        candidate.company_a_id === row.company_a_id &&
+        candidate.company_b_id === row.company_b_id,
+    );
+    const now = new Date().toISOString();
+    const record: HardwareCrossLicenseAgreementRecord = {
+      ...row,
+      // The upsert of record keeps the original id and created_at — the
+      // SQLite/Supabase ON CONFLICT semantics (never send the id in the
+      // conflict payload; the id does not rotate).
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.hardwareCrossLicenseAgreements[
+        this.hardwareCrossLicenseAgreements.indexOf(existing)
+      ] = record;
+    } else {
+      this.hardwareCrossLicenseAgreements.push(record);
+    }
+    return { ...record };
+  }
+
+  async getHardwareCrossLicenseAgreement(
+    companyAId: string,
+    companyBId: string,
+  ): Promise<HardwareCrossLicenseAgreementRecord | undefined> {
+    const found = this.hardwareCrossLicenseAgreements.find(
+      (record) => record.company_a_id === companyAId && record.company_b_id === companyBId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<HardwareSepUnitMonthRecord> {
+    // The cumulative monthly tracker of record — an upsert that ADDS the
+    // row's units to the (licensee, family, pool, month) position.
+    const existing = this.hardwareSepUnitMonths.find(
+      (record) =>
+        record.licensee_id === licenseeId &&
+        record.patent_family_id === patentFamilyId &&
+        record.sep_pool_code === sepPoolCode &&
+        record.month === month,
+    );
+    if (existing !== undefined) {
+      existing.cumulative_units += unitsAdded;
+      return { ...existing };
+    }
+    const record: HardwareSepUnitMonthRecord = {
+      id: randomUUID(),
+      licensee_id: licenseeId,
+      patent_family_id: patentFamilyId,
+      sep_pool_code: sepPoolCode,
+      month,
+      cumulative_units: unitsAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.hardwareSepUnitMonths.push(record);
+    return { ...record };
+  }
+
+  async getHardwareSepUnitMonth(
+    licenseeId: string,
+    patentFamilyId: string,
+    sepPoolCode: string,
+    month: string,
+  ): Promise<HardwareSepUnitMonthRecord | undefined> {
+    const found = this.hardwareSepUnitMonths.find(
+      (record) =>
+        record.licensee_id === licenseeId &&
+        record.patent_family_id === patentFamilyId &&
+        record.sep_pool_code === sepPoolCode &&
+        record.month === month,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwareRealizationApplication(
+    row: Omit<HardwareRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.hardwareRealizationApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_realization_applications.source_event_id');
+    }
+    const record: HardwareRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwareRealizationApplication(
+    sourceEventId: string,
+  ): Promise<HardwareRealizationApplicationRecord | undefined> {
+    const found = this.hardwareRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwareSepRoyaltyApplication(
+    row: Omit<HardwareSepRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareSepRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.hardwareSepRoyaltyApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_sep_royalty_applications.source_event_id');
+    }
+    const record: HardwareSepRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareSepRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwareSepRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareSepRoyaltyApplicationRecord | undefined> {
+    const found = this.hardwareSepRoyaltyApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwarePoolRoutingApplication(
+    row: Omit<HardwarePoolRoutingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolRoutingApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.hardwarePoolRoutingApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_pool_routing_applications.source_event_id');
+    }
+    const record: HardwarePoolRoutingApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwarePoolRoutingApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwarePoolRoutingApplication(
+    sourceEventId: string,
+  ): Promise<HardwarePoolRoutingApplicationRecord | undefined> {
+    const found = this.hardwarePoolRoutingApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwarePoolWaterfallApplication(
+    row: Omit<HardwarePoolWaterfallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwarePoolWaterfallApplicationRecord> {
+    // UNIQUE per (routing_source_event_id, pool_code) — the replay guard.
+    if (
+      this.hardwarePoolWaterfallApplications.some(
+        (existing) =>
+          existing.routing_source_event_id === row.routing_source_event_id &&
+          existing.pool_code === row.pool_code,
+      )
+    ) {
+      uniqueViolation('hardware_pool_waterfall_applications.routing_source_event_id,pool_code');
+    }
+    const record: HardwarePoolWaterfallApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwarePoolWaterfallApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwarePoolWaterfallApplication(
+    routingSourceEventId: string,
+    poolCode: string,
+  ): Promise<HardwarePoolWaterfallApplicationRecord | undefined> {
+    const found = this.hardwarePoolWaterfallApplications.find(
+      (record) =>
+        record.routing_source_event_id === routingSourceEventId &&
+        record.pool_code === poolCode,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwareTelemetryRoyaltyApplication(
+    row: Omit<HardwareTelemetryRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.hardwareTelemetryRoyaltyApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_telemetry_royalty_applications.source_event_id');
+    }
+    const record: HardwareTelemetryRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareTelemetryRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwareTelemetryRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<HardwareTelemetryRoyaltyApplicationRecord | undefined> {
+    const found = this.hardwareTelemetryRoyaltyApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertHardwareOtaUnlockApplication(
+    row: Omit<HardwareOtaUnlockApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareOtaUnlockApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.hardwareOtaUnlockApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('hardware_ota_unlock_applications.source_event_id');
+    }
+    const record: HardwareOtaUnlockApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareOtaUnlockApplications.push(record);
+    return { ...record };
+  }
+
+  async getHardwareOtaUnlockApplication(
+    sourceEventId: string,
+  ): Promise<HardwareOtaUnlockApplicationRecord | undefined> {
+    const found = this.hardwareOtaUnlockApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertHardwareCrossLicenseNetSettlement(
+    row: Omit<HardwareCrossLicenseNetSettlementRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord> {
+    // One net clearing of record per (agreement_ref, period) — the
+    // walk's recompute replaces the sums in place; the id and created_at
+    // of record survive (the SQLite/Supabase ON CONFLICT parity).
+    const existing = this.hardwareCrossLicenseNetSettlements.find(
+      (candidate) =>
+        candidate.agreement_ref === row.agreement_ref && candidate.period === row.period,
+    );
+    if (existing !== undefined) {
+      const updated: HardwareCrossLicenseNetSettlementRecord = { ...existing, ...row };
+      this.hardwareCrossLicenseNetSettlements[
+        this.hardwareCrossLicenseNetSettlements.indexOf(existing)
+      ] = updated;
+      return { ...updated };
+    }
+    const record: HardwareCrossLicenseNetSettlementRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.hardwareCrossLicenseNetSettlements.push(record);
+    return { ...record };
+  }
+
+  async getHardwareCrossLicenseNetSettlement(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetSettlementRecord | undefined> {
+    const found = this.hardwareCrossLicenseNetSettlements.find(
+      (record) => record.agreement_ref === agreementRef && record.period === period,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async sumHardwareSepRoyaltiesBetween(
+    licenseeId: string,
+    payeeId: string,
+    period: string,
+  ): Promise<number> {
+    // The netting walk's liability aggregation — exact integer cents.
+    return this.hardwareSepRoyaltyApplications
+      .filter(
+        (record) =>
+          record.licensee_id === licenseeId &&
+          record.payee_id === payeeId &&
+          record.period === period,
+      )
+      .reduce((sum, record) => sum + record.royalty_cents, 0);
   }
 }
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */

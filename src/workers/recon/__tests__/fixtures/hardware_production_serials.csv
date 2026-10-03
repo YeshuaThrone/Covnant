@@ -1,0 +1,6 @@
+Batch ID,OEM ID,Production Line ID,Serials Produced,Cellular License Fee Per Vehicle,Navigation License Fee Per Vehicle,Currency,Reporting Period
+BAT-2026-03-0001,oem-atlas,line-hamburg,401,7.77,3.33,USD,2026-03
+BAT-2026-03-0002,oem-atlas,line-rotation,100,5.00,0.00,USD,2026-03
+BAT-2026-03-0003,oem-atlas,line-unassigned,80,6.00,2.00,USD,2026-03
+BAT-2026-03-0004,oem-borealis,line-hamburg,25,7.77,3.33,USD,2026-03
+BAT-2026-03-0005,oem-atlas,line-orphan,30,4.00,0.00,USD,2026-03
