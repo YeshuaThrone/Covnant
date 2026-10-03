@@ -471,6 +471,14 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // constraints, deny-all RLS, and service_role grants; still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0050_hardware_serial_parser_frand_cross_licensing_patent_pools.sql',
+      // PR 47 (the founder FRAND litigation directive): five hardware
+      // tables — the hardware payout gate states of record, the patent
+      // litigation escrow policies/drawdowns/reconciliations, and the
+      // cross-license net dispatches of record — with named table-level
+      // ck_ constraints, deny-all RLS, and service_role grants; still no
+      // DDL on universal_royalty_ledger — the referencing pin below
+      // holds.
+      '0051_patent_litigation_escrow_gate_states_net_dispatches.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

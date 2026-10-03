@@ -285,10 +285,12 @@ import type {
   HardwareAutomotivePoolAssignmentRecord,
   HardwareCleanTechRoyaltyPolicyRecord,
   HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetDispatchRecord,
   HardwareCrossLicenseNetSettlementRecord,
   HardwareOtaUnlockApplicationRecord,
   HardwareOtaUnlockPolicyRecord,
   HardwarePatentPoolRecord,
+  HardwarePayoutGateStateRecord,
   HardwarePoolHolderLegRecord,
   HardwarePoolRoutingApplicationRecord,
   HardwarePoolWaterfallApplicationRecord,
@@ -297,6 +299,9 @@ import type {
   HardwareSepRoyaltyPolicyRecord,
   HardwareSepUnitMonthRecord,
   HardwareTelemetryRoyaltyApplicationRecord,
+  PatentLitigationEscrowDrawdownRecord,
+  PatentLitigationEscrowPolicyRecord,
+  PatentLitigationEscrowReconciliationRecord,
 } from '@/modules/hardware/records';
 import type {
   CulinaryAuditEscrowDrawdownRecord,
@@ -669,6 +674,13 @@ const TABLES = {
   softwareAuditEscrowDrawdowns: 'software_audit_escrow_drawdowns',
   softwareAuditEscrowReconciliations: 'software_audit_escrow_reconciliations',
   softwarePayoutGateStates: 'software_payout_gate_states',
+  // PATENT_LITIGATION_ESCROW + the hardware payout gate states + the
+  // cross-license net dispatches (PR 47, migration 0051).
+  patentLitigationEscrowPolicies: 'hardware_patent_litigation_escrow_policies',
+  patentLitigationEscrowDrawdowns: 'hardware_patent_litigation_escrow_drawdowns',
+  patentLitigationEscrowReconciliations: 'hardware_patent_litigation_escrow_reconciliations',
+  hardwarePayoutGateStates: 'hardware_payout_gate_states',
+  hardwareCrossLicenseNetDispatches: 'hardware_cross_license_net_dispatches',
   // Migration 0048 — the developer lane: the royalty/split/ledger/deal
   // registries, the two cumulative monthly trackers, and the seven
   // application ledgers.
@@ -8590,6 +8602,189 @@ export class SupabaseStore implements Store {
         .maybeSingle(),
       'getSoftwarePayoutGateState',
     );
+  }
+
+  async upsertPatentLitigationEscrowPolicy(
+    row: Omit<PatentLitigationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PatentLitigationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<PatentLitigationEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.patentLitigationEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertPatentLitigationEscrowPolicy',
+    );
+  }
+
+  async getPatentLitigationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<PatentLitigationEscrowPolicyRecord | undefined> {
+    return this.one<PatentLitigationEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.patentLitigationEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getPatentLitigationEscrowPolicy',
+    );
+  }
+
+  async insertPatentLitigationEscrowDrawdown(
+    row: Omit<PatentLitigationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<PatentLitigationEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.patentLitigationEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertPatentLitigationEscrowDrawdown',
+    );
+  }
+
+  async listPatentLitigationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // fitness, spatial, culinary, service, and software drawdown lists run.
+    const { data, error } = await this.client
+      .from(TABLES.patentLitigationEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listPatentLitigationEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as PatentLitigationEscrowDrawdownRecord[];
+  }
+
+  async insertPatentLitigationEscrowReconciliation(
+    row: Omit<PatentLitigationEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<PatentLitigationEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.patentLitigationEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertPatentLitigationEscrowReconciliation',
+    );
+  }
+
+  async getPatentLitigationEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowReconciliationRecord | undefined> {
+    return this.one<PatentLitigationEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.patentLitigationEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getPatentLitigationEscrowReconciliation',
+    );
+  }
+
+  async settlePatentLitigationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'patent_litigation_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settlePatentLitigationEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertHardwarePayoutGateState(
+    row: Omit<HardwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, sep_pool_code) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<HardwarePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.hardwarePayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,sep_pool_code' })
+        .select()
+        .maybeSingle(),
+      'upsertHardwarePayoutGateState',
+    );
+  }
+
+  async getHardwarePayoutGateState(
+    payeeId: string,
+    sepPoolCode: string,
+  ): Promise<HardwarePayoutGateStateRecord | undefined> {
+    return this.one<HardwarePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.hardwarePayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('sep_pool_code', sepPoolCode)
+        .maybeSingle(),
+      'getHardwarePayoutGateState',
+    );
+  }
+
+  async insertHardwareCrossLicenseNetDispatch(
+    row: Omit<HardwareCrossLicenseNetDispatchRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord> {
+    // UNIQUE per (agreement_ref, period, net_before_cents,
+    // net_after_cents) — the replay guard AND the concurrency arbiter
+    // (insert-as-lock): a replayed trigger at the same settlement state
+    // or a lost race throws at the migration's constraint, never a
+    // double dispatch. net_before is in the tuple so a re-net that
+    // revisits an earlier net cannot collide with the row that first
+    // reached it.
+    return this.oneStrict<HardwareCrossLicenseNetDispatchRecord>(
+      this.client
+        .from(TABLES.hardwareCrossLicenseNetDispatches)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertHardwareCrossLicenseNetDispatch',
+    );
+  }
+
+  async listHardwareCrossLicenseNetDispatches(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord[]> {
+    // Chronological execution order — the cumulative dispatched position
+    // strictly advances as dispatches land.
+    const { data, error } = await this.client
+      .from(TABLES.hardwareCrossLicenseNetDispatches)
+      .select()
+      .eq('agreement_ref', agreementRef)
+      .eq('period', period)
+      .order('created_at', { ascending: true })
+      .order('net_before_cents', { ascending: true });
+    if (error) {
+      throw new Error(`listHardwareCrossLicenseNetDispatches failed: ${error.message}`);
+    }
+    return (data ?? []) as HardwareCrossLicenseNetDispatchRecord[];
   }
 
   // ------------------------------------------------------------------

@@ -262,6 +262,11 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  PatentLitigationEscrowDrawdownRecord,
+  PatentLitigationEscrowPolicyRecord,
+  PatentLitigationEscrowReconciliationRecord,
+} from '@/modules/hardware/records';
+import type {
   SoftwareAuditEscrowDrawdownRecord,
   SoftwareAuditEscrowPolicyRecord,
   SoftwareAuditEscrowReconciliationRecord,
@@ -309,10 +314,12 @@ import type {
   HardwareAutomotivePoolAssignmentRecord,
   HardwareCleanTechRoyaltyPolicyRecord,
   HardwareCrossLicenseAgreementRecord,
+  HardwareCrossLicenseNetDispatchRecord,
   HardwareCrossLicenseNetSettlementRecord,
   HardwareOtaUnlockApplicationRecord,
   HardwareOtaUnlockPolicyRecord,
   HardwarePatentPoolRecord,
+  HardwarePayoutGateStateRecord,
   HardwarePoolHolderLegRecord,
   HardwarePoolRoutingApplicationRecord,
   HardwarePoolWaterfallApplicationRecord,
@@ -4004,6 +4011,103 @@ export interface Store {
     payeeId: string,
     apiEndpointId: string,
   ): Promise<SoftwarePayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the PATENT_LITIGATION_ESCROW's founder-banded
+   * rate of record for one scope (migration 0051) — upsert converges:
+   * the newest rate governs the next routing. NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertPatentLitigationEscrowPolicy(
+    row: Omit<PatentLitigationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PatentLitigationEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getPatentLitigationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<PatentLitigationEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0051) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertPatentLitigationEscrowDrawdown(
+    row: Omit<PatentLitigationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listPatentLitigationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0051) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertPatentLitigationEscrowReconciliation(
+    row: Omit<PatentLitigationEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getPatentLitigationEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `patent_litigation_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settlePatentLitigationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the hardware payout gate's states of record for one payee
+   * on one SEP pool (migration 0051) — UNIQUE per (payee_id,
+   * sep_pool_code): an upsert converges (a verification heals
+   * 'unknown'; states never regress through this table). NEVER carries
+   * the id in the conflict payload (the id rotates on conflict).
+   */
+  upsertHardwarePayoutGateState(
+    row: Omit<HardwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePayoutGateStateRecord>;
+
+  /**
+   * One payee × SEP pool's gate states of record; undefined when
+   * none — the hardware payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getHardwarePayoutGateState(
+    payeeId: string,
+    sepPoolCode: string,
+  ): Promise<HardwarePayoutGateStateRecord | undefined>;
+
+  /**
+   * Appends one executed cross-license net dispatch (migration 0051) —
+   * UNIQUE per (agreement_ref, period, net_after_cents) is the replay
+   * guard AND the concurrency arbiter: a replayed trigger or a lost
+   * race throws here, never a double dispatch.
+   */
+  insertHardwareCrossLicenseNetDispatch(
+    row: Omit<HardwareCrossLicenseNetDispatchRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord>;
+
+  /** One (agreement, period)'s net dispatches in execution order —
+   * the append-only truth the dispatched position derives from. */
+  listHardwareCrossLicenseNetDispatches(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord[]>;
 
 
   /**

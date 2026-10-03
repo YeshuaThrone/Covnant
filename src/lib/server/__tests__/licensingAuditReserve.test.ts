@@ -200,7 +200,12 @@ describe("registerLicensingAuditReservePolicy — the rate band", () => {
 
   it("converges on re-registration — the newest rate governs the next routing", async () => {
     const store = makeStore();
-    await seedPolicy(store, 700);
+    const first = await registerLicensingAuditReservePolicy(store, {
+      scope_key: SCOPE,
+      reserve_rate_bps: 700,
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
     const second = await registerLicensingAuditReservePolicy(store, {
       scope_key: SCOPE,
       reserve_rate_bps: 900,
@@ -208,7 +213,15 @@ describe("registerLicensingAuditReservePolicy — the rate band", () => {
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.reserve_rate_bps).toBe(900);
-    expect(second.value.created_at).toBe(second.value.updated_at);
+    // Convergence preserves the row of record — same id and creation
+    // instant; only the rate (and the refresh instant) move. (The
+    // same-millisecond equality this replaced raced under full-suite
+    // load.)
+    expect(second.value.id).toBe(first.value.id);
+    expect(second.value.created_at).toBe(first.value.created_at);
+    expect(new Date(second.value.updated_at).getTime()).toBeGreaterThanOrEqual(
+      new Date(first.value.updated_at).getTime(),
+    );
   });
 });
 

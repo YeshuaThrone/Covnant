@@ -622,6 +622,16 @@ export const JOURNAL_KINDS = [
   // licensor's vault (through the taxed cascade) and the platform the
   // moment the activation feed detects the purchase.
   "hardware_ota_unlock_settlement_post",
+  // PR 47, the founder hardware directive: the PATENT_LITIGATION_ESCROW's
+  // route/drawdown/release journals (the software twin's shapes at the
+  // elevated 10–15% band) and the real-time cross-license net dispatch —
+  // a period's mutual patent liabilities clearing to ONE net dispatch
+  // (the settlement of record's delta), the cross-licensing ledgers
+  // reconciling in the Don ledger.
+  "patent_litigation_escrow_route",
+  "patent_litigation_escrow_drawdown",
+  "patent_litigation_escrow_release",
+  "cross_license_net_dispatch",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -791,6 +801,59 @@ export function softwareAuditEscrowGlAccount(scopeKey: string): string {
 // refused.
 export const SOFTWARE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
 export const SOFTWARE_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
+
+// PATENT_LITIGATION_ESCROW (PR 47, the founder hardware directive): the
+// hardware twin of the NIL, spatial, fitness, culinary, service, and
+// software audit escrows — but at the founder's ELEVATED band: 10–15% of
+// a hardware patent payout locks per (licensor payee, SEP pool) scope,
+// double the standard 5–10% verticals, because patent litigation exposure
+// prices higher than an uptime SLA or a backbar inventory audit: a global
+// FRAND rate redetermination can reprice every historical royalty, an
+// anti-suit injunction carries penalty exposure, and a cross-border
+// validity challenge can unwind a family's entire royalty basis. Global
+// court rate redeterminations, anti-suit injunction penalties, and
+// cross-border patent validity challenges draw it down, and the verified
+// reconciliation of record opens the release. Sentinel payee + GL account
+// per scope key — the no-fold discipline: the escrow is its own
+// escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const PATENT_LITIGATION_ESCROW_PAYEE_PREFIX = "patent_litigation_escrow";
+export function patentLitigationEscrowPayeeId(scopeKey: string): string {
+  return `${PATENT_LITIGATION_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function patentLitigationEscrowPayeeName(scopeKey: string): string {
+  return `PATENT_LITIGATION_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_PATENT_LITIGATION_ESCROW = "patent_litigation_escrow";
+export function patentLitigationEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_PATENT_LITIGATION_ESCROW}:${scopeKey}`;
+}
+// The founder's ELEVATED band, enforced at registration AND at use: a
+// 10–15% share of the hardware patent payout. Anything outside the band is
+// a hostile policy, refused.
+export const PATENT_LITIGATION_ESCROW_MIN_RATE_BPS = 1_000;
+export const PATENT_LITIGATION_ESCROW_MAX_RATE_BPS = 1_500;
+
+// The cross-license net settlement execution's GL accounts (PR 47): one
+// position account per (agreement, period) — the period's netting
+// clearing, which every execution's legs zero-sum — and one liability
+// account per side, carrying the gross liabilities of record the
+// dispatches clear. The reconciliation identity the Don ledger pins: the
+// liability accounts' net movement and the dispatch rows' deltas both
+// reconcile to the settlement of record's net.
+export function crossLicenseNettingPositionGlAccount(
+  agreementRef: string,
+  period: string,
+): string {
+  return `cross_license_netting:${agreementRef}:${period}:position`;
+}
+export function crossLicenseLiabilityGlAccount(
+  agreementRef: string,
+  period: string,
+  side: "a" | "b",
+): string {
+  return `cross_license_netting:${agreementRef}:${period}:${side}_liability`;
+}
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

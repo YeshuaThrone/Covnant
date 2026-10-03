@@ -266,6 +266,13 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  HardwareCrossLicenseNetDispatchRecord,
+  HardwarePayoutGateStateRecord,
+  PatentLitigationEscrowDrawdownRecord,
+  PatentLitigationEscrowPolicyRecord,
+  PatentLitigationEscrowReconciliationRecord,
+} from '@/modules/hardware/records';
+import type {
   SoftwareAuditEscrowDrawdownRecord,
   SoftwareAuditEscrowPolicyRecord,
   SoftwareAuditEscrowReconciliationRecord,
@@ -3972,6 +3979,83 @@ CREATE TABLE IF NOT EXISTS hardware_cross_license_net_settlements (
     OR (net_cents < 0 AND direction = 'b_to_a')
     OR (net_cents = 0 AND direction = 'balanced')
   )
+);
+
+-- PR 47 — the patent litigation escrow, the hardware payout gate states,
+-- and the cross-license net dispatches (migration 0051): the software
+-- twins' shapes over the hardware lane's own (licensor payee, SEP pool)
+-- identity space. The CHECK vocabularies below are byte-identical to the
+-- TypeScript unions in src/modules/hardware/records.ts (the PR 129/130
+-- lesson).
+CREATE TABLE IF NOT EXISTS hardware_patent_litigation_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 1000 AND reserve_rate_bps <= 1500),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_patent_litigation_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('global_court_rate_redetermination', 'anti_suit_injunction_penalty', 'cross_border_patent_validity_challenge')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard.
+  UNIQUE (reserve_ledger_id, source_event_id),
+  -- UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+  -- lock the balance derives from.
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_patent_litigation_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hardware_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  sep_pool_code TEXT NOT NULL,
+  frand_determination_state TEXT NOT NULL CHECK (frand_determination_state IN ('unknown', 'cleared')),
+  essentiality_audit_state TEXT NOT NULL CHECK (essentiality_audit_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, sep_pool_code)
+);
+
+CREATE TABLE IF NOT EXISTS hardware_cross_license_net_dispatches (
+  id TEXT PRIMARY KEY,
+  agreement_ref TEXT NOT NULL,
+  company_a_id TEXT NOT NULL,
+  company_b_id TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  net_before_cents INTEGER NOT NULL,
+  net_after_cents INTEGER NOT NULL,
+  dispatched_delta_cents INTEGER NOT NULL,
+  a_gross_cleared_cents INTEGER NOT NULL CHECK (a_gross_cleared_cents >= 0),
+  b_gross_cleared_cents INTEGER NOT NULL CHECK (b_gross_cleared_cents >= 0),
+  direction TEXT NOT NULL CHECK (direction IN ('a_to_b', 'b_to_a', 'balanced')),
+  journal_id TEXT,
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (agreement_ref, period, net_before_cents,
+  -- net_after_cents) — the replay guard AND the concurrency arbiter
+  -- (insert-as-lock): a replayed trigger at the same settlement state
+  -- or a lost race throws here, never a double dispatch. net_before is
+  -- in the tuple so a re-net that revisits an earlier net cannot
+  -- collide with the row that first reached it.
+  UNIQUE (agreement_ref, period, net_before_cents, net_after_cents)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -18535,6 +18619,319 @@ export class SqliteStore implements Store {
       )
       .get(licenseeId, payeeId, period) as Record<string, unknown> | undefined;
     return (row?.total as number) ?? 0;
+  }
+
+  async upsertPatentLitigationEscrowPolicy(
+    row: Omit<PatentLitigationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PatentLitigationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_patent_litigation_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getPatentLitigationEscrowPolicy(record.scope_key) as Promise<
+      PatentLitigationEscrowPolicyRecord
+    >;
+  }
+
+  async getPatentLitigationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<PatentLitigationEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM hardware_patent_litigation_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertPatentLitigationEscrowDrawdown(
+    row: Omit<PatentLitigationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_patent_litigation_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listPatentLitigationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM hardware_patent_litigation_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class:
+        row.drawdown_class as PatentLitigationEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertPatentLitigationEscrowReconciliation(
+    row: Omit<PatentLitigationEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<PatentLitigationEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_patent_litigation_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.reserve_ledger_id, record.evidence_ref, record.reconciled_by, record.created_at);
+    return record;
+  }
+
+  async getPatentLitigationEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<PatentLitigationEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_patent_litigation_escrow_reconciliations WHERE reserve_ledger_id = ?`,
+      )
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settlePatentLitigationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the software escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'patent_litigation_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertHardwarePayoutGateState(
+    row: Omit<HardwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<HardwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, sep_pool_code) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_payout_gate_states
+           (id, payee_id, sep_pool_code, frand_determination_state,
+            essentiality_audit_state, evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, sep_pool_code) DO UPDATE SET
+           frand_determination_state = excluded.frand_determination_state,
+           essentiality_audit_state = excluded.essentiality_audit_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.sep_pool_code,
+        record.frand_determination_state,
+        record.essentiality_audit_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getHardwarePayoutGateState(
+      record.payee_id,
+      record.sep_pool_code,
+    ) as Promise<HardwarePayoutGateStateRecord>;
+  }
+
+  async getHardwarePayoutGateState(
+    payeeId: string,
+    sepPoolCode: string,
+  ): Promise<HardwarePayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM hardware_payout_gate_states WHERE payee_id = ? AND sep_pool_code = ?`,
+      )
+      .get(payeeId, sepPoolCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      sep_pool_code: row.sep_pool_code as string,
+      frand_determination_state:
+        row.frand_determination_state as HardwarePayoutGateStateRecord['frand_determination_state'],
+      essentiality_audit_state:
+        row.essentiality_audit_state as HardwarePayoutGateStateRecord['essentiality_audit_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertHardwareCrossLicenseNetDispatch(
+    row: Omit<HardwareCrossLicenseNetDispatchRecord, 'id' | 'created_at'>,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord> {
+    // UNIQUE per (agreement_ref, period, net_after_cents) — the replay
+    // guard AND the concurrency arbiter (insert-as-lock): a replayed
+    // trigger at the same settlement state or a lost race throws here,
+    // never a double dispatch.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hardware_cross_license_net_dispatches
+           (id, agreement_ref, company_a_id, company_b_id, period, currency,
+            net_before_cents, net_after_cents, dispatched_delta_cents,
+            a_gross_cleared_cents, b_gross_cleared_cents, direction, journal_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.agreement_ref,
+        record.company_a_id,
+        record.company_b_id,
+        record.period,
+        record.currency,
+        record.net_before_cents,
+        record.net_after_cents,
+        record.dispatched_delta_cents,
+        record.a_gross_cleared_cents,
+        record.b_gross_cleared_cents,
+        record.direction,
+        record.journal_id,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listHardwareCrossLicenseNetDispatches(
+    agreementRef: string,
+    period: string,
+  ): Promise<HardwareCrossLicenseNetDispatchRecord[]> {
+    // Chronological execution order: created_at ASC with net_before_cents
+    // ASC as the tiebreak — the cumulative dispatched position strictly
+    // advances as dispatches land.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM hardware_cross_license_net_dispatches
+         WHERE agreement_ref = ? AND period = ?
+         ORDER BY created_at ASC, net_before_cents ASC`,
+      )
+      .all(agreementRef, period) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      agreement_ref: row.agreement_ref as string,
+      company_a_id: row.company_a_id as string,
+      company_b_id: row.company_b_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      net_before_cents: row.net_before_cents as number,
+      net_after_cents: row.net_after_cents as number,
+      dispatched_delta_cents: row.dispatched_delta_cents as number,
+      a_gross_cleared_cents: row.a_gross_cleared_cents as number,
+      b_gross_cleared_cents: row.b_gross_cleared_cents as number,
+      direction: row.direction as HardwareCrossLicenseNetDispatchRecord['direction'],
+      journal_id: row.journal_id as string | null,
+      created_at: row.created_at as string,
+    }));
   }
 }
 
