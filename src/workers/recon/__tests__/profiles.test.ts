@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers fifty-four profiles in dispatch order", () => {
+  it("registers fifty-nine profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -119,6 +119,17 @@ describe("profile registry", () => {
       "fitness_equipment_telemetry_csv",
       "fitness_studio_checkins_csv",
       "fitness_subscription_allocations_csv",
+      // The food lane (PR 40, the founder food directive) — dispatched
+      // last, its own rights family (third-party delivery app order
+      // feeds, restaurant POS ticket streams, meal-kit production
+      // batches, grocery CPG scanner logs, and bulk supplier rebate
+      // statements; never music-rights split math — the lane keys the
+      // chef, recipe, and ghost-kitchen-location identity columns).
+      "food_delivery_orders_csv",
+      "food_pos_tickets_csv",
+      "food_meal_kit_production_csv",
+      "food_grocery_cpg_scans_csv",
+      "food_supplier_rebates_csv",
     ]);
   });
 

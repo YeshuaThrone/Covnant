@@ -116,7 +116,17 @@ export type StatementProfileKind =
   | "fitness_completed_workouts_csv"
   | "fitness_equipment_telemetry_csv"
   | "fitness_studio_checkins_csv"
-  | "fitness_subscription_allocations_csv";
+  | "fitness_subscription_allocations_csv"
+  // The food lane (PR 40, the founder food directive) — the five strict
+  // senders the directive names (third-party delivery app order feeds,
+  // restaurant POS ticket streams, meal-kit production volume, grocery
+  // CPG scanner logs, bulk food supplier rebate statements), one strict
+  // profile per sender's sheet.
+  | "food_delivery_orders_csv"
+  | "food_pos_tickets_csv"
+  | "food_meal_kit_production_csv"
+  | "food_grocery_cpg_scans_csv"
+  | "food_supplier_rebates_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -994,6 +1004,13 @@ export interface ParsedStatementLine {
    * null on every non-fitness line — the presence IS the lane
    * discriminator. Optional for the same reason as bookDetail. */
   fitnessDetail?: FitnessLineDetail | null;
+
+  /** Food lane context (the statement sender, the sender row id of
+   * record, the chef/recipe/location keys the Net Recipe Realization
+   * calculator and every walk key on, and the sender-specific money or
+   * usage legs); null on every non-food line — the presence IS the lane
+   * discriminator. Optional for the same reason as bookDetail. */
+  foodDetail?: FoodLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1162,6 +1179,110 @@ export type FitnessLineDetail =
   | FitnessEquipmentTelemetryDetail
   | FitnessStudioCheckinDetail
   | FitnessSubscriptionAllocationDetail;
+
+/** The food lane's per-line context (PR 40, the founder food directive) —
+ * one discriminated shape per sender family: the delivery order rows carry
+ * the Net Recipe Realization calculator's four money legs and the unit
+ * count the tier walk advances, the POS ticket rows carry the physical
+ * preparation margin the host operator split routes, the meal-kit
+ * production rows carry the cook-cycle executions the micro-fee policy
+ * prices, the grocery CPG scan rows carry the scanner sales the recipe
+ * schedule's CPG royalty rate prices, and the supplier rebate rows carry
+ * the volume kickback the operator waterfall routes. Every sender repeats
+ * the identity columns the founder's directive keys the lane on —
+ * chef_id, recipe_id, and ghost_kitchen_location_id (the rebate statement
+ * routes by location, so it omits the chef/recipe legs) — plus the month
+ * period and the row currency. */
+export type FoodDeliveryOrderDetail = {
+  readonly sender: "delivery_app_order";
+  /** The sender's order id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The third-party delivery platform of record (bounded vocabulary). */
+  readonly platform: "doordash" | "ubereats" | "grubhub";
+  readonly chefId: string;
+  readonly recipeId: string;
+  readonly ghostKitchenLocationId: string;
+  readonly period: string;
+  /** The row's ISO currency of record (validated at parse). */
+  readonly currency: string;
+  /** The row's units of record — the tier walk's advance and the
+   * percentage-split tier's position driver. */
+  readonly unitsSold: number;
+  /** The four realization legs of record — the order feed's own figures,
+   * never a rate guess. */
+  readonly grossMenuItemSalesCents: number;
+  readonly approvedIngredientCogsCents: number;
+  readonly deliveryPlatformEngineCutCents: number;
+  readonly localFoodServiceTaxesCents: number;
+};
+
+export type FoodPosTicketDetail = {
+  readonly sender: "pos_ticket";
+  readonly senderRowId: string;
+  /** The restaurant POS platform of record (bounded vocabulary). */
+  readonly platform: "toast" | "square";
+  readonly chefId: string;
+  readonly recipeId: string;
+  readonly ghostKitchenLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly tickets: number;
+  /** The physical preparation margin of record — the host operator
+   * split's basis. */
+  readonly physicalPreparationMarginCents: number;
+};
+
+export type FoodMealKitDetail = {
+  readonly sender: "meal_kit_production";
+  /** The sender's production batch id of record. */
+  readonly senderRowId: string;
+  readonly chefId: string;
+  readonly recipeId: string;
+  readonly ghostKitchenLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly mealKitsProduced: number;
+  /** The batch's cook-cycle executions of record — the cook-cycle
+   * micro-royalty's basis. */
+  readonly cookCyclesExecuted: number;
+};
+
+export type FoodCobrandScanDetail = {
+  readonly sender: "grocery_cpg_scan";
+  /** The sender's scan batch id of record. */
+  readonly senderRowId: string;
+  readonly chefId: string;
+  readonly recipeId: string;
+  readonly ghostKitchenLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly unitsScanned: number;
+  /** The scanner sales of record — the CPG royalty rate's basis. */
+  readonly grossScannerSalesCents: number;
+};
+
+export type FoodRebateDetail = {
+  readonly sender: "supplier_rebate";
+  /** The sender's rebate id of record. */
+  readonly senderRowId: string;
+  /** The bulk food supplier of record (bounded vocabulary). */
+  readonly supplier: "sysco" | "us_foods";
+  /** The location the rebate routes through — the waterfall's key. */
+  readonly ghostKitchenLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The rebate program's purchase basis of record. */
+  readonly rebateBasisCents: number;
+  /** The volume kickback of record — the routing's pot. */
+  readonly volumeRebateCents: number;
+};
+
+export type FoodLineDetail =
+  | FoodDeliveryOrderDetail
+  | FoodPosTicketDetail
+  | FoodMealKitDetail
+  | FoodCobrandScanDetail
+  | FoodRebateDetail;
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

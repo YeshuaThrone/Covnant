@@ -221,6 +221,20 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  FoodCobrandSplitApplicationRecord,
+  FoodCobrandWeightingRecord,
+  FoodCookCyclePolicyRecord,
+  FoodCookCycleRoyaltyRecord,
+  FoodHostOperatorPolicyRecord,
+  FoodHostOperatorSplitApplicationRecord,
+  FoodLocationUnitMonthRecord,
+  FoodOperatorWaterfallRecord,
+  FoodRealizationApplicationRecord,
+  FoodRecipeRoyaltyApplicationRecord,
+  FoodRecipeRoyaltyScheduleRecord,
+  FoodSupplierRebateApplicationRecord,
+} from '@/modules/food/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -3681,6 +3695,203 @@ export interface Store {
   /** One concluded event's bonus of record by its source event id;
    * undefined when none — the replay check's read. */
   getFitnessLiveEventBonus(sourceEventId: string): Promise<FitnessLiveEventBonusRecord | undefined>;
+
+  // -------------------------------------------------------------------------
+  // PR 40 — the food lane (migration 0044): the founder food directive's
+  // durable facts of record — the recipe royalty schedules, the cumulative
+  // location-month unit trackers, the host operator and cook-cycle
+  // policies, the co-brand weightings and operator waterfalls the walks
+  // read, and the append-only application ledgers the walks write.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Registers (or replaces) the recipe royalty schedule of record for one
+   * (chef, recipe) — UNIQUE per (chef_id, recipe_id): the newest schedule
+   * governs the next walk. The bands ride as JSON strings, re-validated
+   * at every read.
+   */
+  upsertFoodRecipeRoyaltySchedule(
+    row: Omit<FoodRecipeRoyaltyScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord>;
+
+  /** One chef-recipe's royalty schedule of record; undefined when none —
+   * the royalty walk refuses fail-closed (no schedule, no royalty). */
+  getFoodRecipeRoyaltySchedule(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord | undefined>;
+
+  /**
+   * Advances the cumulative monthly unit tracker of record for one
+   * (ghost kitchen location, month) by the row's units — UNIQUE per
+   * (ghost_kitchen_location_id, month): the tracker converges (an upsert
+   * adds); the walk reads the position BEFORE this advance through the
+   * getter.
+   */
+  advanceFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<FoodLocationUnitMonthRecord>;
+
+  /** One location-month's cumulative units of record; undefined when no
+   * row has advanced yet (position starts at zero). */
+  getFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+  ): Promise<FoodLocationUnitMonthRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the host kitchen operator policy of record
+   * for one ghost kitchen location — UNIQUE per
+   * (ghost_kitchen_location_id): the brand licensor payee and the
+   * percentage cut held back from the physical preparation margin.
+   */
+  upsertFoodHostOperatorPolicy(
+    row: Omit<FoodHostOperatorPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodHostOperatorPolicyRecord>;
+
+  /** One location's host operator policy of record; undefined when none
+   * — a POS ticket row skips fail-closed (never a guessed holdback). */
+  getFoodHostOperatorPolicy(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodHostOperatorPolicyRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the cook-cycle micro-fee policy of record
+   * for one (chef, recipe) — UNIQUE per (chef_id, recipe_id): the payee
+   * and the per-execution micro-fee.
+   */
+  upsertFoodCookCyclePolicy(
+    row: Omit<FoodCookCyclePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCookCyclePolicyRecord>;
+
+  /** One chef-recipe's cook-cycle policy of record; undefined when none
+   * — a production row skips fail-closed (never a guessed micro-fee). */
+  getFoodCookCyclePolicy(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodCookCyclePolicyRecord | undefined>;
+
+  /**
+   * Registers one weighting leg of a recipe's co-branded menu split of
+   * record — UNIQUE per (recipe_id, leg_id): a re-registration converges.
+   */
+  upsertFoodCobrandWeighting(
+    row: Omit<FoodCobrandWeightingRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCobrandWeightingRecord>;
+
+  /** One recipe's registered co-brand weighting legs of record, in
+   * registration order; empty when none registered. */
+  listFoodCobrandWeightings(recipeId: string): Promise<FoodCobrandWeightingRecord[]>;
+
+  /**
+   * Registers one leg of a location's virtual franchise operator
+   * waterfall of record — UNIQUE per
+   * (ghost_kitchen_location_id, operator_id): a re-registration
+   * converges.
+   */
+  upsertFoodOperatorWaterfallLeg(
+    row: Omit<FoodOperatorWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodOperatorWaterfallRecord>;
+
+  /** One location's registered operator waterfall legs of record, in
+   * registration order; empty when none registered. */
+  listFoodOperatorWaterfallLegs(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodOperatorWaterfallRecord[]>;
+
+  /**
+   * Appends one executed Net Recipe Realization — the founder's exact
+   * identity on the order event's legs (migration 0044). UNIQUE per
+   * source_event_id is the replay guard — a re-walked order throws,
+   * never a double application.
+   */
+  insertFoodRealizationApplication(
+    row: Omit<FoodRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFoodRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FoodRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed tiered recipe royalty application — the
+   * committed unit band walk and the percentage split on the location's
+   * cumulative monthly units (migration 0044). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertFoodRecipeRoyaltyApplication(
+    row: Omit<FoodRecipeRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord>;
+
+  /** One recipe royalty application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFoodRecipeRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed weighted co-branded menu split — the royalty
+   * pot routed per the registered weightings, conserved exactly
+   * (migration 0044). UNIQUE per source_event_id is the replay guard.
+   */
+  insertFoodCobrandSplitApplication(
+    row: Omit<FoodCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCobrandSplitApplicationRecord>;
+
+  /** One co-brand split application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFoodCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodCobrandSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed host kitchen operator split — the physical
+   * preparation margin's two routes (migration 0044). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertFoodHostOperatorSplitApplication(
+    row: Omit<FoodHostOperatorSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodHostOperatorSplitApplicationRecord>;
+
+  /** One host operator split application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getFoodHostOperatorSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodHostOperatorSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed cook-cycle micro-royalty — the per-execution
+   * fee at the policy of record (migration 0044). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertFoodCookCycleRoyalty(
+    row: Omit<FoodCookCycleRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCookCycleRoyaltyRecord>;
+
+  /** One cook-cycle royalty of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getFoodCookCycleRoyalty(
+    sourceEventId: string,
+  ): Promise<FoodCookCycleRoyaltyRecord | undefined>;
+
+  /**
+   * Appends one executed supplier rebate routing — the volume kickback
+   * routed proportionally to the location's operators, conserved exactly
+   * (migration 0044). UNIQUE per source_event_id is the replay guard.
+   */
+  insertFoodSupplierRebateApplication(
+    row: Omit<FoodSupplierRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodSupplierRebateApplicationRecord>;
+
+  /** One supplier rebate application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFoodSupplierRebateApplication(
+    sourceEventId: string,
+  ): Promise<FoodSupplierRebateApplicationRecord | undefined>;
 }
 
 

@@ -1,0 +1,4 @@
+Scan ID,Chef ID,Recipe ID,Ghost Kitchen Location ID,Units Scanned,Gross Scanner Sales,Currency,Reporting Period
+SCAN-2026-03-0001,chef-aria,rec-hot-honey,GK-AUSTIN,8000,24000.00,USD,2026-03
+SCAN-2026-03-0002,chef-zed,rec-zero-cpg,GK-AUSTIN,100,300.00,USD,2026-03
+SCAN-2026-03-0003,chef-aria,rec-unscheduled,GK-AUSTIN,10,30.00,USD,2026-03

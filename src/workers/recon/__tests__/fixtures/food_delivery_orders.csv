@@ -1,0 +1,7 @@
+Order ID,Platform,Chef ID,Recipe ID,Ghost Kitchen Location ID,Units Sold,Gross Menu Item Sales,Approved Ingredient COGS,Delivery Platform Engine Cut,Local Food Service Taxes,Currency,Reporting Period
+DO-2026-03-0001,doordash,chef-massimo,rec-truffle-burger,GK-AUSTIN,2500,10000.00,2500.00,1250.00,250.00,USD,2026-03
+DO-2026-03-0002,doordash,chef-massimo,rec-truffle-burger,GK-AUSTIN,100,320.00,80.00,60.00,40.00,USD,2026-03
+DO-2026-04-0001,doordash,chef-massimo,rec-truffle-burger,GK-AUSTIN,2600,2000.00,400.00,300.00,100.00,USD,2026-04
+DO-2026-05-0001,doordash,chef-massimo,rec-truffle-burger,GK-AUSTIN,10,100.00,60.00,30.00,20.00,USD,2026-05
+DO-2026-03-9001,ubereats,chef-massimo,rec-truffle-burger,GK-MIAMI,100,400.00,100.00,80.00,40.00,USD,2026-03
+DO-2026-03-9002,grubhub,chef-massimo,rec-truffle-burger,GK-MIAMI,50,250.00,75.00,50.00,45.00,USD,2026-03

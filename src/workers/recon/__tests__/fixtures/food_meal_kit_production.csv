@@ -1,0 +1,3 @@
+Production Batch ID,Chef ID,Recipe ID,Ghost Kitchen Location ID,Meal Kits Produced,Cook Cycles Executed,Currency,Reporting Period
+BATCH-2026-03-0001,chef-massimo,rec-truffle-burger,GK-AUSTIN,500,1200,USD,2026-03
+BATCH-2026-03-0002,chef-stranger,rec-stranger-dish,GK-AUSTIN,300,100,USD,2026-03
