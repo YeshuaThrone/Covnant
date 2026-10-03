@@ -64,6 +64,8 @@ import { writeSpatialRowsToStore } from "./spatialQueue";
 import { writeFitnessRowsToStore } from "./fitnessQueue";
 import { writeFoodRowsToStore } from "./foodQueue";
 import { isServiceProfileKind } from "./serviceProfiles";
+import { isDeveloperProfileKind } from "./developerProfiles";
+import { writeDeveloperRowsToStore } from "./developerQueue";
 import { writeServiceRowsToStore } from "./serviceQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
@@ -341,6 +343,23 @@ async function processJobBody(
     // match_queue never sees a service row.
     if (isServiceProfileKind(matchedProfile.kind)) {
       return await parseService(deps, matchedProfile, content);
+    }
+    // The developer lane branches the same way (PR 44, the founder
+    // developer directive): its rows are the eight strict senders'
+    // gateway-usage / SDK-initialization / token-redemption / marketplace-
+    // sale / co-package-revenue / SBOM-scan / white-label-license /
+    // tool-call lines whose money runs the Net API Realization identity
+    // (gross API transaction revenue − cloud infrastructure hosting base
+    // − payment processing gate cut − enterprise SLA reserves = the Net
+    // Code Usage Pool), the tiered per-call and usage-share
+    // micro-royalties, the marketplace splits, the co-authored package
+    // splits, the SBOM dependency micro-fees, the white-label MMG
+    // recoupment, and the agent tool-call settlements — never the music
+    // queue's split math, the service walks, or any other lane's
+    // machinery. The store applications ARE the lane's money of record;
+    // match_queue never sees a developer row.
+    if (isDeveloperProfileKind(matchedProfile.kind)) {
+      return await parseDeveloper(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1200,6 +1219,74 @@ async function parseService(
     service_rebate_routed_cents: counts.rebateRoutedCents,
     service_chair_rent_cents: counts.chairRentCents,
     service_retail_commission_cents: counts.retailCommissionCents,
+  };
+}
+
+/**
+ * The developer lane (PR 44): the eight strict senders' rows (API gateway
+ * usage logs, SDK initialization events, usage-based billing tokens, app
+ * store marketplace sales feeds, co-authored package revenue, SBOM scan
+ * telemetry, white-label enterprise license logs, and agent tool-call
+ * batches) convert through the Net API Realization calculator, the
+ * tiered per-call and usage-share micro-royalties, the marketplace
+ * splits, the co-authored package splits, the SBOM dependency micro-fees,
+ * the white-label MMG recoupment, and the agent tool-call settlements.
+ * No match_queue row, no holding post: replay guards and the fail-closed
+ * policies of record govern everything. The result's developer_* block is
+ * absent on every other lane — its presence is the discriminator.
+ */
+async function parseDeveloper(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeDeveloperRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationWritten +
+      counts.microRoyaltiesWritten +
+      counts.marketplaceSplitsWritten +
+      counts.copackageSplitsWritten +
+      counts.dependencyFeesWritten +
+      counts.whitelabelSettlementsWritten +
+      counts.toolCallSettlementsWritten,
+    matched: 0, // no vault matching on this lane — the developer tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    developer_realization_applications_committed: counts.realizationWritten,
+    developer_realization_applications_replayed: counts.realizationReplayed,
+    developer_realization_held_negative_net: counts.realizationHeldNegativeNet,
+    developer_micro_royalties_committed: counts.microRoyaltiesWritten,
+    developer_micro_royalties_replayed: counts.microRoyaltiesReplayed,
+    developer_micro_royalties_skipped_no_policy: counts.microRoyaltiesSkippedNoPolicy,
+    developer_marketplace_splits_committed: counts.marketplaceSplitsWritten,
+    developer_marketplace_splits_replayed: counts.marketplaceSplitsReplayed,
+    developer_marketplace_skipped_no_policy: counts.marketplaceSkippedNoPolicy,
+    developer_copackage_splits_committed: counts.copackageSplitsWritten,
+    developer_copackage_splits_replayed: counts.copackageSplitsReplayed,
+    developer_copackage_skipped_no_legs: counts.copackageSkippedNoLegs,
+    developer_dependency_fees_committed: counts.dependencyFeesWritten,
+    developer_dependency_fees_replayed: counts.dependencyFeesReplayed,
+    developer_dependency_skipped_no_ledger: counts.dependencySkippedNoLedger,
+    developer_whitelabel_settlements_committed: counts.whitelabelSettlementsWritten,
+    developer_whitelabel_settlements_replayed: counts.whitelabelSettlementsReplayed,
+    developer_whitelabel_skipped_no_deal: counts.whitelabelSkippedNoDeal,
+    developer_tool_call_settlements_committed: counts.toolCallSettlementsWritten,
+    developer_tool_call_settlements_replayed: counts.toolCallSettlementsReplayed,
+    developer_tool_call_skipped_no_policy: counts.toolCallSkippedNoPolicy,
+    developer_net_code_usage_pool_cents: counts.netCodeUsagePoolCents,
+    developer_micro_royalty_cents: counts.microRoyaltyCents,
+    developer_marketplace_platform_cents: counts.marketplacePlatformCents,
+    developer_marketplace_developer_net_cents: counts.marketplaceDeveloperNetCents,
+    developer_copackage_allocated_cents: counts.copackageAllocatedCents,
+    developer_dependency_fee_cents: counts.dependencyFeeCents,
+    developer_whitelabel_recouped_cents: counts.whitelabelRecoupedCents,
+    developer_whitelabel_overage_royalty_cents: counts.whitelabelOverageRoyaltyCents,
+    developer_tool_call_builder_cents: counts.toolCallBuilderCents,
+    developer_tool_call_platform_cents: counts.toolCallPlatformCents,
   };
 }
 

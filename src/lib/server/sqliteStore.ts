@@ -266,6 +266,23 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  DeveloperAgentToolCallApplicationRecord,
+  DeveloperApiCallMonthRecord,
+  DeveloperApiMicroRoyaltyApplicationRecord,
+  DeveloperApiRealizationApplicationRecord,
+  DeveloperApiRoyaltyPolicyRecord,
+  DeveloperCopackageContributionLegRecord,
+  DeveloperCopackageSplitApplicationRecord,
+  DeveloperDependencyFeeApplicationRecord,
+  DeveloperDependencyMaintainerLedgerRecord,
+  DeveloperMarketplaceSplitApplicationRecord,
+  DeveloperMarketplaceSplitPolicyRecord,
+  DeveloperToolRoyaltyPolicyRecord,
+  DeveloperWhitelabelLicenseApplicationRecord,
+  DeveloperWhitelabelLicenseDealRecord,
+  DeveloperWhitelabelUsageMonthRecord,
+} from '@/modules/developer/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -3180,6 +3197,268 @@ CREATE TABLE IF NOT EXISTS service_booth_lease_applications (
       AND studio_owner_cents = (gross_cents * retail_commission_bps) / 10000
     )
   )
+);
+
+-- Migration 0048 — the developer lane's registries of record, the two
+-- cumulative monthly trackers, and the seven application ledgers. The
+-- vocabulary here is byte-identical to the TS unions and the Supabase
+-- CHECKs (the PR 129 / 41 lesson).
+CREATE TABLE IF NOT EXISTS developer_api_royalty_policies (
+  id TEXT PRIMARY KEY,
+  developer_id TEXT NOT NULL UNIQUE,
+  royalty_mode TEXT NOT NULL CHECK (royalty_mode IN ('per_call', 'usage_share')),
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  tier_bands TEXT NOT NULL CHECK (length(tier_bands) > 0),
+  usage_share_bps INTEGER NOT NULL CHECK (usage_share_bps >= 0 AND usage_share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS developer_api_call_months (
+  id TEXT PRIMARY KEY,
+  developer_id TEXT NOT NULL,
+  month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  cumulative_calls INTEGER NOT NULL CHECK (cumulative_calls >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (developer_id, month)
+);
+
+CREATE TABLE IF NOT EXISTS developer_marketplace_split_policies (
+  id TEXT PRIMARY KEY,
+  marketplace TEXT NOT NULL UNIQUE,
+  platform_share_bps INTEGER NOT NULL CHECK (platform_share_bps >= 1500 AND platform_share_bps <= 3000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS developer_copackage_contribution_legs (
+  id TEXT PRIMARY KEY,
+  package_id TEXT NOT NULL,
+  maintainer_id TEXT NOT NULL,
+  commits INTEGER NOT NULL CHECK (commits >= 0),
+  pull_requests INTEGER NOT NULL CHECK (pull_requests >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (package_id, maintainer_id),
+  CHECK (length(package_id) > 0),
+  CHECK (length(maintainer_id) > 0),
+  CHECK (commits + pull_requests > 0)
+);
+
+CREATE TABLE IF NOT EXISTS developer_dependency_maintainer_ledgers (
+  id TEXT PRIMARY KEY,
+  component_id TEXT NOT NULL UNIQUE,
+  maintainer_payee_id TEXT NOT NULL CHECK (length(maintainer_payee_id) > 0),
+  micros_per_deploy INTEGER NOT NULL CHECK (micros_per_deploy >= 0),
+  micros_per_active_instance INTEGER NOT NULL CHECK (micros_per_active_instance >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- A ledger pricing nothing is a hostile registration.
+  CHECK (micros_per_deploy > 0 OR micros_per_active_instance > 0)
+);
+
+CREATE TABLE IF NOT EXISTS developer_whitelabel_license_deals (
+  id TEXT PRIMARY KEY,
+  sdk_package_hash TEXT NOT NULL UNIQUE,
+  owner_payee_id TEXT NOT NULL CHECK (length(owner_payee_id) > 0),
+  seat_micros_per_seat INTEGER NOT NULL CHECK (seat_micros_per_seat >= 0),
+  deployment_micros_per_deployment INTEGER NOT NULL CHECK (deployment_micros_per_deployment >= 0),
+  minimum_monthly_guarantee_cents INTEGER NOT NULL CHECK (minimum_monthly_guarantee_cents >= 0),
+  overage_royalty_bps INTEGER NOT NULL CHECK (overage_royalty_bps >= 0 AND overage_royalty_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- A deal pricing nothing is a hostile registration.
+  CHECK (seat_micros_per_seat > 0 OR deployment_micros_per_deployment > 0)
+);
+
+CREATE TABLE IF NOT EXISTS developer_tool_royalty_policies (
+  id TEXT PRIMARY KEY,
+  tool_id TEXT NOT NULL UNIQUE,
+  builder_payee_id TEXT NOT NULL CHECK (length(builder_payee_id) > 0),
+  micros_per_call INTEGER NOT NULL CHECK (micros_per_call > 0),
+  builder_share_bps INTEGER NOT NULL CHECK (builder_share_bps >= 0 AND builder_share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS developer_api_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  feed TEXT NOT NULL CHECK (feed IN ('gateway_usage', 'sdk_initialization', 'usage_billing_token')),
+  developer_id TEXT NOT NULL CHECK (length(developer_id) > 0),
+  api_endpoint_id TEXT NOT NULL,
+  sdk_package_hash TEXT NOT NULL CHECK (length(sdk_package_hash) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_api_transaction_revenue_cents INTEGER NOT NULL CHECK (gross_api_transaction_revenue_cents >= 0),
+  cloud_infrastructure_hosting_base_cents INTEGER NOT NULL CHECK (cloud_infrastructure_hosting_base_cents >= 0),
+  payment_processing_gate_cut_cents INTEGER NOT NULL CHECK (payment_processing_gate_cut_cents >= 0),
+  enterprise_sla_reserve_cents INTEGER NOT NULL CHECK (enterprise_sla_reserve_cents >= 0),
+  net_code_usage_pool_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- THE NET API REALIZATION identity, pinned: the four legs conserve
+  -- the gross exactly.
+  CHECK (
+    cloud_infrastructure_hosting_base_cents
+    + payment_processing_gate_cut_cents
+    + enterprise_sla_reserve_cents
+    + net_code_usage_pool_cents
+    = gross_api_transaction_revenue_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS developer_api_micro_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  feed TEXT NOT NULL CHECK (feed IN ('gateway_usage', 'sdk_initialization', 'usage_billing_token')),
+  developer_id TEXT NOT NULL CHECK (length(developer_id) > 0),
+  api_endpoint_id TEXT NOT NULL,
+  sdk_package_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  royalty_mode TEXT NOT NULL CHECK (royalty_mode IN ('per_call', 'usage_share')),
+  policy_ref TEXT NOT NULL,
+  api_calls INTEGER NOT NULL CHECK (api_calls >= 0),
+  tier_legs TEXT NOT NULL,
+  usage_share_bps INTEGER NOT NULL CHECK (usage_share_bps >= 0 AND usage_share_bps <= 10000),
+  royalty_basis_cents INTEGER NOT NULL CHECK (royalty_basis_cents >= 0),
+  royalty_micros INTEGER NOT NULL CHECK (royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents = royalty_micros / 1000000),
+  monthly_calls_before INTEGER NOT NULL CHECK (monthly_calls_before >= 0),
+  monthly_calls_after INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (monthly_calls_after = monthly_calls_before + api_calls)
+);
+
+CREATE TABLE IF NOT EXISTS developer_marketplace_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  marketplace TEXT NOT NULL CHECK (marketplace IN ('apple_app_store', 'google_play', 'unity_asset_store', 'vscode_marketplace')),
+  developer_id TEXT NOT NULL CHECK (length(developer_id) > 0),
+  sdk_package_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_sale_cents INTEGER NOT NULL CHECK (gross_sale_cents >= 0),
+  policy_ref TEXT NOT NULL,
+  platform_share_bps INTEGER NOT NULL CHECK (platform_share_bps >= 1500 AND platform_share_bps <= 3000),
+  platform_cents INTEGER NOT NULL,
+  developer_net_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The founder band's platform share floors and the split conserves
+  -- the sale exactly.
+  CHECK (platform_cents = (gross_sale_cents * platform_share_bps) / 10000),
+  CHECK (platform_cents + developer_net_cents = gross_sale_cents)
+);
+
+CREATE TABLE IF NOT EXISTS developer_copackage_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  package_id TEXT NOT NULL CHECK (length(package_id) > 0),
+  developer_id TEXT NOT NULL,
+  revenue_kind TEXT NOT NULL CHECK (revenue_kind IN ('subscription', 'sponsorship')),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_revenue_cents INTEGER NOT NULL CHECK (gross_revenue_cents >= 0),
+  split_legs TEXT NOT NULL CHECK (length(split_legs) > 0),
+  allocated_total_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The contribution-weighted shares conserve the revenue exactly.
+  CHECK (allocated_total_cents = gross_revenue_cents)
+);
+
+CREATE TABLE IF NOT EXISTS developer_dependency_fee_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  developer_id TEXT NOT NULL,
+  component_id TEXT NOT NULL CHECK (length(component_id) > 0),
+  scan_context TEXT NOT NULL CHECK (scan_context IN ('ci_deploy', 'runtime_fleet')),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  deploy_count INTEGER NOT NULL CHECK (deploy_count >= 0),
+  active_instances INTEGER NOT NULL CHECK (active_instances >= 0),
+  ledger_ref TEXT NOT NULL,
+  maintainer_payee_id TEXT NOT NULL CHECK (length(maintainer_payee_id) > 0),
+  micros_per_deploy INTEGER NOT NULL,
+  micros_per_active_instance INTEGER NOT NULL,
+  fee_micros INTEGER NOT NULL CHECK (fee_micros >= 0),
+  fee_cents INTEGER NOT NULL CHECK (fee_cents = fee_micros / 1000000),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS developer_whitelabel_license_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sdk_package_hash TEXT NOT NULL CHECK (length(sdk_package_hash) > 0),
+  licensor_id TEXT NOT NULL CHECK (length(licensor_id) > 0),
+  event_kind TEXT NOT NULL CHECK (event_kind IN ('seat', 'deployment')),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  deal_ref TEXT NOT NULL,
+  owner_payee_id TEXT NOT NULL CHECK (length(owner_payee_id) > 0),
+  usage_micros INTEGER NOT NULL CHECK (usage_micros >= 0),
+  usage_cents INTEGER NOT NULL CHECK (usage_cents = usage_micros / 1000000),
+  monthly_usage_before_cents INTEGER NOT NULL,
+  monthly_usage_after_cents INTEGER NOT NULL,
+  mmg_cents INTEGER NOT NULL CHECK (mmg_cents >= 0),
+  recouped_cents INTEGER NOT NULL,
+  overage_cents INTEGER NOT NULL,
+  overage_royalty_bps INTEGER NOT NULL CHECK (overage_royalty_bps >= 0 AND overage_royalty_bps <= 10000),
+  overage_royalty_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (monthly_usage_after_cents = monthly_usage_before_cents + usage_cents),
+  -- THE MMG RECOUPMENT, pinned: the guarantee recoups against the
+  -- month's cumulative usage.
+  CHECK (
+    recouped_cents
+    = min(mmg_cents, monthly_usage_after_cents)
+      - min(mmg_cents, monthly_usage_before_cents)
+  ),
+  CHECK (overage_cents = usage_cents - recouped_cents),
+  CHECK (overage_royalty_cents = (overage_cents * overage_royalty_bps) / 10000)
+);
+
+CREATE TABLE IF NOT EXISTS developer_whitelabel_usage_months (
+  id TEXT PRIMARY KEY,
+  sdk_package_hash TEXT NOT NULL,
+  licensor_id TEXT NOT NULL,
+  month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  cumulative_usage_cents INTEGER NOT NULL CHECK (cumulative_usage_cents >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (sdk_package_hash, licensor_id, month)
+);
+
+CREATE TABLE IF NOT EXISTS developer_agent_tool_call_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL CHECK (length(agent_id) > 0),
+  tool_id TEXT NOT NULL CHECK (tool_id IN ('web_search', 'database_query', 'payment_action')),
+  call_count INTEGER NOT NULL CHECK (call_count > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  policy_ref TEXT NOT NULL,
+  builder_payee_id TEXT NOT NULL CHECK (length(builder_payee_id) > 0),
+  micros_per_call INTEGER NOT NULL CHECK (micros_per_call > 0),
+  settlement_micros INTEGER NOT NULL CHECK (settlement_micros >= 0),
+  settlement_cents INTEGER NOT NULL CHECK (settlement_cents = settlement_micros / 1000000),
+  builder_share_bps INTEGER NOT NULL CHECK (builder_share_bps >= 0 AND builder_share_bps <= 10000),
+  builder_cents INTEGER NOT NULL,
+  platform_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  CHECK (builder_cents = (settlement_cents * builder_share_bps) / 10000),
+  CHECK (builder_cents + platform_cents = settlement_cents)
 );
 
 -- The culinary audit escrow (migration 0045, PR 41) — the founder
@@ -15740,6 +16019,981 @@ export class SqliteStore implements Store {
       gross_cents: row.gross_cents as number,
       retail_commission_bps: row.retail_commission_bps as number,
       studio_owner_cents: row.studio_owner_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // The developer lane (PR 44) — the founder developer directive's
+  // registries of record, the two cumulative monthly trackers, and the
+  // seven application ledgers.
+  // ------------------------------------------------------------------
+
+  async upsertDeveloperApiRoyaltyPolicy(
+    row: Omit<DeveloperApiRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord> {
+    // UNIQUE per developer_id — a re-registered policy replaces the row
+    // atomically (never the id column in the conflict payload).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_api_royalty_policies
+           (id, developer_id, royalty_mode, payee_id, tier_bands, usage_share_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (developer_id) DO UPDATE SET
+           royalty_mode = excluded.royalty_mode,
+           payee_id = excluded.payee_id,
+           tier_bands = excluded.tier_bands,
+           usage_share_bps = excluded.usage_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.developer_id,
+        record.royalty_mode,
+        record.payee_id,
+        record.tier_bands,
+        record.usage_share_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperApiRoyaltyPolicy(record.developer_id) as Promise<
+      DeveloperApiRoyaltyPolicyRecord
+    >;
+  }
+
+  async getDeveloperApiRoyaltyPolicy(
+    developerId: string,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM developer_api_royalty_policies WHERE developer_id = ?`)
+      .get(developerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      developer_id: row.developer_id as string,
+      royalty_mode: row.royalty_mode as DeveloperApiRoyaltyPolicyRecord['royalty_mode'],
+      payee_id: row.payee_id as string,
+      tier_bands: row.tier_bands as string,
+      usage_share_bps: row.usage_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertDeveloperMarketplacePolicy(
+    row: Omit<DeveloperMarketplaceSplitPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord> {
+    // UNIQUE per marketplace — a re-registered policy replaces the row
+    // atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_marketplace_split_policies
+           (id, marketplace, platform_share_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (marketplace) DO UPDATE SET
+           platform_share_bps = excluded.platform_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.marketplace,
+        record.platform_share_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperMarketplacePolicy(record.marketplace) as Promise<
+      DeveloperMarketplaceSplitPolicyRecord
+    >;
+  }
+
+  async getDeveloperMarketplacePolicy(
+    marketplace: string,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM developer_marketplace_split_policies WHERE marketplace = ?`)
+      .get(marketplace) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      marketplace: row.marketplace as DeveloperMarketplaceSplitPolicyRecord['marketplace'],
+      platform_share_bps: row.platform_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertDeveloperCopackageLeg(
+    row: Omit<DeveloperCopackageContributionLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperCopackageContributionLegRecord> {
+    // UNIQUE per (package_id, maintainer_id) — a re-registered leg
+    // converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_copackage_contribution_legs
+           (id, package_id, maintainer_id, commits, pull_requests, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (package_id, maintainer_id) DO UPDATE SET
+           commits = excluded.commits,
+           pull_requests = excluded.pull_requests,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.package_id,
+        record.maintainer_id,
+        record.commits,
+        record.pull_requests,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.listDeveloperCopackageLegs(record.package_id).then((legs) =>
+      legs.find(
+        (leg) =>
+          leg.package_id === record.package_id &&
+          leg.maintainer_id === record.maintainer_id,
+      ),
+    ) as Promise<DeveloperCopackageContributionLegRecord>;
+  }
+
+  async listDeveloperCopackageLegs(
+    packageId: string,
+  ): Promise<DeveloperCopackageContributionLegRecord[]> {
+    // Registration order: created_at ASC, then maintainer_id ASC (the
+    // SQL backends' deterministic order).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM developer_copackage_contribution_legs
+           WHERE package_id = ? ORDER BY created_at ASC, maintainer_id ASC`,
+      )
+      .all(packageId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      package_id: row.package_id as string,
+      maintainer_id: row.maintainer_id as string,
+      commits: row.commits as number,
+      pull_requests: row.pull_requests as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertDeveloperDependencyLedger(
+    row: Omit<DeveloperDependencyMaintainerLedgerRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord> {
+    // UNIQUE per component_id — a re-registered ledger replaces the row
+    // atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_dependency_maintainer_ledgers
+           (id, component_id, maintainer_payee_id, micros_per_deploy,
+            micros_per_active_instance, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (component_id) DO UPDATE SET
+           maintainer_payee_id = excluded.maintainer_payee_id,
+           micros_per_deploy = excluded.micros_per_deploy,
+           micros_per_active_instance = excluded.micros_per_active_instance,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.component_id,
+        record.maintainer_payee_id,
+        record.micros_per_deploy,
+        record.micros_per_active_instance,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperDependencyLedger(record.component_id) as Promise<
+      DeveloperDependencyMaintainerLedgerRecord
+    >;
+  }
+
+  async getDeveloperDependencyLedger(
+    componentId: string,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_dependency_maintainer_ledgers WHERE component_id = ?`,
+      )
+      .get(componentId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      component_id: row.component_id as string,
+      maintainer_payee_id: row.maintainer_payee_id as string,
+      micros_per_deploy: row.micros_per_deploy as number,
+      micros_per_active_instance: row.micros_per_active_instance as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertDeveloperWhitelabelDeal(
+    row: Omit<DeveloperWhitelabelLicenseDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord> {
+    // UNIQUE per sdk_package_hash — a re-registered deal replaces the
+    // row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_whitelabel_license_deals
+           (id, sdk_package_hash, owner_payee_id, seat_micros_per_seat,
+            deployment_micros_per_deployment, minimum_monthly_guarantee_cents,
+            overage_royalty_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (sdk_package_hash) DO UPDATE SET
+           owner_payee_id = excluded.owner_payee_id,
+           seat_micros_per_seat = excluded.seat_micros_per_seat,
+           deployment_micros_per_deployment = excluded.deployment_micros_per_deployment,
+           minimum_monthly_guarantee_cents = excluded.minimum_monthly_guarantee_cents,
+           overage_royalty_bps = excluded.overage_royalty_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.sdk_package_hash,
+        record.owner_payee_id,
+        record.seat_micros_per_seat,
+        record.deployment_micros_per_deployment,
+        record.minimum_monthly_guarantee_cents,
+        record.overage_royalty_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperWhitelabelDeal(record.sdk_package_hash) as Promise<
+      DeveloperWhitelabelLicenseDealRecord
+    >;
+  }
+
+  async getDeveloperWhitelabelDeal(
+    sdkPackageHash: string,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_whitelabel_license_deals WHERE sdk_package_hash = ?`,
+      )
+      .get(sdkPackageHash) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      owner_payee_id: row.owner_payee_id as string,
+      seat_micros_per_seat: row.seat_micros_per_seat as number,
+      deployment_micros_per_deployment: row.deployment_micros_per_deployment as number,
+      minimum_monthly_guarantee_cents: row.minimum_monthly_guarantee_cents as number,
+      overage_royalty_bps: row.overage_royalty_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertDeveloperToolPolicy(
+    row: Omit<DeveloperToolRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord> {
+    // UNIQUE per tool_id — a re-registered policy replaces the row
+    // atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_tool_royalty_policies
+           (id, tool_id, builder_payee_id, micros_per_call, builder_share_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (tool_id) DO UPDATE SET
+           builder_payee_id = excluded.builder_payee_id,
+           micros_per_call = excluded.micros_per_call,
+           builder_share_bps = excluded.builder_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.tool_id,
+        record.builder_payee_id,
+        record.micros_per_call,
+        record.builder_share_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperToolPolicy(record.tool_id) as Promise<
+      DeveloperToolRoyaltyPolicyRecord
+    >;
+  }
+
+  async getDeveloperToolPolicy(
+    toolId: string,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM developer_tool_royalty_policies WHERE tool_id = ?`)
+      .get(toolId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      tool_id: row.tool_id as DeveloperToolRoyaltyPolicyRecord['tool_id'],
+      builder_payee_id: row.builder_payee_id as string,
+      micros_per_call: row.micros_per_call as number,
+      builder_share_bps: row.builder_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+    callsAdded: number,
+  ): Promise<DeveloperApiCallMonthRecord> {
+    // UNIQUE per (developer_id, month) — the tracker converges (the
+    // upsert ADDS the row's calls to the cumulative position).
+    const record = {
+      id: randomUUID(),
+      developer_id: developerId,
+      month,
+      cumulative_calls: callsAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_api_call_months
+           (id, developer_id, month, cumulative_calls, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (developer_id, month) DO UPDATE SET
+           cumulative_calls = developer_api_call_months.cumulative_calls
+             + excluded.cumulative_calls,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.developer_id,
+        record.month,
+        record.cumulative_calls,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperApiCallMonth(developerId, month) as Promise<
+      DeveloperApiCallMonthRecord
+    >;
+  }
+
+  async getDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+  ): Promise<DeveloperApiCallMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_api_call_months
+           WHERE developer_id = ? AND month = ?`,
+      )
+      .get(developerId, month) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      developer_id: row.developer_id as string,
+      month: row.month as string,
+      cumulative_calls: row.cumulative_calls as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+    usageCentsAdded: number,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord> {
+    // UNIQUE per (sdk_package_hash, licensor_id, month) — the tracker
+    // converges (the upsert ADDS the event's payable cents).
+    const record = {
+      id: randomUUID(),
+      sdk_package_hash: sdkPackageHash,
+      licensor_id: licensorId,
+      month,
+      cumulative_usage_cents: usageCentsAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_whitelabel_usage_months
+           (id, sdk_package_hash, licensor_id, month, cumulative_usage_cents,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (sdk_package_hash, licensor_id, month) DO UPDATE SET
+           cumulative_usage_cents = developer_whitelabel_usage_months.cumulative_usage_cents
+             + excluded.cumulative_usage_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.sdk_package_hash,
+        record.licensor_id,
+        record.month,
+        record.cumulative_usage_cents,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getDeveloperWhitelabelUsageMonth(
+      sdkPackageHash,
+      licensorId,
+      month,
+    ) as Promise<DeveloperWhitelabelUsageMonthRecord>;
+  }
+
+  async getDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_whitelabel_usage_months
+           WHERE sdk_package_hash = ? AND licensor_id = ? AND month = ?`,
+      )
+      .get(sdkPackageHash, licensorId, month) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      licensor_id: row.licensor_id as string,
+      month: row.month as string,
+      cumulative_usage_cents: row.cumulative_usage_cents as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertDeveloperRealizationApplication(
+    row: Omit<DeveloperApiRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-shipped event
+    // throws here, never a double application.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_api_realization_applications
+           (id, source_event_id, feed, developer_id, api_endpoint_id, sdk_package_hash,
+            period, currency, gross_api_transaction_revenue_cents,
+            cloud_infrastructure_hosting_base_cents, payment_processing_gate_cut_cents,
+            enterprise_sla_reserve_cents, net_code_usage_pool_cents, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.feed,
+        record.developer_id,
+        record.api_endpoint_id,
+        record.sdk_package_hash,
+        record.period,
+        record.currency,
+        record.gross_api_transaction_revenue_cents,
+        record.cloud_infrastructure_hosting_base_cents,
+        record.payment_processing_gate_cut_cents,
+        record.enterprise_sla_reserve_cents,
+        record.net_code_usage_pool_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperRealizationApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperApiRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_api_realization_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      feed: row.feed as DeveloperApiRealizationApplicationRecord['feed'],
+      developer_id: row.developer_id as string,
+      api_endpoint_id: row.api_endpoint_id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_api_transaction_revenue_cents: row.gross_api_transaction_revenue_cents as number,
+      cloud_infrastructure_hosting_base_cents:
+        row.cloud_infrastructure_hosting_base_cents as number,
+      payment_processing_gate_cut_cents: row.payment_processing_gate_cut_cents as number,
+      enterprise_sla_reserve_cents: row.enterprise_sla_reserve_cents as number,
+      net_code_usage_pool_cents: row.net_code_usage_pool_cents as number,
+      verdict: row.verdict as DeveloperApiRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperApiMicroRoyalty(
+    row: Omit<DeveloperApiMicroRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_api_micro_royalty_applications
+           (id, source_event_id, feed, developer_id, api_endpoint_id, sdk_package_hash,
+            period, currency, payee_id, royalty_mode, policy_ref, api_calls, tier_legs,
+            usage_share_bps, royalty_basis_cents, royalty_micros, royalty_cents,
+            monthly_calls_before, monthly_calls_after, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.feed,
+        record.developer_id,
+        record.api_endpoint_id,
+        record.sdk_package_hash,
+        record.period,
+        record.currency,
+        record.payee_id,
+        record.royalty_mode,
+        record.policy_ref,
+        record.api_calls,
+        record.tier_legs,
+        record.usage_share_bps,
+        record.royalty_basis_cents,
+        record.royalty_micros,
+        record.royalty_cents,
+        record.monthly_calls_before,
+        record.monthly_calls_after,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperApiMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_api_micro_royalty_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      feed: row.feed as DeveloperApiMicroRoyaltyApplicationRecord['feed'],
+      developer_id: row.developer_id as string,
+      api_endpoint_id: row.api_endpoint_id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      payee_id: row.payee_id as string,
+      royalty_mode: row.royalty_mode as DeveloperApiMicroRoyaltyApplicationRecord['royalty_mode'],
+      policy_ref: row.policy_ref as string,
+      api_calls: row.api_calls as number,
+      tier_legs: row.tier_legs as string,
+      usage_share_bps: row.usage_share_bps as number,
+      royalty_basis_cents: row.royalty_basis_cents as number,
+      royalty_micros: row.royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      monthly_calls_before: row.monthly_calls_before as number,
+      monthly_calls_after: row.monthly_calls_after as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperMarketplaceSplit(
+    row: Omit<DeveloperMarketplaceSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_marketplace_split_applications
+           (id, source_event_id, marketplace, developer_id, sdk_package_hash, period,
+            currency, gross_sale_cents, policy_ref, platform_share_bps, platform_cents,
+            developer_net_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.marketplace,
+        record.developer_id,
+        record.sdk_package_hash,
+        record.period,
+        record.currency,
+        record.gross_sale_cents,
+        record.policy_ref,
+        record.platform_share_bps,
+        record.platform_cents,
+        record.developer_net_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperMarketplaceSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_marketplace_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      marketplace: row.marketplace as DeveloperMarketplaceSplitApplicationRecord['marketplace'],
+      developer_id: row.developer_id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_sale_cents: row.gross_sale_cents as number,
+      policy_ref: row.policy_ref as string,
+      platform_share_bps: row.platform_share_bps as number,
+      platform_cents: row.platform_cents as number,
+      developer_net_cents: row.developer_net_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperCopackageSplit(
+    row: Omit<DeveloperCopackageSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperCopackageSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_copackage_split_applications
+           (id, source_event_id, package_id, developer_id, revenue_kind, period,
+            currency, gross_revenue_cents, split_legs, allocated_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.package_id,
+        record.developer_id,
+        record.revenue_kind,
+        record.period,
+        record.currency,
+        record.gross_revenue_cents,
+        record.split_legs,
+        record.allocated_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperCopackageSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperCopackageSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_copackage_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      package_id: row.package_id as string,
+      developer_id: row.developer_id as string,
+      revenue_kind: row.revenue_kind as DeveloperCopackageSplitApplicationRecord['revenue_kind'],
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_revenue_cents: row.gross_revenue_cents as number,
+      split_legs: row.split_legs as string,
+      allocated_total_cents: row.allocated_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperDependencyFee(
+    row: Omit<DeveloperDependencyFeeApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperDependencyFeeApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_dependency_fee_applications
+           (id, source_event_id, developer_id, component_id, scan_context, period,
+            currency, deploy_count, active_instances, ledger_ref, maintainer_payee_id,
+            micros_per_deploy, micros_per_active_instance, fee_micros, fee_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.developer_id,
+        record.component_id,
+        record.scan_context,
+        record.period,
+        record.currency,
+        record.deploy_count,
+        record.active_instances,
+        record.ledger_ref,
+        record.maintainer_payee_id,
+        record.micros_per_deploy,
+        record.micros_per_active_instance,
+        record.fee_micros,
+        record.fee_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperDependencyFee(
+    sourceEventId: string,
+  ): Promise<DeveloperDependencyFeeApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_dependency_fee_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      developer_id: row.developer_id as string,
+      component_id: row.component_id as string,
+      scan_context: row.scan_context as DeveloperDependencyFeeApplicationRecord['scan_context'],
+      period: row.period as string,
+      currency: row.currency as string,
+      deploy_count: row.deploy_count as number,
+      active_instances: row.active_instances as number,
+      ledger_ref: row.ledger_ref as string,
+      maintainer_payee_id: row.maintainer_payee_id as string,
+      micros_per_deploy: row.micros_per_deploy as number,
+      micros_per_active_instance: row.micros_per_active_instance as number,
+      fee_micros: row.fee_micros as number,
+      fee_cents: row.fee_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperWhitelabelLicense(
+    row: Omit<DeveloperWhitelabelLicenseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_whitelabel_license_applications
+           (id, source_event_id, sdk_package_hash, licensor_id, event_kind, quantity,
+            period, currency, deal_ref, owner_payee_id, usage_micros, usage_cents,
+            monthly_usage_before_cents, monthly_usage_after_cents, mmg_cents,
+            recouped_cents, overage_cents, overage_royalty_bps, overage_royalty_cents,
+            created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sdk_package_hash,
+        record.licensor_id,
+        record.event_kind,
+        record.quantity,
+        record.period,
+        record.currency,
+        record.deal_ref,
+        record.owner_payee_id,
+        record.usage_micros,
+        record.usage_cents,
+        record.monthly_usage_before_cents,
+        record.monthly_usage_after_cents,
+        record.mmg_cents,
+        record.recouped_cents,
+        record.overage_cents,
+        record.overage_royalty_bps,
+        record.overage_royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperWhitelabelLicense(
+    sourceEventId: string,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_whitelabel_license_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sdk_package_hash: row.sdk_package_hash as string,
+      licensor_id: row.licensor_id as string,
+      event_kind: row.event_kind as DeveloperWhitelabelLicenseApplicationRecord['event_kind'],
+      quantity: row.quantity as number,
+      period: row.period as string,
+      currency: row.currency as string,
+      deal_ref: row.deal_ref as string,
+      owner_payee_id: row.owner_payee_id as string,
+      usage_micros: row.usage_micros as number,
+      usage_cents: row.usage_cents as number,
+      monthly_usage_before_cents: row.monthly_usage_before_cents as number,
+      monthly_usage_after_cents: row.monthly_usage_after_cents as number,
+      mmg_cents: row.mmg_cents as number,
+      recouped_cents: row.recouped_cents as number,
+      overage_cents: row.overage_cents as number,
+      overage_royalty_bps: row.overage_royalty_bps as number,
+      overage_royalty_cents: row.overage_royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertDeveloperToolCallApplication(
+    row: Omit<DeveloperAgentToolCallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperAgentToolCallApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO developer_agent_tool_call_applications
+           (id, source_event_id, agent_id, tool_id, call_count, period, currency,
+            policy_ref, builder_payee_id, micros_per_call, settlement_micros,
+            settlement_cents, builder_share_bps, builder_cents, platform_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.agent_id,
+        record.tool_id,
+        record.call_count,
+        record.period,
+        record.currency,
+        record.policy_ref,
+        record.builder_payee_id,
+        record.micros_per_call,
+        record.settlement_micros,
+        record.settlement_cents,
+        record.builder_share_bps,
+        record.builder_cents,
+        record.platform_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getDeveloperToolCallApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperAgentToolCallApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM developer_agent_tool_call_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      agent_id: row.agent_id as string,
+      tool_id: row.tool_id as DeveloperAgentToolCallApplicationRecord['tool_id'],
+      call_count: row.call_count as number,
+      period: row.period as string,
+      currency: row.currency as string,
+      policy_ref: row.policy_ref as string,
+      builder_payee_id: row.builder_payee_id as string,
+      micros_per_call: row.micros_per_call as number,
+      settlement_micros: row.settlement_micros as number,
+      settlement_cents: row.settlement_cents as number,
+      builder_share_bps: row.builder_share_bps as number,
+      builder_cents: row.builder_cents as number,
+      platform_cents: row.platform_cents as number,
       created_at: row.created_at as string,
     };
   }

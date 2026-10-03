@@ -262,6 +262,23 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  DeveloperAgentToolCallApplicationRecord,
+  DeveloperApiCallMonthRecord,
+  DeveloperApiMicroRoyaltyApplicationRecord,
+  DeveloperApiRealizationApplicationRecord,
+  DeveloperApiRoyaltyPolicyRecord,
+  DeveloperCopackageContributionLegRecord,
+  DeveloperCopackageSplitApplicationRecord,
+  DeveloperDependencyFeeApplicationRecord,
+  DeveloperDependencyMaintainerLedgerRecord,
+  DeveloperMarketplaceSplitApplicationRecord,
+  DeveloperMarketplaceSplitPolicyRecord,
+  DeveloperToolRoyaltyPolicyRecord,
+  DeveloperWhitelabelLicenseApplicationRecord,
+  DeveloperWhitelabelLicenseDealRecord,
+  DeveloperWhitelabelUsageMonthRecord,
+} from '@/modules/developer/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -4313,6 +4330,254 @@ export interface Store {
   getServiceBoothLeaseApplication(
     sourceEventId: string,
   ): Promise<ServiceBoothLeaseApplicationRecord | undefined>;
+
+  // ------------------------------------------------------------------
+  // The developer lane (PR 44) — the founder developer directive's
+  // registries of record, the two cumulative monthly trackers, and the
+  // seven application ledgers. Same discipline as the service lane:
+  // every application is UNIQUE per source_event_id (the replay guard);
+  // every registry upsert converges per its natural key and NEVER puts
+  // the id column in the conflict payload (the parity lesson from PR
+  // 33).
+  // ------------------------------------------------------------------
+
+  /**
+   * Registers one developer's API micro-royalty policy of record — the
+   * royalty mode ('per_call' tier bands or 'usage_share' bps) and the
+   * payee (the third-party data provider). UNIQUE per developer_id: a
+   * re-registration converges.
+   */
+  upsertDeveloperApiRoyaltyPolicy(
+    row: Omit<DeveloperApiRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord>;
+
+  /** One developer's royalty policy of record; undefined when none —
+   * the walk's read. */
+  getDeveloperApiRoyaltyPolicy(
+    developerId: string,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Registers one marketplace's platform revenue share policy of record
+   * — the founder band 1500–3000 bps. UNIQUE per marketplace: a
+   * re-registration converges.
+   */
+  upsertDeveloperMarketplacePolicy(
+    row: Omit<DeveloperMarketplaceSplitPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord>;
+
+  /** One marketplace's split policy of record; undefined when none —
+   * the walk's read. */
+  getDeveloperMarketplacePolicy(
+    marketplace: string,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord | undefined>;
+
+  /**
+   * Registers one co-maintainer's verified Git contribution weighting
+   * for one co-authored package — UNIQUE per (package_id,
+   * maintainer_id): a re-registration converges.
+   */
+  upsertDeveloperCopackageLeg(
+    row: Omit<DeveloperCopackageContributionLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperCopackageContributionLegRecord>;
+
+  /** One package's registered contribution weightings of record, in
+   * registration order; empty when none registered. */
+  listDeveloperCopackageLegs(
+    packageId: string,
+  ): Promise<DeveloperCopackageContributionLegRecord[]>;
+
+  /**
+   * Registers one SBOM component's open-source maintainer ledger of
+   * record — the payee and the per-deploy / per-active-instance
+   * micro-fees. UNIQUE per component_id: a re-registration converges.
+   */
+  upsertDeveloperDependencyLedger(
+    row: Omit<DeveloperDependencyMaintainerLedgerRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord>;
+
+  /** One component's maintainer ledger of record; undefined when none
+   * — the walk's read. */
+  getDeveloperDependencyLedger(
+    componentId: string,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord | undefined>;
+
+  /**
+   * Registers one white-labeled SDK package's enterprise license deal
+   * of record — the owner payee, the seat/deployment micro rates, the
+   * MMG, and the overage royalty bps. UNIQUE per sdk_package_hash: a
+   * re-registration converges.
+   */
+  upsertDeveloperWhitelabelDeal(
+    row: Omit<DeveloperWhitelabelLicenseDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord>;
+
+  /** One SDK package's license deal of record; undefined when none —
+   * the walk's read. */
+  getDeveloperWhitelabelDeal(
+    sdkPackageHash: string,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord | undefined>;
+
+  /**
+   * Registers one AI-agent tool's per-call micro-settlement policy of
+   * record — the builder payee, the per-call micros, and the builder's
+   * share bps. UNIQUE per tool_id: a re-registration converges.
+   */
+  upsertDeveloperToolPolicy(
+    row: Omit<DeveloperToolRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord>;
+
+  /** One tool's settlement policy of record; undefined when none — the
+   * walk's read. */
+  getDeveloperToolPolicy(
+    toolId: string,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Advances the cumulative monthly API-call tracker of record for one
+   * (developer, month) by the row's calls — UNIQUE per (developer_id,
+   * month): the tracker converges (an upsert adds); the walk reads the
+   * position BEFORE this advance through the getter.
+   */
+  advanceDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+    callsAdded: number,
+  ): Promise<DeveloperApiCallMonthRecord>;
+
+  /** One developer-month's cumulative API calls of record; undefined
+   * when no row has advanced yet (position starts at zero). */
+  getDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+  ): Promise<DeveloperApiCallMonthRecord | undefined>;
+
+  /**
+   * Advances the cumulative monthly usage tracker of record for one
+   * (SDK package, enterprise licensee, month) by the event's payable
+   * cents — UNIQUE per (sdk_package_hash, licensor_id, month).
+   */
+  advanceDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+    usageCentsAdded: number,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord>;
+
+  /** One package-licensee-month's cumulative usage of record;
+   * undefined when no row has advanced yet. */
+  getDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord | undefined>;
+
+  /**
+   * Appends one executed Net API Realization — the founder's exact
+   * identity keyed on the developer_id, api_endpoint_id, and
+   * sdk_package_hash columns (migration 0048). UNIQUE per
+   * source_event_id is the replay guard.
+   */
+  insertDeveloperRealizationApplication(
+    row: Omit<DeveloperApiRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperRealizationApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperApiRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed tiered developer micro-royalty — the per-call
+   * tier walk on the cumulative monthly position or the usage-share bps
+   * off the realized pool (migration 0048). UNIQUE per source_event_id
+   * is the replay guard.
+   */
+  insertDeveloperApiMicroRoyalty(
+    row: Omit<DeveloperApiMicroRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord>;
+
+  /** One micro-royalty application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperApiMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed marketplace split — the founder band's
+   * platform share and the developer net, conserving the sale exactly
+   * (migration 0048). UNIQUE per source_event_id is the replay guard.
+   */
+  insertDeveloperMarketplaceSplit(
+    row: Omit<DeveloperMarketplaceSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord>;
+
+  /** One marketplace split application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getDeveloperMarketplaceSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed co-authored package split — the
+   * contribution-weighted shares, conserving the revenue exactly
+   * (migration 0048). UNIQUE per source_event_id is the replay guard.
+   */
+  insertDeveloperCopackageSplit(
+    row: Omit<DeveloperCopackageSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperCopackageSplitApplicationRecord>;
+
+  /** One copackage split application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperCopackageSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperCopackageSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed SBOM dependency micro-fee — the per-deploy and
+   * per-active-instance fees at the maintainer ledger of record
+   * (migration 0048). UNIQUE per source_event_id is the replay guard.
+   */
+  insertDeveloperDependencyFee(
+    row: Omit<DeveloperDependencyFeeApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperDependencyFeeApplicationRecord>;
+
+  /** One dependency fee application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperDependencyFee(
+    sourceEventId: string,
+  ): Promise<DeveloperDependencyFeeApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed white-label license settlement — the usage,
+   * the MMG recoupment, and the owner's overage royalty (migration
+   * 0048). UNIQUE per source_event_id is the replay guard.
+   */
+  insertDeveloperWhitelabelLicense(
+    row: Omit<DeveloperWhitelabelLicenseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord>;
+
+  /** One license settlement of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperWhitelabelLicense(
+    sourceEventId: string,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed agent tool-call micro-settlement — the pot
+   * split between the tool builder's ledger and the platform (migration
+   * 0048). UNIQUE per source_event_id is the replay guard.
+   */
+  insertDeveloperToolCallApplication(
+    row: Omit<DeveloperAgentToolCallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperAgentToolCallApplicationRecord>;
+
+  /** One tool-call settlement of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getDeveloperToolCallApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperAgentToolCallApplicationRecord | undefined>;
 }
 
 

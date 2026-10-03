@@ -1,0 +1,4 @@
+Init Event ID,SDK Platform,Developer ID,API Endpoint ID,SDK Package Hash,Gross API Transaction Revenue,Cloud Infrastructure Hosting Base,Payment Processing Gate Cut,Enterprise SLA Reserve,Currency,Reporting Period
+SDK-2026-03-0001,ios,dev-nova,ep-nova-1,sha256:nova-sdk-v3,0.00,0.00,0.00,0.00,USD,2026-03
+SDK-2026-03-0002,android,dev-quasar,ep-quasar-1,sha256:quasar-sdk-v1,250.00,25.00,7.50,0.00,USD,2026-03
+SDK-2026-03-0003,web,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,0.00,10.00,0.00,0.00,USD,2026-03

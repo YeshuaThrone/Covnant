@@ -138,7 +138,22 @@ export type StatementProfileKind =
   | "service_membership_breakage_csv"
   | "service_hotel_folio_charges_csv"
   | "service_vendor_rebates_csv"
-  | "service_booth_lease_csv";
+  | "service_booth_lease_csv"
+  // The developer lane (PR 44, the founder developer directive) — the
+  // eight strict senders the directive names (API gateway usage logs from
+  // Kong, AWS API Gateway, and Cloudflare Workers, SDK initialization
+  // events, app store marketplace sales feeds, usage-based billing
+  // tokens, co-authored package revenue statements, software bill of
+  // materials scans, white-label SDK license statements, and AI agent
+  // tool-call logs), one strict profile per sender's sheet.
+  | "developer_api_gateway_usage_csv"
+  | "developer_sdk_initializations_csv"
+  | "developer_marketplace_sales_csv"
+  | "developer_usage_billing_tokens_csv"
+  | "developer_copackage_revenue_csv"
+  | "developer_sbom_scans_csv"
+  | "developer_whitelabel_licenses_csv"
+  | "developer_agent_tool_calls_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -1031,6 +1046,13 @@ export interface ParsedStatementLine {
    * IS the lane discriminator. Optional for the same reason as
    * bookDetail. */
   serviceDetail?: ServiceLineDetail | null;
+
+  /** Developer lane context (the statement sender, the sender row id of
+   * record, the developer/endpoint/package keys the Net API Realization
+   * calculator and every walk key on, and the sender-specific money or
+   * usage legs); null on every non-developer line — the presence IS the
+   * lane discriminator. Optional for the same reason as bookDetail. */
+  developerDetail?: DeveloperLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1417,6 +1439,175 @@ export type ServiceLineDetail =
   | ServiceMembershipBreakageDetail
   | ServiceVendorRebateDetail
   | ServiceBoothLeaseDetail;
+
+/** The developer lane's per-line context (PR 44, the founder developer
+ * directive) — the eight strict senders' identity and money/usage legs,
+ * one discriminated shape per sender family. Every realizing sender
+ * repeats the identity columns the directive keys the Net API Realization
+ * on — developer_id, api_endpoint_id, and sdk_package_hash; the
+ * marketplace sales feed keys on the marketplace and package, the SBOM
+ * scans on the component, the white-label statements on the SDK package
+ * and enterprise licensee, and the agent tool-call logs on the tool and
+ * the calling agent. Fields a sender's row does not carry fingerprint as
+ * "" (part of the row identity either way). */
+export type DeveloperGatewayUsageDetail = {
+  readonly sender: "gateway_usage";
+  /** The sender's usage row id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The API gateway of record (bounded vocabulary). */
+  readonly gateway: "kong" | "aws_api_gateway" | "cloudflare_workers";
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  /** The row's ISO currency of record (validated at parse). */
+  readonly currency: string;
+  /** The row's API call count — the per-call royalty's usage leg. */
+  readonly apiCalls: number;
+  /** THE NET API REALIZATION'S FOUR LEGS of record — the usage
+   * statement's own figures, never a rate guess. */
+  readonly grossApiTransactionRevenueCents: number;
+  readonly cloudInfrastructureHostingBaseCents: number;
+  readonly paymentProcessingGateCutCents: number;
+  readonly enterpriseSlaReserveCents: number;
+};
+
+export type DeveloperSdkInitializationDetail = {
+  readonly sender: "sdk_initialization";
+  /** The sender's init event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The SDK platform of record (bounded vocabulary). */
+  readonly platform: "ios" | "android" | "web" | "server";
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The SDK activation's money legs of record (zero where the
+   * activation carries no billable revenue). */
+  readonly grossApiTransactionRevenueCents: number;
+  readonly cloudInfrastructureHostingBaseCents: number;
+  readonly paymentProcessingGateCutCents: number;
+  readonly enterpriseSlaReserveCents: number;
+};
+
+export type DeveloperUsageBillingTokenDetail = {
+  readonly sender: "usage_billing_token";
+  /** The sender's token event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The usage-based billing token kind of record (bounded vocabulary). */
+  readonly tokenKind: "compute_credit" | "inference_token" | "storage_gb_hour" | "egress_gb";
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The token redemption's money legs of record. */
+  readonly grossApiTransactionRevenueCents: number;
+  readonly cloudInfrastructureHostingBaseCents: number;
+  readonly paymentProcessingGateCutCents: number;
+  readonly enterpriseSlaReserveCents: number;
+};
+
+export type DeveloperMarketplaceSaleDetail = {
+  readonly sender: "marketplace_sale";
+  /** The sender's sale id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The app store marketplace of record (bounded vocabulary). */
+  readonly marketplace: "apple_app_store" | "google_play" | "unity_asset_store" | "vscode_marketplace";
+  readonly developerId: string;
+  /** The sale's endpoint leg of record ("" where the feed does not key
+   * one — the marketplace split prices off the sale, not the endpoint). */
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The gross sale of record — the split's basis. */
+  readonly grossSaleCents: number;
+};
+
+export type DeveloperCopackageRevenueDetail = {
+  readonly sender: "copackage_revenue";
+  /** The sender's revenue event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The co-authored package id of record — the weightings' key. */
+  readonly packageId: string;
+  /** The reporting developer of record (provenance; the split routes by
+   * the package's contribution legs). */
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The revenue kind of record (bounded vocabulary). */
+  readonly revenueKind: "subscription" | "sponsorship";
+  /** The incoming revenue of record — the split's pot. */
+  readonly grossRevenueCents: number;
+};
+
+export type DeveloperSbomScanDetail = {
+  readonly sender: "sbom_scan";
+  /** The sender's scan event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The SBOM scan context of record (bounded vocabulary). */
+  readonly scanContext: "ci_deploy" | "runtime_fleet";
+  readonly developerId: string;
+  /** The SBOM component id of record — the maintainer ledger's key. */
+  readonly componentId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The scan's usage counts of record — the micro-fees' legs. */
+  readonly deployCount: number;
+  readonly activeInstances: number;
+};
+
+export type DeveloperWhitelabelLicenseDetail = {
+  readonly sender: "whitelabel_license";
+  /** The sender's license event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The event kind of record (bounded vocabulary). */
+  readonly eventKind: "seat" | "deployment";
+  /** The enterprise licensee of record — the monthly usage tracker's
+   * subject. */
+  readonly licensorId: string;
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The event's seat or deployment count. */
+  readonly quantity: number;
+};
+
+export type DeveloperAgentToolCallDetail = {
+  readonly sender: "agent_tool_call";
+  /** The sender's tool-call batch id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** The paid third-party tool of record (bounded vocabulary). */
+  readonly toolId: "web_search" | "database_query" | "payment_action";
+  /** The autonomous agent of record (provenance). */
+  readonly agentId: string;
+  readonly developerId: string;
+  readonly apiEndpointId: string;
+  readonly sdkPackageHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The batch's call count — the settlement's usage leg. */
+  readonly callCount: number;
+};
+
+export type DeveloperLineDetail =
+  | DeveloperGatewayUsageDetail
+  | DeveloperSdkInitializationDetail
+  | DeveloperUsageBillingTokenDetail
+  | DeveloperMarketplaceSaleDetail
+  | DeveloperCopackageRevenueDetail
+  | DeveloperSbomScanDetail
+  | DeveloperWhitelabelLicenseDetail
+  | DeveloperAgentToolCallDetail;
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers sixty-five profiles in dispatch order", () => {
+  it("registers seventy-three profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -142,6 +142,19 @@ describe("profile registry", () => {
       "service_hotel_folio_charges_csv",
       "service_vendor_rebates_csv",
       "service_booth_lease_csv",
+      // The developer lane (PR 44, the founder developer directive) —
+      // dispatched last, after the services lane: the four founder-named
+      // feeds (gateway usage, SDK init, marketplace sales, usage tokens)
+      // plus the four modeled feeds (co-package revenue, SBOM scans,
+      // white-label licenses, agent tool-call batches).
+      "developer_api_gateway_usage_csv",
+      "developer_sdk_initializations_csv",
+      "developer_usage_billing_tokens_csv",
+      "developer_marketplace_sales_csv",
+      "developer_copackage_revenue_csv",
+      "developer_sbom_scans_csv",
+      "developer_whitelabel_licenses_csv",
+      "developer_agent_tool_calls_csv",
     ]);
   });
 

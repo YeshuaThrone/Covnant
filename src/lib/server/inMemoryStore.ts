@@ -280,6 +280,23 @@ import type {
   ServiceRedemptionSplitApplicationRecord,
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
+import type {
+  DeveloperAgentToolCallApplicationRecord,
+  DeveloperApiCallMonthRecord,
+  DeveloperApiMicroRoyaltyApplicationRecord,
+  DeveloperApiRealizationApplicationRecord,
+  DeveloperApiRoyaltyPolicyRecord,
+  DeveloperCopackageContributionLegRecord,
+  DeveloperCopackageSplitApplicationRecord,
+  DeveloperDependencyFeeApplicationRecord,
+  DeveloperDependencyMaintainerLedgerRecord,
+  DeveloperMarketplaceSplitApplicationRecord,
+  DeveloperMarketplaceSplitPolicyRecord,
+  DeveloperToolRoyaltyPolicyRecord,
+  DeveloperWhitelabelLicenseApplicationRecord,
+  DeveloperWhitelabelLicenseDealRecord,
+  DeveloperWhitelabelUsageMonthRecord,
+} from '@/modules/developer/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -592,6 +609,44 @@ export class InMemoryStore implements Store {
     ServiceAuditEscrowReconciliationRecord
   >();
   private servicesPayoutGateStates = new Map<string, ServicesPayoutGateStateRecord>();
+  // Migration 0048 — the developer lane's registries of record, the two
+  // cumulative monthly trackers, and the seven application ledgers.
+  private developerApiRoyaltyPolicies = new Map<
+    string,
+    DeveloperApiRoyaltyPolicyRecord
+  >();
+  private developerMarketplacePolicies = new Map<
+    string,
+    DeveloperMarketplaceSplitPolicyRecord
+  >();
+  private developerCopackageLegs: DeveloperCopackageContributionLegRecord[] = [];
+  private developerDependencyLedgers = new Map<
+    string,
+    DeveloperDependencyMaintainerLedgerRecord
+  >();
+  private developerWhitelabelDeals = new Map<
+    string,
+    DeveloperWhitelabelLicenseDealRecord
+  >();
+  private developerToolPolicies = new Map<
+    string,
+    DeveloperToolRoyaltyPolicyRecord
+  >();
+  private developerApiCallMonths = new Map<
+    string,
+    DeveloperApiCallMonthRecord
+  >();
+  private developerWhitelabelUsageMonths = new Map<
+    string,
+    DeveloperWhitelabelUsageMonthRecord
+  >();
+  private developerRealizationApplications: DeveloperApiRealizationApplicationRecord[] = [];
+  private developerApiMicroRoyalties: DeveloperApiMicroRoyaltyApplicationRecord[] = [];
+  private developerMarketplaceSplits: DeveloperMarketplaceSplitApplicationRecord[] = [];
+  private developerCopackageSplits: DeveloperCopackageSplitApplicationRecord[] = [];
+  private developerDependencyFees: DeveloperDependencyFeeApplicationRecord[] = [];
+  private developerWhitelabelLicenses: DeveloperWhitelabelLicenseApplicationRecord[] = [];
+  private developerToolCallApplications: DeveloperAgentToolCallApplicationRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -7589,9 +7644,430 @@ export class InMemoryStore implements Store {
     );
     return found === undefined ? undefined : { ...found };
   }
+
+  // ------------------------------------------------------------------
+  // The developer lane (PR 44) — the founder developer directive's
+  // registries of record, the two cumulative monthly trackers, and the
+  // seven application ledgers.
+  // ------------------------------------------------------------------
+
+  async upsertDeveloperApiRoyaltyPolicy(
+    row: Omit<DeveloperApiRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord> {
+    // UNIQUE per developer_id — a re-registered policy replaces the row
+    // atomically.
+    const now = new Date().toISOString();
+    const existing = this.developerApiRoyaltyPolicies.get(row.developer_id);
+    const record: DeveloperApiRoyaltyPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerApiRoyaltyPolicies.set(row.developer_id, record);
+    return { ...record };
+  }
+
+  async getDeveloperApiRoyaltyPolicy(
+    developerId: string,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord | undefined> {
+    const found = this.developerApiRoyaltyPolicies.get(developerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertDeveloperMarketplacePolicy(
+    row: Omit<DeveloperMarketplaceSplitPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord> {
+    // UNIQUE per marketplace — a re-registered policy replaces the row
+    // atomically.
+    const now = new Date().toISOString();
+    const existing = this.developerMarketplacePolicies.get(row.marketplace);
+    const record: DeveloperMarketplaceSplitPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerMarketplacePolicies.set(row.marketplace, record);
+    return { ...record };
+  }
+
+  async getDeveloperMarketplacePolicy(
+    marketplace: string,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord | undefined> {
+    const found = this.developerMarketplacePolicies.get(marketplace);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertDeveloperCopackageLeg(
+    row: Omit<DeveloperCopackageContributionLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperCopackageContributionLegRecord> {
+    // UNIQUE per (package_id, maintainer_id) — a re-registered leg
+    // replaces its row in place (registration order preserved).
+    const now = new Date().toISOString();
+    const index = this.developerCopackageLegs.findIndex(
+      (leg) =>
+        leg.package_id === row.package_id && leg.maintainer_id === row.maintainer_id,
+    );
+    const prior = index >= 0 ? this.developerCopackageLegs[index] : undefined;
+    const record: DeveloperCopackageContributionLegRecord = {
+      ...row,
+      id: prior?.id ?? randomUUID(),
+      created_at: prior?.created_at ?? now,
+      updated_at: now,
+    };
+    if (index >= 0) {
+      this.developerCopackageLegs[index] = record;
+    } else {
+      this.developerCopackageLegs.push(record);
+    }
+    return { ...record };
+  }
+
+  async listDeveloperCopackageLegs(
+    packageId: string,
+  ): Promise<DeveloperCopackageContributionLegRecord[]> {
+    return this.developerCopackageLegs
+      .filter((leg) => leg.package_id === packageId)
+      .map((leg) => ({ ...leg }));
+  }
+
+  async upsertDeveloperDependencyLedger(
+    row: Omit<DeveloperDependencyMaintainerLedgerRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord> {
+    // UNIQUE per component_id — a re-registered ledger replaces the row
+    // atomically.
+    const now = new Date().toISOString();
+    const existing = this.developerDependencyLedgers.get(row.component_id);
+    const record: DeveloperDependencyMaintainerLedgerRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerDependencyLedgers.set(row.component_id, record);
+    return { ...record };
+  }
+
+  async getDeveloperDependencyLedger(
+    componentId: string,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord | undefined> {
+    const found = this.developerDependencyLedgers.get(componentId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertDeveloperWhitelabelDeal(
+    row: Omit<DeveloperWhitelabelLicenseDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord> {
+    // UNIQUE per sdk_package_hash — a re-registered deal replaces the
+    // row atomically.
+    const now = new Date().toISOString();
+    const existing = this.developerWhitelabelDeals.get(row.sdk_package_hash);
+    const record: DeveloperWhitelabelLicenseDealRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerWhitelabelDeals.set(row.sdk_package_hash, record);
+    return { ...record };
+  }
+
+  async getDeveloperWhitelabelDeal(
+    sdkPackageHash: string,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord | undefined> {
+    const found = this.developerWhitelabelDeals.get(sdkPackageHash);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertDeveloperToolPolicy(
+    row: Omit<DeveloperToolRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord> {
+    // UNIQUE per tool_id — a re-registered policy replaces the row
+    // atomically.
+    const now = new Date().toISOString();
+    const existing = this.developerToolPolicies.get(row.tool_id);
+    const record: DeveloperToolRoyaltyPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerToolPolicies.set(row.tool_id, record);
+    return { ...record };
+  }
+
+  async getDeveloperToolPolicy(
+    toolId: string,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord | undefined> {
+    const found = this.developerToolPolicies.get(toolId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+    callsAdded: number,
+  ): Promise<DeveloperApiCallMonthRecord> {
+    const key = `${developerId}\u0000${month}`;
+    const now = new Date().toISOString();
+    const existing = this.developerApiCallMonths.get(key);
+    const record: DeveloperApiCallMonthRecord = {
+      id: existing?.id ?? randomUUID(),
+      developer_id: developerId,
+      month,
+      cumulative_calls: (existing?.cumulative_calls ?? 0) + callsAdded,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerApiCallMonths.set(key, record);
+    return { ...record };
+  }
+
+  async getDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+  ): Promise<DeveloperApiCallMonthRecord | undefined> {
+    const found = this.developerApiCallMonths.get(`${developerId}\u0000${month}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+    usageCentsAdded: number,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord> {
+    const key = `${sdkPackageHash}\u0000${licensorId}\u0000${month}`;
+    const now = new Date().toISOString();
+    const existing = this.developerWhitelabelUsageMonths.get(key);
+    const record: DeveloperWhitelabelUsageMonthRecord = {
+      id: existing?.id ?? randomUUID(),
+      sdk_package_hash: sdkPackageHash,
+      licensor_id: licensorId,
+      month,
+      cumulative_usage_cents: (existing?.cumulative_usage_cents ?? 0) + usageCentsAdded,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.developerWhitelabelUsageMonths.set(key, record);
+    return { ...record };
+  }
+
+  async getDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord | undefined> {
+    const found = this.developerWhitelabelUsageMonths.get(
+      `${sdkPackageHash}\u0000${licensorId}\u0000${month}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperRealizationApplication(
+    row: Omit<DeveloperApiRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerRealizationApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_api_realization_applications.source_event_id');
+    }
+    const record: DeveloperApiRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperRealizationApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperApiRealizationApplicationRecord | undefined> {
+    const found = this.developerRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperApiMicroRoyalty(
+    row: Omit<DeveloperApiMicroRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerApiMicroRoyalties.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_api_micro_royalty_applications.source_event_id');
+    }
+    const record: DeveloperApiMicroRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerApiMicroRoyalties.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperApiMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord | undefined> {
+    const found = this.developerApiMicroRoyalties.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperMarketplaceSplit(
+    row: Omit<DeveloperMarketplaceSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerMarketplaceSplits.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_marketplace_split_applications.source_event_id');
+    }
+    const record: DeveloperMarketplaceSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerMarketplaceSplits.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperMarketplaceSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord | undefined> {
+    const found = this.developerMarketplaceSplits.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperCopackageSplit(
+    row: Omit<DeveloperCopackageSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperCopackageSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerCopackageSplits.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_copackage_split_applications.source_event_id');
+    }
+    const record: DeveloperCopackageSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerCopackageSplits.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperCopackageSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperCopackageSplitApplicationRecord | undefined> {
+    const found = this.developerCopackageSplits.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperDependencyFee(
+    row: Omit<DeveloperDependencyFeeApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperDependencyFeeApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerDependencyFees.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_dependency_fee_applications.source_event_id');
+    }
+    const record: DeveloperDependencyFeeApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerDependencyFees.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperDependencyFee(
+    sourceEventId: string,
+  ): Promise<DeveloperDependencyFeeApplicationRecord | undefined> {
+    const found = this.developerDependencyFees.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperWhitelabelLicense(
+    row: Omit<DeveloperWhitelabelLicenseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerWhitelabelLicenses.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_whitelabel_license_applications.source_event_id');
+    }
+    const record: DeveloperWhitelabelLicenseApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerWhitelabelLicenses.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperWhitelabelLicense(
+    sourceEventId: string,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord | undefined> {
+    const found = this.developerWhitelabelLicenses.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertDeveloperToolCallApplication(
+    row: Omit<DeveloperAgentToolCallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperAgentToolCallApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.developerToolCallApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('developer_agent_tool_call_applications.source_event_id');
+    }
+    const record: DeveloperAgentToolCallApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.developerToolCallApplications.push(record);
+    return { ...record };
+  }
+
+  async getDeveloperToolCallApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperAgentToolCallApplicationRecord | undefined> {
+    const found = this.developerToolCallApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
 }
-
-
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
 function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {
   if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;

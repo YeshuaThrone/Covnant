@@ -446,6 +446,15 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // ledgers and the services payout gate states of record; still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0047_service_audit_escrow_gate_states.sql',
+      // The developer lane (PR 44, the founder developer directive): the
+      // 15 developer tables (royalty policies + call-month tracker,
+      // marketplace policies + splits, co-package legs + splits, SBOM
+      // dependency ledgers + fees, white-label deals + usage months +
+      // licenses, tool policies + settlements, realizations) with named
+      // table-level ck_ constraints, deny-all RLS, and service_role
+      // grants; still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0048_api_gateway_developer_revenue_sdk_licensing.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

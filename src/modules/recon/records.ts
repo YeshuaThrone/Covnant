@@ -594,6 +594,59 @@ export interface ReconJobResult {
   service_rebate_routed_cents?: number;
   service_chair_rent_cents?: number;
   service_retail_commission_cents?: number;
+  // The developer lane (PR 44) — the same result discipline: the
+  // developer_* block is absent on every other lane; its presence is the
+  // discriminator.
+  /** Developer lane: the Net API Realization applications — the
+   * calculator rows committed, the counted replay no-ops, and the
+   * negative-net holds (the money pauses, visible). */
+  developer_realization_applications_committed?: number;
+  developer_realization_applications_replayed?: number;
+  developer_realization_held_negative_net?: number;
+  /** Developer lane: the tiered micro-royalties — committed / counted
+   * replay no-ops / fail-closed skips (no royalty policy of record, a
+   * per-call policy on a call-free row, or a usage-share royalty on a
+   * HELD row). */
+  developer_micro_royalties_committed?: number;
+  developer_micro_royalties_replayed?: number;
+  developer_micro_royalties_skipped_no_policy?: number;
+  /** Developer lane: the marketplace splits — committed / counted replay
+   * no-ops / fail-closed skips (no marketplace split policy of record). */
+  developer_marketplace_splits_committed?: number;
+  developer_marketplace_splits_replayed?: number;
+  developer_marketplace_skipped_no_policy?: number;
+  /** Developer lane: the co-authored package splits — committed / counted
+   * replay no-ops / fail-closed skips (no registered weightings). */
+  developer_copackage_splits_committed?: number;
+  developer_copackage_splits_replayed?: number;
+  developer_copackage_skipped_no_legs?: number;
+  /** Developer lane: the SBOM dependency micro-fees — committed / counted
+   * replay no-ops / fail-closed skips (no maintainer ledger of record). */
+  developer_dependency_fees_committed?: number;
+  developer_dependency_fees_replayed?: number;
+  developer_dependency_skipped_no_ledger?: number;
+  /** Developer lane: the white-label settlements — committed / counted
+   * replay no-ops / fail-closed skips (no deal of record). */
+  developer_whitelabel_settlements_committed?: number;
+  developer_whitelabel_settlements_replayed?: number;
+  developer_whitelabel_skipped_no_deal?: number;
+  /** Developer lane: the agent tool-call settlements — committed / counted
+   * replay no-ops / fail-closed skips (no settlement policy of record). */
+  developer_tool_call_settlements_committed?: number;
+  developer_tool_call_settlements_replayed?: number;
+  developer_tool_call_skipped_no_policy?: number;
+  /** Developer lane: the committed money, integer cents — the realized
+   * pool and every leg the walks priced. */
+  developer_net_code_usage_pool_cents?: number;
+  developer_micro_royalty_cents?: number;
+  developer_marketplace_platform_cents?: number;
+  developer_marketplace_developer_net_cents?: number;
+  developer_copackage_allocated_cents?: number;
+  developer_dependency_fee_cents?: number;
+  developer_whitelabel_recouped_cents?: number;
+  developer_whitelabel_overage_royalty_cents?: number;
+  developer_tool_call_builder_cents?: number;
+  developer_tool_call_platform_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */
