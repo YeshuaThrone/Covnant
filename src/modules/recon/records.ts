@@ -691,6 +691,37 @@ export interface ReconJobResult {
   hardware_cross_license_net_dispatch_cents?: number;
   hardware_ota_licensor_cents?: number;
   hardware_ota_platform_cents?: number;
+  /** Energy lane (PR 48, the founder resource directive): the walks —
+   * committed / counted replay no-ops / fail-closed skips, per walk
+   * (realizations, parcel tier royalties, acreage divisions, statutory
+   * interest accruals, GPU yields, telemetry grid splits, carbon
+   * payouts). The row replay counter rides all four senders' replay
+   * guards — a re-shipped sheet replays every row behind it. */
+  energy_realizations_committed?: number;
+  energy_rows_replayed?: number;
+  energy_realization_held_negative_net?: number;
+  energy_parcel_royalties_committed?: number;
+  energy_parcel_royalties_skipped_no_policy?: number;
+  energy_divisions_committed?: number;
+  energy_divisions_skipped_no_interests?: number;
+  energy_statutory_interest_accruals_committed?: number;
+  energy_gpu_yields_committed?: number;
+  energy_gpu_yields_skipped_no_policy?: number;
+  energy_grid_splits_committed?: number;
+  energy_grid_splits_skipped_no_participants?: number;
+  energy_carbon_payouts_committed?: number;
+  energy_carbon_payouts_skipped_no_policy?: number;
+  /** Energy lane: the committed money, integer cents — the pass's
+   * Net Realized Resource Pool DELTA (the per-tuple after − before of
+   * record, additive across jobs; includes held negative nets) and
+   * every leg the walks priced. */
+  energy_net_realized_resource_pool_delta_cents?: number;
+  energy_parcel_royalty_cents?: number;
+  energy_divided_cents?: number;
+  energy_statutory_interest_accrued_cents?: number;
+  energy_gpu_yield_cents?: number;
+  energy_grid_split_cents?: number;
+  energy_carbon_payout_total_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

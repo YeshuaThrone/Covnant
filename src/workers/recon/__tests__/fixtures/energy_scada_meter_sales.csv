@@ -1,0 +1,6 @@
+Meter Event ID,Parcel ID,Well Meter ID,GPU Cluster Hash,Gross Energy Sales,Gross Mineral Sales,Currency,Reporting Period
+MSC-2026-03-0001,TRACT-77,WELL-77-A,a1b2c3-cluster-hash,"$1,000.03",0.00,USD,2026-03
+MSC-2026-03-0002,TRACT-77,WELL-77-A,a1b2c3-cluster-hash,0.00,"$2,000.00",USD,2026-03
+MSC-2026-03-0003,TRACT-HELD,WELL-H-1,cluster-held,"$10.00",0.00,USD,2026-03
+MSC-2026-03-0004,TRACT-NOPO,WELL-N-1,cluster-nopo,"$500.00",0.00,USD,2026-03
+MSC-2026-03-0005,TRACT-BARE,WELL-B-1,cluster-bare,"$250.00",0.00,USD,2026-03

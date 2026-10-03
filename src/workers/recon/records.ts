@@ -162,7 +162,16 @@ export type StatementProfileKind =
   | "hardware_cellular_activations_csv"
   | "hardware_mac_address_logs_csv"
   | "hardware_production_serials_csv"
-  | "hardware_smart_grid_telemetry_csv";
+  | "hardware_smart_grid_telemetry_csv"
+  // The energy lane (PR 48, the founder resource directive) — the four
+  // strict senders the directive names (SCADA smart meter utility logs,
+  // GPU data center utilization metrics, pipeline flow-meter volume
+  // feeds, and carbon offset registry mints), one strict profile per
+  // sender's sheet.
+  | "energy_scada_meter_sales_csv"
+  | "energy_gpu_utilization_csv"
+  | "energy_pipeline_flow_meter_csv"
+  | "energy_carbon_offset_mints_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -1070,6 +1079,15 @@ export interface ParsedStatementLine {
    * line — the presence IS the lane discriminator. Optional for the same
    * reason as developerDetail. */
   hardwareDetail?: HardwareLineDetail | null;
+
+  /** Energy lane context (PR 48, the founder resource directive — the
+   * statement sender, the sender row id of record, the
+   * founder-specified realization keys the Net Resource Realization
+   * calculator and every walk key on, and the sender-specific money or
+   * usage legs); null on every non-energy line — the presence IS the
+   * lane discriminator. Optional for the same reason as
+   * hardwareDetail. */
+  energyDetail?: EnergyLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1720,6 +1738,84 @@ export type HardwareSmartGridTelemetryDetail = {
    * completed charge cycles — the micro-payout's legs. */
   readonly kwhMicros: number;
   readonly chargeCycles: number;
+};
+
+/** The energy lane's per-line context (PR 48, the founder resource
+ * directive) — the four strict senders' identity and money legs. The
+ * founder-specified realization keys (parcel_id, well_meter_id,
+ * gpu_cluster_hash) ride the meter and flow-meter rows; the money basis
+ * rides the row's own detail legs (the realization's gross and
+ * deduction legs, the GPU row's telemetry and revenue, the registry
+ * mint's verified tonnes). */
+export type EnergyLineDetail =
+  | EnergyScadaMeterSalesDetail
+  | EnergyPipelineFlowMeterDetail
+  | EnergyGpuUtilizationDetail
+  | EnergyCarbonOffsetMintDetail;
+
+export type EnergyScadaMeterSalesDetail = {
+  readonly sender: "scada_meter_sales";
+  /** The sender's meter event id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  /** THE REALIZATION KEYS — the founder-specified columns the Net
+   * Resource Realization keys on (the GPU hash is '' where the parcel
+   * carries no compute — the NULL-distinctness avoidance). */
+  readonly parcelId: string;
+  readonly wellMeterId: string;
+  readonly gpuClusterHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The realization's gross legs of record (exact cents). */
+  readonly grossEnergySalesCents: number;
+  readonly grossMineralSalesCents: number;
+};
+
+export type EnergyPipelineFlowMeterDetail = {
+  readonly sender: "pipeline_flow_meter";
+  /** The sender's flow event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly parcelId: string;
+  readonly wellMeterId: string;
+  readonly gpuClusterHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The realization's three deduction legs of record (exact cents). */
+  readonly transportationPipelineDeductionsCents: number;
+  readonly gridTransmissionFeesCents: number;
+  readonly processingRefiningBaseFeesCents: number;
+};
+
+export type EnergyGpuUtilizationDetail = {
+  readonly sender: "gpu_utilization";
+  /** The sender's utilization event id of record — part of the row
+   * identity. */
+  readonly senderRowId: string;
+  readonly gpuClusterHash: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The row's compute hours in micros and average power draw in
+   * kilowatt micros — the dynamic grid split's scaling telemetry. */
+  readonly computeHoursMicros: number;
+  readonly powerDrawKwMicros: number;
+  /** The row's compute revenue of record (exact cents) — the yield
+   * walk's and the instant cascade's basis. */
+  readonly computeRevenueCents: number;
+};
+
+export type EnergyCarbonOffsetMintDetail = {
+  readonly sender: "carbon_offset_mint";
+  /** The sender's mint event id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly parcelId: string;
+  /** The carbon offset registry's mint reference of record. */
+  readonly registryRef: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The satellite-verified tonnes in statement micros (the house
+   * quantity parse: 1 unit = 1e8 micros) — the micro-royalty's
+   * quantity leg. */
+  readonly tonnesVerifiedMicros: number;
 };
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'

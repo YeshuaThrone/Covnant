@@ -290,6 +290,26 @@ import type {
   DeveloperWhitelabelUsageMonthRecord,
 } from '@/modules/developer/records';
 import type {
+  EnergyCarbonOffsetPayoutApplicationRecord,
+  EnergyCarbonOffsetPolicyRecord,
+  EnergyComputeGridSplitApplicationRecord,
+  EnergyComputeYieldPolicyRecord,
+  EnergyComputeYieldPositionRecord,
+  EnergyDeedTransferRecord,
+  EnergyDivisionOrderRecord,
+  EnergyGpuUtilizationPostRecord,
+  EnergyGridParticipantRegistrationRecord,
+  EnergyLandParcelRecord,
+  EnergyMeterSalesPostRecord,
+  EnergyNetRealizationApplicationRecord,
+  EnergyParcelDivisionApplicationRecord,
+  EnergyParcelOwnerInterestRecord,
+  EnergyParcelRoyaltyPolicyRecord,
+  EnergyParcelRoyaltyPositionRecord,
+  EnergyPipelineDeductionPostRecord,
+  EnergyStatutoryInterestApplicationRecord,
+} from '@/modules/energy/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -5043,6 +5063,334 @@ export interface Store {
     payeeId: string,
     period: string,
   ): Promise<number>;
+
+  // -------------------------------------------------------------------------
+  // Energy lane (PR 48, migration 0052) — the resource registries, posts,
+  // and applications. Shape discipline mirrors the hardware seam exactly:
+  // registries upsert-converge on their natural keys, posts and
+  // applications append with content-derived replay guards, and the
+  // realization is a keyed position recomputed in place.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Registers one surveyed land parcel of record. UNIQUE per parcel_id:
+   * a re-registration converges.
+   */
+  upsertEnergyLandParcel(
+    row: Omit<EnergyLandParcelRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyLandParcelRecord>;
+
+  /** One parcel of record by its founder-specified id; undefined when
+   * none — the division and realization registries' read. */
+  getEnergyLandParcel(
+    parcelId: string,
+  ): Promise<EnergyLandParcelRecord | undefined>;
+
+  /**
+   * Registers one deeded fractional owner's acreage interest — the
+   * division's leg basis. UNIQUE per (parcel_id, owner_payee_id): a
+   * re-registration converges.
+   */
+  upsertEnergyParcelOwnerInterest(
+    row: Omit<EnergyParcelOwnerInterestRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelOwnerInterestRecord>;
+
+  /** One parcel's registered owner interests of record, in
+   * registration order; empty when none registered. */
+  listEnergyParcelOwnerInterests(
+    parcelId: string,
+  ): Promise<EnergyParcelOwnerInterestRecord[]>;
+
+  /**
+   * Registers one parcel's tiered royalty policy of record — the ORRI
+   * ladder the walk prices from (bands validated before persist).
+   * UNIQUE per parcel_id: a re-registration converges.
+   */
+  upsertEnergyParcelRoyaltyPolicy(
+    row: Omit<EnergyParcelRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord>;
+
+  /** One parcel's royalty policy of record; undefined when none —
+   * the walk's read. */
+  getEnergyParcelRoyaltyPolicy(
+    parcelId: string,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Advances the parcel's cumulative royalty position of record for one
+   * (parcel, period, currency) by the row's revenue and royalty cents
+   * — UNIQUE per that triple: the position converges (an upsert adds);
+   * the walk reads the position BEFORE this advance through the
+   * getter.
+   */
+  advanceEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+    revenueCentsAdded: number,
+    royaltyCentsAdded: number,
+  ): Promise<EnergyParcelRoyaltyPositionRecord>;
+
+  /** One parcel-period-currency's cumulative royalty position of
+   * record; undefined when no row has advanced yet. */
+  getEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyParcelRoyaltyPositionRecord | undefined>;
+
+  /**
+   * Registers one GPU cluster's yield split policy of record — the
+   * sponsor's share ladder (bands validated before persist). UNIQUE
+   * per gpu_cluster_hash: a re-registration converges.
+   */
+  upsertEnergyComputeYieldPolicy(
+    row: Omit<EnergyComputeYieldPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyComputeYieldPolicyRecord>;
+
+  /** One cluster's yield policy of record; undefined when none —
+   * the walk's read. */
+  getEnergyComputeYieldPolicy(
+    gpuClusterHash: string,
+  ): Promise<EnergyComputeYieldPolicyRecord | undefined>;
+
+  /**
+   * Advances the cluster's cumulative yield position of record for one
+   * (cluster, period, currency) by the row's compute revenue and yield
+   * cents — UNIQUE per that triple: the position converges (an upsert
+   * adds); the walk reads the position BEFORE this advance through the
+   * getter.
+   */
+  advanceEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+    computeRevenueCentsAdded: number,
+    yieldCentsAdded: number,
+  ): Promise<EnergyComputeYieldPositionRecord>;
+
+  /** One cluster-period-currency's cumulative yield position of
+   * record; undefined when no row has advanced yet. */
+  getEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyComputeYieldPositionRecord | undefined>;
+
+  /**
+   * Registers one cluster participant's grid registration of record —
+   * the class and telemetry weight the dynamic split scales.
+   * UNIQUE per (gpu_cluster_hash, participant_payee_id): a
+   * re-registration converges.
+   */
+  upsertEnergyGridParticipant(
+    row: Omit<
+      EnergyGridParticipantRegistrationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyGridParticipantRegistrationRecord>;
+
+  /** One cluster's registered participants of record, in registration
+   * order; empty when none registered. */
+  listEnergyGridParticipants(
+    gpuClusterHash: string,
+  ): Promise<EnergyGridParticipantRegistrationRecord[]>;
+
+  /**
+   * Registers one parsed title division order of record. UNIQUE per
+   * order_ref: a re-parse converges.
+   */
+  upsertEnergyDivisionOrder(
+    row: Omit<EnergyDivisionOrderRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDivisionOrderRecord>;
+
+  /** One division order of record by its reference; undefined when
+   * none — the routing's read. */
+  getEnergyDivisionOrder(
+    orderRef: string,
+  ): Promise<EnergyDivisionOrderRecord | undefined>;
+
+  /**
+   * Registers one deed transfer of record — the title move AND the
+   * statutory interest rate of record at the transfer. UNIQUE per
+   * deed_ref: a re-registration converges.
+   */
+  upsertEnergyDeedTransfer(
+    row: Omit<EnergyDeedTransferRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDeedTransferRecord>;
+
+  /** One deed transfer of record by its reference; undefined when
+   * none — the reroute accrual's read. */
+  getEnergyDeedTransfer(
+    deedRef: string,
+  ): Promise<EnergyDeedTransferRecord | undefined>;
+
+  /** One parcel's deed transfers of record, in registration order;
+   * empty when none — the division walk's reroute read (which legs'
+   * title moved, and at what statutory rate). */
+  listEnergyDeedTransfersForParcel(
+    parcelId: string,
+  ): Promise<EnergyDeedTransferRecord[]>;
+
+  /**
+   * Registers one parcel's per-tonne carbon offset payout policy of
+   * record — the trust and developer payees and the split. UNIQUE per
+   * parcel_id: a re-registration converges.
+   */
+  upsertEnergyCarbonOffsetPolicy(
+    row: Omit<EnergyCarbonOffsetPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyCarbonOffsetPolicyRecord>;
+
+  /** One parcel's offset policy of record; undefined when none —
+   * the payout walk's read. */
+  getEnergyCarbonOffsetPolicy(
+    parcelId: string,
+  ): Promise<EnergyCarbonOffsetPolicyRecord | undefined>;
+
+  /**
+   * Appends one SCADA meter sales row post — the realization's gross
+   * side (migration 0052). UNIQUE per source_event_id is the replay
+   * guard.
+   */
+  insertEnergyMeterSalesPost(
+    row: Omit<EnergyMeterSalesPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyMeterSalesPostRecord>;
+
+  /** One meter sales post of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getEnergyMeterSalesPost(
+    sourceEventId: string,
+  ): Promise<EnergyMeterSalesPostRecord | undefined>;
+
+  /**
+   * Appends one pipeline deduction row post — the realization's
+   * deduction side (migration 0052). UNIQUE per source_event_id is the
+   * replay guard.
+   */
+  insertEnergyPipelineDeductionPost(
+    row: Omit<EnergyPipelineDeductionPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyPipelineDeductionPostRecord>;
+
+  /** One pipeline deduction post of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getEnergyPipelineDeductionPost(
+    sourceEventId: string,
+  ): Promise<EnergyPipelineDeductionPostRecord | undefined>;
+
+  /**
+   * Appends one GPU utilization row post — the compute walks' replay
+   * guard (migration 0052). UNIQUE per source_event_id.
+   */
+  insertEnergyGpuUtilizationPost(
+    row: Omit<EnergyGpuUtilizationPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyGpuUtilizationPostRecord>;
+
+  /** One GPU utilization post of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getEnergyGpuUtilizationPost(
+    sourceEventId: string,
+  ): Promise<EnergyGpuUtilizationPostRecord | undefined>;
+
+  /**
+   * Sums the posted gross and deduction cents for one realization key
+   * (parcel, meter, cluster, period, currency) — the realization
+   * recompute's aggregation (exact integer cents, zeros when none).
+   */
+  sumEnergyRealizationPosts(
+    parcelId: string,
+    wellMeterId: string,
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_energy_sales_cents: number;
+    gross_mineral_sales_cents: number;
+    transportation_pipeline_deductions_cents: number;
+    grid_transmission_fees_cents: number;
+    processing_refining_base_fees_cents: number;
+  }>;
+
+  /**
+   * Upserts one Net Realized Resource Pool application — the founder's
+   * exact identity keyed on the parcel_id, well_meter_id, and
+   * gpu_cluster_hash columns plus period and currency (migration
+   * 0052). UNIQUE per that five-tuple; the recompute replaces the sums
+   * in place (the id and created_at of record survive — the PR 33
+   * lesson, no id in the conflict payload).
+   */
+  upsertEnergyNetRealizationApplication(
+    row: Omit<
+      EnergyNetRealizationApplicationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyNetRealizationApplicationRecord>;
+
+  /** One realization application of record by its source event id —
+   * the five-tuple-derived content id; undefined when none. */
+  getEnergyNetRealizationApplication(
+    sourceEventId: string,
+  ): Promise<EnergyNetRealizationApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed monthly acreage division — the parcel's
+   * royalty pot split across the deeded heirs (migration 0052).
+   * UNIQUE per source_event_id is the replay guard.
+   */
+  insertEnergyParcelDivisionApplication(
+    row: Omit<EnergyParcelDivisionApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyParcelDivisionApplicationRecord>;
+
+  /** One division application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getEnergyParcelDivisionApplication(
+    sourceEventId: string,
+  ): Promise<EnergyParcelDivisionApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed dynamic grid split — the compute row's
+   * telemetry-weighted cascade across the participants (migration
+   * 0052). UNIQUE per source_event_id is the replay guard.
+   */
+  insertEnergyComputeGridSplitApplication(
+    row: Omit<EnergyComputeGridSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyComputeGridSplitApplicationRecord>;
+
+  /** One grid split application of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getEnergyComputeGridSplitApplication(
+    sourceEventId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed statutory interest accrual — the rerouted
+   * division leg's late-payment interest at the transfer's rate of
+   * record (migration 0052). UNIQUE per source_event_id is the replay
+   * guard.
+   */
+  insertEnergyStatutoryInterestApplication(
+    row: Omit<EnergyStatutoryInterestApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyStatutoryInterestApplicationRecord>;
+
+  /** One statutory interest application of record by its source event
+   * id; undefined when none — the replay check's read. */
+  getEnergyStatutoryInterestApplication(
+    sourceEventId: string,
+  ): Promise<EnergyStatutoryInterestApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed per-tonne carbon offset payout — the
+   * registry mint routed to the trust and developer (migration 0052).
+   * UNIQUE per source_event_id is the replay guard.
+   */
+  insertEnergyCarbonOffsetPayoutApplication(
+    row: Omit<EnergyCarbonOffsetPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord>;
+
+  /** One carbon offset payout application of record by its source
+   * event id; undefined when none — the replay check's read. */
+  getEnergyCarbonOffsetPayoutApplication(
+    sourceEventId: string,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord | undefined>;
 }
 
 
@@ -5076,6 +5424,26 @@ export type {
   TaxEscrowRecord,
   VaultDisputeRecord,
 } from '@/modules/don/records';
+export type {
+  EnergyCarbonOffsetPayoutApplicationRecord,
+  EnergyCarbonOffsetPolicyRecord,
+  EnergyComputeGridSplitApplicationRecord,
+  EnergyComputeYieldPolicyRecord,
+  EnergyComputeYieldPositionRecord,
+  EnergyDeedTransferRecord,
+  EnergyDivisionOrderRecord,
+  EnergyGpuUtilizationPostRecord,
+  EnergyGridParticipantRegistrationRecord,
+  EnergyLandParcelRecord,
+  EnergyMeterSalesPostRecord,
+  EnergyNetRealizationApplicationRecord,
+  EnergyParcelDivisionApplicationRecord,
+  EnergyParcelOwnerInterestRecord,
+  EnergyParcelRoyaltyPolicyRecord,
+  EnergyParcelRoyaltyPositionRecord,
+  EnergyPipelineDeductionPostRecord,
+  EnergyStatutoryInterestApplicationRecord,
+} from '@/modules/energy/records';
 export type {
   MatchQueueRecord,
   MatchQueueResolution,

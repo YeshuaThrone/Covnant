@@ -1,0 +1,4 @@
+Utilization Event ID,GPU Cluster Hash,Compute Hours,Power Draw kW,Compute Revenue,Currency,Reporting Period
+GPUU-2026-03-0001,a1b2c3-cluster-hash,1.5,250,"$500.00",USD,2026-03
+GPUU-2026-03-0002,a1b2c3-cluster-hash,3,500,"$1,000.00",USD,2026-03
+GPUU-2026-03-0003,cluster-orphan,2,100,"$200.00",USD,2026-03

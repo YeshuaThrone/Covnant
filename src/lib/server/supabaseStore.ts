@@ -312,6 +312,26 @@ import type {
   CulinaryPopupWriteoffRecord,
 } from '@/modules/culinary/records';
 import type {
+  EnergyCarbonOffsetPayoutApplicationRecord,
+  EnergyCarbonOffsetPolicyRecord,
+  EnergyComputeGridSplitApplicationRecord,
+  EnergyComputeYieldPolicyRecord,
+  EnergyComputeYieldPositionRecord,
+  EnergyDeedTransferRecord,
+  EnergyDivisionOrderRecord,
+  EnergyGpuUtilizationPostRecord,
+  EnergyGridParticipantRegistrationRecord,
+  EnergyLandParcelRecord,
+  EnergyMeterSalesPostRecord,
+  EnergyNetRealizationApplicationRecord,
+  EnergyParcelDivisionApplicationRecord,
+  EnergyParcelOwnerInterestRecord,
+  EnergyParcelRoyaltyPolicyRecord,
+  EnergyParcelRoyaltyPositionRecord,
+  EnergyPipelineDeductionPostRecord,
+  EnergyStatutoryInterestApplicationRecord,
+} from '@/modules/energy/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -717,6 +737,27 @@ const TABLES = {
   hardwareTelemetryRoyaltyApplications: 'hardware_telemetry_royalty_applications',
   hardwareOtaUnlockApplications: 'hardware_ota_unlock_applications',
   hardwareCrossLicenseNetSettlements: 'hardware_cross_license_net_settlements',
+
+  // The energy lane (migration 0052, PR 48, the founder resource
+  // directive) — the registries, posts, and application ledgers.
+  energyLandParcels: 'energy_land_parcels',
+  energyParcelOwnerInterests: 'energy_parcel_owner_interests',
+  energyParcelRoyaltyPolicies: 'energy_parcel_royalty_policies',
+  energyParcelRoyaltyPositions: 'energy_parcel_royalty_positions',
+  energyComputeYieldPolicies: 'energy_compute_yield_policies',
+  energyComputeYieldPositions: 'energy_compute_yield_positions',
+  energyGridParticipants: 'energy_grid_participant_registrations',
+  energyDivisionOrders: 'energy_division_orders',
+  energyDeedTransfers: 'energy_deed_transfers',
+  energyCarbonOffsetPolicies: 'energy_carbon_offset_policies',
+  energyMeterSalesPosts: 'energy_meter_sales_posts',
+  energyPipelineDeductionPosts: 'energy_pipeline_deduction_posts',
+  energyGpuUtilizationPosts: 'energy_gpu_utilization_posts',
+  energyNetRealizationApplications: 'energy_net_realization_applications',
+  energyParcelDivisionApplications: 'energy_parcel_division_applications',
+  energyComputeGridSplitApplications: 'energy_compute_grid_split_applications',
+  energyStatutoryInterestApplications: 'energy_statutory_interest_applications',
+  energyCarbonOffsetPayoutApplications: 'energy_carbon_offset_payout_applications',
 } as const;
 
 /**
@@ -10103,5 +10144,657 @@ export class SupabaseStore implements Store {
       'sumHardwareSepRoyaltiesBetween',
     );
     return rows.reduce((total, row) => total + row.royalty_cents, 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // The energy lane (PR 48, migration 0052) — the founder resource
+  // directive's registries, posts, and application ledgers. HARDENED
+  // UPSERTS: no id in any conflict payload (the PR 33 lesson).
+  // -------------------------------------------------------------------------
+
+  async upsertEnergyLandParcel(
+    row: Omit<EnergyLandParcelRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyLandParcelRecord> {
+    // One parcel of record per parcel_id.
+    return this.oneStrict<EnergyLandParcelRecord>(
+      this.client
+        .from(TABLES.energyLandParcels)
+        .upsert(row, { onConflict: 'parcel_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyLandParcel',
+    );
+  }
+
+  async getEnergyLandParcel(
+    parcelId: string,
+  ): Promise<EnergyLandParcelRecord | undefined> {
+    return this.one<EnergyLandParcelRecord>(
+      this.client
+        .from(TABLES.energyLandParcels)
+        .select()
+        .eq('parcel_id', parcelId)
+        .maybeSingle(),
+      'getEnergyLandParcel',
+    );
+  }
+
+  async upsertEnergyParcelOwnerInterest(
+    row: Omit<EnergyParcelOwnerInterestRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelOwnerInterestRecord> {
+    // One deeded interest per (parcel_id, owner_payee_id).
+    return this.oneStrict<EnergyParcelOwnerInterestRecord>(
+      this.client
+        .from(TABLES.energyParcelOwnerInterests)
+        .upsert(row, { onConflict: 'parcel_id,owner_payee_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyParcelOwnerInterest',
+    );
+  }
+
+  async listEnergyParcelOwnerInterests(
+    parcelId: string,
+  ): Promise<EnergyParcelOwnerInterestRecord[]> {
+    // Registration order (the insertion order the division reads).
+    const { data, error } = await this.client
+      .from(TABLES.energyParcelOwnerInterests)
+      .select()
+      .eq('parcel_id', parcelId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listEnergyParcelOwnerInterests failed: ${error.message}`);
+    }
+    return (data ?? []) as EnergyParcelOwnerInterestRecord[];
+  }
+
+  async upsertEnergyParcelRoyaltyPolicy(
+    row: Omit<EnergyParcelRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord> {
+    // One policy of record per parcel_id.
+    return this.oneStrict<EnergyParcelRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.energyParcelRoyaltyPolicies)
+        .upsert(row, { onConflict: 'parcel_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyParcelRoyaltyPolicy',
+    );
+  }
+
+  async getEnergyParcelRoyaltyPolicy(
+    parcelId: string,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord | undefined> {
+    return this.one<EnergyParcelRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.energyParcelRoyaltyPolicies)
+        .select()
+        .eq('parcel_id', parcelId)
+        .maybeSingle(),
+      'getEnergyParcelRoyaltyPolicy',
+    );
+  }
+
+  async advanceEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+    revenueCentsAdded: number,
+    royaltyCentsAdded: number,
+  ): Promise<EnergyParcelRoyaltyPositionRecord> {
+    // UNIQUE per (parcel_id, period, currency) — the position converges.
+    // The cumulative walk is serialized per parcel-period-currency by
+    // the recon lane (one event at a time), so a read-modify-upsert
+    // carries the same position arithmetic the SQLite backend expresses
+    // additively in its ON CONFLICT arm. No id in the payload.
+    const existing = await this.getEnergyParcelRoyaltyPosition(
+      parcelId,
+      period,
+      currency,
+    );
+    return this.oneStrict<EnergyParcelRoyaltyPositionRecord>(
+      this.client
+        .from(TABLES.energyParcelRoyaltyPositions)
+        .upsert(
+          {
+            parcel_id: parcelId,
+            period,
+            currency,
+            cumulative_revenue_cents:
+              (existing?.cumulative_revenue_cents ?? 0) + revenueCentsAdded,
+            cumulative_royalty_cents:
+              (existing?.cumulative_royalty_cents ?? 0) + royaltyCentsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'parcel_id,period,currency' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceEnergyParcelRoyaltyPosition',
+    );
+  }
+
+  async getEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyParcelRoyaltyPositionRecord | undefined> {
+    return this.one<EnergyParcelRoyaltyPositionRecord>(
+      this.client
+        .from(TABLES.energyParcelRoyaltyPositions)
+        .select()
+        .eq('parcel_id', parcelId)
+        .eq('period', period)
+        .eq('currency', currency)
+        .maybeSingle(),
+      'getEnergyParcelRoyaltyPosition',
+    );
+  }
+
+  async upsertEnergyComputeYieldPolicy(
+    row: Omit<EnergyComputeYieldPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyComputeYieldPolicyRecord> {
+    // One policy of record per gpu_cluster_hash.
+    return this.oneStrict<EnergyComputeYieldPolicyRecord>(
+      this.client
+        .from(TABLES.energyComputeYieldPolicies)
+        .upsert(row, { onConflict: 'gpu_cluster_hash' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyComputeYieldPolicy',
+    );
+  }
+
+  async getEnergyComputeYieldPolicy(
+    gpuClusterHash: string,
+  ): Promise<EnergyComputeYieldPolicyRecord | undefined> {
+    return this.one<EnergyComputeYieldPolicyRecord>(
+      this.client
+        .from(TABLES.energyComputeYieldPolicies)
+        .select()
+        .eq('gpu_cluster_hash', gpuClusterHash)
+        .maybeSingle(),
+      'getEnergyComputeYieldPolicy',
+    );
+  }
+
+  async advanceEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+    computeRevenueCentsAdded: number,
+    yieldCentsAdded: number,
+  ): Promise<EnergyComputeYieldPositionRecord> {
+    // UNIQUE per (gpu_cluster_hash, period, currency) — the position
+    // converges; serialized per the recon lane. No id in the payload.
+    const existing = await this.getEnergyComputeYieldPosition(
+      gpuClusterHash,
+      period,
+      currency,
+    );
+    return this.oneStrict<EnergyComputeYieldPositionRecord>(
+      this.client
+        .from(TABLES.energyComputeYieldPositions)
+        .upsert(
+          {
+            gpu_cluster_hash: gpuClusterHash,
+            period,
+            currency,
+            cumulative_compute_revenue_cents:
+              (existing?.cumulative_compute_revenue_cents ?? 0) +
+              computeRevenueCentsAdded,
+            cumulative_yield_cents:
+              (existing?.cumulative_yield_cents ?? 0) + yieldCentsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'gpu_cluster_hash,period,currency' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceEnergyComputeYieldPosition',
+    );
+  }
+
+  async getEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyComputeYieldPositionRecord | undefined> {
+    return this.one<EnergyComputeYieldPositionRecord>(
+      this.client
+        .from(TABLES.energyComputeYieldPositions)
+        .select()
+        .eq('gpu_cluster_hash', gpuClusterHash)
+        .eq('period', period)
+        .eq('currency', currency)
+        .maybeSingle(),
+      'getEnergyComputeYieldPosition',
+    );
+  }
+
+  async upsertEnergyGridParticipant(
+    row: Omit<
+      EnergyGridParticipantRegistrationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyGridParticipantRegistrationRecord> {
+    // One registration per (gpu_cluster_hash, participant_payee_id).
+    return this.oneStrict<EnergyGridParticipantRegistrationRecord>(
+      this.client
+        .from(TABLES.energyGridParticipants)
+        .upsert(row, { onConflict: 'gpu_cluster_hash,participant_payee_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyGridParticipant',
+    );
+  }
+
+  async listEnergyGridParticipants(
+    gpuClusterHash: string,
+  ): Promise<EnergyGridParticipantRegistrationRecord[]> {
+    // Registration order (the insertion order the split reads).
+    const { data, error } = await this.client
+      .from(TABLES.energyGridParticipants)
+      .select()
+      .eq('gpu_cluster_hash', gpuClusterHash)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listEnergyGridParticipants failed: ${error.message}`);
+    }
+    return (data ?? []) as EnergyGridParticipantRegistrationRecord[];
+  }
+
+  async upsertEnergyDivisionOrder(
+    row: Omit<EnergyDivisionOrderRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDivisionOrderRecord> {
+    // One order of record per order_ref.
+    return this.oneStrict<EnergyDivisionOrderRecord>(
+      this.client
+        .from(TABLES.energyDivisionOrders)
+        .upsert(row, { onConflict: 'order_ref' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyDivisionOrder',
+    );
+  }
+
+  async getEnergyDivisionOrder(
+    orderRef: string,
+  ): Promise<EnergyDivisionOrderRecord | undefined> {
+    return this.one<EnergyDivisionOrderRecord>(
+      this.client
+        .from(TABLES.energyDivisionOrders)
+        .select()
+        .eq('order_ref', orderRef)
+        .maybeSingle(),
+      'getEnergyDivisionOrder',
+    );
+  }
+
+  async upsertEnergyDeedTransfer(
+    row: Omit<EnergyDeedTransferRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDeedTransferRecord> {
+    // One transfer of record per deed_ref.
+    return this.oneStrict<EnergyDeedTransferRecord>(
+      this.client
+        .from(TABLES.energyDeedTransfers)
+        .upsert(row, { onConflict: 'deed_ref' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyDeedTransfer',
+    );
+  }
+
+  async getEnergyDeedTransfer(
+    deedRef: string,
+  ): Promise<EnergyDeedTransferRecord | undefined> {
+    return this.one<EnergyDeedTransferRecord>(
+      this.client
+        .from(TABLES.energyDeedTransfers)
+        .select()
+        .eq('deed_ref', deedRef)
+        .maybeSingle(),
+      'getEnergyDeedTransfer',
+    );
+  }
+
+  async listEnergyDeedTransfersForParcel(
+    parcelId: string,
+  ): Promise<EnergyDeedTransferRecord[]> {
+    // Registration order (the insertion order the division reads).
+    const { data, error } = await this.client
+      .from(TABLES.energyDeedTransfers)
+      .select()
+      .eq('parcel_id', parcelId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listEnergyDeedTransfersForParcel failed: ${error.message}`);
+    }
+    return (data ?? []) as EnergyDeedTransferRecord[];
+  }
+
+  async upsertEnergyCarbonOffsetPolicy(
+    row: Omit<EnergyCarbonOffsetPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyCarbonOffsetPolicyRecord> {
+    // One policy of record per parcel_id.
+    return this.oneStrict<EnergyCarbonOffsetPolicyRecord>(
+      this.client
+        .from(TABLES.energyCarbonOffsetPolicies)
+        .upsert(row, { onConflict: 'parcel_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEnergyCarbonOffsetPolicy',
+    );
+  }
+
+  async getEnergyCarbonOffsetPolicy(
+    parcelId: string,
+  ): Promise<EnergyCarbonOffsetPolicyRecord | undefined> {
+    return this.one<EnergyCarbonOffsetPolicyRecord>(
+      this.client
+        .from(TABLES.energyCarbonOffsetPolicies)
+        .select()
+        .eq('parcel_id', parcelId)
+        .maybeSingle(),
+      'getEnergyCarbonOffsetPolicy',
+    );
+  }
+
+  async insertEnergyMeterSalesPost(
+    row: Omit<EnergyMeterSalesPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyMeterSalesPostRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyMeterSalesPostRecord>(
+      this.client
+        .from(TABLES.energyMeterSalesPosts)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyMeterSalesPost',
+    );
+  }
+
+  async getEnergyMeterSalesPost(
+    sourceEventId: string,
+  ): Promise<EnergyMeterSalesPostRecord | undefined> {
+    return this.one<EnergyMeterSalesPostRecord>(
+      this.client
+        .from(TABLES.energyMeterSalesPosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyMeterSalesPost',
+    );
+  }
+
+  async insertEnergyPipelineDeductionPost(
+    row: Omit<EnergyPipelineDeductionPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyPipelineDeductionPostRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyPipelineDeductionPostRecord>(
+      this.client
+        .from(TABLES.energyPipelineDeductionPosts)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyPipelineDeductionPost',
+    );
+  }
+
+  async getEnergyPipelineDeductionPost(
+    sourceEventId: string,
+  ): Promise<EnergyPipelineDeductionPostRecord | undefined> {
+    return this.one<EnergyPipelineDeductionPostRecord>(
+      this.client
+        .from(TABLES.energyPipelineDeductionPosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyPipelineDeductionPost',
+    );
+  }
+
+  async insertEnergyGpuUtilizationPost(
+    row: Omit<EnergyGpuUtilizationPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyGpuUtilizationPostRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyGpuUtilizationPostRecord>(
+      this.client
+        .from(TABLES.energyGpuUtilizationPosts)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyGpuUtilizationPost',
+    );
+  }
+
+  async getEnergyGpuUtilizationPost(
+    sourceEventId: string,
+  ): Promise<EnergyGpuUtilizationPostRecord | undefined> {
+    return this.one<EnergyGpuUtilizationPostRecord>(
+      this.client
+        .from(TABLES.energyGpuUtilizationPosts)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyGpuUtilizationPost',
+    );
+  }
+
+  async sumEnergyRealizationPosts(
+    parcelId: string,
+    wellMeterId: string,
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_energy_sales_cents: number;
+    gross_mineral_sales_cents: number;
+    transportation_pipeline_deductions_cents: number;
+    grid_transmission_fees_cents: number;
+    processing_refining_base_fees_cents: number;
+  }> {
+    // The realization recompute's aggregation — the amount columns alone,
+    // summed exactly (never a page of full rows).
+    const meterRows = await this.many<{
+      gross_energy_sales_cents: number;
+      gross_mineral_sales_cents: number;
+    }>(
+      this.client
+        .from(TABLES.energyMeterSalesPosts)
+        .select('gross_energy_sales_cents,gross_mineral_sales_cents')
+        .eq('parcel_id', parcelId)
+        .eq('well_meter_id', wellMeterId)
+        .eq('gpu_cluster_hash', gpuClusterHash)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumEnergyRealizationPosts',
+    );
+    const pipelineRows = await this.many<{
+      transportation_pipeline_deductions_cents: number;
+      grid_transmission_fees_cents: number;
+      processing_refining_base_fees_cents: number;
+    }>(
+      this.client
+        .from(TABLES.energyPipelineDeductionPosts)
+        .select(
+          'transportation_pipeline_deductions_cents,grid_transmission_fees_cents,processing_refining_base_fees_cents',
+        )
+        .eq('parcel_id', parcelId)
+        .eq('well_meter_id', wellMeterId)
+        .eq('gpu_cluster_hash', gpuClusterHash)
+        .eq('period', period)
+        .eq('currency', currency),
+      'sumEnergyRealizationPosts',
+    );
+    return {
+      gross_energy_sales_cents: meterRows.reduce(
+        (total, row) => total + row.gross_energy_sales_cents,
+        0,
+      ),
+      gross_mineral_sales_cents: meterRows.reduce(
+        (total, row) => total + row.gross_mineral_sales_cents,
+        0,
+      ),
+      transportation_pipeline_deductions_cents: pipelineRows.reduce(
+        (total, row) => total + row.transportation_pipeline_deductions_cents,
+        0,
+      ),
+      grid_transmission_fees_cents: pipelineRows.reduce(
+        (total, row) => total + row.grid_transmission_fees_cents,
+        0,
+      ),
+      processing_refining_base_fees_cents: pipelineRows.reduce(
+        (total, row) => total + row.processing_refining_base_fees_cents,
+        0,
+      ),
+    };
+  }
+
+  async upsertEnergyNetRealizationApplication(
+    row: Omit<
+      EnergyNetRealizationApplicationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyNetRealizationApplicationRecord> {
+    // The realization position of record — UNIQUE per the founder's
+    // five-tuple; the recompute replaces the sums in place (no id in the
+    // conflict payload — the PR 33 lesson). updated_at is stamped here —
+    // the caller has no clock.
+    return this.oneStrict<EnergyNetRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.energyNetRealizationApplications)
+        .upsert(
+          { ...row, updated_at: new Date().toISOString() },
+          {
+            onConflict:
+              'parcel_id,well_meter_id,gpu_cluster_hash,period,currency',
+          },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertEnergyNetRealizationApplication',
+    );
+  }
+
+  async getEnergyNetRealizationApplication(
+    sourceEventId: string,
+  ): Promise<EnergyNetRealizationApplicationRecord | undefined> {
+    return this.one<EnergyNetRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.energyNetRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyNetRealizationApplication',
+    );
+  }
+
+  async insertEnergyParcelDivisionApplication(
+    row: Omit<EnergyParcelDivisionApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyParcelDivisionApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyParcelDivisionApplicationRecord>(
+      this.client
+        .from(TABLES.energyParcelDivisionApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyParcelDivisionApplication',
+    );
+  }
+
+  async getEnergyParcelDivisionApplication(
+    sourceEventId: string,
+  ): Promise<EnergyParcelDivisionApplicationRecord | undefined> {
+    return this.one<EnergyParcelDivisionApplicationRecord>(
+      this.client
+        .from(TABLES.energyParcelDivisionApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyParcelDivisionApplication',
+    );
+  }
+
+  async insertEnergyComputeGridSplitApplication(
+    row: Omit<EnergyComputeGridSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyComputeGridSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyComputeGridSplitApplicationRecord>(
+      this.client
+        .from(TABLES.energyComputeGridSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyComputeGridSplitApplication',
+    );
+  }
+
+  async getEnergyComputeGridSplitApplication(
+    sourceEventId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    return this.one<EnergyComputeGridSplitApplicationRecord>(
+      this.client
+        .from(TABLES.energyComputeGridSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyComputeGridSplitApplication',
+    );
+  }
+
+  async insertEnergyStatutoryInterestApplication(
+    row: Omit<EnergyStatutoryInterestApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyStatutoryInterestApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyStatutoryInterestApplicationRecord>(
+      this.client
+        .from(TABLES.energyStatutoryInterestApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyStatutoryInterestApplication',
+    );
+  }
+
+  async getEnergyStatutoryInterestApplication(
+    sourceEventId: string,
+  ): Promise<EnergyStatutoryInterestApplicationRecord | undefined> {
+    return this.one<EnergyStatutoryInterestApplicationRecord>(
+      this.client
+        .from(TABLES.energyStatutoryInterestApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyStatutoryInterestApplication',
+    );
+  }
+
+  async insertEnergyCarbonOffsetPayoutApplication(
+    row: Omit<EnergyCarbonOffsetPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<EnergyCarbonOffsetPayoutApplicationRecord>(
+      this.client
+        .from(TABLES.energyCarbonOffsetPayoutApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEnergyCarbonOffsetPayoutApplication',
+    );
+  }
+
+  async getEnergyCarbonOffsetPayoutApplication(
+    sourceEventId: string,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord | undefined> {
+    return this.one<EnergyCarbonOffsetPayoutApplicationRecord>(
+      this.client
+        .from(TABLES.energyCarbonOffsetPayoutApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getEnergyCarbonOffsetPayoutApplication',
+    );
   }
 }

@@ -36,6 +36,7 @@ import { FOOD_PROFILES } from "./foodProfiles";
 import { SERVICE_PROFILES } from "./serviceProfiles";
 import { DEVELOPER_PROFILES } from "./developerProfiles";
 import { HARDWARE_PROFILES } from "./hardwareProfiles";
+import { ENERGY_PROFILES } from "./energyProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -628,6 +629,15 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // unlock instant settlements are hardware-only, and hardware rows
   // never touch the music split machinery).
   ...HARDWARE_PROFILES,
+  // The energy lane (PR 48, the founder resource directive) — same
+  // dispatch opinion again: the worker branches on the profile kind
+  // before the music machinery (the Net Resource Realization
+  // calculator, the tiered parcel royalty and GPU yield walks, the
+  // acreage-ratio owner divisions, the telemetry-weighted compute-grid
+  // splits, the division order reroutes with statutory interest, and
+  // the per-tonne carbon offset micro-royalties are energy-only, and
+  // energy rows never touch the music split machinery).
+  ...ENERGY_PROFILES,
 ];
 
 /**
