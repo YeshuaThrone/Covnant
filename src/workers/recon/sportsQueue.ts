@@ -93,6 +93,10 @@ import {
   unionLedgerPayeeId,
 } from "./sports";
 import { isSportsPeriod } from "@/modules/sports/records";
+import {
+  executeSportsBiometricMicroPayout,
+  executeSportsResaleRoyaltyPosting,
+} from "@/lib/server/sportsInstantPostings";
 
 /** The sports lane's per-pass counters — the honest outcome summary. */
 export interface SportsWriteCounts {
@@ -109,6 +113,12 @@ export interface SportsWriteCounts {
    * royalty policy of record for the (venue, league) scope). */
   resaleRoyaltiesWritten: number;
   resaleRoyaltiesSkippedNoPolicy: number;
+  /** The staged royalties' INSTANT postings (PR 51) — completed
+   * journal-stamped postings, and postings refused (the staged row
+   * remains the row of record; the reconciliation of staged
+   * applications against journals surfaces the gap). */
+  resaleRoyaltyPostingsPosted: number;
+  resaleRoyaltyPostingsRefused: number;
   /** League pool distributions committed / fail-closed skips (no pool
    * policy of record / no registered teams). */
   leaguePoolsWritten: number;
@@ -129,6 +139,12 @@ export interface SportsWriteCounts {
   biometricPayoutsWritten: number;
   biometricPayoutsSkippedNoPolicy: number;
   biometricPayoutsSkippedNoProfile: number;
+  /** The staged micro-payouts' INSTANT postings (PR 51) — completed
+   * journal-stamped postings, and postings refused (the staged row
+   * remains the row of record; the reconciliation of staged
+   * applications against journals surfaces the gap). */
+  biometricPayoutPostingsPosted: number;
+  biometricPayoutPostingsRefused: number;
   /** The committed money, integer cents. The pool DELTA is what this
    * pass's realization recomputes moved the pool of record by (the
    * per-tuple after − before of record; negative when the deduction
@@ -161,6 +177,8 @@ export async function writeSportsRowsToStore(
     rowsReplayed: 0,
     resaleRoyaltiesWritten: 0,
     resaleRoyaltiesSkippedNoPolicy: 0,
+    resaleRoyaltyPostingsPosted: 0,
+    resaleRoyaltyPostingsRefused: 0,
     leaguePoolsWritten: 0,
     leaguePoolsSkippedNoPolicy: 0,
     leaguePoolsSkippedNoTeams: 0,
@@ -173,6 +191,8 @@ export async function writeSportsRowsToStore(
     biometricPayoutsWritten: 0,
     biometricPayoutsSkippedNoPolicy: 0,
     biometricPayoutsSkippedNoProfile: 0,
+    biometricPayoutPostingsPosted: 0,
+    biometricPayoutPostingsRefused: 0,
     netGatePoolDeltaCents: 0,
     resaleRoyaltyCents: 0,
     leaguePoolDistributedCents: 0,
@@ -569,12 +589,13 @@ async function walkSportsResaleSale(
   }
 
   const split = planResaleRoyaltySplit(detail.resaleGrossCents, policy);
+  const royaltyEventId = sportsRowEventId(
+    "resale_royalty",
+    `${detail.sender}:${detail.senderRowId}`,
+    `${detail.period}:${detail.currency}`,
+  );
   await store.insertSportsResaleRoyaltyApplication({
-    source_event_id: sportsRowEventId(
-      "resale_royalty",
-      `${detail.sender}:${detail.senderRowId}`,
-      `${detail.period}:${detail.currency}`,
-    ),
+    source_event_id: royaltyEventId,
     resale_sale_event_id: sourceEventId,
     venue_gln: detail.venueGln,
     league_rights_code: detail.leagueRightsCode,
@@ -587,9 +608,25 @@ async function walkSportsResaleSale(
     promoter_leg_cents: split.promoterLegCents,
     venue_leg_cents: split.venueLegCents,
     league_leg_cents: split.leagueLegCents,
+    journal_id: null,
   });
   counts.resaleRoyaltiesWritten += 1;
   counts.resaleRoyaltyCents += split.royaltyPotCents;
+
+  // THE INSTANT POSTING (PR 51) — the staged royalty completes
+  // immediately: the promoter, venue, and league rights holders post
+  // between their ledgers the moment the secondary market's royalty
+  // stages. The staged row is the row of record (the OTA
+  // instant-posting discipline): a refused posting leaves the row
+  // journal_id-null — the reconciliation of staged applications against
+  // journals surfaces the gap — and the walk counts the refusal instead
+  // of guessing money.
+  const royaltyPosted = await executeSportsResaleRoyaltyPosting(store, royaltyEventId);
+  if (royaltyPosted.ok) {
+    counts.resaleRoyaltyPostingsPosted += 1;
+  } else {
+    counts.resaleRoyaltyPostingsRefused += 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -897,12 +934,13 @@ async function walkSportsBiometricTracking(
     policy.micros_per_unit,
   );
   const split = planBiometricPayoutSplit(payoutPotCents, policy.athlete_share_bps);
+  const payoutEventId = sportsRowEventId(
+    "biometric_payout",
+    `${detail.leagueRightsCode}:${detail.senderRowId}`,
+    `${detail.period}:${detail.currency}`,
+  );
   await store.insertSportsBiometricMicroPayoutApplication({
-    source_event_id: sportsRowEventId(
-      "biometric_payout",
-      `${detail.leagueRightsCode}:${detail.senderRowId}`,
-      `${detail.period}:${detail.currency}`,
-    ),
+    source_event_id: payoutEventId,
     biometric_post_event_id: sourceEventId,
     athlete_glan: detail.athleteGlan,
     league_rights_code: detail.leagueRightsCode,
@@ -916,7 +954,23 @@ async function walkSportsBiometricTracking(
     athlete_leg_cents: split.athleteLegCents,
     league_data_payee_id: policy.league_data_payee_id,
     league_leg_cents: split.leagueLegCents,
+    journal_id: null,
   });
   counts.biometricPayoutsWritten += 1;
   counts.biometricPayoutCents += payoutPotCents;
+
+  // THE INSTANT POSTING (PR 51) — the staged micro-payout completes
+  // immediately: the athlete's wallet and the league's data-rights
+  // ledger post between each other the moment the tracking feed's
+  // payout stages. The staged row is the row of record (the OTA
+  // instant-posting discipline): a refused posting leaves the row
+  // journal_id-null — the reconciliation of staged applications against
+  // journals surfaces the gap — and the walk counts the refusal instead
+  // of guessing money.
+  const payoutPosted = await executeSportsBiometricMicroPayout(store, payoutEventId);
+  if (payoutPosted.ok) {
+    counts.biometricPayoutPostingsPosted += 1;
+  } else {
+    counts.biometricPayoutPostingsRefused += 1;
+  }
 }

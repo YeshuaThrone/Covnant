@@ -741,6 +741,11 @@ export interface ReconJobResult {
   sports_rows_replayed?: number;
   sports_resale_royalties_committed?: number;
   sports_resale_royalties_skipped_no_policy?: number;
+  /** The staged royalties' instant postings (PR 51) — completed
+   * journal-stamped postings and refused postings (the staged row
+   * remains the row of record). */
+  sports_resale_royalty_postings_posted?: number;
+  sports_resale_royalty_postings_refused?: number;
   sports_league_pools_committed?: number;
   sports_league_pools_skipped_no_policy?: number;
   sports_league_pools_skipped_no_teams?: number;
@@ -753,6 +758,11 @@ export interface ReconJobResult {
   sports_biometric_payouts_committed?: number;
   sports_biometric_payouts_skipped_no_policy?: number;
   sports_biometric_payouts_skipped_no_profile?: number;
+  /** The staged micro-payouts' instant postings (PR 51) — completed
+   * journal-stamped postings and refused postings (the staged row
+   * remains the row of record). */
+  sports_biometric_payout_postings_posted?: number;
+  sports_biometric_payout_postings_refused?: number;
   /** Sports lane: the committed money, integer cents — the pass's
    * Net Gate Pool DELTA (the per-tuple after − before of record,
    * additive across jobs; includes held negative nets) and every leg
