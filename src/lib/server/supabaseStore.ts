@@ -102,6 +102,12 @@ import type {
   BookRecoupmentPoolClass,
   BookRecoupmentApplicationRecord,
   BookEditorialSplitAccrualRecord,
+  ArtRecoupmentPoolRecord,
+  ArtRecoupmentPoolClass,
+  ArtRecoupmentApplicationRecord,
+  ArtSplitScheduleRecord,
+  ArtSplitAccrualRecord,
+  ArtLicensingAgencyPolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -314,6 +320,11 @@ const TABLES = {
   bookRecoupmentPools: 'book_recoupment_pools',
   bookRecoupmentApplications: 'book_recoupment_applications',
   bookEditorialSplitAccruals: 'book_editorial_split_accruals',
+  artSplitSchedules: 'art_split_schedules',
+  artRecoupmentPools: 'art_recoupment_pools',
+  artRecoupmentApplications: 'art_recoupment_applications',
+  artSplitAccruals: 'art_split_accruals',
+  artLicensingAgencyPolicies: 'art_licensing_agency_policies',
   // Migration 0031 (PR 27) — the foreign tax hold + book returns reserve
   // layer: the withholding-tax-credit verification of record per
   // (country_code, tax_year) and the ISBN rights verification of record per
@@ -2455,6 +2466,162 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'insertBookEditorialSplitAccrual',
+    );
+  }
+
+  // --- Art market waterfalls (PR 28, migration 0032) ---
+
+  async upsertArtSplitSchedule(
+    row: ArtSplitScheduleRecord,
+  ): Promise<ArtSplitScheduleRecord> {
+    // One schedule of record per scope_key — the upsert targets the key, so
+    // a re-registration (identity + version preserved by the caller)
+    // replaces the row atomically.
+    return this.oneStrict<ArtSplitScheduleRecord>(
+      this.client
+        .from(TABLES.artSplitSchedules)
+        .upsert({ ...row }, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertArtSplitSchedule',
+    );
+  }
+
+  async getArtSplitSchedule(scopeKey: string): Promise<ArtSplitScheduleRecord | undefined> {
+    return this.one<ArtSplitScheduleRecord>(
+      this.client
+        .from(TABLES.artSplitSchedules)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getArtSplitSchedule',
+    );
+  }
+
+  async insertArtRecoupmentPool(
+    row: Omit<ArtRecoupmentPoolRecord, 'id'>,
+  ): Promise<ArtRecoupmentPoolRecord> {
+    // UNIQUE per (scope_key, pool_class, sequence_no): a re-registered
+    // sequence slot throws here — never a silent duplicate debt slot.
+    return this.oneStrict<ArtRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.artRecoupmentPools)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertArtRecoupmentPool',
+    );
+  }
+
+  async listArtRecoupmentPools(
+    scopeKey: string,
+    poolClass: ArtRecoupmentPoolClass,
+  ): Promise<ArtRecoupmentPoolRecord[]> {
+    // sequence_no ASC — the fabrication recoupment order of record.
+    return this.many<ArtRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.artRecoupmentPools)
+        .select()
+        .eq('scope_key', scopeKey)
+        .eq('pool_class', poolClass)
+        .order('sequence_no', { ascending: true }),
+      'listArtRecoupmentPools',
+    );
+  }
+
+  async updateArtRecoupmentPoolProgress(
+    id: string,
+    recoupedCents: number,
+    status: ArtRecoupmentPoolRecord['status'],
+    updatedAt: string,
+  ): Promise<ArtRecoupmentPoolRecord | undefined> {
+    // The pool CAS: one conditional update scoped to the 'active' state —
+    // changes=0 (no returned row) means the pool is absent or already
+    // recouped; either way this call lost the race (the books CAS).
+    return this.one<ArtRecoupmentPoolRecord>(
+      this.client
+        .from(TABLES.artRecoupmentPools)
+        .update({ recouped_cents: recoupedCents, status, updated_at: updatedAt })
+        .eq('id', id)
+        .eq('status', 'active')
+        .select()
+        .maybeSingle(),
+      'updateArtRecoupmentPoolProgress',
+    );
+  }
+
+  async insertArtRecoupmentApplication(
+    row: Omit<ArtRecoupmentApplicationRecord, 'id'>,
+  ): Promise<ArtRecoupmentApplicationRecord> {
+    // UNIQUE per (pool_id, source_event_id): a replayed application throws
+    // here — the once-only replay guard, never a double recovery. UNIQUE
+    // per (pool_id, recouped_before_cents): the POSITION lock (the
+    // insert-as-lock arbiter).
+    return this.oneStrict<ArtRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.artRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertArtRecoupmentApplication',
+    );
+  }
+
+  async listArtRecoupmentApplications(
+    poolId: string,
+  ): Promise<ArtRecoupmentApplicationRecord[]> {
+    // created_at ASC — the running recovery in application order.
+    return this.many<ArtRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.artRecoupmentApplications)
+        .select()
+        .eq('pool_id', poolId)
+        .order('created_at', { ascending: true }),
+      'listArtRecoupmentApplications',
+    );
+  }
+
+  async insertArtSplitAccrual(
+    row: Omit<ArtSplitAccrualRecord, 'id'>,
+  ): Promise<ArtSplitAccrualRecord> {
+    // UNIQUE per source_event_id: a replayed accrual throws here — the
+    // once-only designation guard, never a double split.
+    return this.oneStrict<ArtSplitAccrualRecord>(
+      this.client
+        .from(TABLES.artSplitAccruals)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertArtSplitAccrual',
+    );
+  }
+
+  async upsertArtLicensingAgencyPolicy(
+    row: Omit<ArtLicensingAgencyPolicyRecord, 'id'>,
+  ): Promise<ArtLicensingAgencyPolicyRecord> {
+    // One policy of record per agency_code — the upsert targets the key, so
+    // a re-registered rate replaces the row atomically (the founder band
+    // validates at registration).
+    return this.oneStrict<ArtLicensingAgencyPolicyRecord>(
+      this.client
+        .from(TABLES.artLicensingAgencyPolicies)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'agency_code' })
+        .select()
+        .maybeSingle(),
+      'upsertArtLicensingAgencyPolicy',
+    );
+  }
+
+  async getArtLicensingAgencyPolicy(
+    agencyCode: ArtLicensingAgencyPolicyRecord['agency_code'],
+  ): Promise<ArtLicensingAgencyPolicyRecord | undefined> {
+    return this.one<ArtLicensingAgencyPolicyRecord>(
+      this.client
+        .from(TABLES.artLicensingAgencyPolicies)
+        .select()
+        .eq('agency_code', agencyCode)
+        .maybeSingle(),
+      'getArtLicensingAgencyPolicy',
     );
   }
 

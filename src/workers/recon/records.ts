@@ -58,6 +58,11 @@ export type StatementProfileKind =
   | "book_ebook_agency_csv"
   | "book_magazine_csv"
   | "book_audiobook_sales_csv"
+  | "art_gallery_invoice_csv"
+  | "art_auction_resale_report_csv"
+  | "art_print_shop_sales_csv"
+  | "art_museum_licensing_csv"
+  | "art_foundation_estate_audit_csv"
   | "shopify_dtc_dump_csv"
   | "pod_fulfillment_dump_csv"
   | "wholesale_consignment_payout_csv"
@@ -603,6 +608,102 @@ export type BookLineDetail =
     };
 
 /**
+ * The art-market lane's per-line context (PR 28, founder art directive).
+ * Null on every non-art line — the field's PRESENCE is the lane
+ * discriminator, the same pattern as bookDetail. Identity is content-
+ * derived per row (the sha256 fingerprints in art.ts); money legs ride the
+ * row verbatim as exact micros text (the founder's rate-logging rule).
+ */
+export type ArtLineDetail =
+  | {
+      /** A primary gallery sale — the founder equation's subject: sale
+       * price − gallery commission − production/framing/shipping COGS. */
+      readonly kind: "gallery_primary_sale";
+      readonly galleryId: string;
+      readonly invoiceId: string;
+      /** The piece's artwork identity — the match queue's artwork_id. */
+      readonly artworkId: string;
+      /** Routes sculpture sales to the sculpture fabrication waterfall. */
+      readonly pieceKind: "unique_work" | "sculpture";
+      /** Exact micros text, recorded verbatim. */
+      readonly salePriceMicros: string;
+      /** Whole basis points, validated into the 40–50% founder band. */
+      readonly galleryCommissionBps: number;
+      readonly productionCogsMicros: string;
+      readonly framingCogsMicros: string;
+      readonly shippingCogsMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** An auction house secondary resale — the statutory sliding
+       * scale's subject (EU/UK jurisdictions, EUR only). */
+      readonly kind: "auction_resale";
+      readonly auctionHouse: string;
+      readonly lotId: string;
+      readonly artworkId: string;
+      /** Always 'secondary_resale' — the profile rejects primary rows. */
+      readonly saleType: "secondary_resale";
+      /** Exact micros text, recorded verbatim: the hammer price and the
+       * cross-border tax legs offsetting before the royalty releases. */
+      readonly hammerPriceMicros: string;
+      readonly crossBorderVatMicros: string;
+      readonly importExportDutyMicros: string;
+      /** The resale-right jurisdiction of record (ISO alpha-2). */
+      readonly jurisdictionCode: string;
+      readonly period: string;
+    }
+  | {
+      /** A print shop edition sale — the print-edition fabrication
+       * waterfall's revenue feed, keyed on edition + artwork. */
+      readonly kind: "print_shop_sale";
+      readonly shopId: string;
+      readonly orderId: string;
+      /** The edition identity — the fabrication pools' scope key. */
+      readonly editionId: string;
+      readonly artworkId: string;
+      readonly units: number;
+      /** The row's gross sale, exact micros text — the waterfall's feed. */
+      readonly grossSaleMicros: string;
+      readonly period: string;
+    }
+  | {
+      /** A museum reproduction license — the Don Ledger's isolated
+       * licensing feed with the copyright agency's deduction. */
+      readonly kind: "museum_licensing";
+      readonly museumId: string;
+      readonly licenseId: string;
+      readonly artworkId: string;
+      readonly reproductionType:
+        | "exhibition_catalog"
+        | "postcard"
+        | "poster"
+        | "educational_material"
+        | "digital_reproduction";
+      /** Exact micros text, recorded verbatim. */
+      readonly licenseFeeMicros: string;
+      /** The copyright agency of record (ARS / DACS). */
+      readonly agencyCode: "ars" | "dacs";
+      /** Whole basis points, validated into the 15–20% founder band. */
+      readonly agencyCollectionFeeBps: number;
+      readonly period: string;
+    }
+  | {
+      /** A foundation/estate audit attestation — a fact of record,
+       * never posted, never recouped, never split. */
+      readonly kind: "foundation_estate_audit";
+      readonly auditEntityId: string;
+      readonly auditId: string;
+      /** Null when the audit covers a whole holding. */
+      readonly artworkId: string | null;
+      readonly scope: "print_edition" | "sculpture_fabrication" | "museum_licensing" | "general";
+      /** Exact micros text, recorded verbatim. */
+      readonly declaredFabricationCostMicros: string;
+      readonly declaredLicenseIncomeMicros: string;
+      readonly period: string;
+    };
+
+
+/**
  * The gaming lane's platform vocabulary (PR 12, founder gaming directive).
  * The Epic Games Store and Unreal Engine Marketplace share one engine-
  * royalty accumulator scope (the Epic family) — the store cell discriminates
@@ -738,6 +839,12 @@ export interface ParsedStatementLine {
    * discriminator. Optional so the other lanes' constructors and the
    * existing test literals stay honest without naming an absent lane. */
   bookDetail?: BookLineDetail | null;
+
+  /** Art-market lane context (artwork identity, gallery deduction legs,
+   * resale jurisdiction and tax legs, fabrication waterfall keys, licensing
+   * agency cells); null on every non-art line — the presence IS the lane
+   * discriminator. Optional for the same reason as bookDetail. */
+  artDetail?: ArtLineDetail | null;
 }
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */

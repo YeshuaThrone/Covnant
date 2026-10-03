@@ -1070,6 +1070,226 @@ export type BookEditorialSplitAccrualRecord = {
   created_at: string;
 };
 
+// --- Art market waterfalls (PR 28, migration 0032) ---------------------------
+
+/**
+ * The fabrication recoupment pool classes (PR 28, the founder art
+ * directive) — the isolation firewall's art vocabulary: a print shop sale
+ * recoups ONLY print_edition_fabrication pools (master printmaker and
+ * lithographer costs); a sculpture sale recoups ONLY sculpture_fabrication
+ * pools (bronze foundry and 3D printing bills). Museum licensing money and
+ * ARR resales touch neither — the books pool-class rule, applied to
+ * fabrication debts.
+ */
+export const ART_RECOUPMENT_POOL_CLASSES = [
+  "print_edition_fabrication",
+  "sculpture_fabrication",
+] as const;
+export type ArtRecoupmentPoolClass = (typeof ART_RECOUPMENT_POOL_CLASSES)[number];
+
+export function isArtRecoupmentPoolClass(value: string): value is ArtRecoupmentPoolClass {
+  return (ART_RECOUPMENT_POOL_CLASSES as readonly string[]).includes(value);
+}
+
+/**
+ * The creditor roles a fabrication debt can name — the costs that recoup
+ * BEFORE any split exists: the print edition's master printmaker and
+ * lithographer, the sculpture's bronze foundry and 3D printing bills.
+ */
+export const ART_CREDITOR_ROLES = [
+  "master_printmaker",
+  "lithographer",
+  "bronze_foundry",
+  "three_d_printing",
+] as const;
+export type ArtCreditorRole = (typeof ART_CREDITOR_ROLES)[number];
+
+export function isArtCreditorRole(value: string): value is ArtCreditorRole {
+  return (ART_CREDITOR_ROLES as readonly string[]).includes(value);
+}
+
+/**
+ * One sequential fabrication recoupment pool of record per (scope_key,
+ * pool_class, sequence_no) (migration 0032) — a print edition's or a
+ * sculpture's registered fabrication debts, keyed on the edition or
+ * artwork scope: the pools fill in sequence_no order, 100% of the sale's
+ * net flowing until each clears. The append-only application rows are the
+ * truth; recouped_cents/status are the derived read (the books pool's
+ * discipline).
+ */
+export type ArtRecoupmentPoolRecord = {
+  id: string;
+  /** The waterfall scope key — `edition:{editionId}` for print editions,
+   * `sculpture:{artworkId}` for sculpture fabrications. */
+  scope_key: string;
+  pool_class: ArtRecoupmentPoolClass;
+  /** The recoupment order (1 = first). The sequence is the fabrication
+   * contract's order of record. */
+  sequence_no: number;
+  /** The fronted fabrication debt, integer cents. */
+  debt_cents: number;
+  /** The running recovery, integer cents (<= debt_cents). */
+  recouped_cents: number;
+  currency: string;
+  /** 'active' until the debt fully recoups, then 'recouped'. */
+  status: 'active' | 'recouped';
+  /** The creditor the debt is owed to. */
+  creditor_role: ArtCreditorRole;
+  creditor_payee_id: string;
+  creditor_payee_name: string;
+  /** The fabrication agreement of record. */
+  agreement_ref: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One art recoupment application (migration 0032) — the append-only
+ * recovery ledger. UNIQUE per (pool_id, source_event_id): a replayed
+ * application is the unique violation, never a double recovery. UNIQUE per
+ * (pool_id, recouped_before_cents): the POSITION lock — the insert-as-lock
+ * arbiter (the books/webtoon discipline) — so two concurrent applications
+ * of one pool compute the same running position and exactly one wins it;
+ * the loser re-derives from the append-only truth.
+ */
+export type ArtRecoupmentApplicationRecord = {
+  id: string;
+  pool_id: string;
+  pool_class: ArtRecoupmentPoolClass;
+  scope_key: string;
+  /** The revenue feed's content-derived event id — the replay guard. */
+  source_event_id: string;
+  /** The pool's recouped_cents the instant before this application. */
+  recouped_before_cents: number;
+  /** The integer cents of revenue applied this application. */
+  applied_cents: number;
+  /** The integer cents of the pool still open after this application. */
+  remaining_cents: number;
+  created_at: string;
+};
+
+/**
+ * The post-recoupment split contributor roles the directive names — the
+ * founder's example cut (50% artist / 30% gallery / 20% master
+ * printmaker) and the sculpture releases (studio assistants and
+ * co-creators). The role is descriptive metadata on the cut (the money
+ * keys on the payee), recorded for the audit trail.
+ */
+export const ART_CONTRIBUTOR_ROLES = [
+  "artist",
+  "gallery",
+  "master_printmaker",
+  "lithographer",
+  "bronze_foundry",
+  "three_d_printing",
+  "studio_assistant",
+  "co_creator",
+] as const;
+export type ArtContributorRole = (typeof ART_CONTRIBUTOR_ROLES)[number];
+
+export function isArtContributorRole(value: string): value is ArtContributorRole {
+  return (ART_CONTRIBUTOR_ROLES as readonly string[]).includes(value);
+}
+
+/**
+ * The art split schedule's scopes (migration 0032) — percentage mode only
+ * (the founder's example cut is a percentage cut; the books pro-rata
+ * anthology modes have no art analogue in the directive).
+ */
+export const ART_SPLIT_SCHEDULE_SCOPES = [
+  "print_edition",
+  "sculpture_fabrication",
+] as const;
+export type ArtSplitScheduleScope = (typeof ART_SPLIT_SCHEDULE_SCOPES)[number];
+
+/**
+ * One contributor's cut of record on an art split schedule — percentage
+ * mode only: whole basis points of the post-recoupment net.
+ */
+export type ArtSplitContributorSpec = {
+  payee_id: string;
+  payee_name: string;
+  role: ArtContributorRole;
+  /** Whole basis points of the post-recoupment net (1..10000). */
+  percentage_bps: number;
+};
+
+/**
+ * The art split schedule of record (migration 0032) — one per scope_key.
+ * The print-edition example cut (artist 50 / gallery 30 / master
+ * printmaker 20) and the sculpture releases (studio assistants,
+ * co-creators) register here; the waterfall applies them ONLY to the
+ * excess after every fabrication pool has recouped.
+ */
+export type ArtSplitScheduleRecord = {
+  id: string;
+  scope_key: string;
+  scope: ArtSplitScheduleScope;
+  contributors: ArtSplitContributorSpec[];
+  /** The schedule's revision — a re-registration increments it; accrued
+   * cuts keep their version's event ids (history, never re-cut). */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One payee's designated share on an art split accrual. */
+export type ArtSplitAllocation = {
+  payee_id: string;
+  payee_name: string;
+  share_cents: number;
+};
+
+/**
+ * One executed art split (migration 0032) — the append-only accrual
+ * ledger. UNIQUE per source_event_id: a replayed split is the unique
+ * violation, never a double accrual. The accrual DESIGNATES the routing;
+ * the money moves through the standing release machinery (the payout
+ * gates) — the accrual row is the gate's verified input.
+ */
+export type ArtSplitAccrualRecord = {
+  id: string;
+  schedule_id: string;
+  scope_key: string;
+  scope: ArtSplitScheduleScope;
+  /** The funding row's event id — the once-only guard. */
+  source_event_id: string;
+  /** The split's funding base, integer cents (the post-recoupment excess). */
+  basis_cents: number;
+  allocations: ArtSplitAllocation[];
+  /** The visible floor residue — never rounded into a contributor's credit. */
+  dust_cents: number;
+  created_at: string;
+};
+
+/**
+ * The copyright agencies the directive names — the museum licensing
+ * collection-fee policy's vocabulary.
+ */
+export const ART_COPYRIGHT_AGENCIES = ["ars", "dacs"] as const;
+export type ArtCopyrightAgency = (typeof ART_COPYRIGHT_AGENCIES)[number];
+
+export function isArtCopyrightAgency(value: string): value is ArtCopyrightAgency {
+  return (ART_COPYRIGHT_AGENCIES as readonly string[]).includes(value);
+}
+
+/**
+ * The copyright agency collection-fee policy of record (migration 0032) —
+ * one per agency_code, CONFIGURABLE inside the founder's 15–20% band
+ * (validated at registration). The licensing row's applied fee is
+ * validated against the same band at parse; the policy is the
+ * administration's registered rate of record.
+ */
+export type ArtLicensingAgencyPolicyRecord = {
+  id: string;
+  agency_code: ArtCopyrightAgency;
+  agency_name: string;
+  /** The agency's collection fee, basis points of the license fee (1500..2000). */
+  collection_fee_bps: number;
+  created_at: string;
+  updated_at: string;
+};
+
 // --- IP adaptation optioning (PR 21, migration 0025) -----------------------
 
 /**

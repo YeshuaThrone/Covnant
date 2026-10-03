@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers thirty-one profiles in dispatch order", () => {
+  it("registers thirty-six profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -73,6 +73,15 @@ describe("profile registry", () => {
       "wandb_inference_telemetry_csv",
       "elevenlabs_voice_clone_licensing_csv",
       "huggingface_dataset_attribution_log_csv",
+      // The art-market lane (PR 28, the founder art directive) — dispatched
+      // after AI, its own rights family (gallery invoices, auction resale
+      // reports, print shop sales, museum licensing, and foundation or
+      // estate audits).
+      "art_gallery_invoice_csv",
+      "art_auction_resale_report_csv",
+      "art_print_shop_sales_csv",
+      "art_museum_licensing_csv",
+      "art_foundation_estate_audit_csv",
     ]);
   });
 
