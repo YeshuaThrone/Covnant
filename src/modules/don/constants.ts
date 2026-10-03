@@ -632,6 +632,17 @@ export const JOURNAL_KINDS = [
   "patent_litigation_escrow_drawdown",
   "patent_litigation_escrow_release",
   "cross_license_net_dispatch",
+  // PR 49, the founder resource directive: the RESOURCE_AUDIT_ESCROW's
+  // route/drawdown/release journals (the escrow family's shapes over the
+  // energy lane's owner×parcel scope) and the instant GPU cascade
+  // settlement post — a detected compute-block grid split posting the
+  // moment the PR 48 detector stages it: the allocated legs moving from
+  // FBO cash to the silicon lessor, power provider, and hosting facility
+  // ledgers in one journal.
+  "resource_audit_escrow_route",
+  "resource_audit_escrow_drawdown",
+  "resource_audit_escrow_release",
+  "gpu_cascade_settlement_post",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -854,6 +865,35 @@ export function crossLicenseLiabilityGlAccount(
 ): string {
   return `cross_license_netting:${agreementRef}:${period}:${side}_liability`;
 }
+
+// RESOURCE_AUDIT_ESCROW (PR 49, the founder resource directive): the
+// energy/resource twin of the NIL, spatial, fitness, culinary, service,
+// software, and patent audit escrows — the founder's standard band: 5–15%
+// of a resource payout locks per (owner payee, parcel) scope. A resource
+// owner's royalty is re-trued by monthly commodity price reconciliations,
+// volumetric pipeline variance audits, and the parcel's environmental
+// regulatory compliance exposure, so the escrow holds the true-up reserve
+// until those run. Drawdowns spend it by class, and the verified
+// reconciliation of record opens the release. Sentinel payee + GL account
+// per scope key — the no-fold discipline: the escrow is its own
+// escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const RESOURCE_AUDIT_ESCROW_PAYEE_PREFIX = "resource_audit_escrow";
+export function resourceAuditEscrowPayeeId(scopeKey: string): string {
+  return `${RESOURCE_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function resourceAuditEscrowPayeeName(scopeKey: string): string {
+  return `RESOURCE_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_RESOURCE_AUDIT_ESCROW = "resource_audit_escrow";
+export function resourceAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_RESOURCE_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder's standard resource band, enforced at registration AND at
+// use: a 5–15% share of the resource payout. Anything outside the band is
+// a hostile policy, refused.
+export const RESOURCE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const RESOURCE_AUDIT_ESCROW_MAX_RATE_BPS = 1_500;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

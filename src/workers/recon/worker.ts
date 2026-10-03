@@ -1443,6 +1443,8 @@ async function parseEnergy(
     energy_gpu_yields_skipped_no_policy: counts.gpuYieldsSkippedNoPolicy,
     energy_grid_splits_committed: counts.gridSplitsWritten,
     energy_grid_splits_skipped_no_participants: counts.gridSplitsSkippedNoParticipants,
+    energy_grid_split_postings_posted: counts.gridSplitPostingsPosted,
+    energy_grid_split_postings_refused: counts.gridSplitPostingsRefused,
     energy_carbon_payouts_committed: counts.carbonPayoutsWritten,
     energy_carbon_payouts_skipped_no_policy: counts.carbonPayoutsSkippedNoPolicy,
     energy_net_realized_resource_pool_delta_cents: counts.netRealizedResourcePoolDeltaCents,

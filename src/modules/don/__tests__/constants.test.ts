@@ -174,6 +174,10 @@ describe('don constants', () => {
       'patent_litigation_escrow_drawdown',
       'patent_litigation_escrow_release',
       'cross_license_net_dispatch',
+      'resource_audit_escrow_route',
+      'resource_audit_escrow_drawdown',
+      'resource_audit_escrow_release',
+      'gpu_cascade_settlement_post',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

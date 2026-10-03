@@ -1,3 +1,4 @@
+
 /**
  * The energy resource record vocabulary (PR 48, migration 0052) — the
  * founder resource directive's durable facts of record for energy,
@@ -461,4 +462,132 @@ export interface EnergyCarbonOffsetPayoutApplicationRecord {
   developer_payout_cents: number;
   total_payout_cents: number;
   created_at: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// PR 49 — the resource audit escrow, the resource payout gate states, and the
+// scope identity. The RESOURCE_AUDIT_ESCROW is the energy/resource twin of the
+// audit escrows at the founder's standard band (500–1500 bps — 5–15% of a
+// resource payout), keyed per (owner payee, parcel): mineral-rights and
+// surface owners ride division-order payouts whose commodity price can be
+// re-trued by monthly reconciliations, whose gathering pipelines can run
+// volumetric variance audits, and whose parcels carry environmental regulatory
+// exposure. Drawdowns and the release follow the escrow family's position
+// locks; the resource payout gate reads the two durable gate states below,
+// fail-closed (absent and unknown BOTH refuse).
+// ---------------------------------------------------------------------------
+
+/** The RESOURCE_AUDIT_ESCROW's three drawdown classes of record — exactly
+ * the resource exposures the founder directive names: monthly commodity
+ * price reconciliations, pipeline variance audits, and environmental
+ * regulatory compliance checks. Anything else refuses. This array is the
+ * TS side of the vocabulary the SQL CHECKs enforce byte-identically
+ * (migration 0053; the PR 129/130 lesson — verified byte-identical
+ * before CI). */
+export const RESOURCE_AUDIT_ESCROW_DRAWDOWN_CLASSES = [
+  "commodity_price_reconciliation",
+  "pipeline_variance_audit",
+  "environmental_compliance_check",
+] as const;
+export type ResourceAuditEscrowDrawdownClass =
+  (typeof RESOURCE_AUDIT_ESCROW_DRAWDOWN_CLASSES)[number];
+
+/** The resource payout gate's environmental regulatory compliance states of
+ * record (migration 0053) — byte-identical to the SQL CHECK vocabulary
+ * ck_energy_resource_payout_gate_states_environmental_state_vocabulary. */
+export const RESOURCE_GATE_ENVIRONMENTAL_STATES = ["unknown", "cleared"] as const;
+export type ResourceGateEnvironmentalState =
+  (typeof RESOURCE_GATE_ENVIRONMENTAL_STATES)[number];
+
+/** The resource payout gate's title ownership verification states of record
+ * (migration 0053) — byte-identical to the SQL CHECK vocabulary
+ * ck_energy_resource_payout_gate_states_title_state_vocabulary. */
+export const RESOURCE_GATE_TITLE_STATES = ["unknown", "verified"] as const;
+export type ResourceGateTitleState = (typeof RESOURCE_GATE_TITLE_STATES)[number];
+
+/** The resource payout gate's states of record for one owner payee on one
+ * parcel (migration 0053) — the two states the payout gate's resource case
+ * reads, fail-closed: `environmental_compliance_cleared` is true only when
+ * the state is 'cleared', `title_ownership_verification_passed` is true
+ * only when the state is 'verified'; an absent record resolves null and
+ * 'unknown' resolves false. */
+export interface ResourcePayoutGateStateRecord {
+  readonly id: string;
+  /** The payout's beneficiary of record (the parcel owner). */
+  readonly payee_id: string;
+  /** The parcel whose title and environmental posture govern the payout. */
+  readonly parcel_id: string;
+  /** The parcel's environmental regulatory compliance over the payout. */
+  readonly environmental_compliance_state: ResourceGateEnvironmentalState;
+  /** The owner's title ownership verification over the parcel. */
+  readonly title_ownership_state: ResourceGateTitleState;
+  /** The verification evidence of record. */
+  readonly evidence_ref: string;
+  /** Who verified the states of record. */
+  readonly verified_by: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One scope's resource audit escrow rate of record (migration 0053) — a
+ * founder-banded 500–1500 bps share of the scope's resource payouts that
+ * locks into the RESOURCE_AUDIT_ESCROW bucket at routing. */
+export interface ResourceAuditEscrowPolicyRecord {
+  readonly id: string;
+  /** `owner:{ownerPayeeId}:parcel:{parcelId}` — the scope key the escrow's
+   * sentinel payee and GL account cite (the energy lane's own identifier
+   * space, the same payee/parcel identity the 0052 tables key on). */
+  readonly scope_key: string;
+  /** The founder band: 500–1500 bps, checked at registration and again
+   * at use (a hostile policy out-of-band refuses). */
+  readonly reserve_rate_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One position-locked escrow drawdown (migration 0053) — append-only.
+ * UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+ * UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position lock
+ * the balance is derived from. */
+export interface ResourceAuditEscrowDrawdownRecord {
+  readonly id: string;
+  /** The escrow bucket's ledger_transactions row of record. */
+  readonly reserve_ledger_id: string;
+  readonly scope_key: string;
+  readonly drawdown_class: ResourceAuditEscrowDrawdownClass;
+  /** The drawing event's identity of record — the replay guard. */
+  readonly source_event_id: string;
+  /** The bucket balance this draw was taken against (the spend position). */
+  readonly drawn_before_cents: number;
+  /** The drawn amount: 0 < drawn_cents <= drawn_before_cents. */
+  readonly drawn_cents: number;
+  /** drawn_before_cents - drawn_cents, pinned in a CHECK. */
+  readonly remaining_cents: number;
+  readonly created_at: string;
+}
+
+/** The verified reconciliation of record for one escrow bucket (migration
+ * 0053) — insert-as-lock, one per bucket: the release refuses fail-closed
+ * until this row exists. */
+export interface ResourceAuditEscrowReconciliationRecord {
+  readonly id: string;
+  readonly reserve_ledger_id: string;
+  /** The reconciliation evidence of record (the monthly commodity price
+   * reconciliation, the pipeline variance audit, the environmental
+   * regulatory check). */
+  readonly evidence_ref: string;
+  /** Who verified the reconciliation of record. */
+  readonly reconciled_by: string;
+  readonly created_at: string;
+}
+
+/** The resource audit escrow's scope key — injective in the (owner payee,
+ * parcel) pair, the same identifier space the 0052 energy tables key on.
+ * The sentinel payee id, GL account, and policy row all cite it. */
+export function resourceAuditEscrowScopeKey(
+  ownerPayeeId: string,
+  parcelId: string,
+): string {
+  return `owner:${ownerPayeeId}:parcel:${parcelId}`;
 }

@@ -709,6 +709,10 @@ export interface ReconJobResult {
   energy_gpu_yields_skipped_no_policy?: number;
   energy_grid_splits_committed?: number;
   energy_grid_splits_skipped_no_participants?: number;
+  /** PR 49 instant cascade: staged grid splits posted on the walk
+   * (journal-stamped) and staged splits refused before posting. */
+  energy_grid_split_postings_posted?: number;
+  energy_grid_split_postings_refused?: number;
   energy_carbon_payouts_committed?: number;
   energy_carbon_payouts_skipped_no_policy?: number;
   /** Energy lane: the committed money, integer cents — the pass's
