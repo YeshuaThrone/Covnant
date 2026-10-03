@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers forty profiles in dispatch order", () => {
+  it("registers forty-four profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -90,6 +90,14 @@ describe("profile registry", () => {
       "licensing_sellthrough_log_csv",
       "licensing_ecommerce_pos_csv",
       "licensing_wholesale_manifest_csv",
+      // The NIL lane (PR 34, the founder NIL directive) — dispatched last,
+      // its own rights family (third-party brand endorsement deals,
+      // collective deal disclosures, school direct revenue-share pools, and
+      // media rights revenue distributions; never music-rights split math).
+      "nil_brand_endorsement_csv",
+      "nil_collective_disclosure_csv",
+      "nil_school_rev_share_pool_csv",
+      "nil_media_rights_distribution_csv",
     ]);
   });
 

@@ -29,6 +29,7 @@ import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
 import { LICENSING_PROFILES } from "./licensingProfiles";
+import { NIL_PROFILES } from "./nilProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -566,6 +567,12 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // dual-IP split, the treaty withholding, and the sub-license override
   // with its audit gate are licensing-only).
   ...LICENSING_PROFILES,
+  // The NIL lane (PR 34) — same dispatch opinion; the worker branches on
+  // the profile kind before the music machinery (the compliance parser's
+  // $600 flag, the state matrix, the associated-entity holdback, the
+  // adjusted pool walk, and the equal group split are NIL-only, and NIL
+  // rows never touch the music split machinery).
+  ...NIL_PROFILES,
 ];
 
 /**

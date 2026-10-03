@@ -54,7 +54,9 @@ import { isTheatricalProfileKind } from "./theatricalProfiles";
 import { writeTheatricalLinesToMatchQueue } from "./theatricalQueue";
 import { postTheatricalNetsToHolding } from "./theatricalPosting";
 import { isLicensingProfileKind } from "./licensingProfiles";
+import { isNilProfileKind } from "./nilProfiles";
 import { writeLicensingLinesToMatchQueue } from "./licensingQueue";
+import { writeNilRowsToStore } from "./nilQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
@@ -250,6 +252,21 @@ async function processJobBody(
     // art fabrication waterfalls, or the theatrical deal classes.
     if (isLicensingProfileKind(matchedProfile.kind)) {
       return await parseLicensing(deps, job.ingest_id, matchedProfile, content);
+    }
+    // The NIL lane branches the same way (PR 34, the founder directive): its
+    // rows are the four strict senders' deal / disclosure / pool /
+    // distribution events whose money runs the compliance parser's verdict
+    // walk ($600 audit flag, state matrix, associated-entity holdback, the
+    // agency commission), the adjusted direct revenue-sharing calculator,
+    // the tiered roster waterfalls, and the group NIL equal splits — never
+    // the music queue's split math, the gaming accumulator, the livestream
+    // escrow, the webtoon conversions, the merch COGS deduction, the AI
+    // split, the book editorial cascade, the art fabrication waterfalls,
+    // the theatrical deal classes, or the brand-licensing cascade. The
+    // store applications ARE the lane's money of record; match_queue never
+    // sees a NIL row.
+    if (isNilProfileKind(matchedProfile.kind)) {
+      return await parseNil(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -798,6 +815,53 @@ async function parseLicensing(
     licensing_agency_commission_cents: cascade.agencyCommissionCents,
     licensing_withheld_cents: cascade.withheldCents,
     licensing_payout_legs_held: cascade.payoutLegsHeld,
+  };
+}
+
+/**
+ * The NIL lane (PR 34, the founder directive): the four strict senders'
+ * rows run the compliance parser's verdict walk and the store's NIL
+ * applications ARE the lane's money of record — the deal payouts (the
+ * $600 audit flag, the state matrix, the associated-entity holdback, the
+ * agency commission), the adjusted calculator's pool walks, and the group
+ * NIL equal splits. No match_queue row, no holding post: replay guards
+ * and the verdict walk govern everything. The result's nil_* block is
+ * absent on every other lane — its presence is the discriminator.
+ */
+async function parseNil(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeNilRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.dealsWritten + counts.poolWalksWritten + counts.groupSplitsWritten,
+    matched: 0, // no vault matching on this lane — the NIL tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    nil_payouts_committed: counts.dealsWritten,
+    nil_payouts_replayed: counts.dealsReplayed,
+    nil_payouts_held_compliance: counts.dealsHeldCompliance,
+    nil_payouts_held_state_rule: counts.dealsHeldStateRule,
+    nil_deal_audits_flagged: counts.auditsFlagged,
+    nil_deal_audits_cleared: counts.auditsCleared,
+    nil_pool_walks_committed: counts.poolWalksWritten,
+    nil_pool_walks_replayed: counts.poolWalksReplayed,
+    nil_pool_walks_skipped_no_program: counts.poolWalksSkippedNoProgram,
+    nil_pool_walks_skipped_no_waterfall: counts.poolWalksSkippedNoWaterfall,
+    nil_group_splits_committed: counts.groupSplitsWritten,
+    nil_group_splits_replayed: counts.groupSplitsReplayed,
+    nil_gate_states_upserted: counts.gateStatesUpserted,
+    nil_deal_gross_cents: counts.dealGrossCents,
+    nil_agency_fees_cents: counts.agencyFeesCents,
+    nil_net_payout_cents: counts.netPayoutCents,
+    nil_net_athlete_share_pool_cents: counts.netAthleteSharePoolCents,
+    nil_roster_paid_cents: counts.rosterPaidCents,
+    nil_dust_cents: counts.dustCents,
   };
 }
 

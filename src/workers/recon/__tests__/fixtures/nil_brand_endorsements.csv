@@ -1,0 +1,5 @@
+Deal ID,Contract Date,Athlete ID,School ID,State Jurisdiction Code,Deal Category,Brand,Deal Value,Agency Fee Mode,Agency Commission BPS,Currency,Reporting Period
+B-5001,2026-09-05,ATH-QB-1,SCH-1,CA,private_brand,Beacon Sportswear,599.99,marketing,1500,USD,2026-09
+B-5002,2026-09-06,ATH-WR-2,SCH-2,TX,private_brand,Peak Hydration,600.00,marketing,2000,USD,2026-09
+B-5003,2026-09-07,ATH-QB-1,SCH-1,CA,team_apparel,Ridge Outfitters,1500.00,direct_rev_share,300,USD,2026-09
+B-5004,2026-09-08,ATH-TE-3,SCH-3,NY,private_brand,Hudson Gear,500.00,none,0,USD,2026-09

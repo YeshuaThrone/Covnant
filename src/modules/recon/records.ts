@@ -378,6 +378,39 @@ export interface ReconJobResult {
   licensing_agency_commission_cents?: number;
   licensing_withheld_cents?: number;
   licensing_payout_legs_held?: number;
+  /** NIL lane (PR 34): the compliance parser's deal payouts — commits and
+   * counted replay no-ops, and the two held verdicts (held money is
+   * visible, never dropped, never posted). */
+  nil_payouts_committed?: number;
+  nil_payouts_replayed?: number;
+  nil_payouts_held_compliance?: number;
+  nil_payouts_held_state_rule?: number;
+  /** NIL lane: the valid business purpose audit — $600 flags raised and
+   * metadata matches that healed 'flagged' → 'nil_cleared'. */
+  nil_deal_audits_flagged?: number;
+  nil_deal_audits_cleared?: number;
+  /** NIL lane: the adjusted calculator's pool walks — commits, counted
+   * replay no-ops, and the fail-closed skips (no program of record, no
+   * waterfall of record — money never guessed). */
+  nil_pool_walks_committed?: number;
+  nil_pool_walks_replayed?: number;
+  nil_pool_walks_skipped_no_program?: number;
+  nil_pool_walks_skipped_no_waterfall?: number;
+  /** NIL lane: the group NIL equal splits — commits and counted replay
+   * no-ops. */
+  nil_group_splits_committed?: number;
+  nil_group_splits_replayed?: number;
+  /** NIL lane: the payout gate states upserted across the pass. */
+  nil_gate_states_upserted?: number;
+  /** NIL lane: the committed money, integer cents — deal gross, agency
+   * fees deducted at payout, net deal payouts, and the pool walk's net
+   * share pool / roster paid / dust (the conservation identities' legs). */
+  nil_deal_gross_cents?: number;
+  nil_agency_fees_cents?: number;
+  nil_net_payout_cents?: number;
+  nil_net_athlete_share_pool_cents?: number;
+  nil_roster_paid_cents?: number;
+  nil_dust_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */
