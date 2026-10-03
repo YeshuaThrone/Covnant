@@ -356,6 +356,11 @@ export async function routeEventCancellationEscrowFromGateReceipts(
     operatorSettlementApproved: input.operator_settlement_approved,
     kycStatus,
     verticalState,
+    // The LOCK routes pre-event: telemetry cannot be verified for an
+    // event that has not completed (the lock is itself the protection).
+    // Insurance and the NIL audit still refuse fail-closed; the RELEASE
+    // below runs the strict post-event gate.
+    sportsGatePhase: "pre_event_lock",
   });
   if (!compliance.ok) {
     return {

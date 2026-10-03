@@ -713,6 +713,15 @@ export type PayoutComplianceInput = {
   operatorSettlementApproved: boolean;
   kycStatus: KycStatus | null;
   verticalState: VerticalComplianceState | null;
+  /** Which sports gate this verdict serves. The event-cancellation
+   * escrow's LOCK routes pre-event — completion telemetry cannot be
+   * verified for an event that has not happened yet (the lock itself is
+   * the protection) — so it skips the telemetry condition while still
+   * enforcing insurance and the collegiate NIL audit. The final payout
+   * DISPATCH (the escrow's release, and every other sports payout)
+   * defaults to the strict post-event gate that reads all three
+   * conditions. */
+  sportsGatePhase?: "pre_event_lock" | "post_event_dispatch";
 };
 
 export type PayoutComplianceVerdict =
@@ -1138,7 +1147,15 @@ export function evaluatePayoutCompliance(
       return { ok: true };
     }
     case "sports": {
-      if (state.event_completion_telemetry_verified !== true) {
+      // The pre-event LOCK skips the telemetry condition — an event that
+      // has not completed cannot have verified telemetry, and demanding
+      // it would make the escrow unfillable. Insurance and the NIL audit
+      // still refuse fail-closed. The post-event DISPATCH (default)
+      // reads all three.
+      if (
+        input.sportsGatePhase !== "pre_event_lock" &&
+        state.event_completion_telemetry_verified !== true
+      ) {
         return {
           ok: false,
           code: "sports_telemetry_unverified",

@@ -101,6 +101,16 @@ export const UNIQUE_COLUMNS: Record<string, string[][]> = {
     ["nil_contract_id", "athlete_glan", "period"],
   ],
   sports_biometric_micro_payout_applications: [["source_event_id"]],
+  // Event-cancellation escrow + sports payout gate states (migration 0055,
+  // mirrored exactly): one policy per scope, position-locked drawdowns
+  // (replay guard AND spend position), and one gate state per (promoter
+  // payee, event).
+  sports_event_cancellation_escrow_policies: [["scope_key"]],
+  sports_event_cancellation_escrow_drawdowns: [
+    ["reserve_ledger_id", "source_event_id"],
+    ["reserve_ledger_id", "drawn_before_cents"],
+  ],
+  sports_payout_gate_states: [["payee_id", "event_ref"]],
 };
 
 export class FakeTable {
