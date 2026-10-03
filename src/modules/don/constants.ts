@@ -575,6 +575,16 @@ export const JOURNAL_KINDS = [
   "spatial_audit_escrow_drawdown",
   "spatial_audit_escrow_release",
   "spatial_msg_shortfall_invoice",
+  // Fitness audit escrow (PR 39, the founder fitness directive): a
+  // fitness IP payout's release splits the held credit — the 5–10%
+  // FITNESS_AUDIT_ESCROW locks into the per-scope escrow (route), member
+  // chargeback reserves, class return allowances, and quarterly sync
+  // music licensing audits draw it down (drawdown), and the verified
+  // reconciliation of record opens the release that pays the remaining
+  // escrow through the taxed cascade (release). Additive only.
+  "fitness_audit_escrow_route",
+  "fitness_audit_escrow_drawdown",
+  "fitness_audit_escrow_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -638,6 +648,32 @@ export const GL_ACCOUNT_SPATIAL_MSG_SHORTFALL_INCOME =
 export function spatialMsgShortfallIncomeGlAccount(scopeKey: string): string {
   return `${GL_ACCOUNT_SPATIAL_MSG_SHORTFALL_INCOME}:${scopeKey}`;
 }
+
+// FITNESS_AUDIT_ESCROW (PR 39, the founder fitness directive): the
+// fitness-side twin of the NIL and spatial audit escrows — 5–10% of a
+// fitness IP payout locks per (trainer, studio franchise) scope while the
+// payout's exposure runs: member chargeback reserves, class return
+// allowances, and quarterly sync music licensing audits draw it down, and
+// the verified reconciliation of record opens the release. Sentinel payee
+// + GL account per scope key — the no-fold discipline: the escrow is its
+// own escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const FITNESS_AUDIT_ESCROW_PAYEE_PREFIX = "fitness_audit_escrow";
+export function fitnessAuditEscrowPayeeId(scopeKey: string): string {
+  return `${FITNESS_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function fitnessAuditEscrowPayeeName(scopeKey: string): string {
+  return `FITNESS_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_FITNESS_AUDIT_ESCROW = "fitness_audit_escrow";
+export function fitnessAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_FITNESS_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder band, enforced at registration AND at use: a 5–10% share of
+// the fitness IP payout. Anything outside the band is a hostile policy,
+// refused.
+export const FITNESS_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const FITNESS_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

@@ -409,6 +409,15 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // algorithm royalty, co-creation waterfall); still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0042_fitness_telemetry_trainer_royalties_sync_music.sql',
+      // PR 39 (the founder fitness directive): six additive tables for the
+      // FITNESS_AUDIT_ESCROW bucket (the founder-banded 5–10% rate), the
+      // position-locked drawdowns, the verified reconciliations (the
+      // release gate's key), the hipaa_gdpr_privacy_cleared +
+      // territorial_studio_exclusivity_verified payout gate states, the
+      // per-program instant live-event bonus policies, and the bonus
+      // applications of record; still no DDL on universal_royalty_ledger —
+      // the referencing pin below holds.
+      '0043_fitness_audit_escrow_payout_gates_live_bonuses.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

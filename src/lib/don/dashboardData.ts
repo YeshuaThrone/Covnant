@@ -194,6 +194,9 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   nil_audit_escrow_route: 'NIL audit escrow locked',
   nil_audit_escrow_drawdown: 'NIL audit escrow drawn down',
   nil_audit_escrow_release: 'NIL audit escrow released',
+  fitness_audit_escrow_route: 'Fitness audit escrow locked',
+  fitness_audit_escrow_drawdown: 'Fitness audit escrow drawn down',
+  fitness_audit_escrow_release: 'Fitness audit escrow released',
   nil_unearned_clawback_hold: 'NIL unearned advance clawback hold',
   // PR 37 — the spatial commitments lane (the founder spatial directive):
   // park-earnings routing locks the founder-banded audit escrow, drawdowns

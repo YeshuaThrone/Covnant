@@ -744,3 +744,139 @@ describe("the pure calculator contracts", () => {
     expect(fitnessMicrosToCents(1_000_000n)).toBe(1);
   });
 });
+
+// --------------------------------------------------------------------------
+// Sender 1 — the instant live-event performance bonus (PR 39): a concluded
+// synchronous broadcast posts its lead trainer's bonus at the program's
+// bonus policy rate, replay-guarded per source event, fail-closed without
+// a policy.
+// --------------------------------------------------------------------------
+
+describe("the instant live-event performance bonus", () => {
+  const STREAM_HEADER =
+    "Stream Start ID,Trainer ID,Program ID,Studio Franchise Code,Stream Starts,Live Broadcast,Peak Simultaneous Viewers,Live Event Revenue,Currency,Reporting Period";
+
+  it("posts the lead trainer's bonus at event conclusion with the policy rate pinned alongside the priced amount", async () => {
+
+    const store = new InMemoryStore();
+    registerPolicies(store);
+    store.upsertFitnessLiveEventBonusPolicy({
+      program_id: PROGRAM,
+      bonus_bps: 250,
+    });
+
+    const counts = await walkFixtures(store);
+
+    // SS-2026-0003 is the fixture's live broadcast — the founder's
+    // 50,000-viewer weekend event, 20,000.00 of live event revenue
+    // (2,000,000 cents). The bonus is 250 bps of that, floored.
+    expect(counts.liveEventBonusesWritten).toBe(1);
+    expect(counts.liveEventBonusCents).toBe(50_000);
+    expect(counts.liveEventBonusesReplayed).toBe(0);
+    expect(counts.liveSkippedNoBonusPolicy).toBe(0);
+
+    const bonus = await store.getFitnessLiveEventBonus(
+      eventId("live", "stream_start", "SS-2026-0003"),
+    );
+    expect(bonus?.trainer_id).toBe(TRAINER); // the row's trainer_id — the lead trainer of record
+    expect(bonus?.program_id).toBe(PROGRAM);
+    expect(bonus?.studio_franchise_code).toBe(FRANCHISE);
+    expect(bonus?.period).toBe(MONTH);
+    expect(bonus?.currency).toBe("USD");
+    expect(bonus?.peak_simultaneous_viewers).toBe(50_000);
+    expect(bonus?.live_event_revenue_cents).toBe(2_000_000);
+    expect(bonus?.bonus_bps).toBe(250);
+    expect(bonus?.bonus_cents).toBe(50_000);
+  });
+
+  it("prices the floor exactly on a non-round revenue — integer cents, no float dust", async () => {
+    const store = new InMemoryStore();
+    store.upsertFitnessLiveEventBonusPolicy({
+      program_id: PROGRAM,
+      bonus_bps: 333,
+    });
+
+    const counts = await writeFitnessRowsToStore(
+      store,
+      parseCsv(
+        [
+          STREAM_HEADER,
+          `SS-F1,${TRAINER},${PROGRAM},${FRANCHISE},1000,yes,12345,1999.99,USD,${MONTH}`,
+        ].join("\n"),
+      ),
+    );
+
+    // 1,999.99 dollars = 199,999 cents; 333 bps of that floors to
+    // floor(199,999 × 333 / 10,000) = 6,659 cents.
+    expect(counts.liveEventBonusesWritten).toBe(1);
+    const bonus = await store.getFitnessLiveEventBonus(
+      eventId("live", "stream_start", "SS-F1"),
+    );
+    expect(bonus?.live_event_revenue_cents).toBe(199_999);
+    expect(bonus?.bonus_bps).toBe(333);
+    expect(bonus?.bonus_cents).toBe(6_659);
+    expect(counts.liveEventBonusCents).toBe(6_659);
+  });
+
+  it("replays a re-shipped broadcast as a counted no-op — never a second bonus", async () => {
+    const store = new InMemoryStore();
+    registerPolicies(store);
+    store.upsertFitnessLiveEventBonusPolicy({
+      program_id: PROGRAM,
+      bonus_bps: 250,
+    });
+
+    await walkFixtures(store);
+    const replay = await walkFixtures(store);
+
+    expect(replay.liveEventBonusesWritten).toBe(0);
+    expect(replay.liveEventBonusesReplayed).toBe(1);
+    expect(replay.liveEventBonusCents).toBe(0);
+
+    // Exactly one bonus row of record, unchanged.
+    const bonus = await store.getFitnessLiveEventBonus(
+      eventId("live", "stream_start", "SS-2026-0003"),
+    );
+    expect(bonus?.bonus_cents).toBe(50_000);
+  });
+
+  it("skips the bonus when the program has no bonus policy of record — a counted fail-closed skip, never a guessed rate", async () => {
+    const store = new InMemoryStore();
+    registerPolicies(store); // no bonus policy of record
+
+    const counts = await walkFixtures(store);
+
+    // The broadcast's other walks still commit (the residual rides the
+    // load policy) — only the bonus lane skips.
+    expect(counts.liveResidualsWritten).toBe(1);
+    expect(counts.liveSkippedNoBonusPolicy).toBe(1);
+    expect(counts.liveEventBonusesWritten).toBe(0);
+    expect(counts.liveEventBonusCents).toBe(0);
+    expect(
+      await store.getFitnessLiveEventBonus(
+        eventId("live", "stream_start", "SS-2026-0003"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("posts a late-registered policy's bonus on the re-ship of a previously skipped broadcast", async () => {
+    const store = new InMemoryStore();
+    registerPolicies(store);
+
+    const first = await walkFixtures(store);
+    expect(first.liveSkippedNoBonusPolicy).toBe(1);
+    expect(first.liveEventBonusesWritten).toBe(0);
+
+    // The policy of record arrives; the residual already replayed, but
+    // the bonus lane's own guard has never seen the event — the re-ship
+    // posts the bonus it skipped.
+    store.upsertFitnessLiveEventBonusPolicy({
+      program_id: PROGRAM,
+      bonus_bps: 250,
+    });
+    const second = await walkFixtures(store);
+    expect(second.liveEventBonusesWritten).toBe(1);
+    expect(second.liveEventBonusCents).toBe(50_000);
+    expect(second.liveEventBonusesReplayed).toBe(0);
+  });
+});
