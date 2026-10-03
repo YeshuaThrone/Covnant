@@ -572,9 +572,16 @@ describe("drawDownEventCancellationEscrow — weather, withdrawal, and refund-ca
     const drawn = drawdowns.reduce((total, line) => total + line.drawn_cents, 0);
     expect(drawn).toBe(120_000);
 
-    // Every spend journaled balanced.
-    await expectJournalBalanced(store, weather.value.journal_id as string);
-    await expectJournalBalanced(store, refundCall.value.journal_id as string);
+    // Every spend journaled balanced — a successful drawdown's post
+    // always carries a journal id.
+    expect(weather.ok, "weather drawdown should succeed").toBe(true);
+    expect(refundCall.ok, "refund drawdown should succeed").toBe(true);
+    if (weather.ok && refundCall.ok) {
+      expect(weather.value.journal_id).toBeTypeOf("string");
+      expect(refundCall.value.journal_id).toBeTypeOf("string");
+      await expectJournalBalanced(store, weather.value.journal_id as string);
+      await expectJournalBalanced(store, refundCall.value.journal_id as string);
+    }
   });
 
   it("replays a re-shipped cancellation event as a counted no-op", async () => {
