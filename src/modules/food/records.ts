@@ -214,7 +214,7 @@ export function parseFoodRoyaltyBpsBands(
 
 /** The payee roles a co-branded menu split's weighting legs carry — the
  * chef of record and the ingredient brand payees. */
-export type FoodCobrandLegRole = "chef" | "ingredient_brand";
+export type FoodCobrandLegRole = "chef" | "brand" | "operator" | "supplier_partner";
 
 /** One weighting leg of a co-branded menu split of record: the leg's payee
  * and its weighting of the recipe royalty pot, bps. The registered legs'
@@ -252,7 +252,12 @@ export function validateFoodCobrandWeightings(
     if (leg.payee_id === "") {
       return { ok: false, reason: `leg_${index}:payee_empty` };
     }
-    if (leg.payee_role !== "chef" && leg.payee_role !== "ingredient_brand") {
+    if (
+      leg.payee_role !== "chef" &&
+      leg.payee_role !== "brand" &&
+      leg.payee_role !== "operator" &&
+      leg.payee_role !== "supplier_partner"
+    ) {
       return { ok: false, reason: `leg_${index}:role_out_of_vocabulary` };
     }
     if (!Number.isInteger(leg.weight_bps) || leg.weight_bps <= 0 || leg.weight_bps > 10_000) {

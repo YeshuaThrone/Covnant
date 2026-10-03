@@ -2800,10 +2800,11 @@ CREATE TABLE IF NOT EXISTS food_recipe_royalty_applications (
   created_at TEXT NOT NULL,
   -- UNIQUE per source_event_id is the replay guard.
   UNIQUE (source_event_id),
-  -- The pinned band arithmetic: the payout cents floor the micros; the
+  -- The pinned band arithmetic: the payout cents floor the micros (one
+  -- cent = 1,000,000 statement micros, per migration 0044); the
   -- percentage split prices the row's net basis at the row's band rate.
   CHECK (
-    unit_payout_cents = unit_payout_micros / 10000
+    unit_payout_cents = unit_payout_micros / 1000000
     AND percentage_split_cents = (net_basis_cents * royalty_bps) / 10000
     AND units_after = units_before + units_sold
   )
@@ -2870,9 +2871,10 @@ CREATE TABLE IF NOT EXISTS food_cook_cycle_royalties (
   created_at TEXT NOT NULL,
   -- UNIQUE per source_event_id is the replay guard.
   UNIQUE (source_event_id),
-  -- The pinned per-execution arithmetic (integer cents, floor).
+  -- The pinned per-execution arithmetic (integer cents, floor; one
+  -- cent = 1,000,000 statement micros, per migration 0044).
   CHECK (royalty_micros = cook_cycles_executed * micros_per_cook_cycle
-    AND royalty_cents = royalty_micros / 10000)
+    AND royalty_cents = royalty_micros / 1000000)
 );
 
 CREATE TABLE IF NOT EXISTS food_supplier_rebate_applications (
