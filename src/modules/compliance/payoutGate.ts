@@ -8,6 +8,7 @@ import type {
 import type { FitnessPayoutGateStateRecord } from "@/modules/fitness/records";
 import type { CulinaryPayoutGateStateRecord } from "@/modules/culinary/records";
 import type { ServicesPayoutGateStateRecord } from "@/modules/service/records";
+import type { SoftwarePayoutGateStateRecord } from "@/modules/software/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -585,6 +586,38 @@ export async function resolveServicesVerticalComplianceState(
     health_board_license_verified: record.health_license_state === "verified",
     territorial_franchise_exclusivity_verified:
       record.territorial_exclusivity_state === "verified",
+  };
+}
+
+/**
+ * The software vertical's compliance state (PR 45, the founder software
+ * directive), resolved from the software payout-gate states of record
+ * (migration 0049) — the store-backed reader the software payout path uses
+ * for the 'software' vertical (the services resolver's pattern, scoped
+ * per payee × API endpoint). FAIL-CLOSED on both failure modes the
+ * directive names: an ABSENT record returns null (the gate refuses with
+ * vertical_state_unknown), and an 'unknown' stored state maps to false
+ * (the gate refuses with software_uptime_sla_unverified /
+ * software_security_audit_not_cleared). The booleans are true ONLY on the
+ * api_uptime_sla_verified / software_security_audit_cleared states of
+ * record — nothing defaults to allowing.
+ */
+export async function resolveSoftwareVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  apiEndpointId: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "software" }> | null> {
+  const record: SoftwarePayoutGateStateRecord | undefined = await store.getSoftwarePayoutGateState(
+    payeeId,
+    apiEndpointId,
+  );
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "software",
+    api_uptime_sla_verified: record.api_uptime_sla_state === "verified",
+    software_security_audit_cleared: record.security_audit_state === "verified",
   };
 }
 

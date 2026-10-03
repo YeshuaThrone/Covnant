@@ -266,6 +266,12 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  SoftwareAuditEscrowDrawdownRecord,
+  SoftwareAuditEscrowPolicyRecord,
+  SoftwareAuditEscrowReconciliationRecord,
+  SoftwarePayoutGateStateRecord,
+} from '@/modules/software/records';
+import type {
   DeveloperAgentToolCallApplicationRecord,
   DeveloperApiCallMonthRecord,
   DeveloperApiMicroRoyaltyApplicationRecord,
@@ -3598,6 +3604,62 @@ CREATE TABLE IF NOT EXISTS services_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (payee_id, salon_location_id)
+);
+
+-- SOFTWARE_AUDIT_ESCROW + the software payout gate states (migration 0049,
+-- PR 45, the founder software directive): the SOFTWARE_AUDIT_ESCROW
+-- founder-banded rate of record per (developer, API endpoint) scope, the
+-- position-locked drawdowns (uptime outage penalty refunds, API rate-limit
+-- breach credits, quarterly security compliance audits), the verified
+-- reconciliation of record (the release gate's key), and the two durable
+-- gate states the software payout gate reads fail-closed. The CHECK
+-- vocabularies are byte-identical to the TS-side arrays in
+-- modules/software/records.ts (the PR 129/130 lesson).
+CREATE TABLE IF NOT EXISTS software_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS software_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('uptime_outage_penalty_refund', 'api_rate_limit_breach_credit', 'quarterly_security_compliance_audit')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard.
+  UNIQUE (reserve_ledger_id, source_event_id),
+  -- UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+  -- lock the balance derives from.
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents)
+);
+
+CREATE TABLE IF NOT EXISTS software_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS software_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  api_endpoint_id TEXT NOT NULL,
+  api_uptime_sla_state TEXT NOT NULL CHECK (api_uptime_sla_state IN ('unknown', 'verified')),
+  security_audit_state TEXT NOT NULL CHECK (security_audit_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, api_endpoint_id)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -14408,6 +14470,251 @@ export class SqliteStore implements Store {
         row.health_license_state as ServicesPayoutGateStateRecord['health_license_state'],
       territorial_exclusivity_state:
         row.territorial_exclusivity_state as ServicesPayoutGateStateRecord['territorial_exclusivity_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSoftwareAuditEscrowPolicy(
+    row: Omit<SoftwareAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwareAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO software_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSoftwareAuditEscrowPolicy(record.scope_key) as Promise<
+      SoftwareAuditEscrowPolicyRecord
+    >;
+  }
+
+  async getSoftwareAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SoftwareAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM software_audit_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSoftwareAuditEscrowDrawdown(
+    row: Omit<SoftwareAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO software_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listSoftwareAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM software_audit_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class: row.drawdown_class as SoftwareAuditEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertSoftwareAuditEscrowReconciliation(
+    row: Omit<SoftwareAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO software_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.evidence_ref,
+        record.reconciled_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSoftwareAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM software_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`)
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settleSoftwareAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the culinary escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'software_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertSoftwarePayoutGateState(
+    row: Omit<SoftwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, api_endpoint_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO software_payout_gate_states
+           (id, payee_id, api_endpoint_id, api_uptime_sla_state,
+            security_audit_state, evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, api_endpoint_id) DO UPDATE SET
+           api_uptime_sla_state = excluded.api_uptime_sla_state,
+           security_audit_state = excluded.security_audit_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.api_endpoint_id,
+        record.api_uptime_sla_state,
+        record.security_audit_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSoftwarePayoutGateState(
+      record.payee_id,
+      record.api_endpoint_id,
+    ) as Promise<SoftwarePayoutGateStateRecord>;
+  }
+
+  async getSoftwarePayoutGateState(
+    payeeId: string,
+    apiEndpointId: string,
+  ): Promise<SoftwarePayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM software_payout_gate_states WHERE payee_id = ? AND api_endpoint_id = ?`,
+      )
+      .get(payeeId, apiEndpointId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      api_endpoint_id: row.api_endpoint_id as string,
+      api_uptime_sla_state:
+        row.api_uptime_sla_state as SoftwarePayoutGateStateRecord['api_uptime_sla_state'],
+      security_audit_state:
+        row.security_audit_state as SoftwarePayoutGateStateRecord['security_audit_state'],
       evidence_ref: row.evidence_ref as string,
       verified_by: row.verified_by as string,
       created_at: row.created_at as string,

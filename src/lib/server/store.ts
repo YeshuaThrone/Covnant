@@ -262,6 +262,12 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  SoftwareAuditEscrowDrawdownRecord,
+  SoftwareAuditEscrowPolicyRecord,
+  SoftwareAuditEscrowReconciliationRecord,
+  SoftwarePayoutGateStateRecord,
+} from '@/modules/software/records';
+import type {
   DeveloperAgentToolCallApplicationRecord,
   DeveloperApiCallMonthRecord,
   DeveloperApiMicroRoyaltyApplicationRecord,
@@ -3901,6 +3907,86 @@ export interface Store {
     payeeId: string,
     salonLocationId: string,
   ): Promise<ServicesPayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the SOFTWARE_AUDIT_ESCROW's founder-banded
+   * rate of record for one scope (migration 0049) — upsert converges:
+   * the newest rate governs the next routing. NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertSoftwareAuditEscrowPolicy(
+    row: Omit<SoftwareAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwareAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getSoftwareAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SoftwareAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0049) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertSoftwareAuditEscrowDrawdown(
+    row: Omit<SoftwareAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listSoftwareAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0049) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertSoftwareAuditEscrowReconciliation(
+    row: Omit<SoftwareAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getSoftwareAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `software_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleSoftwareAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the software payout gate's states of record for one payee
+   * on one API endpoint (migration 0049) — UNIQUE per (payee_id,
+   * api_endpoint_id): an upsert converges (a verification heals
+   * 'unknown'; states never regress through this table). NEVER carries
+   * the id in the conflict payload (the id rotates on conflict).
+   */
+  upsertSoftwarePayoutGateState(
+    row: Omit<SoftwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwarePayoutGateStateRecord>;
+
+  /**
+   * One payee × API endpoint's gate states of record; undefined when
+   * none — the software payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getSoftwarePayoutGateState(
+    payeeId: string,
+    apiEndpointId: string,
+  ): Promise<SoftwarePayoutGateStateRecord | undefined>;
 
 
   /**

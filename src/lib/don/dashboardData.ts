@@ -203,6 +203,10 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   service_audit_escrow_route: 'Service audit escrow locked',
   service_audit_escrow_drawdown: 'Service audit escrow drawn down',
   service_audit_escrow_release: 'Service audit escrow released',
+  software_audit_escrow_route: 'Software audit escrow locked',
+  software_audit_escrow_drawdown: 'Software audit escrow drawn down',
+  software_audit_escrow_release: 'Software audit escrow released',
+  developer_toolcall_settlement_post: 'Instant tool-call settlement posted',
   nil_unearned_clawback_hold: 'NIL unearned advance clawback hold',
   // PR 37 — the spatial commitments lane (the founder spatial directive):
   // park-earnings routing locks the founder-banded audit escrow, drawdowns

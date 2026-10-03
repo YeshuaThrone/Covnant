@@ -635,6 +635,10 @@ export interface ReconJobResult {
   developer_tool_call_settlements_committed?: number;
   developer_tool_call_settlements_replayed?: number;
   developer_tool_call_skipped_no_policy?: number;
+  /** Developer lane (PR 45): the instant postings — journals written the
+   * moment detector events priced (sub-cent pots record rows, no
+   * journal, and are NOT counted here). */
+  developer_tool_call_instant_postings?: number;
   /** Developer lane: the committed money, integer cents — the realized
    * pool and every leg the walks priced. */
   developer_net_code_usage_pool_cents?: number;

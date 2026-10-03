@@ -149,6 +149,16 @@ describe('don constants', () => {
       'service_audit_escrow_route',
       'service_audit_escrow_drawdown',
       'service_audit_escrow_release',
+
+      // PR 45 (the founder software directive): the SOFTWARE_AUDIT_ESCROW
+      // journals — the 5–10% developer IP payout's automatic escrow
+      // routing, the outage-refund/rate-limit-credit/security-audit
+      // drawdown, the verified-reconciliation release — and the instant
+      // AI-agent tool-call micro-settlement post.
+      'software_audit_escrow_route',
+      'software_audit_escrow_drawdown',
+      'software_audit_escrow_release',
+      'developer_toolcall_settlement_post',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

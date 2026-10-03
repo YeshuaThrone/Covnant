@@ -455,6 +455,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // grants; still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0048_api_gateway_developer_revenue_sdk_licensing.sql',
+      // PR 45 (the founder software directive): four software tables —
+      // escrow policies, drawdowns, reconciliations, payout gate
+      // states — with named table-level ck_ constraints, deny-all RLS,
+      // and service_role grants; still no DDL on universal_royalty_ledger
+      // — the referencing pin below holds.
+      '0049_software_audit_escrow_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

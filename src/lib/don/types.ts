@@ -276,6 +276,20 @@ export const LEDGER_STATUSES = [
   // whole life. No migration: ledger_transactions.status is free text,
   // the same extension-in-place discipline as every escrow state above.
   "service_audit_escrow",
+  // SOFTWARE_AUDIT_ESCROW (PR 45, the founder software directive): the
+  // 5–10% (founder-banded, per-scope policy of record) of a developer IP
+  // payout that locks here — keyed per (developer, API endpoint) scope by
+  // the escrow row's 'software_audit_escrow:{scopeKey}' sentinel payee —
+  // while the payout's exposure runs (API uptime SLA, security audit
+  // clearance). Uptime outage penalty refunds, API rate-limit breach
+  // credits, and quarterly security compliance audits draw it down
+  // position-locked; the verified reconciliation of record opens the
+  // release (fail-closed: no reconciliation of record, no release), and
+  // the released remainder settles it (status → 'settled'). Kind marks
+  // WHAT the row is for its whole life. No migration:
+  // ledger_transactions.status is free text, the same extension-in-place
+  // discipline as every escrow state above.
+  "software_audit_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -428,6 +442,14 @@ export const LEDGER_KINDS = [
   // the row is for its whole life, the same division every escrow kind
   // above uses.
   "service_audit_escrow",
+  // Software audit escrow (PR 45, the founder software directive): the
+  // 5–10% of a developer IP payout auto-locked while the payout's API
+  // uptime SLA and security-audit exposure runs — drawn down by uptime
+  // outage penalty refunds, API rate-limit breach credits, and quarterly
+  // security compliance audits; released on the verified reconciliation
+  // of record. Kind marks WHAT the row is for its whole life, the same
+  // division every escrow kind above uses.
+  "software_audit_escrow",
   // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the

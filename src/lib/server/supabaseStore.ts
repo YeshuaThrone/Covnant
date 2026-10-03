@@ -259,6 +259,12 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  SoftwareAuditEscrowDrawdownRecord,
+  SoftwareAuditEscrowPolicyRecord,
+  SoftwareAuditEscrowReconciliationRecord,
+  SoftwarePayoutGateStateRecord,
+} from '@/modules/software/records';
+import type {
   DeveloperAgentToolCallApplicationRecord,
   DeveloperApiCallMonthRecord,
   DeveloperApiMicroRoyaltyApplicationRecord,
@@ -640,6 +646,12 @@ const TABLES = {
   serviceAuditEscrowDrawdowns: 'service_audit_escrow_drawdowns',
   serviceAuditEscrowReconciliations: 'service_audit_escrow_reconciliations',
   servicesPayoutGateStates: 'services_payout_gate_states',
+  // SOFTWARE_AUDIT_ESCROW + the software payout gate states (PR 45,
+  // migration 0049).
+  softwareAuditEscrowPolicies: 'software_audit_escrow_policies',
+  softwareAuditEscrowDrawdowns: 'software_audit_escrow_drawdowns',
+  softwareAuditEscrowReconciliations: 'software_audit_escrow_reconciliations',
+  softwarePayoutGateStates: 'software_payout_gate_states',
   // Migration 0048 — the developer lane: the royalty/split/ledger/deal
   // registries, the two cumulative monthly trackers, and the seven
   // application ledgers.
@@ -8398,6 +8410,150 @@ export class SupabaseStore implements Store {
         .eq('salon_location_id', salonLocationId)
         .maybeSingle(),
       'getServicesPayoutGateState',
+    );
+  }
+
+  async upsertSoftwareAuditEscrowPolicy(
+    row: Omit<SoftwareAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwareAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<SoftwareAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.softwareAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertSoftwareAuditEscrowPolicy',
+    );
+  }
+
+  async getSoftwareAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SoftwareAuditEscrowPolicyRecord | undefined> {
+    return this.one<SoftwareAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.softwareAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getSoftwareAuditEscrowPolicy',
+    );
+  }
+
+  async insertSoftwareAuditEscrowDrawdown(
+    row: Omit<SoftwareAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<SoftwareAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.softwareAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSoftwareAuditEscrowDrawdown',
+    );
+  }
+
+  async listSoftwareAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // fitness, spatial, culinary, and service drawdown lists run.
+    const { data, error } = await this.client
+      .from(TABLES.softwareAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listSoftwareAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as SoftwareAuditEscrowDrawdownRecord[];
+  }
+
+  async insertSoftwareAuditEscrowReconciliation(
+    row: Omit<SoftwareAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<SoftwareAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.softwareAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSoftwareAuditEscrowReconciliation',
+    );
+  }
+
+  async getSoftwareAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord | undefined> {
+    return this.one<SoftwareAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.softwareAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getSoftwareAuditEscrowReconciliation',
+    );
+  }
+
+  async settleSoftwareAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'software_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleSoftwareAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertSoftwarePayoutGateState(
+    row: Omit<SoftwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, api_endpoint_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<SoftwarePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.softwarePayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,api_endpoint_id' })
+        .select()
+        .maybeSingle(),
+      'upsertSoftwarePayoutGateState',
+    );
+  }
+
+  async getSoftwarePayoutGateState(
+    payeeId: string,
+    apiEndpointId: string,
+  ): Promise<SoftwarePayoutGateStateRecord | undefined> {
+    return this.one<SoftwarePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.softwarePayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('api_endpoint_id', apiEndpointId)
+        .maybeSingle(),
+      'getSoftwarePayoutGateState',
     );
   }
 
