@@ -24,6 +24,7 @@ import type {
   MatchQueueStreamPlatform,
   RightsPipeline,
 } from "@/modules/sdk/records";
+import type { SpatialZoneRowClass } from "@/modules/spatial/records";
 
 // The worker lanes on the SDK's four-pipeline vocabulary verbatim — one
 // definition, no worker-local shadow.
@@ -95,7 +96,17 @@ export type StatementProfileKind =
   | "nil_brand_endorsement_csv"
   | "nil_collective_disclosure_csv"
   | "nil_school_rev_share_pool_csv"
-  | "nil_media_rights_distribution_csv";
+  | "nil_media_rights_distribution_csv"
+  // The spatial lane (PR 36, the founder spatial directive) — the five
+  // strict senders the directive names (venue turnstile ticket scans,
+  // attraction pass sales, in-park food and beverage register feeds,
+  // location-tagged retail POS logs, RFID wristband telemetry), one
+  // strict profile per sender's sheet.
+  | "spatial_turnstile_ticket_scans_csv"
+  | "spatial_attraction_pass_sales_csv"
+  | "spatial_fnb_register_csv"
+  | "spatial_retail_pos_csv"
+  | "spatial_rfid_wristband_telemetry_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -959,7 +970,89 @@ export interface ParsedStatementLine {
    * non-NIL line — the presence IS the lane discriminator. Optional for
    * the same reason as bookDetail. */
   nilDetail?: NilLineDetail | null;
+
+  /** Spatial lane context (the statement sender, the sender row id of
+   * record, the venue/zone/footprint keys the calculator and the zone
+   * routing key on, and the sender-specific money or telemetry legs);
+   * null on every non-spatial line — the presence IS the lane
+   * discriminator. Optional for the same reason as bookDetail. */
+  spatialDetail?: SpatialLineDetail | null;
 }
+
+/** The spatial lane's per-line context (PR 36, the founder spatial
+ * directive) — one discriminated shape per sender family: the turnstile
+ * and pass rows carry the Adjusted Location Sales calculator's legs, the
+ * zone sale rows carry the routing gross, and the telemetry rows carry
+ * the dwell/session legs the micro-royalty policy of record prices. */
+export type SpatialTurnstileDetail = {
+  readonly sender: "turnstile";
+  /** The sender's settlement id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly venueId: string;
+  /** The row's ISO currency of record (validated at parse). */
+  readonly currency: string;
+  readonly zoneCode: string;
+  readonly spatialFootprintSqft: number;
+  readonly period: string;
+  readonly ticketRevenueCents: number;
+  readonly merchRevenueCents: number;
+  readonly occupancyTaxCents: number;
+  readonly infrastructureCogsCents: number;
+  readonly groupTourDiscountCents: number;
+  /** Only an approved group tour discount deducts — pending holds. */
+  readonly tourDiscountApproved: boolean;
+  readonly turnstileEntries: number;
+};
+
+export type SpatialPassDetail = {
+  readonly sender: "pass";
+  readonly senderRowId: string;
+  readonly venueId: string;
+  readonly currency: string;
+  readonly zoneCode: string;
+  readonly spatialFootprintSqft: number;
+  readonly period: string;
+  readonly passType: string;
+  readonly passRevenueCents: number;
+  readonly occupancyTaxCents: number;
+  readonly infrastructureCogsCents: number;
+  readonly groupTourDiscountCents: number;
+  readonly tourDiscountApproved: boolean;
+};
+
+export type SpatialZoneSaleDetail = {
+  readonly sender: "fnb" | "retail";
+  readonly rowClass: SpatialZoneRowClass;
+  readonly senderRowId: string;
+  readonly venueId: string;
+  readonly currency: string;
+  readonly zoneCode: string;
+  readonly period: string;
+  readonly grossCents: number;
+  /** The location sensor of record the zone routing cites; the register
+   * feed carries none (the register id is the identity). */
+  readonly beaconId: string | null;
+};
+
+export type SpatialTelemetryDetail = {
+  readonly sender: "rfid";
+  readonly senderRowId: string;
+  readonly venueId: string;
+  readonly currency: string;
+  readonly zoneCode: string;
+  readonly period: string;
+  readonly wristbandId: string;
+  readonly sensorId: string;
+  readonly scanTime: string;
+  readonly dwellMinutes: number;
+  readonly rideSessions: number;
+};
+
+export type SpatialLineDetail =
+  | SpatialTurnstileDetail
+  | SpatialPassDetail
+  | SpatialZoneSaleDetail
+  | SpatialTelemetryDetail;
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

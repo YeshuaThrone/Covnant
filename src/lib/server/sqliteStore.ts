@@ -2047,15 +2047,20 @@ CREATE TABLE IF NOT EXISTS spatial_royalty_applications (
   verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
   created_at TEXT NOT NULL,
   UNIQUE (source_event_id),
-  CHECK (ck_spatial_royalty_applications_calculator_identity
-    = (net_spatial_licensed_revenue_cents
-       = ticket_revenue_cents + merch_revenue_cents
-         - occupancy_tax_cents - infrastructure_cogs_cents - group_tour_discount_cents)),
-  CHECK (ck_spatial_royalty_applications_overhead_ordering
-    = (royalty_basis_cents = net_spatial_licensed_revenue_cents - overhead_total_cents)),
-  CHECK (ck_spatial_royalty_applications_overhead_legs
-    = (overhead_total_cents
-       = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents))
+  CHECK (net_spatial_licensed_revenue_cents
+    = ticket_revenue_cents + merch_revenue_cents
+      - occupancy_tax_cents - infrastructure_cogs_cents - group_tour_discount_cents),
+  CHECK (verdict = 'held_negative_net'
+    OR royalty_basis_cents = net_spatial_licensed_revenue_cents - overhead_total_cents),
+  CHECK (verdict = 'paid'
+    OR (overhead_security_cents = 0
+        AND overhead_wristband_cents = 0
+        AND overhead_ticketing_cents = 0
+        AND overhead_total_cents = 0
+        AND royalty_basis_cents = 0
+        AND occupancy_royalty_cents = 0)),
+  CHECK (overhead_total_cents
+    = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents)
 );
 
 CREATE TABLE IF NOT EXISTS spatial_zone_allocations (
@@ -2076,11 +2081,9 @@ CREATE TABLE IF NOT EXISTS spatial_zone_allocations (
   royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
   created_at TEXT NOT NULL,
   UNIQUE (source_event_id),
-  CHECK (ck_spatial_zone_allocations_overhead_ordering
-    = (allocated_basis_cents = gross_cents - overhead_total_cents)),
-  CHECK (ck_spatial_zone_allocations_overhead_legs
-    = (overhead_total_cents
-       = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents))
+  CHECK (allocated_basis_cents = gross_cents - overhead_total_cents),
+  CHECK (overhead_total_cents
+    = overhead_security_cents + overhead_wristband_cents + overhead_ticketing_cents)
 );
 
 CREATE TABLE IF NOT EXISTS spatial_micro_royalty_ledger (
@@ -2101,14 +2104,10 @@ CREATE TABLE IF NOT EXISTS spatial_micro_royalty_ledger (
   royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
   created_at TEXT NOT NULL,
   UNIQUE (source_event_id),
-  CHECK (ck_spatial_micro_royalty_dwell_leg
-    = (dwell_royalty_micros = dwell_minutes * micros_per_dwell_minute)),
-  CHECK (ck_spatial_micro_royalty_session_leg
-    = (session_royalty_micros = ride_sessions * micros_per_ride_session)),
-  CHECK (ck_spatial_micro_royalty_total
-    = (total_royalty_micros = dwell_royalty_micros + session_royalty_micros)),
-  CHECK (ck_spatial_micro_royalty_cents
-    = (royalty_cents = total_royalty_micros / 1000000))
+  CHECK (dwell_royalty_micros = dwell_minutes * micros_per_dwell_minute),
+  CHECK (session_royalty_micros = ride_sessions * micros_per_ride_session),
+  CHECK (total_royalty_micros = dwell_royalty_micros + session_royalty_micros),
+  CHECK (royalty_cents = total_royalty_micros / 1000000)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of

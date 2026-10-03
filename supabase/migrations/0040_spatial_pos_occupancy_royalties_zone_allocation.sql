@@ -311,7 +311,22 @@ create table if not exists public.spatial_royalty_applications (
         + overhead_ticketing_cents
     ),
   constraint ck_spatial_royalty_applications_overhead_ordering
-    check (royalty_basis_cents = net_spatial_licensed_revenue_cents - overhead_total_cents),
+    check (
+      verdict = 'held_negative_net'
+      or royalty_basis_cents = net_spatial_licensed_revenue_cents - overhead_total_cents
+    ),
+  constraint ck_spatial_royalty_applications_held_money_legs_zeroed
+    check (
+      verdict = 'paid'
+      or (
+        overhead_security_cents = 0
+        and overhead_wristband_cents = 0
+        and overhead_ticketing_cents = 0
+        and overhead_total_cents = 0
+        and royalty_basis_cents = 0
+        and occupancy_royalty_cents = 0
+      )
+    ),
   constraint ck_spatial_royalty_applications_tier_basis
     check (tier_basis in ('annual_throughput', 'footprint_sqft')),
   constraint ck_spatial_royalty_applications_entries_nonneg

@@ -386,6 +386,17 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // universal_royalty_ledger — the buckets and journals ride the
       // existing ledger vocabulary, and the referencing pin below holds.
       '0039_nil_audit_escrow_transfer_portal_clawback.sql',
+      // Spatial POS + occupancy royalties + zone allocation (PR 36, the
+      // founder spatial directive): eight durable tables — the occupancy
+      // tier schedules (the founder's 5%/8% throughput example), the
+      // shared facility overhead policies, the zone assignments to IP
+      // owners, the micro-royalty unit rates, the cumulative annual
+      // throughput tracker, and the three append-only application
+      // ledgers (occupancy royalties, zone allocations, micro-royalties)
+      // with the calculator identities pinned in CHECKs; still no DDL on
+      // universal_royalty_ledger — the applications ride their own
+      // spatial tables, and the referencing pin below holds.
+      '0040_spatial_pos_occupancy_royalties_zone_allocation.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

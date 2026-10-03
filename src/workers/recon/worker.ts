@@ -55,8 +55,10 @@ import { writeTheatricalLinesToMatchQueue } from "./theatricalQueue";
 import { postTheatricalNetsToHolding } from "./theatricalPosting";
 import { isLicensingProfileKind } from "./licensingProfiles";
 import { isNilProfileKind } from "./nilProfiles";
+import { isSpatialProfileKind } from "./spatialProfiles";
 import { writeLicensingLinesToMatchQueue } from "./licensingQueue";
 import { writeNilRowsToStore } from "./nilQueue";
+import { writeSpatialRowsToStore } from "./spatialQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
@@ -267,6 +269,22 @@ async function processJobBody(
     // sees a NIL row.
     if (isNilProfileKind(matchedProfile.kind)) {
       return await parseNil(deps, matchedProfile, content);
+    }
+    // The spatial lane branches the same way (PR 36, the founder
+    // directive): its rows are the five strict senders' telemetry /
+    // settlement / register / POS events whose money runs the Adjusted
+    // Location Sales calculator, the shared facility overhead deduction,
+    // the occupancy royalty tier walks (annual throughput and footprint
+    // bases), the zone routing to the assigned IP owner's waterfall, and
+    // the dwell/session micro-royalties — never the music queue's split
+    // math, the gaming accumulator, the livestream escrow, the webtoon
+    // conversions, the merch COGS deduction, the AI split, the book
+    // editorial cascade, the art fabrication waterfalls, the theatrical
+    // deal classes, the brand-licensing cascade, or the NIL verdict walk.
+    // The store applications ARE the lane's money of record; match_queue
+    // never sees a spatial row.
+    if (isSpatialProfileKind(matchedProfile.kind)) {
+      return await parseSpatial(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -862,6 +880,56 @@ async function parseNil(
     nil_net_athlete_share_pool_cents: counts.netAthleteSharePoolCents,
     nil_roster_paid_cents: counts.rosterPaidCents,
     nil_dust_cents: counts.dustCents,
+  };
+}
+
+/**
+ * The spatial lane (PR 36, the founder directive): the five strict
+ * senders' rows run the three store walks and the store's spatial
+ * applications ARE the lane's money of record — the occupancy royalty
+ * applications (the Adjusted Location Sales calculator's legs, the
+ * shared facility overhead deduction, the tier walk's committed bands),
+ * the zone allocations routed to the assigned IP owner's waterfall, and
+ * the RFID micro-royalty ledger. No match_queue row, no holding post:
+ * replay guards and the fail-closed policies of record govern
+ * everything. The result's spatial_* block is absent on every other
+ * lane — its presence is the discriminator.
+ */
+async function parseSpatial(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeSpatialRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.occupancyApplicationsWritten +
+      counts.zoneAllocationsWritten +
+      counts.microRoyaltiesWritten,
+    matched: 0, // no vault matching on this lane — the spatial tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    spatial_occupancy_applications_committed: counts.occupancyApplicationsWritten,
+    spatial_occupancy_applications_replayed: counts.occupancyApplicationsReplayed,
+    spatial_occupancy_skipped_no_schedule: counts.occupancySkippedNoSchedule,
+    spatial_occupancy_skipped_unverified_schedule: counts.occupancySkippedUnverifiedSchedule,
+    spatial_occupancy_skipped_no_overhead: counts.occupancySkippedNoOverhead,
+    spatial_occupancy_held_negative_net: counts.occupancyHeldNegativeNet,
+    spatial_zone_allocations_committed: counts.zoneAllocationsWritten,
+    spatial_zone_allocations_replayed: counts.zoneAllocationsReplayed,
+    spatial_zone_skipped_no_assignment: counts.zoneSkippedNoAssignment,
+    spatial_zone_skipped_no_overhead: counts.zoneSkippedNoOverhead,
+    spatial_micro_royalties_committed: counts.microRoyaltiesWritten,
+    spatial_micro_royalties_replayed: counts.microRoyaltiesReplayed,
+    spatial_micro_skipped_no_policy: counts.microSkippedNoPolicy,
+    spatial_net_spatial_licensed_revenue_cents: counts.netSpatialLicensedRevenueCents,
+    spatial_overhead_total_cents: counts.overheadTotalCents,
+    spatial_occupancy_royalty_cents: counts.occupancyRoyaltyCents,
+    spatial_zone_royalty_cents: counts.zoneRoyaltyCents,
+    spatial_micro_royalty_cents: counts.microRoyaltyCents,
   };
 }
 

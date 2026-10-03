@@ -411,6 +411,35 @@ export interface ReconJobResult {
   nil_net_athlete_share_pool_cents?: number;
   nil_roster_paid_cents?: number;
   nil_dust_cents?: number;
+  /** Spatial lane (PR 36): the occupancy royalty walk's applications —
+   * commits, counted replay no-ops, the fail-closed skips (no schedule /
+   * unverified schedule / no overhead policy of record), and the negative
+   * net holds (held money is visible, never dropped, never posted). */
+  spatial_occupancy_applications_committed?: number;
+  spatial_occupancy_applications_replayed?: number;
+  spatial_occupancy_skipped_no_schedule?: number;
+  spatial_occupancy_skipped_unverified_schedule?: number;
+  spatial_occupancy_skipped_no_overhead?: number;
+  spatial_occupancy_held_negative_net?: number;
+  /** Spatial lane: the zone allocation walk — the zone's sales routed to
+   * the assigned IP owner's waterfall, overhead-first. */
+  spatial_zone_allocations_committed?: number;
+  spatial_zone_allocations_replayed?: number;
+  spatial_zone_skipped_no_assignment?: number;
+  spatial_zone_skipped_no_overhead?: number;
+  /** Spatial lane: the dynamic micro-royalty ledger — the dwell/session
+   * payouts at the zone's unit rates of record. */
+  spatial_micro_royalties_committed?: number;
+  spatial_micro_royalties_replayed?: number;
+  spatial_micro_skipped_no_policy?: number;
+  /** Spatial lane: the committed money, integer cents — the Adjusted
+   * Location Sales nets, the shared facility overhead deducted, and the
+   * three royalty legs the walk priced. */
+  spatial_net_spatial_licensed_revenue_cents?: number;
+  spatial_overhead_total_cents?: number;
+  spatial_occupancy_royalty_cents?: number;
+  spatial_zone_royalty_cents?: number;
+  spatial_micro_royalty_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */
