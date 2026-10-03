@@ -7,6 +7,7 @@ import type {
 } from "@/modules/don/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
+import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -480,6 +481,36 @@ export async function resolveNilVerticalComplianceState(
     // condition to be verified before anything releases.
     collective_or_booster_backed: record.collective_or_booster_backed !== false,
     institutional_cap_verified: record.institutional_cap_state === "verified",
+  };
+}
+
+/**
+ * The spatial vertical's compliance state (PR 37, the founder spatial
+ * directive), resolved from the spatial payout-gate states of record
+ * (migration 0041) — the store-backed reader the spatial payout path
+ * uses for the 'spatial' vertical (the NIL resolver's pattern, scoped
+ * per payee × venue). FAIL-CLOSED on both failure modes the directive
+ * names: an ABSENT record returns null (the gate refuses with
+ * vertical_state_unknown), and an 'unknown' stored state maps to false
+ * (the gate refuses with territorial_zoning_not_cleared /
+ * spatial_audit_unverified). The booleans are true ONLY on the
+ * territorial_zoning_cleared / spatial_audit_verified states of record
+ * — nothing defaults to allowing.
+ */
+export async function resolveSpatialVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  venueId: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "spatial" }> | null> {
+  const record: SpatialPayoutGateStateRecord | undefined =
+    await store.getSpatialPayoutGateState(payeeId, venueId);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "spatial",
+    territorial_zoning_cleared: record.territorial_zoning_state === "cleared",
+    spatial_audit_verified: record.spatial_audit_state === "verified",
   };
 }
 

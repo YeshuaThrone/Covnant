@@ -557,8 +557,87 @@ export const JOURNAL_KINDS = [
   "nil_audit_escrow_drawdown",
   "nil_audit_escrow_release",
   "nil_unearned_clawback_hold",
+  // Spatial audit escrow (PR 37, the founder spatial directive): a
+  // venue's held unclaimed-holding credit routes through the spatial
+  // payout gate — the 5–12% SPATIAL_AUDIT_ESCROW locks into the
+  // per-scope escrow (route), local entertainment sales taxes, safety
+  // compliance holdbacks, and quarterly park concession reconciliations
+  // draw it down (drawdown), and the verified reconciliation of record
+  // opens the release that pays the remaining escrow through the taxed
+  // cascade (release). A pop-up scope's release is additionally gated on
+  // its post-event inventory write-off and site restoration reserve of
+  // record. The quarterly Minimum Spatial Guarantee shortfall invoice
+  // posts its own balanced legs — the operator's receivable of record
+  // rises and the shortfall penalty income rises, priced from the
+  // venue's reserved footprint and the append-only spatial royalty
+  // truth. Additive only.
+  "spatial_audit_escrow_route",
+  "spatial_audit_escrow_drawdown",
+  "spatial_audit_escrow_release",
+  "spatial_msg_shortfall_invoice",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
+
+// SPATIAL_AUDIT_ESCROW (PR 37, the founder spatial directive): the
+// founder-banded 5–12% of a park venue's earnings held per scope while
+// the scope's local exposure runs. Per-scope — the payee and GL account
+// carry the scope key the way vault accounts carry the payee id and the
+// film escrow carries the film id. A park scope is `venue:{venueId}`; a
+// temporary pop-up's scope is `venue:{venueId}:popup:{popupRef}`. Both
+// scopes draw down for local entertainment sales taxes, safety
+// compliance holdbacks, and quarterly park concession reconciliations;
+// the verified reconciliation of record opens the release (fail-closed),
+// and a pop-up scope's release additionally requires its post-event
+// inventory write-off and site restoration reserve of record.
+// Deliberately NOT 'platform', NOT the unclaimed holding sentinel, and
+// NOT the NIL audit escrow's sentinel: spatial escrow is distinct from
+// company dust, from unallocated recon funds, and from the NIL escrow in
+// payee, GL account, and ledger kind, so no query can fold one into
+// another.
+export const SPATIAL_AUDIT_ESCROW_PAYEE_PREFIX = "spatial_audit_escrow";
+export function spatialAuditEscrowPayeeId(scopeKey: string): string {
+  return `${SPATIAL_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function spatialAuditEscrowPayeeName(scopeKey: string): string {
+  return `SPATIAL_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_SPATIAL_AUDIT_ESCROW = "spatial_audit_escrow";
+export function spatialAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_SPATIAL_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder band: a scope's escrow policy of record must price between
+// 5% and 12% of park earnings inclusive — below the band under-reserves
+// the scope's exposure, above it confiscates earnings, so the band is a
+// constructor argument to every routing, never a suggestion.
+export const SPATIAL_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const SPATIAL_AUDIT_ESCROW_MAX_RATE_BPS = 1_200;
+// The drawdown classes of record — the three exposures the directive
+// names. Position-locked against the escrow bucket's balance of record;
+// anything else is refused at the vocabulary (no unpriced drawdown
+// shape).
+export const SPATIAL_AUDIT_ESCROW_DRAWDOWN_CLASSES = [
+  "entertainment_sales_tax",
+  "safety_compliance_holdback",
+  "concession_reconciliation",
+] as const;
+export type SpatialAuditEscrowDrawdownClass =
+  (typeof SPATIAL_AUDIT_ESCROW_DRAWDOWN_CLASSES)[number];
+
+// Minimum Spatial Guarantee GL pair (PR 37): a quarterly MSG shortfall
+// debits the operator's receivable of record and credits the shortfall
+// penalty income of record — balanced legs priced from the venue's
+// reserved-footprint guarantee terms and the append-only spatial royalty
+// truth. Per operator × venue scope, the way the NIL clawback's pair is
+// per athlete: no query can fold one operator's guarantee into another's.
+export const GL_ACCOUNT_SPATIAL_MSG_RECEIVABLE = "spatial_msg_receivable";
+export function spatialMsgReceivableGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_SPATIAL_MSG_RECEIVABLE}:${scopeKey}`;
+}
+export const GL_ACCOUNT_SPATIAL_MSG_SHORTFALL_INCOME =
+  "spatial_msg_shortfall_income";
+export function spatialMsgShortfallIncomeGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_SPATIAL_MSG_SHORTFALL_INCOME}:${scopeKey}`;
+}
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

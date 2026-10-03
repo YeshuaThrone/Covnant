@@ -195,6 +195,16 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   nil_audit_escrow_drawdown: 'NIL audit escrow drawn down',
   nil_audit_escrow_release: 'NIL audit escrow released',
   nil_unearned_clawback_hold: 'NIL unearned advance clawback hold',
+  // PR 37 — the spatial commitments lane (the founder spatial directive):
+  // park-earnings routing locks the founder-banded audit escrow, drawdowns
+  // spend it on local taxes, safety holdbacks, and concession
+  // reconciliations, the verified release pays the remainder, and the
+  // quarterly Minimum Spatial Guarantee close invoices the operator's
+  // shortfall automatically.
+  spatial_audit_escrow_route: 'Spatial audit escrow locked',
+  spatial_audit_escrow_drawdown: 'Spatial audit escrow drawn down',
+  spatial_audit_escrow_release: 'Spatial audit escrow released',
+  spatial_msg_shortfall_invoice: 'Spatial MSG shortfall invoiced',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

@@ -181,10 +181,21 @@ import type {
   NilStateRuleRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialAuditEscrowDrawdownRecord,
+  SpatialAuditEscrowPolicyRecord,
+  SpatialAuditEscrowReconciliationRecord,
+  SpatialCapexApplicationRecord,
+  SpatialCapexCommitmentRecord,
   SpatialMicroPolicyRecord,
   SpatialMicroRoyaltyRecord,
+  SpatialMsgCommitmentRecord,
+  SpatialMsgTermCloseRecord,
   SpatialOccupancyTierScheduleRecord,
   SpatialOverheadPolicyRecord,
+  SpatialPopupExperienceRecord,
+  SpatialPopupRestorationReserveRecord,
+  SpatialPopupWriteoffRecord,
+  SpatialPayoutGateStateRecord,
   SpatialRoyaltyApplicationRecord,
   SpatialThroughputYearRecord,
   SpatialZoneAllocationRecord,
@@ -468,6 +479,17 @@ const TABLES = {
   spatialRoyaltyApplications: 'spatial_royalty_applications',
   spatialZoneAllocations: 'spatial_zone_allocations',
   spatialMicroRoyalties: 'spatial_micro_royalty_ledger',
+  spatialCapexCommitments: 'spatial_capex_commitments',
+  spatialCapexApplications: 'spatial_capex_applications',
+  spatialMsgCommitments: 'spatial_msg_commitments',
+  spatialMsgTermCloses: 'spatial_msg_term_closes',
+  spatialPopupExperiences: 'spatial_popup_experiences',
+  spatialPopupWriteoffs: 'spatial_popup_writeoffs',
+  spatialPopupRestorationReserves: 'spatial_popup_restoration_reserves',
+  spatialAuditEscrowPolicies: 'spatial_audit_escrow_policies',
+  spatialAuditEscrowDrawdowns: 'spatial_audit_escrow_drawdowns',
+  spatialAuditEscrowReconciliations: 'spatial_audit_escrow_reconciliations',
+  spatialPayoutGateStates: 'spatial_payout_gate_states',
 } as const;
 
 /**
@@ -4506,6 +4528,422 @@ export class SupabaseStore implements Store {
         .eq('source_event_id', sourceEventId)
         .maybeSingle(),
       'getSpatialMicroRoyalty',
+    );
+  }
+
+  // --- PR 37 — spatial commitments (migration 0041) ---
+
+  async upsertSpatialCapexCommitment(
+    row: Omit<SpatialCapexCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialCapexCommitmentRecord> {
+    // UNIQUE per (scope_key, capex_ref) — a re-registered commitment
+    // converges (the newest registered cost governs the next walk).
+    // HARDENED UPSERT: no id in the payload (the id rotates on conflict).
+    return this.oneStrict<SpatialCapexCommitmentRecord>(
+      this.client
+        .from(TABLES.spatialCapexCommitments)
+        .upsert(row, { onConflict: 'scope_key,capex_ref' })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialCapexCommitment',
+    );
+  }
+
+  async getSpatialCapexCommitment(
+    scopeKey: string,
+    capexRef: string,
+  ): Promise<SpatialCapexCommitmentRecord | undefined> {
+    return this.one<SpatialCapexCommitmentRecord>(
+      this.client
+        .from(TABLES.spatialCapexCommitments)
+        .select()
+        .eq('scope_key', scopeKey)
+        .eq('capex_ref', capexRef)
+        .maybeSingle(),
+      'getSpatialCapexCommitment',
+    );
+  }
+
+  async listSpatialCapexCommitments(
+    scopeKey: string,
+  ): Promise<SpatialCapexCommitmentRecord[]> {
+    // created_at ASC — the offset walk's OLDEST-FIRST input.
+    const { data, error } = await this.client
+      .from(TABLES.spatialCapexCommitments)
+      .select()
+      .eq('scope_key', scopeKey)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialCapexCommitments failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialCapexCommitmentRecord[];
+  }
+
+  async insertSpatialCapexApplication(
+    row: Omit<SpatialCapexApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialCapexApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard and
+    // UNIQUE per (commitment_id, offset_before_cents) is the position
+    // lock — a replayed royalty or a lost race throws here, never a
+    // double offset; the caller re-derives from the append-only truth.
+    return this.oneStrict<SpatialCapexApplicationRecord>(
+      this.client
+        .from(TABLES.spatialCapexApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialCapexApplication',
+    );
+  }
+
+  async listSpatialCapexApplications(
+    commitmentId: string,
+  ): Promise<SpatialCapexApplicationRecord[]> {
+    // created_at ASC — the amortization schedule of record.
+    const { data, error } = await this.client
+      .from(TABLES.spatialCapexApplications)
+      .select()
+      .eq('commitment_id', commitmentId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialCapexApplications failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialCapexApplicationRecord[];
+  }
+
+  async upsertSpatialMsgCommitment(
+    row: Omit<SpatialMsgCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgCommitmentRecord> {
+    // UNIQUE per scope_key — a re-registered guarantee converges (the
+    // newest priced terms govern the next close). HARDENED UPSERT: no id
+    // in the payload (the id rotates on conflict).
+    return this.oneStrict<SpatialMsgCommitmentRecord>(
+      this.client
+        .from(TABLES.spatialMsgCommitments)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialMsgCommitment',
+    );
+  }
+
+  async getSpatialMsgCommitment(
+    scopeKey: string,
+  ): Promise<SpatialMsgCommitmentRecord | undefined> {
+    return this.one<SpatialMsgCommitmentRecord>(
+      this.client
+        .from(TABLES.spatialMsgCommitments)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getSpatialMsgCommitment',
+    );
+  }
+
+  async upsertSpatialMsgTermClose(
+    row: Omit<SpatialMsgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgTermCloseRecord> {
+    // UNIQUE per (commitment_id, quarter) — the once-only close; a replay
+    // converges on the recorded shortfall and invoice of record.
+    // HARDENED UPSERT: no id in the payload (the id rotates on conflict).
+    return this.oneStrict<SpatialMsgTermCloseRecord>(
+      this.client
+        .from(TABLES.spatialMsgTermCloses)
+        .upsert(row, { onConflict: 'commitment_id,quarter' })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialMsgTermClose',
+    );
+  }
+
+  async getSpatialMsgTermClose(
+    commitmentId: string,
+    quarter: string,
+  ): Promise<SpatialMsgTermCloseRecord | undefined> {
+    return this.one<SpatialMsgTermCloseRecord>(
+      this.client
+        .from(TABLES.spatialMsgTermCloses)
+        .select()
+        .eq('commitment_id', commitmentId)
+        .eq('quarter', quarter)
+        .maybeSingle(),
+      'getSpatialMsgTermClose',
+    );
+  }
+
+  async listSpatialRoyaltyApplicationsByVenue(
+    venueId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord[]> {
+    // created_at ASC — the append-only royalty truth the MSG close sums.
+    const { data, error } = await this.client
+      .from(TABLES.spatialRoyaltyApplications)
+      .select()
+      .eq('venue_id', venueId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialRoyaltyApplicationsByVenue failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialRoyaltyApplicationRecord[];
+  }
+
+  async listSpatialZoneAllocationsByVenue(
+    venueId: string,
+  ): Promise<SpatialZoneAllocationRecord[]> {
+    const { data, error } = await this.client
+      .from(TABLES.spatialZoneAllocations)
+      .select()
+      .eq('venue_id', venueId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialZoneAllocationsByVenue failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialZoneAllocationRecord[];
+  }
+
+  async listSpatialMicroRoyaltiesByVenue(venueId: string): Promise<SpatialMicroRoyaltyRecord[]> {
+    const { data, error } = await this.client
+      .from(TABLES.spatialMicroRoyalties)
+      .select()
+      .eq('venue_id', venueId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialMicroRoyaltiesByVenue failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialMicroRoyaltyRecord[];
+  }
+
+  async insertSpatialPopupExperience(
+    row: Omit<SpatialPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here.
+    return this.oneStrict<SpatialPopupExperienceRecord>(
+      this.client
+        .from(TABLES.spatialPopupExperiences)
+        .insert({
+          ...row,
+          id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .maybeSingle(),
+      'insertSpatialPopupExperience',
+    );
+  }
+
+  async getSpatialPopupExperience(
+    popupRef: string,
+  ): Promise<SpatialPopupExperienceRecord | undefined> {
+    return this.one<SpatialPopupExperienceRecord>(
+      this.client
+        .from(TABLES.spatialPopupExperiences)
+        .select()
+        .eq('popup_ref', popupRef)
+        .maybeSingle(),
+      'getSpatialPopupExperience',
+    );
+  }
+
+  async insertSpatialPopupWriteoff(
+    row: Omit<SpatialPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    return this.oneStrict<SpatialPopupWriteoffRecord>(
+      this.client
+        .from(TABLES.spatialPopupWriteoffs)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialPopupWriteoff',
+    );
+  }
+
+  async listSpatialPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupWriteoffRecord[]> {
+    const { data, error } = await this.client
+      .from(TABLES.spatialPopupWriteoffs)
+      .select()
+      .eq('popup_experience_id', popupExperienceId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listSpatialPopupWriteoffs failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialPopupWriteoffRecord[];
+  }
+
+  async insertSpatialPopupRestorationReserve(
+    row: Omit<SpatialPopupRestorationReserveRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupRestorationReserveRecord> {
+    // Insert-as-lock — UNIQUE per popup_experience_id: the FIRST reserve
+    // wins; a concurrent second insert throws here.
+    return this.oneStrict<SpatialPopupRestorationReserveRecord>(
+      this.client
+        .from(TABLES.spatialPopupRestorationReserves)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialPopupRestorationReserve',
+    );
+  }
+
+  async getSpatialPopupRestorationReserve(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupRestorationReserveRecord | undefined> {
+    return this.one<SpatialPopupRestorationReserveRecord>(
+      this.client
+        .from(TABLES.spatialPopupRestorationReserves)
+        .select()
+        .eq('popup_experience_id', popupExperienceId)
+        .maybeSingle(),
+      'getSpatialPopupRestorationReserve',
+    );
+  }
+
+  async upsertSpatialAuditEscrowPolicy(
+    row: Omit<SpatialAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<SpatialAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.spatialAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialAuditEscrowPolicy',
+    );
+  }
+
+  async getSpatialAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SpatialAuditEscrowPolicyRecord | undefined> {
+    return this.one<SpatialAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.spatialAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getSpatialAuditEscrowPolicy',
+    );
+  }
+
+  async insertSpatialAuditEscrowDrawdown(
+    row: Omit<SpatialAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<SpatialAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.spatialAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialAuditEscrowDrawdown',
+    );
+  }
+
+  async listSpatialAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique position column orders same-millisecond rows honestly.
+    const { data, error } = await this.client
+      .from(TABLES.spatialAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listSpatialAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as SpatialAuditEscrowDrawdownRecord[];
+  }
+
+  async insertSpatialAuditEscrowReconciliation(
+    row: Omit<SpatialAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<SpatialAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.spatialAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertSpatialAuditEscrowReconciliation',
+    );
+  }
+
+  async getSpatialAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowReconciliationRecord | undefined> {
+    return this.one<SpatialAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.spatialAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getSpatialAuditEscrowReconciliation',
+    );
+  }
+
+  async settleSpatialAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'spatial_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleSpatialAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertSpatialPayoutGateState(
+    row: Omit<SpatialPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, venue_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<SpatialPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.spatialPayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,venue_id' })
+        .select()
+        .maybeSingle(),
+      'upsertSpatialPayoutGateState',
+    );
+  }
+
+  async getSpatialPayoutGateState(
+    payeeId: string,
+    venueId: string,
+  ): Promise<SpatialPayoutGateStateRecord | undefined> {
+    return this.one<SpatialPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.spatialPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('venue_id', venueId)
+        .maybeSingle(),
+      'getSpatialPayoutGateState',
     );
   }
 

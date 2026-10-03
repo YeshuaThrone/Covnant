@@ -121,6 +121,13 @@ describe('don constants', () => {
       'nil_audit_escrow_drawdown',
       'nil_audit_escrow_release',
       'nil_unearned_clawback_hold',
+      // PR 37 (the founder spatial directive): the spatial commitment
+      // journals — escrow route/drawdown/release and the quarterly MSG
+      // shortfall invoice — alongside the spatial royalty ingest kinds.
+      'spatial_audit_escrow_route',
+      'spatial_audit_escrow_drawdown',
+      'spatial_audit_escrow_release',
+      'spatial_msg_shortfall_invoice',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

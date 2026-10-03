@@ -218,6 +218,33 @@ export const LEDGER_STATUSES = [
   // arithmetic, exact to the cent). Kind marks WHAT the row is for its
   // whole life. No migration: the same extension-in-place discipline.
   "nil_unearned_clawback",
+  // SPATIAL_AUDIT_ESCROW (PR 37, the founder spatial directive): the
+  // 5–12% (founder-banded, per-scope policy of record) of a venue's park
+  // earnings that locks here — keyed per scope by the escrow row's
+  // 'spatial_audit_escrow:{scopeKey}' sentinel payee — while the scope's
+  // local exposure runs. Local entertainment sales taxes, safety
+  // compliance holdbacks, and quarterly park concession reconciliations
+  // draw it down position-locked; the verified reconciliation of record
+  // opens the release (fail-closed: no reconciliation of record, no
+  // release), and a pop-up scope's final disbursement additionally
+  // requires its post-event inventory write-off and site restoration
+  // reserve of record. The released remainder settles it (status →
+  // 'settled'). Kind marks WHAT the row is for its whole life. No
+  // migration: ledger_transactions.status is free text, the same
+  // extension-in-place discipline as every escrow state above.
+  "spatial_audit_escrow",
+  // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
+  // licensee's or pop-up park operator's quarterly Minimum Spatial
+  // Guarantee shortfall — the quarter's spatial royalty earnings of
+  // record did not meet the guarantee priced from the venue's reserved
+  // footprint — debits here as the invoice of record AGAINST the
+  // operator of record (payee = the operator, the quarter key stamped in
+  // line_item_id). The row is the receivable's face on the Don ledger:
+  // visible, priced, and never a guessed amount (the shortfall derives
+  // from the append-only spatial royalty truth at close). Kind marks WHAT
+  // the row is for its whole life. No migration: the same
+  // extension-in-place discipline.
+  "msg_shortfall_due",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -319,6 +346,25 @@ export const LEDGER_KINDS = [
   // guessed. Kind marks WHAT the row is for its whole life, the same
   // division every kind above uses.
   "nil_unearned_clawback",
+  // Spatial audit escrow (PR 37): the founder-banded 5–12% of a venue's
+  // park earnings held per scope for the scope's local exposure — drawn
+  // down by local entertainment sales taxes, safety compliance
+  // holdbacks, and quarterly park concession reconciliations, released
+  // with a verified reconciliation of record (a pop-up scope's release
+  // additionally gated on its post-event inventory write-off and site
+  // restoration reserve of record). Kind marks WHAT the row is for its
+  // whole life (a released or fully-drawn escrow stays kind
+  // 'spatial_audit_escrow' with status 'settled'), the same division
+  // every escrow kind above uses.
+  "spatial_audit_escrow",
+  // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
+  // or pop-up park operator's quarterly MSG shortfall debited as the
+  // invoice of record at quarter close — the receivable's face on the
+  // Don ledger, priced from the venue's reserved-footprint guarantee
+  // terms and the append-only spatial royalty truth, never guessed. Kind
+  // marks WHAT the row is for its whole life, the same division every
+  // kind above uses.
+  "msg_shortfall_due",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

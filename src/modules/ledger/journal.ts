@@ -21,6 +21,9 @@ import {
   merchReturnsReserveGlAccount,
   promoterSettlementGlAccount,
   bookReturnsReserveGlAccount,
+  spatialAuditEscrowGlAccount,
+  spatialMsgReceivableGlAccount,
+  spatialMsgShortfallIncomeGlAccount,
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
   vaultGlAccount,
@@ -415,6 +418,56 @@ export function nilUnearnedClawbackRecoveryCredit(
 ): GlLegInput {
   return {
     account: nilUnearnedClawbackRecoveryGlAccount(athleteId),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Spatial audit escrow legs (PR 37): the per-scope SPATIAL_AUDIT_ESCROW
+// obligation account — the escrow legs' mirror at (venue[, popup]) scope.
+// A routed park-earnings distribution's reserve locks here against the
+// holding account's debit; local entertainment sales taxes, safety
+// compliance holdbacks, and quarterly park concession reconciliations
+// debit it back to FBO cash; the verified release debits it into the
+// beneficiary's payout legs — never the dust payee's account, never the
+// unclaimed holding account, never the NIL escrow's account, never any
+// other escrow's account.
+export function spatialAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: spatialAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function spatialAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: spatialAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Spatial Minimum-Spatial-Guarantee shortfall legs (PR 37): the
+// quarter's MSG shortfall debit of record — the operator's receivable
+// rises as an asset (debit) against the shortfall penalty income of
+// record (credit). Balanced legs; the invoice's face derives from the
+// venue's reserved-footprint guarantee terms and the append-only spatial
+// royalty truth, never a guessed amount.
+export function spatialMsgReceivableDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: spatialMsgReceivableGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function spatialMsgShortfallIncomeCredit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: spatialMsgShortfallIncomeGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

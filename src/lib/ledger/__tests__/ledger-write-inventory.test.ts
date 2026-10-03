@@ -397,6 +397,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // universal_royalty_ledger — the applications ride their own
       // spatial tables, and the referencing pin below holds.
       '0040_spatial_pos_occupancy_royalties_zone_allocation.sql',
+      // PR 37 (the founder spatial directive): eleven additive tables for
+      // CapEx recoupment, quarterly MSG closes, pop-up decommissioning,
+      // spatial audit escrow, and payout gate states; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0041_spatial_capex_msg_popup_escrow_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

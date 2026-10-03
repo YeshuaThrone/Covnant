@@ -188,10 +188,21 @@ import type {
   NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialAuditEscrowDrawdownRecord,
+  SpatialAuditEscrowPolicyRecord,
+  SpatialAuditEscrowReconciliationRecord,
+  SpatialCapexApplicationRecord,
+  SpatialCapexCommitmentRecord,
   SpatialMicroPolicyRecord,
   SpatialMicroRoyaltyRecord,
+  SpatialMsgCommitmentRecord,
+  SpatialMsgTermCloseRecord,
   SpatialOccupancyTierScheduleRecord,
   SpatialOverheadPolicyRecord,
+  SpatialPopupExperienceRecord,
+  SpatialPopupRestorationReserveRecord,
+  SpatialPopupWriteoffRecord,
+  SpatialPayoutGateStateRecord,
   SpatialRoyaltyApplicationRecord,
   SpatialThroughputYearRecord,
   SpatialZoneAllocationRecord,
@@ -2108,6 +2119,160 @@ CREATE TABLE IF NOT EXISTS spatial_micro_royalty_ledger (
   CHECK (session_royalty_micros = ride_sessions * micros_per_ride_session),
   CHECK (total_royalty_micros = dwell_royalty_micros + session_royalty_micros),
   CHECK (royalty_cents = total_royalty_micros / 1000000)
+);
+
+-- Spatial commitments (migration 0041, PR 37). The allowable CapEx
+-- commitments of record per (scope, capex_ref) with their position-locked
+-- recoupment applications, the quarterly Minimum Spatial Guarantee terms
+-- and once-only term closes, the temporary pop-up experiences of record
+-- with their post-event inventory write-off calculations and site
+-- restoration reserves, the SPATIAL_AUDIT_ESCROW policies per scope with
+-- their position-locked drawdowns and verified reconciliations, and the
+-- durable spatial payout-gate states per (payee, venue).
+CREATE TABLE IF NOT EXISTS spatial_capex_commitments (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  capex_ref TEXT NOT NULL,
+  operator_id TEXT NOT NULL,
+  capex_category TEXT NOT NULL CHECK (capex_category IN ('ride_construction', 'venue_buildout')),
+  capex_amount_cents INTEGER NOT NULL CHECK (capex_amount_cents > 0),
+  recouped_cents INTEGER NOT NULL CHECK (recouped_cents >= 0),
+  currency TEXT NOT NULL CHECK (currency <> ''),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key, capex_ref),
+  CHECK (recouped_cents <= capex_amount_cents)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_capex_applications (
+  id TEXT PRIMARY KEY,
+  commitment_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  capex_category TEXT NOT NULL CHECK (capex_category IN ('ride_construction', 'venue_buildout')),
+  source_event_id TEXT NOT NULL,
+  royalty_stream TEXT NOT NULL CHECK (royalty_stream IN ('occupancy', 'zone', 'micro')),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  offset_before_cents INTEGER NOT NULL CHECK (offset_before_cents >= 0),
+  offset_cents INTEGER NOT NULL CHECK (offset_cents > 0),
+  offset_after_cents INTEGER NOT NULL CHECK (offset_after_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (commitment_id, source_event_id),
+  UNIQUE (commitment_id, offset_before_cents),
+  CHECK (offset_after_cents = offset_before_cents + offset_cents)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_msg_commitments (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  operator_id TEXT NOT NULL,
+  operator_name TEXT NOT NULL CHECK (operator_name <> ''),
+  venue_id TEXT NOT NULL,
+  reserved_footprint_sqft INTEGER NOT NULL CHECK (reserved_footprint_sqft > 0),
+  quarterly_rate_micros_per_sqft INTEGER NOT NULL CHECK (quarterly_rate_micros_per_sqft > 0),
+  currency TEXT NOT NULL CHECK (currency <> ''),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spatial_msg_term_closes (
+  id TEXT PRIMARY KEY,
+  commitment_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  quarter TEXT NOT NULL CHECK (quarter GLOB '[0-9][0-9][0-9][0-9]-Q[1-4]'),
+  msg_due_cents INTEGER NOT NULL CHECK (msg_due_cents >= 0),
+  earned_at_close_cents INTEGER NOT NULL CHECK (earned_at_close_cents >= 0),
+  shortfall_cents INTEGER NOT NULL CHECK (shortfall_cents >= 0),
+  invoice_ledger_id TEXT,
+  closed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (commitment_id, quarter),
+  CHECK (shortfall_cents = MAX(msg_due_cents - earned_at_close_cents, 0)),
+  CHECK (shortfall_cents > 0 OR invoice_ledger_id IS NULL)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_popup_experiences (
+  id TEXT PRIMARY KEY,
+  popup_ref TEXT NOT NULL UNIQUE,
+  venue_id TEXT NOT NULL,
+  zone_code TEXT NOT NULL,
+  operator_id TEXT NOT NULL,
+  experience_kind TEXT NOT NULL CHECK (experience_kind <> ''),
+  window_start_date TEXT NOT NULL,
+  window_end_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (window_end_date >= window_start_date)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_popup_writeoffs (
+  id TEXT PRIMARY KEY,
+  popup_experience_id TEXT NOT NULL,
+  popup_ref TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  unsold_units INTEGER NOT NULL CHECK (unsold_units >= 0),
+  unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+  writeoff_cents INTEGER NOT NULL CHECK (writeoff_cents >= 0),
+  evidence_ref TEXT NOT NULL,
+  calculated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (popup_experience_id, source_event_id),
+  CHECK (writeoff_cents = unsold_units * unit_cost_cents)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_popup_restoration_reserves (
+  id TEXT PRIMARY KEY,
+  popup_experience_id TEXT NOT NULL UNIQUE,
+  popup_ref TEXT NOT NULL,
+  reserve_cents INTEGER NOT NULL CHECK (reserve_cents >= 0),
+  evidence_ref TEXT NOT NULL,
+  funded_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spatial_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1200),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spatial_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN
+    ('entertainment_sales_tax', 'safety_compliance_holdback', 'concession_reconciliation')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL CHECK (drawn_before_cents >= 0),
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents)
+);
+
+CREATE TABLE IF NOT EXISTS spatial_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spatial_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  venue_id TEXT NOT NULL,
+  territorial_zoning_state TEXT NOT NULL CHECK (territorial_zoning_state IN ('unknown', 'cleared')),
+  spatial_audit_state TEXT NOT NULL CHECK (spatial_audit_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, venue_id)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -10292,6 +10457,783 @@ export class SqliteStore implements Store {
       total_royalty_micros: row.total_royalty_micros as number,
       royalty_cents: row.royalty_cents as number,
       created_at: row.created_at as string,
+    };
+  }
+
+  // -----------------------------------------------------------------
+  // PR 37 — spatial commitments (migration 0041).
+  // -----------------------------------------------------------------
+
+  async upsertSpatialCapexCommitment(
+    row: Omit<SpatialCapexCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialCapexCommitmentRecord> {
+    // UNIQUE per (scope_key, capex_ref) — a re-registered commitment
+    // converges (the newest registered cost governs the next walk).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_capex_commitments
+           (id, scope_key, capex_ref, operator_id, capex_category,
+            capex_amount_cents, recouped_cents, currency, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key, capex_ref) DO UPDATE SET
+           operator_id = excluded.operator_id,
+           capex_category = excluded.capex_category,
+           capex_amount_cents = excluded.capex_amount_cents,
+           recouped_cents = excluded.recouped_cents,
+           currency = excluded.currency,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.capex_ref,
+        record.operator_id,
+        record.capex_category,
+        record.capex_amount_cents,
+        record.recouped_cents,
+        record.currency,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialCapexCommitment(record.scope_key, record.capex_ref) as Promise<
+      SpatialCapexCommitmentRecord
+    >;
+  }
+
+  async getSpatialCapexCommitment(
+    scopeKey: string,
+    capexRef: string,
+  ): Promise<SpatialCapexCommitmentRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM spatial_capex_commitments WHERE scope_key = ? AND capex_ref = ?`,
+      )
+      .get(scopeKey, capexRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      capex_ref: row.capex_ref as string,
+      operator_id: row.operator_id as string,
+      capex_category: row.capex_category as SpatialCapexCommitmentRecord['capex_category'],
+      capex_amount_cents: Number(row.capex_amount_cents),
+      recouped_cents: Number(row.recouped_cents),
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listSpatialCapexCommitments(
+    scopeKey: string,
+  ): Promise<SpatialCapexCommitmentRecord[]> {
+    // created_at ASC — the offset walk's OLDEST-FIRST input.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_capex_commitments WHERE scope_key = ? ORDER BY created_at ASC`,
+      )
+      .all(scopeKey) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      capex_ref: row.capex_ref as string,
+      operator_id: row.operator_id as string,
+      capex_category: row.capex_category as SpatialCapexCommitmentRecord['capex_category'],
+      capex_amount_cents: Number(row.capex_amount_cents),
+      recouped_cents: Number(row.recouped_cents),
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async insertSpatialCapexApplication(
+    row: Omit<SpatialCapexApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialCapexApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard and
+    // UNIQUE per (commitment_id, offset_before_cents) is the position
+    // lock — a replayed royalty or a lost race throws here, never a
+    // double offset; the caller re-derives from the append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_capex_applications
+           (id, commitment_id, scope_key, capex_category, source_event_id,
+            royalty_stream, royalty_cents, offset_before_cents, offset_cents,
+            offset_after_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.commitment_id,
+        record.scope_key,
+        record.capex_category,
+        record.source_event_id,
+        record.royalty_stream,
+        record.royalty_cents,
+        record.offset_before_cents,
+        record.offset_cents,
+        record.offset_after_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listSpatialCapexApplications(
+    commitmentId: string,
+  ): Promise<SpatialCapexApplicationRecord[]> {
+    // created_at ASC — the amortization schedule of record.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_capex_applications WHERE commitment_id = ? ORDER BY created_at ASC`,
+      )
+      .all(commitmentId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      commitment_id: row.commitment_id as string,
+      scope_key: row.scope_key as string,
+      capex_category: row.capex_category as SpatialCapexApplicationRecord['capex_category'],
+      source_event_id: row.source_event_id as string,
+      royalty_stream: row.royalty_stream as SpatialCapexApplicationRecord['royalty_stream'],
+      royalty_cents: Number(row.royalty_cents),
+      offset_before_cents: Number(row.offset_before_cents),
+      offset_cents: Number(row.offset_cents),
+      offset_after_cents: Number(row.offset_after_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async upsertSpatialMsgCommitment(
+    row: Omit<SpatialMsgCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgCommitmentRecord> {
+    // UNIQUE per scope_key — a re-registered guarantee converges (the
+    // newest priced terms govern the next close).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_msg_commitments
+           (id, scope_key, operator_id, operator_name, venue_id,
+            reserved_footprint_sqft, quarterly_rate_micros_per_sqft,
+            currency, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           operator_id = excluded.operator_id,
+           operator_name = excluded.operator_name,
+           venue_id = excluded.venue_id,
+           reserved_footprint_sqft = excluded.reserved_footprint_sqft,
+           quarterly_rate_micros_per_sqft = excluded.quarterly_rate_micros_per_sqft,
+           currency = excluded.currency,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.operator_id,
+        record.operator_name,
+        record.venue_id,
+        record.reserved_footprint_sqft,
+        record.quarterly_rate_micros_per_sqft,
+        record.currency,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialMsgCommitment(record.scope_key) as Promise<SpatialMsgCommitmentRecord>;
+  }
+
+  async getSpatialMsgCommitment(
+    scopeKey: string,
+  ): Promise<SpatialMsgCommitmentRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_msg_commitments WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      operator_id: row.operator_id as string,
+      operator_name: row.operator_name as string,
+      venue_id: row.venue_id as string,
+      reserved_footprint_sqft: Number(row.reserved_footprint_sqft),
+      quarterly_rate_micros_per_sqft: Number(row.quarterly_rate_micros_per_sqft),
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSpatialMsgTermClose(
+    row: Omit<SpatialMsgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgTermCloseRecord> {
+    // UNIQUE per (commitment_id, quarter) — the once-only close; a
+    // replay converges on the recorded shortfall and invoice of record.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_msg_term_closes
+           (id, commitment_id, scope_key, quarter, msg_due_cents,
+            earned_at_close_cents, shortfall_cents, invoice_ledger_id,
+            closed_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (commitment_id, quarter) DO UPDATE SET
+           msg_due_cents = excluded.msg_due_cents,
+           earned_at_close_cents = excluded.earned_at_close_cents,
+           shortfall_cents = excluded.shortfall_cents,
+           invoice_ledger_id = excluded.invoice_ledger_id,
+           closed_by = excluded.closed_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.commitment_id,
+        record.scope_key,
+        record.quarter,
+        record.msg_due_cents,
+        record.earned_at_close_cents,
+        record.shortfall_cents,
+        record.invoice_ledger_id,
+        record.closed_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialMsgTermClose(record.commitment_id, record.quarter) as Promise<
+      SpatialMsgTermCloseRecord
+    >;
+  }
+
+  async getSpatialMsgTermClose(
+    commitmentId: string,
+    quarter: string,
+  ): Promise<SpatialMsgTermCloseRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM spatial_msg_term_closes WHERE commitment_id = ? AND quarter = ?`,
+      )
+      .get(commitmentId, quarter) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      commitment_id: row.commitment_id as string,
+      scope_key: row.scope_key as string,
+      quarter: row.quarter as string,
+      msg_due_cents: Number(row.msg_due_cents),
+      earned_at_close_cents: Number(row.earned_at_close_cents),
+      shortfall_cents: Number(row.shortfall_cents),
+      invoice_ledger_id: (row.invoice_ledger_id as string | null) ?? null,
+      closed_by: row.closed_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listSpatialRoyaltyApplicationsByVenue(
+    venueId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord[]> {
+    // created_at ASC — the append-only royalty truth the MSG close sums.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_royalty_applications WHERE venue_id = ? ORDER BY created_at ASC`,
+      )
+      .all(venueId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as SpatialRoyaltyApplicationRecord['sender'],
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      spatial_footprint_sqft: Number(row.spatial_footprint_sqft),
+      period: row.period as string,
+      ticket_revenue_cents: Number(row.ticket_revenue_cents),
+      merch_revenue_cents: Number(row.merch_revenue_cents),
+      gross_revenue_cents: Number(row.gross_revenue_cents),
+      occupancy_tax_cents: Number(row.occupancy_tax_cents),
+      infrastructure_cogs_cents: Number(row.infrastructure_cogs_cents),
+      group_tour_discount_cents: Number(row.group_tour_discount_cents),
+      net_spatial_licensed_revenue_cents: Number(row.net_spatial_licensed_revenue_cents),
+      overhead_security_cents: Number(row.overhead_security_cents),
+      overhead_wristband_cents: Number(row.overhead_wristband_cents),
+      overhead_ticketing_cents: Number(row.overhead_ticketing_cents),
+      overhead_total_cents: Number(row.overhead_total_cents),
+      royalty_basis_cents: Number(row.royalty_basis_cents),
+      tier_basis: row.tier_basis as SpatialRoyaltyApplicationRecord['tier_basis'],
+      tier_schedule_ref: (row.tier_schedule_ref as string | null) ?? null,
+      tier_legs: row.tier_legs as string,
+      entries_count: Number(row.entries_count),
+      entries_before: (row.entries_before as number | null) ?? null,
+      entries_after: (row.entries_after as number | null) ?? null,
+      occupancy_royalty_cents: Number(row.occupancy_royalty_cents),
+      verdict: row.verdict as SpatialRoyaltyApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async listSpatialZoneAllocationsByVenue(
+    venueId: string,
+  ): Promise<SpatialZoneAllocationRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_zone_allocations WHERE venue_id = ? ORDER BY created_at ASC`,
+      )
+      .all(venueId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      row_class: row.row_class as SpatialZoneAllocationRecord['row_class'],
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      period: row.period as string,
+      gross_cents: Number(row.gross_cents),
+      overhead_security_cents: Number(row.overhead_security_cents),
+      overhead_wristband_cents: Number(row.overhead_wristband_cents),
+      overhead_ticketing_cents: Number(row.overhead_ticketing_cents),
+      overhead_total_cents: Number(row.overhead_total_cents),
+      allocated_basis_cents: Number(row.allocated_basis_cents),
+      assigned_ip_owner_id: row.assigned_ip_owner_id as string,
+      royalty_bps: Number(row.royalty_bps),
+      royalty_cents: Number(row.royalty_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async listSpatialMicroRoyaltiesByVenue(venueId: string): Promise<SpatialMicroRoyaltyRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_micro_royalty_ledger WHERE venue_id = ? ORDER BY created_at ASC`,
+      )
+      .all(venueId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      wristband_id: row.wristband_id as string,
+      sensor_id: row.sensor_id as string,
+      period: row.period as string,
+      dwell_minutes: Number(row.dwell_minutes),
+      ride_sessions: Number(row.ride_sessions),
+      micros_per_dwell_minute: Number(row.micros_per_dwell_minute),
+      micros_per_ride_session: Number(row.micros_per_ride_session),
+      dwell_royalty_micros: Number(row.dwell_royalty_micros),
+      session_royalty_micros: Number(row.session_royalty_micros),
+      total_royalty_micros: Number(row.total_royalty_micros),
+      royalty_cents: Number(row.royalty_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertSpatialPopupExperience(
+    row: Omit<SpatialPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_popup_experiences
+           (id, popup_ref, venue_id, zone_code, operator_id, experience_kind,
+            window_start_date, window_end_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.popup_ref,
+        record.venue_id,
+        record.zone_code,
+        record.operator_id,
+        record.experience_kind,
+        record.window_start_date,
+        record.window_end_date,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async getSpatialPopupExperience(
+    popupRef: string,
+  ): Promise<SpatialPopupExperienceRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_popup_experiences WHERE popup_ref = ?`)
+      .get(popupRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      popup_ref: row.popup_ref as string,
+      venue_id: row.venue_id as string,
+      zone_code: row.zone_code as string,
+      operator_id: row.operator_id as string,
+      experience_kind: row.experience_kind as string,
+      window_start_date: row.window_start_date as string,
+      window_end_date: row.window_end_date as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSpatialPopupWriteoff(
+    row: Omit<SpatialPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_popup_writeoffs
+           (id, popup_experience_id, popup_ref, source_event_id, unsold_units,
+            unit_cost_cents, writeoff_cents, evidence_ref, calculated_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.popup_experience_id,
+        record.popup_ref,
+        record.source_event_id,
+        record.unsold_units,
+        record.unit_cost_cents,
+        record.writeoff_cents,
+        record.evidence_ref,
+        record.calculated_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listSpatialPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupWriteoffRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_popup_writeoffs WHERE popup_experience_id = ? ORDER BY created_at ASC`,
+      )
+      .all(popupExperienceId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      popup_experience_id: row.popup_experience_id as string,
+      popup_ref: row.popup_ref as string,
+      source_event_id: row.source_event_id as string,
+      unsold_units: Number(row.unsold_units),
+      unit_cost_cents: Number(row.unit_cost_cents),
+      writeoff_cents: Number(row.writeoff_cents),
+      evidence_ref: row.evidence_ref as string,
+      calculated_by: row.calculated_by as string,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertSpatialPopupRestorationReserve(
+    row: Omit<SpatialPopupRestorationReserveRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupRestorationReserveRecord> {
+    // Insert-as-lock — UNIQUE per popup_experience_id: the FIRST reserve
+    // wins; a concurrent second insert throws here.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_popup_restoration_reserves
+           (id, popup_experience_id, popup_ref, reserve_cents, evidence_ref,
+            funded_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.popup_experience_id,
+        record.popup_ref,
+        record.reserve_cents,
+        record.evidence_ref,
+        record.funded_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSpatialPopupRestorationReserve(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupRestorationReserveRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM spatial_popup_restoration_reserves WHERE popup_experience_id = ?`,
+      )
+      .get(popupExperienceId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      popup_experience_id: row.popup_experience_id as string,
+      popup_ref: row.popup_ref as string,
+      reserve_cents: Number(row.reserve_cents),
+      evidence_ref: row.evidence_ref as string,
+      funded_by: row.funded_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async upsertSpatialAuditEscrowPolicy(
+    row: Omit<SpatialAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record.id, record.scope_key, record.reserve_rate_bps, record.created_at, record.updated_at);
+    return this.getSpatialAuditEscrowPolicy(record.scope_key) as Promise<SpatialAuditEscrowPolicyRecord>;
+  }
+
+  async getSpatialAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SpatialAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM spatial_audit_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: Number(row.reserve_rate_bps),
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSpatialAuditEscrowDrawdown(
+    row: Omit<SpatialAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listSpatialAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique position column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM spatial_audit_escrow_drawdowns WHERE reserve_ledger_id = ? ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class: row.drawdown_class as SpatialAuditEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: Number(row.drawn_before_cents),
+      drawn_cents: Number(row.drawn_cents),
+      remaining_cents: Number(row.remaining_cents),
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertSpatialAuditEscrowReconciliation(
+    row: Omit<SpatialAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.reserve_ledger_id, record.evidence_ref, record.reconciled_by, record.created_at);
+    return record;
+  }
+
+  async getSpatialAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM spatial_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`,
+      )
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settleSpatialAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the licensing reserve settle rides: only the caller
+    // whose WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'spatial_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertSpatialPayoutGateState(
+    row: Omit<SpatialPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, venue_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO spatial_payout_gate_states
+           (id, payee_id, venue_id, territorial_zoning_state, spatial_audit_state,
+            evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, venue_id) DO UPDATE SET
+           territorial_zoning_state = excluded.territorial_zoning_state,
+           spatial_audit_state = excluded.spatial_audit_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.venue_id,
+        record.territorial_zoning_state,
+        record.spatial_audit_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSpatialPayoutGateState(record.payee_id, record.venue_id) as Promise<
+      SpatialPayoutGateStateRecord
+    >;
+  }
+
+  async getSpatialPayoutGateState(
+    payeeId: string,
+    venueId: string,
+  ): Promise<SpatialPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM spatial_payout_gate_states WHERE payee_id = ? AND venue_id = ?`,
+      )
+      .get(payeeId, venueId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      venue_id: row.venue_id as string,
+      territorial_zoning_state:
+        row.territorial_zoning_state as SpatialPayoutGateStateRecord['territorial_zoning_state'],
+      spatial_audit_state:
+        row.spatial_audit_state as SpatialPayoutGateStateRecord['spatial_audit_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
     };
   }
 }
