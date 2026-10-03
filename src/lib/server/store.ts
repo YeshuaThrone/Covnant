@@ -319,6 +319,8 @@ import type {
   SportsBiometricRoyaltyPolicyRecord,
   SportsBiometricTrackingPostRecord,
   SportsBroadcastingContractRecord,
+  EventCancellationEscrowDrawdownRecord,
+  EventCancellationEscrowPolicyRecord,
   SportsGateReconciliationRecord,
   SportsGroupLicensingApplicationRecord,
   SportsLicenseeClass,
@@ -327,6 +329,7 @@ import type {
   SportsLeagueTeamRegistrationRecord,
   SportsNetVenueRealizationRecord,
   SportsNilDealReconciliationRecord,
+  SportsPayoutGateStateRecord,
   SportsResaleRoyaltyApplicationRecord,
   SportsResaleRoyaltyPolicyRecord,
   SportsResaleSalePostRecord,
@@ -4230,6 +4233,70 @@ export interface Store {
   ): Promise<EnergyComputeGridSplitApplicationRecord | undefined>;
 
   /**
+   * Upserts the event cancellation escrow's policy of record for one
+   * promoter×event scope (migration 0055) — UNIQUE per scope_key: an
+   * upsert converges (the newest rate governs the next routing). NEVER
+   * carries the id in the conflict payload (the id rotates on conflict).
+   */
+  upsertEventCancellationEscrowPolicy(
+    row: Omit<EventCancellationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EventCancellationEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getEventCancellationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<EventCancellationEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked event cancellation escrow drawdown
+   * (migration 0055) — UNIQUE per (reserve_ledger_id, source_event_id)
+   * is the replay guard, UNIQUE per (reserve_ledger_id,
+   * drawn_before_cents) is the position lock: a replayed draw or a lost
+   * race throws here, never a double drawdown.
+   */
+  insertEventCancellationEscrowDrawdown(
+    row: Omit<EventCancellationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<EventCancellationEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listEventCancellationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<EventCancellationEscrowDrawdownRecord[]>;
+
+  /**
+   * Settles one held `event_cancellation_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleEventCancellationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the sports payout gate's states of record for one promoter
+   * payee on one event (migration 0055) — UNIQUE per (payee_id,
+   * event_ref): an upsert converges (a verification heals 'unknown';
+   * states never regress through this table). NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertSportsPayoutGateState(
+    row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsPayoutGateStateRecord>;
+
+  /**
+   * One payee × event's gate states of record; undefined when
+   * none — the sports payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getSportsPayoutGateState(
+    payeeId: string,
+    eventRef: string,
+  ): Promise<SportsPayoutGateStateRecord | undefined>;
+
+  /**
    * Appends one executed cross-license net dispatch (migration 0051) —
    * UNIQUE per (agreement_ref, period, net_after_cents) is the replay
    * guard AND the concurrency arbiter: a replayed trigger or a lost
@@ -5828,6 +5895,32 @@ export interface Store {
    * event id; undefined when none — the replay-check read. */
   getSportsBiometricMicroPayoutApplication(
     sourceEventId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined>;
+
+  /**
+   * Completes one staged sports resale royalty application with its
+   * instant posting's journal of record (migration 0055) — the CAS: the
+   * journal stamps only while the application's journal_id is still
+   * null (PR 50 stages the application; the PR 51 instant posting
+   * completes it); the caller that lost the race (or replayed) reads
+   * undefined.
+   */
+  setSportsResaleRoyaltyJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Completes one staged sports biometric micro-payout application with
+   * its instant posting's journal of record (migration 0055) — the CAS:
+   * the journal stamps only while the application's journal_id is still
+   * null (PR 50 stages the application; the PR 51 instant posting
+   * completes it); the caller that lost the race (or replayed) reads
+   * undefined.
+   */
+  setSportsBiometricMicroPayoutJournal(
+    sourceEventId: string,
+    journalId: string,
   ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined>;
 }
 

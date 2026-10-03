@@ -469,6 +469,8 @@ export interface SportsResaleRoyaltyApplicationRecord {
   promoter_leg_cents: number;
   venue_leg_cents: number;
   league_leg_cents: number;
+  /** The instant posting's journal of record — CAS-stamped once (null while staged). */
+  journal_id: string | null;
   created_at: string;
 }
 
@@ -506,6 +508,10 @@ export interface SportsBiometricMicroPayoutApplicationRecord {
   athlete_leg_cents: number;
   league_data_payee_id: string;
   league_leg_cents: number;
+  /** The instant posting's journal of record (PR 51) — null until the
+   * real-time posting stamps it (the GPU cascade's journal-stamp
+   * discipline: a stamped journal IS the posting of record). */
+  journal_id: string | null;
   created_at: string;
 }
 
@@ -522,6 +528,145 @@ export interface SportsBiometricRoyaltyPolicyRecord {
   athlete_share_bps: number;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// PR 51 — the event cancellation escrow and the sports payout gate states.
+// The EVENT_CANCELLATION_ESCROW is the sports twin of the audit escrow
+// family at the founder's ELEVATED gate band (1500–2000 bps — 15–20% of
+// net gate receipts), keyed per (promoter payee, event): a promoter's
+// gate receipts stay exposure-live until the event's completion telemetry
+// verifies AND 48 hours elapse post-event — weather delays, athlete
+// withdrawals, and mandatory ticket refund calls draw the escrow down;
+// the verified telemetry of record plus the elapsed clock open the
+// release. The sports payout gate reads the durable states below,
+// fail-closed (absent and unknown BOTH refuse), and collegiate NIL
+// waterfall disbursements additionally require the NIL compliance audit
+// of record (gender equity compliance + university athletic association
+// disclosure) to have cleared.
+// ---------------------------------------------------------------------------
+
+/** The EVENT_CANCELLATION_ESCROW's three drawdown classes of record —
+ * exactly the event exposures the founder directive names: weather
+ * delays, athlete withdrawals, and mandatory ticket refund calls.
+ * Anything else refuses. This array is the TS side of the vocabulary the
+ * SQL CHECKs enforce byte-identically (migration 0055; the PR 129/130
+ * lesson — verified byte-identical before CI). */
+export const SPORTS_EVENT_CANCELLATION_DRAWDOWN_CLASSES = [
+  "weather_delay",
+  "athlete_withdrawal",
+  "ticket_refund_call",
+] as const;
+export type SportsEventCancellationDrawdownClass =
+  (typeof SPORTS_EVENT_CANCELLATION_DRAWDOWN_CLASSES)[number];
+
+/** The sports payout gate's event completion telemetry states of record
+ * (migration 0055) — byte-identical to the SQL CHECK vocabulary
+ * ck_sports_payout_gate_states_telemetry_state_vocabulary. */
+export const SPORTS_GATE_TELEMETRY_STATES = ["unknown", "verified"] as const;
+export type SportsGateTelemetryState =
+  (typeof SPORTS_GATE_TELEMETRY_STATES)[number];
+
+/** The sports payout gate's promoter insurance clearance states of record
+ * (migration 0055) — byte-identical to the SQL CHECK vocabulary
+ * ck_sports_payout_gate_states_insurance_state_vocabulary. */
+export const SPORTS_GATE_INSURANCE_STATES = ["unknown", "cleared"] as const;
+export type SportsGateInsuranceState =
+  (typeof SPORTS_GATE_INSURANCE_STATES)[number];
+
+/** The collegiate NIL compliance audit's states of record (migration
+ * 0055) — the gender equity compliance and university athletic
+ * association disclosure audit the collegiate NIL waterfall's
+ * disbursements hold behind. Byte-identical to the SQL CHECK vocabulary
+ * ck_sports_payout_gate_states_nil_audit_state_vocabulary. */
+export const SPORTS_GATE_NIL_AUDIT_STATES = ["unknown", "cleared"] as const;
+export type SportsGateNilAuditState =
+  (typeof SPORTS_GATE_NIL_AUDIT_STATES)[number];
+
+/** The sports payout gate's states of record for one promoter payee on
+ * one event (migration 0055) — the states the payout gate's sports case
+ * reads, fail-closed: `event_completion_telemetry_verified` is true only
+ * when the state is 'verified', `promoter_insurance_clearance` is true
+ * only when the state is 'cleared', and a collegiate NIL waterfall
+ * disbursement's `nil_compliance_audit_cleared` is true only when the
+ * audit state is 'cleared'; an absent record resolves null and 'unknown'
+ * resolves false. The event's completion timestamp of record rides the
+ * telemetry verification — the escrow's 48-hour clock anchors to it. */
+export interface SportsPayoutGateStateRecord {
+  readonly id: string;
+  /** The payout's beneficiary of record (the event's promoter). */
+  readonly payee_id: string;
+  /** The event whose completion telemetry and insurance posture govern
+   * the payout. */
+  readonly event_ref: string;
+  /** The event's completion telemetry verification over the payout. */
+  readonly event_completion_telemetry_state: SportsGateTelemetryState;
+  /** The promoter's insurance clearance over the event. */
+  readonly promoter_insurance_state: SportsGateInsuranceState;
+  /** True when the disbursement is a collegiate NIL waterfall payout —
+   * only those require the NIL compliance audit of record. */
+  readonly is_collegiate_nil_waterfall: boolean;
+  /** The collegiate NIL compliance audit's state of record (gender
+   * equity compliance + university athletic association disclosure). */
+  readonly nil_compliance_audit_state: SportsGateNilAuditState;
+  /** When the event's completion telemetry verified — null until the
+   * telemetry state is 'verified' (pinned by a CHECK). The escrow
+   * release's 48-hour clock reads this. */
+  readonly event_completed_at: string | null;
+  /** The verification evidence of record. */
+  readonly evidence_ref: string;
+  /** Who verified the states of record. */
+  readonly verified_by: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One scope's event cancellation escrow rate of record (migration 0055)
+ * — a founder-banded 1500–2000 bps share of the scope's net gate receipts
+ * that locks into the EVENT_CANCELLATION_ESCROW bucket at payout. */
+export interface EventCancellationEscrowPolicyRecord {
+  readonly id: string;
+  /** `promoter:{payeeId}:event:{eventRef}` — the scope key the escrow's
+   * sentinel payee and GL account cite (the sports lane's own identifier
+   * space, the same payee/event identity the gate states key on). */
+  readonly scope_key: string;
+  /** The founder band: 1500–2000 bps, checked at registration and again
+   * at use (a hostile policy out-of-band refuses). */
+  readonly reserve_rate_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One position-locked escrow drawdown (migration 0055) — append-only.
+ * UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+ * UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position lock
+ * the balance is derived from. */
+export interface EventCancellationEscrowDrawdownRecord {
+  readonly id: string;
+  /** The escrow bucket's ledger_transactions row of record. */
+  readonly reserve_ledger_id: string;
+  readonly scope_key: string;
+  readonly drawdown_class: SportsEventCancellationDrawdownClass;
+  /** The drawing event's identity of record — the replay guard. */
+  readonly source_event_id: string;
+  /** The bucket balance this draw was taken against (the spend position). */
+  readonly drawn_before_cents: number;
+  /** The drawn amount: 0 < drawn_cents <= drawn_before_cents. */
+  readonly drawn_cents: number;
+  /** drawn_before_cents - drawn_cents, pinned in a CHECK. */
+  readonly remaining_cents: number;
+  readonly created_at: string;
+}
+
+/** The event cancellation escrow's scope key — injective in the
+ * (promoter payee, event) pair, the same identifier space the 0055 gate
+ * states key on. The sentinel payee id, GL account, and policy row all
+ * cite it. */
+export function eventCancellationEscrowScopeKey(
+  promoterPayeeId: string,
+  eventRef: string,
+): string {
+  return `promoter:${promoterPayeeId}:event:${eventRef}`;
 }
 
 /** The period shape — the platform-wide `YYYY-MM` bucket. */

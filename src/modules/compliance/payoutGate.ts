@@ -13,6 +13,7 @@ import type { HardwarePayoutGateStateRecord } from "@/modules/hardware/records";
 import type {
   ResourcePayoutGateStateRecord,
 } from "@/modules/energy/records";
+import type { SportsPayoutGateStateRecord } from "@/modules/sports/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -671,6 +672,40 @@ export async function resolveResourceVerticalComplianceState(
     vertical: "resource",
     environmental_compliance_cleared: record.environmental_compliance_state === "cleared",
     title_ownership_verification_passed: record.title_ownership_state === "verified",
+  };
+}
+
+/**
+ * Resolves the sports vertical's compliance state from the durable gate
+ * states of record (migration 0055) — the facts the sports payout gate
+ * reads: the event's completion telemetry verification, the promoter's
+ * insurance clearance, and (for collegiate NIL waterfall disbursements)
+ * the NIL compliance audit — the gender equity compliance and university
+ * athletic association disclosure holdbacks. An ABSENT record resolves
+ * null (the gate refuses with vertical_state_unknown) and an 'unknown'
+ * state resolves false (the gate refuses the specific condition) —
+ * fail-closed, the resource resolver's exact shape over the sports
+ * lane's (payee, event) identity.
+ */
+export async function resolveSportsVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  eventRef: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "sports" }> | null> {
+  const record: SportsPayoutGateStateRecord | undefined =
+    await store.getSportsPayoutGateState(payeeId, eventRef);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "sports",
+    event_completion_telemetry_verified:
+      record.event_completion_telemetry_state === "verified",
+    promoter_insurance_clearance: record.promoter_insurance_state === "cleared",
+    is_collegiate_nil_waterfall: record.is_collegiate_nil_waterfall,
+    // Only consulted when is_collegiate_nil_waterfall is true — the gate
+    // skips the audit condition for non-NIL sports payouts.
+    nil_compliance_audit_cleared: record.nil_compliance_audit_state === "cleared",
   };
 }
 

@@ -199,6 +199,11 @@ import type {
   SportsResaleSalePostRecord,
   SportsTurnstileScanPostRecord,
   SportsGroupLicensingApplicationRecord,
+  SportsPayoutGateStateRecord,
+} from '@/modules/sports/records';
+import type {
+  EventCancellationEscrowDrawdownRecord,
+  EventCancellationEscrowPolicyRecord,
 } from '@/modules/sports/records';
 import type {
   SpatialAuditEscrowDrawdownRecord,
@@ -806,6 +811,14 @@ const TABLES = {
   sportsNilDealReconciliations: 'sports_nil_deal_reconciliations',
   sportsBiometricMicroPayoutApplications:
     'sports_biometric_micro_payout_applications',
+
+  // PR 51 — the event cancellation escrow and the sports payout gate
+  // states (mirrors the SQLite DDL table names).
+  sportsEventCancellationEscrowPolicies:
+    'sports_event_cancellation_escrow_policies',
+  sportsEventCancellationEscrowDrawdowns:
+    'sports_event_cancellation_escrow_drawdowns',
+  sportsPayoutGateStates: 'sports_payout_gate_states',
 } as const;
 
 /**
@@ -11708,5 +11721,169 @@ export class SupabaseStore implements Store {
         .maybeSingle(),
       'getSportsBiometricMicroPayoutApplication',
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 51 — the event cancellation escrow, the sports payout gate states, and
+  // the staged sports applications' instant-posting journal stamps. The
+  // Supabase mirror of the SQLite methods: no id in any conflict payload
+  // (the PR 33 lesson).
+  // ---------------------------------------------------------------------------
+
+  async upsertEventCancellationEscrowPolicy(
+    row: Omit<EventCancellationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EventCancellationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the newest
+    // rate governs the next routing). HARDENED UPSERT: no id in the
+    // payload (the id rotates on conflict).
+    return this.oneStrict<EventCancellationEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.sportsEventCancellationEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertEventCancellationEscrowPolicy',
+    );
+  }
+
+  async getEventCancellationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<EventCancellationEscrowPolicyRecord | undefined> {
+    return this.one<EventCancellationEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.sportsEventCancellationEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getEventCancellationEscrowPolicy',
+    );
+  }
+
+  async insertEventCancellationEscrowDrawdown(
+    row: Omit<EventCancellationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<EventCancellationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<EventCancellationEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.sportsEventCancellationEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertEventCancellationEscrowDrawdown',
+    );
+  }
+
+  async listEventCancellationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<EventCancellationEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // resource escrow's drawdown list runs.
+    const { data, error } = await this.client
+      .from(TABLES.sportsEventCancellationEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listEventCancellationEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as EventCancellationEscrowDrawdownRecord[];
+  }
+
+  async settleEventCancellationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'event_cancellation_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleEventCancellationEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertSportsPayoutGateState(
+    row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, event_ref) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<SportsPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.sportsPayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,event_ref' })
+        .select()
+        .maybeSingle(),
+      'upsertSportsPayoutGateState',
+    );
+  }
+
+  async getSportsPayoutGateState(
+    payeeId: string,
+    eventRef: string,
+  ): Promise<SportsPayoutGateStateRecord | undefined> {
+    return this.one<SportsPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.sportsPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('event_ref', eventRef)
+        .maybeSingle(),
+      'getSportsPayoutGateState',
+    );
+  }
+
+  async setSportsResaleRoyaltyJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    // The conditional update is the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 50 stages
+    // the application, PR 51's instant posting completes it); a lost
+    // race (or a replay) updates zero rows and returns undefined. The
+    // null check rides `.is()` — PostgREST's null filter.
+    const { data, error } = await this.client
+      .from(TABLES.sportsResaleRoyaltyApplications)
+      .update({ journal_id: journalId })
+      .eq('source_event_id', sourceEventId)
+      .is('journal_id', null)
+      .select();
+    if (error) {
+      throw new Error(`setSportsResaleRoyaltyJournal failed: ${error.message}`);
+    }
+    return (data?.[0] as SportsResaleRoyaltyApplicationRecord | undefined) ?? undefined;
+  }
+
+  async setSportsBiometricMicroPayoutJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    // The conditional update is the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 50 stages
+    // the application, PR 51's instant posting completes it); a lost
+    // race (or a replay) updates zero rows and returns undefined. The
+    // null check rides `.is()` — PostgREST's null filter.
+    const { data, error } = await this.client
+      .from(TABLES.sportsBiometricMicroPayoutApplications)
+      .update({ journal_id: journalId })
+      .eq('source_event_id', sourceEventId)
+      .is('journal_id', null)
+      .select();
+    if (error) {
+      throw new Error(`setSportsBiometricMicroPayoutJournal failed: ${error.message}`);
+    }
+    return (data?.[0] as SportsBiometricMicroPayoutApplicationRecord | undefined) ?? undefined;
   }
 }

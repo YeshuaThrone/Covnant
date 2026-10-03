@@ -643,6 +643,17 @@ export const JOURNAL_KINDS = [
   "resource_audit_escrow_drawdown",
   "resource_audit_escrow_release",
   "gpu_cascade_settlement_post",
+  // PR 51, the founder sports directive: the EVENT_CANCELLATION_ESCROW's
+  // route/drawdown/release journals (the escrow family's shapes over the
+  // sports lane's promoter×event scope) and the real-time sports
+  // postings — the biometric micro-payout (athlete wallet + league data
+  // rights) and the secondary resale royalty's three-way cut posting the
+  // moment the PR 50 walks stage their applications.
+  "event_cancellation_escrow_route",
+  "event_cancellation_escrow_drawdown",
+  "event_cancellation_escrow_release",
+  "sports_biometric_payout_post",
+  "sports_resale_royalty_post",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -894,6 +905,47 @@ export function resourceAuditEscrowGlAccount(scopeKey: string): string {
 // a hostile policy, refused.
 export const RESOURCE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
 export const RESOURCE_AUDIT_ESCROW_MAX_RATE_BPS = 1_500;
+
+// EVENT_CANCELLATION_ESCROW (PR 51, the founder sports directive): the
+// sports twin of the NIL, spatial, fitness, culinary, service, software,
+// patent, and resource audit escrows — at the founder's ELEVATED gate
+// band: 15–20% of a scope's net gate receipts locks per (promoter payee,
+// event) scope, double the standard verticals' floor, because a live
+// event's cancellation exposure prices higher than an API SLA or a
+// backbar inventory audit: a weather delay can postpone the entire gate,
+// a headline athlete's withdrawal can trigger mass refund calls, and a
+// mandatory ticket refund order can claw back every realized receipt.
+// Weather delays, athlete withdrawals, and mandatory ticket refund calls
+// draw it down, and the release opens only on BOTH facts of record: the
+// event's completion telemetry verified (the durable sports payout gate
+// state, migration 0055) AND 48 hours elapsed post-event (the gate
+// state's completion timestamp of record). Sentinel payee + GL account
+// per scope key — the no-fold discipline: the escrow is its own
+// escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const EVENT_CANCELLATION_ESCROW_PAYEE_PREFIX = "event_cancellation_escrow";
+export function eventCancellationEscrowPayeeId(scopeKey: string): string {
+  return `${EVENT_CANCELLATION_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function eventCancellationEscrowPayeeName(scopeKey: string): string {
+  return `EVENT_CANCELLATION_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_EVENT_CANCELLATION_ESCROW = "event_cancellation_escrow";
+export function eventCancellationEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_EVENT_CANCELLATION_ESCROW}:${scopeKey}`;
+}
+// The founder's ELEVATED gate band, enforced at registration AND at use:
+// a 15–20% share of the scope's net gate receipts. Anything outside the
+// band is a hostile policy, refused.
+export const EVENT_CANCELLATION_ESCROW_MIN_RATE_BPS = 1_500;
+export const EVENT_CANCELLATION_ESCROW_MAX_RATE_BPS = 2_000;
+
+// The event cancellation escrow's timed release (PR 51): the escrow pays
+// out only after 48 hours elapse post-event — the refund-call window the
+// directive holds gate receipts through. Anchored to the event's
+// completion timestamp of record (the sports payout gate state's
+// event_completed_at, set when the completion telemetry verifies).
+export const EVENT_CANCELLATION_RELEASE_DELAY_HOURS = 48;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];
