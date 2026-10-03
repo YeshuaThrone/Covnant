@@ -170,6 +170,18 @@ import type {
   LicensingSubLicenseReportRecord,
 } from '@/modules/licensing/records';
 import type {
+  NilCapVerificationRecord,
+  NilDealComplianceAuditRecord,
+  NilGroupSplitRecord,
+  NilPayoutApplicationRecord,
+  NilPayoutGateStateRecord,
+  NilPoolApplicationRecord,
+  NilRevenueShareProgramRecord,
+  NilRosterWaterfallRecord,
+  NilSchoolCapRecord,
+  NilStateRuleRecord,
+} from '@/modules/nil/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -1689,6 +1701,160 @@ CREATE TABLE IF NOT EXISTS licensing_payout_gate_states (
 );
 CREATE INDEX IF NOT EXISTS idx_licensing_gate_states_scope
   ON licensing_payout_gate_states (scope_key);
+
+-- The NIL lane (migration 0038, PR 34). The compliance parser + roster
+-- waterfall's durable facts of record — the revenue-share program per
+-- scope, the roster waterfall per (scope, key), the school caps and cap
+-- verifications per (school, year), the valid business purpose audits per
+-- contract, the append-only payout/pool/group-split applications (replay-
+-- guarded per source event), the state rules per (state, rule), and the
+-- payout gate states per (payee, school). The SQLite mirror keeps the
+-- Postgres wall types as TEXT (uuid/timestamptz read back as strings),
+-- packs the jsonb columns (tiers/slices/participant_ids — pre-encoded in
+-- the records module) as TEXT JSON, and mirrors booleans as INTEGER
+-- (null stays NULL).
+CREATE TABLE IF NOT EXISTS nil_revenue_share_programs (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('school', 'collective')),
+  school_id TEXT,
+  collective_id TEXT,
+  title_ix_reserve_bps INTEGER NOT NULL,
+  admin_fee_bps INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key)
+);
+
+CREATE TABLE IF NOT EXISTS nil_roster_waterfalls (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  waterfall_key TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('position', 'performance')),
+  tiers TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key, waterfall_key)
+);
+
+CREATE TABLE IF NOT EXISTS nil_school_caps (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  cap_year TEXT NOT NULL,
+  annual_cap_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (school_id, cap_year)
+);
+
+CREATE TABLE IF NOT EXISTS nil_cap_verifications (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  cap_year TEXT NOT NULL,
+  verified_committed_cents INTEGER NOT NULL,
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (school_id, cap_year)
+);
+
+CREATE TABLE IF NOT EXISTS nil_deal_compliance_audits (
+  id TEXT PRIMARY KEY,
+  nil_contract_id TEXT NOT NULL,
+  athlete_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  deal_value_cents INTEGER NOT NULL,
+  business_purpose_state TEXT NOT NULL CHECK (business_purpose_state IN ('flagged', 'nil_cleared')),
+  purpose_description TEXT,
+  evidence_ref TEXT,
+  cleared_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (nil_contract_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_payout_applications (
+  id TEXT PRIMARY KEY,
+  nil_contract_id TEXT NOT NULL,
+  athlete_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  gross_cents INTEGER NOT NULL,
+  agency_mode TEXT NOT NULL CHECK (agency_mode IN ('marketing', 'direct_rev_share', 'none')),
+  agency_bps INTEGER NOT NULL,
+  agency_fee_cents INTEGER NOT NULL,
+  net_payout_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_compliance', 'held_state_rule')),
+  state_rule_ref TEXT,
+  cap_verified_ref TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_pool_applications (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  pool_type TEXT NOT NULL CHECK (pool_type IN ('media_rights', 'ticket_distribution')),
+  source_event_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  gross_pool_cents INTEGER NOT NULL,
+  title_ix_reserve_bps INTEGER NOT NULL,
+  title_ix_reserve_cents INTEGER NOT NULL,
+  admin_fee_bps INTEGER NOT NULL,
+  admin_fee_cents INTEGER NOT NULL,
+  net_athlete_share_pool_cents INTEGER NOT NULL,
+  waterfall_key TEXT NOT NULL,
+  tier_kind TEXT NOT NULL CHECK (tier_kind IN ('position', 'performance')),
+  slices TEXT NOT NULL,
+  roster_paid_cents INTEGER NOT NULL,
+  dust_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_group_splits (
+  id TEXT PRIMARY KEY,
+  scope_ref TEXT NOT NULL,
+  rights_stream TEXT NOT NULL CHECK (rights_stream IN ('video_game', 'apparel', 'media')),
+  source_event_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  total_cents INTEGER NOT NULL,
+  participant_ids TEXT NOT NULL,
+  participant_count INTEGER NOT NULL,
+  per_participant_cents INTEGER NOT NULL,
+  dust_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_state_rules (
+  id TEXT PRIMARY KEY,
+  state_jurisdiction_code TEXT NOT NULL,
+  rule_code TEXT NOT NULL,
+  applies_to_category TEXT NOT NULL,
+  enforcement TEXT NOT NULL CHECK (enforcement IN ('prohibited', 'permitted', 'conditional')),
+  rule_summary TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (state_jurisdiction_code, rule_code)
+);
+
+CREATE TABLE IF NOT EXISTS nil_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  nil_clearance_state TEXT NOT NULL CHECK (nil_clearance_state IN ('unknown', 'nil_cleared')),
+  compliance_state TEXT NOT NULL CHECK (compliance_state IN ('unknown', 'verified')),
+  title_ix_state TEXT NOT NULL CHECK (title_ix_state IN ('unknown', 'cleared')),
+  collective_or_booster_backed INTEGER,
+  institutional_cap_state TEXT NOT NULL CHECK (institutional_cap_state IN ('unknown', 'verified')),
+  evidence_ref TEXT,
+  verified_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, school_id)
+);
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
 -- record per work (upsert on work_id), the ordered author-side IP
@@ -6047,6 +6213,640 @@ export class SqliteStore implements Store {
       return undefined;
     }
     return Promise.resolve(licensingApplicationFromDbRow(row));
+  }
+
+  // --- The NIL lane: the compliance parser + roster waterfall (PR 34,
+  // --- migration 0038) ---
+  // UPSERT DISCIPLINE (the PR 33 parity-suite lesson, applied): the
+  // UPDATE SET list NEVER touches id — on conflict the id stays the
+  // existing row's; the generated id only lands on the insert path.
+
+  async upsertNilRevenueShareProgram(
+    row: Omit<NilRevenueShareProgramRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRevenueShareProgramRecord> {
+    // UNIQUE per scope_key — a re-registration replaces the row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_revenue_share_programs
+           (id, scope_key, scope, school_id, collective_id,
+            title_ix_reserve_bps, admin_fee_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           scope = excluded.scope,
+           school_id = excluded.school_id,
+           collective_id = excluded.collective_id,
+           title_ix_reserve_bps = excluded.title_ix_reserve_bps,
+           admin_fee_bps = excluded.admin_fee_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.scope,
+        record.school_id,
+        record.collective_id,
+        record.title_ix_reserve_bps,
+        record.admin_fee_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilRevenueShareProgram(record.scope_key)) as NilRevenueShareProgramRecord;
+  }
+
+  async getNilRevenueShareProgram(
+    scopeKey: string,
+  ): Promise<NilRevenueShareProgramRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_revenue_share_programs WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      scope: row.scope as NilRevenueShareProgramRecord['scope'],
+      school_id: (row.school_id as string | null) ?? null,
+      collective_id: (row.collective_id as string | null) ?? null,
+      title_ix_reserve_bps: row.title_ix_reserve_bps as number,
+      admin_fee_bps: row.admin_fee_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async upsertNilRosterWaterfall(
+    row: Omit<NilRosterWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRosterWaterfallRecord> {
+    // UNIQUE per (scope_key, waterfall_key) — an upsert converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_roster_waterfalls
+           (id, scope_key, waterfall_key, kind, tiers, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key, waterfall_key) DO UPDATE SET
+           kind = excluded.kind,
+           tiers = excluded.tiers,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.waterfall_key,
+        record.kind,
+        record.tiers,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilRosterWaterfall(
+      record.scope_key,
+      record.waterfall_key,
+    )) as NilRosterWaterfallRecord;
+  }
+
+  async getNilRosterWaterfall(
+    scopeKey: string,
+    waterfallKey: string,
+  ): Promise<NilRosterWaterfallRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM nil_roster_waterfalls WHERE scope_key = ? AND waterfall_key = ?`,
+      )
+      .get(scopeKey, waterfallKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      waterfall_key: row.waterfall_key as string,
+      kind: row.kind as NilRosterWaterfallRecord['kind'],
+      tiers: row.tiers as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async upsertNilSchoolCap(
+    row: Omit<NilSchoolCapRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilSchoolCapRecord> {
+    // UNIQUE per (school_id, cap_year) — an upsert converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_school_caps
+           (id, school_id, cap_year, annual_cap_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (school_id, cap_year) DO UPDATE SET
+           annual_cap_cents = excluded.annual_cap_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.school_id,
+        record.cap_year,
+        record.annual_cap_cents,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilSchoolCap(
+      record.school_id,
+      record.cap_year,
+    )) as NilSchoolCapRecord;
+  }
+
+  async getNilSchoolCap(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilSchoolCapRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_school_caps WHERE school_id = ? AND cap_year = ?`)
+      .get(schoolId, capYear) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      school_id: row.school_id as string,
+      cap_year: row.cap_year as string,
+      annual_cap_cents: row.annual_cap_cents as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async insertNilCapVerification(
+    row: Omit<NilCapVerificationRecord, 'id' | 'created_at'>,
+  ): Promise<NilCapVerificationRecord> {
+    // UNIQUE per (school_id, cap_year) is the INSERT-AS-LOCK: the FIRST
+    // verification wins; a concurrent second insert throws here, never a
+    // double verification.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_cap_verifications
+           (id, school_id, cap_year, verified_committed_cents, evidence_ref, verified_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.school_id,
+        record.cap_year,
+        record.verified_committed_cents,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilCapVerification(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilCapVerificationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_cap_verifications WHERE school_id = ? AND cap_year = ?`)
+      .get(schoolId, capYear) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      school_id: row.school_id as string,
+      cap_year: row.cap_year as string,
+      verified_committed_cents: row.verified_committed_cents as number,
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async upsertNilDealComplianceAudit(
+    row: Omit<NilDealComplianceAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilDealComplianceAuditRecord> {
+    // UNIQUE per nil_contract_id — an upsert converges: the $600 flag
+    // heals to 'nil_cleared'; never the reverse through this table.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_deal_compliance_audits
+           (id, nil_contract_id, athlete_id, school_id, deal_value_cents,
+            business_purpose_state, purpose_description, evidence_ref, cleared_by,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (nil_contract_id) DO UPDATE SET
+           athlete_id = excluded.athlete_id,
+           school_id = excluded.school_id,
+           deal_value_cents = excluded.deal_value_cents,
+           business_purpose_state = excluded.business_purpose_state,
+           purpose_description = excluded.purpose_description,
+           evidence_ref = excluded.evidence_ref,
+           cleared_by = excluded.cleared_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.nil_contract_id,
+        record.athlete_id,
+        record.school_id,
+        record.deal_value_cents,
+        record.business_purpose_state,
+        record.purpose_description,
+        record.evidence_ref,
+        record.cleared_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilDealComplianceAudit(
+      record.nil_contract_id,
+    )) as NilDealComplianceAuditRecord;
+  }
+
+  async getNilDealComplianceAudit(
+    nilContractId: string,
+  ): Promise<NilDealComplianceAuditRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_deal_compliance_audits WHERE nil_contract_id = ?`)
+      .get(nilContractId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      deal_value_cents: row.deal_value_cents as number,
+      business_purpose_state:
+        row.business_purpose_state as NilDealComplianceAuditRecord['business_purpose_state'],
+      purpose_description: (row.purpose_description as string | null) ?? null,
+      evidence_ref: (row.evidence_ref as string | null) ?? null,
+      cleared_by: (row.cleared_by as string | null) ?? null,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async insertNilPayoutApplication(
+    row: Omit<NilPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPayoutApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked event
+    // throws here, never a double payout.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_payout_applications
+           (id, nil_contract_id, athlete_id, school_id, source_event_id, period,
+            gross_cents, agency_mode, agency_bps, agency_fee_cents, net_payout_cents,
+            verdict, state_rule_ref, cap_verified_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.nil_contract_id,
+        record.athlete_id,
+        record.school_id,
+        record.source_event_id,
+        record.period,
+        record.gross_cents,
+        record.agency_mode,
+        record.agency_bps,
+        record.agency_fee_cents,
+        record.net_payout_cents,
+        record.verdict,
+        record.state_rule_ref,
+        record.cap_verified_ref,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilPayoutApplication(
+    sourceEventId: string,
+  ): Promise<NilPayoutApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_payout_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      source_event_id: row.source_event_id as string,
+      period: row.period as string,
+      gross_cents: row.gross_cents as number,
+      agency_mode: row.agency_mode as NilPayoutApplicationRecord['agency_mode'],
+      agency_bps: row.agency_bps as number,
+      agency_fee_cents: row.agency_fee_cents as number,
+      net_payout_cents: row.net_payout_cents as number,
+      verdict: row.verdict as NilPayoutApplicationRecord['verdict'],
+      state_rule_ref: (row.state_rule_ref as string | null) ?? null,
+      cap_verified_ref: (row.cap_verified_ref as string | null) ?? null,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async insertNilPoolApplication(
+    row: Omit<NilPoolApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPoolApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked pool
+    // event throws here, never a double distribution.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_pool_applications
+           (id, school_id, pool_type, source_event_id, period, gross_pool_cents,
+            title_ix_reserve_bps, title_ix_reserve_cents, admin_fee_bps, admin_fee_cents,
+            net_athlete_share_pool_cents, waterfall_key, tier_kind, slices,
+            roster_paid_cents, dust_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.school_id,
+        record.pool_type,
+        record.source_event_id,
+        record.period,
+        record.gross_pool_cents,
+        record.title_ix_reserve_bps,
+        record.title_ix_reserve_cents,
+        record.admin_fee_bps,
+        record.admin_fee_cents,
+        record.net_athlete_share_pool_cents,
+        record.waterfall_key,
+        record.tier_kind,
+        record.slices,
+        record.roster_paid_cents,
+        record.dust_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilPoolApplication(
+    sourceEventId: string,
+  ): Promise<NilPoolApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_pool_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      school_id: row.school_id as string,
+      pool_type: row.pool_type as NilPoolApplicationRecord['pool_type'],
+      source_event_id: row.source_event_id as string,
+      period: row.period as string,
+      gross_pool_cents: row.gross_pool_cents as number,
+      title_ix_reserve_bps: row.title_ix_reserve_bps as number,
+      title_ix_reserve_cents: row.title_ix_reserve_cents as number,
+      admin_fee_bps: row.admin_fee_bps as number,
+      admin_fee_cents: row.admin_fee_cents as number,
+      net_athlete_share_pool_cents: row.net_athlete_share_pool_cents as number,
+      waterfall_key: row.waterfall_key as string,
+      tier_kind: row.tier_kind as NilPoolApplicationRecord['tier_kind'],
+      slices: row.slices as string,
+      roster_paid_cents: row.roster_paid_cents as number,
+      dust_cents: row.dust_cents as number,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async insertNilGroupSplit(
+    row: Omit<NilGroupSplitRecord, 'id' | 'created_at'>,
+  ): Promise<NilGroupSplitRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-shipped
+    // distribution splits once, never twice.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_group_splits
+           (id, scope_ref, rights_stream, source_event_id, period, total_cents,
+            participant_ids, participant_count, per_participant_cents, dust_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.scope_ref,
+        record.rights_stream,
+        record.source_event_id,
+        record.period,
+        record.total_cents,
+        record.participant_ids,
+        record.participant_count,
+        record.per_participant_cents,
+        record.dust_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilGroupSplit(
+    sourceEventId: string,
+  ): Promise<NilGroupSplitRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_group_splits WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      scope_ref: row.scope_ref as string,
+      rights_stream: row.rights_stream as NilGroupSplitRecord['rights_stream'],
+      source_event_id: row.source_event_id as string,
+      period: row.period as string,
+      total_cents: row.total_cents as number,
+      participant_ids: row.participant_ids as string,
+      participant_count: row.participant_count as number,
+      per_participant_cents: row.per_participant_cents as number,
+      dust_cents: row.dust_cents as number,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async upsertNilStateRule(
+    row: Omit<NilStateRuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilStateRuleRecord> {
+    // UNIQUE per (state_jurisdiction_code, rule_code) — an upsert
+    // converges (the newest rule governs the next payout execution).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_state_rules
+           (id, state_jurisdiction_code, rule_code, applies_to_category, enforcement,
+            rule_summary, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (state_jurisdiction_code, rule_code) DO UPDATE SET
+           applies_to_category = excluded.applies_to_category,
+           enforcement = excluded.enforcement,
+           rule_summary = excluded.rule_summary,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.state_jurisdiction_code,
+        record.rule_code,
+        record.applies_to_category,
+        record.enforcement,
+        record.rule_summary,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilStateRule(
+      record.state_jurisdiction_code,
+      record.rule_code,
+    )) as NilStateRuleRecord;
+  }
+
+  async getNilStateRule(
+    stateJurisdictionCode: string,
+    ruleCode: string,
+  ): Promise<NilStateRuleRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM nil_state_rules WHERE state_jurisdiction_code = ? AND rule_code = ?`,
+      )
+      .get(stateJurisdictionCode, ruleCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      state_jurisdiction_code: row.state_jurisdiction_code as string,
+      rule_code: row.rule_code as string,
+      applies_to_category: row.applies_to_category as string,
+      enforcement: row.enforcement as NilStateRuleRecord['enforcement'],
+      rule_summary: row.rule_summary as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async upsertNilPayoutGateState(
+    row: Omit<NilPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, school_id) — an upsert converges: a
+    // verification heals 'unknown'; states never regress through this
+    // table. The boolean mirror: true = 1, false = 0, null = NULL.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const backed = record.collective_or_booster_backed;
+    this.db
+      .prepare(
+        `INSERT INTO nil_payout_gate_states
+           (id, payee_id, school_id, nil_clearance_state, compliance_state, title_ix_state,
+            collective_or_booster_backed, institutional_cap_state, evidence_ref, verified_by,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, school_id) DO UPDATE SET
+           nil_clearance_state = excluded.nil_clearance_state,
+           compliance_state = excluded.compliance_state,
+           title_ix_state = excluded.title_ix_state,
+           collective_or_booster_backed = excluded.collective_or_booster_backed,
+           institutional_cap_state = excluded.institutional_cap_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.school_id,
+        record.nil_clearance_state,
+        record.compliance_state,
+        record.title_ix_state,
+        backed === null ? null : backed ? 1 : 0,
+        record.institutional_cap_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return (await this.getNilPayoutGateState(
+      record.payee_id,
+      record.school_id,
+    )) as NilPayoutGateStateRecord;
+  }
+
+  async getNilPayoutGateState(
+    payeeId: string,
+    schoolId: string,
+  ): Promise<NilPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_payout_gate_states WHERE payee_id = ? AND school_id = ?`)
+      .get(payeeId, schoolId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    const backed = row.collective_or_booster_backed as number | null | undefined;
+    return Promise.resolve({
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      school_id: row.school_id as string,
+      nil_clearance_state:
+        row.nil_clearance_state as NilPayoutGateStateRecord['nil_clearance_state'],
+      compliance_state: row.compliance_state as NilPayoutGateStateRecord['compliance_state'],
+      title_ix_state: row.title_ix_state as NilPayoutGateStateRecord['title_ix_state'],
+      collective_or_booster_backed: backed === null || backed === undefined ? null : backed === 1,
+      institutional_cap_state:
+        row.institutional_cap_state as NilPayoutGateStateRecord['institutional_cap_state'],
+      evidence_ref: (row.evidence_ref as string | null) ?? null,
+      verified_by: (row.verified_by as string | null) ?? null,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
   }
 
   async listTranslationLocalizationEscrowCredits(

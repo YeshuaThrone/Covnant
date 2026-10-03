@@ -1,0 +1,4 @@
+Disclosure ID,Disclosure Date,Athlete ID,School ID,State Jurisdiction Code,Collective ID,Funding Source,Deal Value,Agency Fee Mode,Agency Commission BPS,Currency,Reporting Period
+C-6001,2026-09-10,ATH-QB-1,SCH-1,CA,COV-ALPHA,collective,100000.00,marketing,1000,USD,2026-09
+C-6002,2026-09-11,ATH-WR-2,SCH-2,TX,COV-BETA,booster,25000000.00,direct_rev_share,500,USD,2026-09
+C-6003,2026-09-12,ATH-TE-3,SCH-3,NY,COV-GAMMA,collective,50000.00,none,0,USD,2026-09

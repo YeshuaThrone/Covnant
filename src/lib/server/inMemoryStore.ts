@@ -166,6 +166,18 @@ import type {
   LicensingSubLicenseeRecord,
   LicensingSubLicenseReportRecord,
 } from '@/modules/licensing/records';
+import type {
+  NilCapVerificationRecord,
+  NilDealComplianceAuditRecord,
+  NilGroupSplitRecord,
+  NilPayoutApplicationRecord,
+  NilPayoutGateStateRecord,
+  NilPoolApplicationRecord,
+  NilRevenueShareProgramRecord,
+  NilRosterWaterfallRecord,
+  NilSchoolCapRecord,
+  NilStateRuleRecord,
+} from '@/modules/nil/records';
 import { bookReturnsReservePayeeId } from '@/modules/don/constants';
 import type {
   MatchQueueRecord,
@@ -328,6 +340,22 @@ export class InMemoryStore implements Store {
     string,
     LicensingAuditReserveReconciliationRecord
   >();
+  // Migration 0038 — the NIL lane's facts of record: the revenue-share
+  // program per scope, the roster waterfall per (scope, key), the school
+  // caps and cap verifications per (school, year), the valid business
+  // purpose audits per contract, the append-only payout/pool/group-split
+  // applications (replay-guarded per source event), the state rules per
+  // (state, rule), and the payout gate states per (payee, school).
+  private nilRevenueSharePrograms = new Map<string, NilRevenueShareProgramRecord>();
+  private nilRosterWaterfalls = new Map<string, NilRosterWaterfallRecord>();
+  private nilSchoolCaps = new Map<string, NilSchoolCapRecord>();
+  private nilCapVerifications = new Map<string, NilCapVerificationRecord>();
+  private nilDealComplianceAudits = new Map<string, NilDealComplianceAuditRecord>();
+  private nilPayoutApplications = new Map<string, NilPayoutApplicationRecord>();
+  private nilPoolApplications = new Map<string, NilPoolApplicationRecord>();
+  private nilGroupSplits = new Map<string, NilGroupSplitRecord>();
+  private nilStateRules = new Map<string, NilStateRuleRecord>();
+  private nilPayoutGateStates = new Map<string, NilPayoutGateStateRecord>();
   private licensingAuditReserveDrawdowns: LicensingAuditReserveDrawdownRecord[] = [];
   private licensingPayoutGateStates = new Map<string, LicensingPayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
@@ -3071,6 +3099,259 @@ export class InMemoryStore implements Store {
     const found = this.licensingRoyaltyApplications.find(
       (row) => row.deal_id === dealId && row.source_event_id === sourceEventId,
     );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // --- The NIL lane: the compliance parser + roster waterfall (PR 34,
+  // --- migration 0038) ---
+
+  async upsertNilRevenueShareProgram(
+    row: Omit<NilRevenueShareProgramRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRevenueShareProgramRecord> {
+    // UNIQUE per scope_key — a re-registration replaces the row atomically
+    // (the option-agreement/agency-policy discipline).
+    const now = new Date().toISOString();
+    const existing = this.nilRevenueSharePrograms.get(row.scope_key);
+    const record: NilRevenueShareProgramRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilRevenueSharePrograms.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getNilRevenueShareProgram(
+    scopeKey: string,
+  ): Promise<NilRevenueShareProgramRecord | undefined> {
+    const found = this.nilRevenueSharePrograms.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertNilRosterWaterfall(
+    row: Omit<NilRosterWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRosterWaterfallRecord> {
+    // UNIQUE per (scope_key, waterfall_key) — an upsert converges (the
+    // newest schedule governs the next walk).
+    const key = `${row.scope_key}:${row.waterfall_key}`;
+    const now = new Date().toISOString();
+    const existing = this.nilRosterWaterfalls.get(key);
+    const record: NilRosterWaterfallRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilRosterWaterfalls.set(key, record);
+    return { ...record };
+  }
+
+  async getNilRosterWaterfall(
+    scopeKey: string,
+    waterfallKey: string,
+  ): Promise<NilRosterWaterfallRecord | undefined> {
+    const found = this.nilRosterWaterfalls.get(`${scopeKey}:${waterfallKey}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertNilSchoolCap(
+    row: Omit<NilSchoolCapRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilSchoolCapRecord> {
+    // UNIQUE per (school_id, cap_year) — an upsert converges.
+    const key = `${row.school_id}:${row.cap_year}`;
+    const now = new Date().toISOString();
+    const existing = this.nilSchoolCaps.get(key);
+    const record: NilSchoolCapRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilSchoolCaps.set(key, record);
+    return { ...record };
+  }
+
+  async getNilSchoolCap(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilSchoolCapRecord | undefined> {
+    const found = this.nilSchoolCaps.get(`${schoolId}:${capYear}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilCapVerification(
+    row: Omit<NilCapVerificationRecord, 'id' | 'created_at'>,
+  ): Promise<NilCapVerificationRecord> {
+    // UNIQUE per (school_id, cap_year) is the INSERT-AS-LOCK: the FIRST
+    // verification wins; a concurrent second insert throws the unique
+    // violation, never a double verification.
+    if (this.nilCapVerifications.has(`${row.school_id}:${row.cap_year}`)) {
+      uniqueViolation('nil_cap_verifications.school_id,cap_year');
+    }
+    const record: NilCapVerificationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilCapVerifications.set(`${row.school_id}:${row.cap_year}`, record);
+    return { ...record };
+  }
+
+  async getNilCapVerification(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilCapVerificationRecord | undefined> {
+    const found = this.nilCapVerifications.get(`${schoolId}:${capYear}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertNilDealComplianceAudit(
+    row: Omit<NilDealComplianceAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilDealComplianceAuditRecord> {
+    // UNIQUE per nil_contract_id — an upsert converges: the $600 flag
+    // heals to 'nil_cleared'; never the reverse through this table.
+    const now = new Date().toISOString();
+    const existing = this.nilDealComplianceAudits.get(row.nil_contract_id);
+    const record: NilDealComplianceAuditRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilDealComplianceAudits.set(row.nil_contract_id, record);
+    return { ...record };
+  }
+
+  async getNilDealComplianceAudit(
+    nilContractId: string,
+  ): Promise<NilDealComplianceAuditRecord | undefined> {
+    const found = this.nilDealComplianceAudits.get(nilContractId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilPayoutApplication(
+    row: Omit<NilPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPayoutApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked event
+    // throws, never a double payout.
+    if (this.nilPayoutApplications.has(row.source_event_id)) {
+      uniqueViolation('nil_payout_applications.source_event_id');
+    }
+    const record: NilPayoutApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilPayoutApplications.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getNilPayoutApplication(
+    sourceEventId: string,
+  ): Promise<NilPayoutApplicationRecord | undefined> {
+    const found = this.nilPayoutApplications.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilPoolApplication(
+    row: Omit<NilPoolApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPoolApplicationRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-walked pool
+    // event throws, never a double distribution.
+    if (this.nilPoolApplications.has(row.source_event_id)) {
+      uniqueViolation('nil_pool_applications.source_event_id');
+    }
+    const record: NilPoolApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilPoolApplications.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getNilPoolApplication(
+    sourceEventId: string,
+  ): Promise<NilPoolApplicationRecord | undefined> {
+    const found = this.nilPoolApplications.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertNilGroupSplit(
+    row: Omit<NilGroupSplitRecord, 'id' | 'created_at'>,
+  ): Promise<NilGroupSplitRecord> {
+    // UNIQUE per source_event_id is the replay guard — a re-shipped
+    // distribution splits once, never twice.
+    if (this.nilGroupSplits.has(row.source_event_id)) {
+      uniqueViolation('nil_group_splits.source_event_id');
+    }
+    const record: NilGroupSplitRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.nilGroupSplits.set(row.source_event_id, record);
+    return { ...record };
+  }
+
+  async getNilGroupSplit(
+    sourceEventId: string,
+  ): Promise<NilGroupSplitRecord | undefined> {
+    const found = this.nilGroupSplits.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertNilStateRule(
+    row: Omit<NilStateRuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilStateRuleRecord> {
+    // UNIQUE per (state_jurisdiction_code, rule_code) — an upsert
+    // converges (the newest rule governs the next payout execution).
+    const key = `${row.state_jurisdiction_code}:${row.rule_code}`;
+    const now = new Date().toISOString();
+    const existing = this.nilStateRules.get(key);
+    const record: NilStateRuleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilStateRules.set(key, record);
+    return { ...record };
+  }
+
+  async getNilStateRule(
+    stateJurisdictionCode: string,
+    ruleCode: string,
+  ): Promise<NilStateRuleRecord | undefined> {
+    const found = this.nilStateRules.get(`${stateJurisdictionCode}:${ruleCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertNilPayoutGateState(
+    row: Omit<NilPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, school_id) — an upsert converges: a
+    // verification heals 'unknown'; states never regress through this
+    // table.
+    const key = `${row.payee_id}:${row.school_id}`;
+    const now = new Date().toISOString();
+    const existing = this.nilPayoutGateStates.get(key);
+    const record: NilPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.nilPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getNilPayoutGateState(
+    payeeId: string,
+    schoolId: string,
+  ): Promise<NilPayoutGateStateRecord | undefined> {
+    const found = this.nilPayoutGateStates.get(`${payeeId}:${schoolId}`);
     return found === undefined ? undefined : { ...found };
   }
 

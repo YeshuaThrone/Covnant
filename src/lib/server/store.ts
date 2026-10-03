@@ -158,6 +158,18 @@ import type {
   LicensingSubLicenseReportRecord,
 } from '@/modules/licensing/records';
 import type {
+  NilCapVerificationRecord,
+  NilDealComplianceAuditRecord,
+  NilGroupSplitRecord,
+  NilPayoutApplicationRecord,
+  NilPayoutGateStateRecord,
+  NilPoolApplicationRecord,
+  NilRevenueShareProgramRecord,
+  NilRosterWaterfallRecord,
+  NilSchoolCapRecord,
+  NilStateRuleRecord,
+} from '@/modules/nil/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2654,6 +2666,174 @@ export interface Store {
     dealId: string,
     sourceEventId: string,
   ): Promise<LicensingRoyaltyApplicationRecord | undefined>;
+
+  // --- The NIL lane: the compliance parser + roster waterfall (PR 34,
+  // --- migration 0038) ---
+
+  /**
+   * Registers (or replaces) the adjusted direct revenue-sharing program of
+   * record for one scope (migration 0038) — upsert on scope_key: a
+   * re-registration replaces the row atomically (the option-agreement
+   * discipline). The newest rates govern the next pool walk.
+   */
+  upsertNilRevenueShareProgram(
+    row: Omit<NilRevenueShareProgramRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRevenueShareProgramRecord>;
+
+  /** One scope's program of record; undefined when none — the pool walk
+   * refuses (fail-closed), never guesses rates. */
+  getNilRevenueShareProgram(
+    scopeKey: string,
+  ): Promise<NilRevenueShareProgramRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the tiered roster waterfall config of record
+   * for one (scope, key) (migration 0038) — upsert converges: a
+   * re-registration replaces the row atomically. The tier schedule is
+   * JSON validated by the records module before it reaches this seam.
+   */
+  upsertNilRosterWaterfall(
+    row: Omit<NilRosterWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilRosterWaterfallRecord>;
+
+  /** One (scope, key)'s waterfall of record; undefined when none — the
+   * pool walk refuses (fail-closed), never invents a schedule. */
+  getNilRosterWaterfall(
+    scopeKey: string,
+    waterfallKey: string,
+  ): Promise<NilRosterWaterfallRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the institutional cap allowance of record for
+   * one (school, year) (migration 0038) — upsert converges.
+   */
+  upsertNilSchoolCap(
+    row: Omit<NilSchoolCapRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilSchoolCapRecord>;
+
+  /** One (school, year)'s cap of record; undefined when none — the
+   * associated-entity holdback holds (fail-closed), never assumes a cap. */
+  getNilSchoolCap(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilSchoolCapRecord | undefined>;
+
+  /**
+   * Records the verified cap verification of record per (school, year) —
+   * the associated-entity holdback's release key (migration 0038). UNIQUE
+   * per (school_id, cap_year) is the INSERT-AS-LOCK: the FIRST
+   * verification wins; a concurrent second insert throws the unique
+   * violation, never a double verification.
+   */
+  insertNilCapVerification(
+    row: Omit<NilCapVerificationRecord, 'id' | 'created_at'>,
+  ): Promise<NilCapVerificationRecord>;
+
+  /** One (school, year)'s verification of record; undefined when none —
+   * the payout gate reads fail-closed: no verification, money holds. */
+  getNilCapVerification(
+    schoolId: string,
+    capYear: string,
+  ): Promise<NilCapVerificationRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the valid business purpose audit of record
+   * for one NIL contract (migration 0038) — upsert converges: the $600
+   * flag ('flagged') heals to 'nil_cleared' when the mandatory metadata
+   * matches; never the reverse through this table.
+   */
+  upsertNilDealComplianceAudit(
+    row: Omit<NilDealComplianceAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilDealComplianceAuditRecord>;
+
+  /** One contract's audit of record; undefined when none — the payout
+   * gate reads fail-closed (an unflagged deal needs no audit row). */
+  getNilDealComplianceAudit(
+    nilContractId: string,
+  ): Promise<NilDealComplianceAuditRecord | undefined>;
+
+  /**
+   * Appends one executed deal payout application (migration 0038). UNIQUE
+   * per source_event_id is the replay guard — a re-walked event throws
+   * the unique violation, never a double payout; the caller reads the
+   * committed application through the getter.
+   */
+  insertNilPayoutApplication(
+    row: Omit<NilPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPayoutApplicationRecord>;
+
+  /** One payout application of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getNilPayoutApplication(
+    sourceEventId: string,
+  ): Promise<NilPayoutApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed pool application — the adjusted calculator's
+   * pool math and the tiered roster walk's committed slices (migration
+   * 0038). UNIQUE per source_event_id is the replay guard — a re-walked
+   * pool event throws, never a double distribution.
+   */
+  insertNilPoolApplication(
+    row: Omit<NilPoolApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<NilPoolApplicationRecord>;
+
+  /** One pool application of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getNilPoolApplication(
+    sourceEventId: string,
+  ): Promise<NilPoolApplicationRecord | undefined>;
+
+  /**
+   * Appends one executed group NIL equal split (migration 0038). UNIQUE
+   * per source_event_id is the replay guard — a re-shipped distribution
+   * splits once, never twice.
+   */
+  insertNilGroupSplit(
+    row: Omit<NilGroupSplitRecord, 'id' | 'created_at'>,
+  ): Promise<NilGroupSplitRecord>;
+
+  /** One group split of record by its source event id; undefined when
+   * none — the replay check's read. */
+  getNilGroupSplit(
+    sourceEventId: string,
+  ): Promise<NilGroupSplitRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the state compliance matrix's rule of record
+   * for one (state, rule_code) (migration 0038) — upsert converges: the
+   * newest rule governs the next payout execution.
+   */
+  upsertNilStateRule(
+    row: Omit<NilStateRuleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilStateRuleRecord>;
+
+  /** One (state, rule)'s enforcement of record; undefined when none —
+   * the state matrix reads fail-closed for gated categories. */
+  getNilStateRule(
+    stateJurisdictionCode: string,
+    ruleCode: string,
+  ): Promise<NilStateRuleRecord | undefined>;
+
+  /**
+   * Upserts the NIL payout gate's states of record for one payee in one
+   * school (migration 0038) — UNIQUE per (payee_id, school_id): an upsert
+   * converges (a verification heals 'unknown'; states never regress
+   * through this table).
+   */
+  upsertNilPayoutGateState(
+    row: Omit<NilPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilPayoutGateStateRecord>;
+
+  /**
+   * One payee × school's gate states of record; undefined when none — the
+   * NIL payout gate resolves fail-closed through this (absent → null →
+   * the gate refuses).
+   */
+  getNilPayoutGateState(
+    payeeId: string,
+    schoolId: string,
+  ): Promise<NilPayoutGateStateRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

@@ -368,6 +368,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // the buckets and journals ride the existing ledger vocabulary, and
       // the referencing pin below holds.
       '0037_licensing_mg_recoupment_audit_reserve_gate_states.sql',
+      // NIL compliance parser + roster waterfall (PR 34, the founder NIL
+      // directive): ten durable NIL record tables — programs, waterfalls,
+      // school caps, cap verifications, business-purpose audits, payout and
+      // pool applications, group splits, state rules, and payout gate
+      // states; still no DDL on universal_royalty_ledger — the applications
+      // ride their own NIL tables, and the referencing pin below holds.
+      '0038_nil_compliance_parser_roster_waterfall.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

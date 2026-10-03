@@ -86,7 +86,16 @@ export type StatementProfileKind =
   | "licensing_retail_sales_csv"
   | "licensing_sellthrough_log_csv"
   | "licensing_ecommerce_pos_csv"
-  | "licensing_wholesale_manifest_csv";
+  | "licensing_wholesale_manifest_csv"
+  // The NIL lane (PR 34) — the four statement senders the founder
+  // directive names (third-party brand endorsement deals, collective
+  // deal disclosures, school direct revenue-share distribution pools,
+  // media rights revenue distributions), one strict profile per
+  // sender's sheet.
+  | "nil_brand_endorsement_csv"
+  | "nil_collective_disclosure_csv"
+  | "nil_school_rev_share_pool_csv"
+  | "nil_media_rights_distribution_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -942,7 +951,57 @@ export interface ParsedStatementLine {
    * non-licensing line — the presence IS the lane discriminator. Optional
    * for the same reason as bookDetail. */
   licensingDetail?: LicensingLineDetail | null;
+
+  /** NIL lane context (the statement sender, the sender row id and NIL
+   * contract id of record, the addendum 13 athlete/school/state
+   * jurisdiction identifiers, the funding source, pool type, rights
+   * stream, participant roster, and the agency fee pair); null on every
+   * non-NIL line — the presence IS the lane discriminator. Optional for
+   * the same reason as bookDetail. */
+  nilDetail?: NilLineDetail | null;
 }
+
+/** The NIL lane's per-line context (PR 34) — the four strict senders'
+ * identity and fee legs. The addendum 13 identifiers (athlete_id,
+ * school_id, state_jurisdiction_code) ride here; the money basis rides
+ * the line's own grossMicros. */
+export type NilLineDetail = {
+  /** The statement sender — its own event-id space per sender. */
+  readonly sender: "brand" | "collective" | "school" | "media";
+  /** The sender's row id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The NIL contract id of record (the sender's deal/distribution id) —
+   * the valid business purpose audit's key. */
+  readonly nilContractId: string;
+  /** THE ADDENDUM 13 IDENTIFIERS — the athlete and school the money keys
+   * on, and the state jurisdiction the compliance matrix keys on; null
+   * where a sender's row is team-level (pools, media distributions). */
+  readonly athleteId: string | null;
+  readonly schoolId: string | null;
+  readonly stateJurisdictionCode: string | null;
+  /** The deal category — the state matrix's rule scope. */
+  readonly dealCategory: string;
+  /** The collective disclosure's funding source of record
+   * ('collective' | 'booster' | 'direct'); null on every other sender. */
+  readonly fundingSource: "collective" | "booster" | "direct" | null;
+  /** The collective disclosure's collective id; null elsewhere. */
+  readonly collectiveId: string | null;
+  /** The school pool's type of record; null elsewhere. */
+  readonly poolType: "media_rights" | "ticket_distribution" | null;
+  /** The media distribution's rights stream of record; null elsewhere. */
+  readonly rightsStream: "video_game" | "apparel" | "media" | null;
+  /** The media distribution's participating roster — semicolon-joined
+   * athlete ids; null elsewhere. */
+  readonly participantIds: string | null;
+  /** The agency fee pair — the founder's bands, validated at parse. */
+  readonly agencyMode: "marketing" | "direct_rev_share" | "none";
+  readonly agencyBps: number;
+  /** The row's money basis, exact micros text (deal value, pool, or
+   * distribution total) — recorded verbatim. */
+  readonly grossMicros: string;
+  /** The statement's period (reporting month, YYYY-MM). */
+  readonly period: string;
+};
 
 /** A worker parse rejection — profile-scoped, row-attributed, never silent. */
 export class StatementParseError extends Error {
