@@ -1,0 +1,4 @@
+Report ID,Report Date,License ID,Category Code,Territory ISO,Retailer,Gross Revenue,Trade Discounts,Returned Goods Allowance,Shipping Freight Deductions,VAT,Currency,Reporting Period
+R-1001,2026-08-15,LIC-APPAREL-001,APPAREL,US,Nordstrom,250000.00,12500.00,2000.00,3250.00,0.00,USD,2026-08
+R-1002,2026-08-20,LIC-APPAREL-001,APPAREL,GB,Selfridges,100000.00,5000.00,0.00,2500.00,0.00,USD,2026-08
+R-1003,2026-08-25,LIC-APPAREL-001,APPAREL,US,"Macy's Inc",100.00,150.00,0.00,0.00,0.00,USD,2026-08

@@ -28,6 +28,7 @@ import { AI_PROFILES } from "./aiProfiles";
 import { GAMING_PROFILES } from "./gamingProfiles";
 import { LIVESTREAM_PROFILES } from "./livestreamProfiles";
 import { WEBTOON_PROFILES } from "./webtoonProfiles";
+import { LICENSING_PROFILES } from "./licensingProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -559,6 +560,12 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // gallery equation, the ARR sliding scale, the fabrication recoupment
   // waterfalls, and the museum licensing isolation are art-only).
   ...ART_PROFILES,
+  // The brand-licensing lane (PR 32) — same dispatch opinion; the worker
+  // branches on the profile kind before the music machinery (the Net Sales
+  // realization, the cumulative tier walk, the agency commission, the
+  // dual-IP split, the treaty withholding, and the sub-license override
+  // with its audit gate are licensing-only).
+  ...LICENSING_PROFILES,
 ];
 
 /**

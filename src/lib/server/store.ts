@@ -141,6 +141,13 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingRoyaltyDealRecord,
+  LicensingRoyaltyApplicationRecord,
+  LicensingTreatyRateRecord,
+  LicensingSubLicenseeRecord,
+  LicensingSubLicenseReportRecord,
+} from '@/modules/licensing/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2356,6 +2363,125 @@ export interface Store {
     id: string,
     outcome: DistributorTraversalOutcome,
   ): Promise<DistributorConnectionRecord | undefined>;
+
+  // --- Brand licensing: Net Sales + tiered royalties + sub-license cascade
+  // --- (PR 32, migration 0036) ---
+
+  /**
+   * Registers (or replaces) the tiered-royalty deal of record for one
+   * license scope (`license:<license_id>`, migration 0036) — upsert on
+   * scope_key: a re-registration replaces the row atomically (the
+   * option-agreement/agency-policy discipline). The tier schedule is JSON
+   * (the table's jsonb column) validated by the records module before it
+   * ever reaches this seam; the caller increments version and preserves
+   * the cumulative counters — never this method.
+   */
+  upsertLicensingRoyaltyDeal(
+    row: Omit<LicensingRoyaltyDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingRoyaltyDealRecord>;
+
+  /** One license scope's deal of record; undefined when none — the
+   * cascade refuses (fail-closed), never guesses a schedule. */
+  getLicensingRoyaltyDeal(
+    scopeKey: string,
+  ): Promise<LicensingRoyaltyDealRecord | undefined>;
+
+  /**
+   * Appends one executed royalty application — a tier walk's immutable
+   * commit (migration 0036). UNIQUE per (deal_id, source_event_id) is the
+   * replay guard; UNIQUE per (deal_id, cumulative_before_cents) is the
+   * POSITION LOCK — a replayed walk or a lost position race throws the
+   * unique violation, never a double application; the caller retries at
+   * the advanced position.
+   */
+  insertLicensingRoyaltyApplication(
+    row: Omit<LicensingRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingRoyaltyApplicationRecord>;
+
+  /** One deal's executed applications, created_at ASC — the cumulative
+   * ledger the next period's tier walk reads. */
+  listLicensingRoyaltyApplications(
+    dealId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord[]>;
+
+  /**
+   * Registers (or replaces) the double-taxation treaty rate of record for
+   * one (source_country, residence_country) pair (migration 0036) — upsert
+   * on the pair: a re-registration converges (the newest rate governs the
+   * next walk).
+   */
+  upsertLicensingTreatyRate(
+    row: Omit<LicensingTreatyRateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingTreatyRateRecord>;
+
+  /** One (source, residence) pair's treaty rate; undefined when no treaty
+   * of record exists — the cascade refuses (fail-closed), never assumes
+   * 0%: the deal's withholding_default_bps or a HOLD governs. */
+  getLicensingTreatyRate(
+    sourceCountry: string,
+    residenceCountry: string,
+  ): Promise<LicensingTreatyRateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) a master-approved sub-licensee — upsert on
+   * (scope_key, sub_licensee_id) (migration 0036): the master royalty
+   * override of record the cascade applies to that regional party's
+   * reports.
+   */
+  upsertLicensingSubLicensee(
+    row: Omit<LicensingSubLicenseeRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseeRecord>;
+
+  /** One (scope, sub-licensee) registration; undefined when none — the
+   * cascade refuses an unregistered sub-licensee's report (fail-closed). */
+  getLicensingSubLicensee(
+    scopeKey: string,
+    subLicenseeId: string,
+  ): Promise<LicensingSubLicenseeRecord | undefined>;
+
+  /** Every sub-licensee registered under one master scope, created_at
+   * ASC — the cascade's regional discovery surface. */
+  listLicensingSubLicensees(
+    scopeKey: string,
+  ): Promise<LicensingSubLicenseeRecord[]>;
+
+  /**
+   * Records one regional sub-licensee gross report (migration 0036) —
+   * upsert on source_event_id (the once-only key): a re-shipped manifest
+   * converges, never a double report row.
+   */
+  upsertLicensingSubLicenseReport(
+    row: Omit<LicensingSubLicenseReportRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingSubLicenseReportRecord>;
+
+  /** One report of record by its source event id; undefined when none —
+   * fail-closed. */
+  getLicensingSubLicenseReport(
+    sourceEventId: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined>;
+
+  /** Every report filed under one master scope, created_at ASC — the
+   * audit trail the release path replays. */
+  listLicensingSubLicenseReports(
+    scopeKey: string,
+  ): Promise<LicensingSubLicenseReportRecord[]>;
+
+  /**
+   * The evidenced audit reconciliation CAS — flips ONE report row from
+   * audit_state 'unknown' to 'reconciled' (evidence_ref = the reconciler's
+   * citation, reconciled_by = the actor) in a single conditional statement
+   * (migration 0036's fail-closed audit gate). Returns the row only when
+   * THIS call won the transition; undefined when the id is unknown OR the
+   * row is already reconciled — the caller lost the race (or replayed).
+   * The flip happens BEFORE any proceeds release: a crash mid-release
+   * fails toward "nothing moved twice" — the reconciled report with no
+   * proceeds journal is the visible alarm.
+   */
+  reconcileLicensingSubLicenseReport(
+    id: string,
+    evidenceRef: string,
+    reconciledBy: string,
+  ): Promise<LicensingSubLicenseReportRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.

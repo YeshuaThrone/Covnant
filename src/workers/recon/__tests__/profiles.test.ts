@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers thirty-six profiles in dispatch order", () => {
+  it("registers forty profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -82,6 +82,14 @@ describe("profile registry", () => {
       "art_print_shop_sales_csv",
       "art_museum_licensing_csv",
       "art_foundation_estate_audit_csv",
+      // The brand-licensing lane (PR 32, the founder licensing directive) —
+      // dispatched last, its own rights family (retail sales reports,
+      // master-licensee sell-through logs, e-commerce POS feeds, and
+      // wholesale distributor manifests).
+      "licensing_retail_sales_csv",
+      "licensing_sellthrough_log_csv",
+      "licensing_ecommerce_pos_csv",
+      "licensing_wholesale_manifest_csv",
     ]);
   });
 

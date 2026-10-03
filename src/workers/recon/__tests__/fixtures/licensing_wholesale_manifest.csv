@@ -1,0 +1,4 @@
+Manifest ID,Ship Date,License ID,Category Code,Territory ISO,Sub-Licensee ID,Region Code,Distributor,Gross Revenue,Trade Discounts,Returned Goods Allowance,Shipping Freight Deductions,VAT,Reported Net,Currency,Reporting Period
+M-4001,2026-08-10,LIC-TOYS-002,TOYS,GB,SUB-EU-WEST,EU,Brighthouse Distribution,120000.00,6000.00,1500.00,2500.00,1200.00,108800.00,USD,2026-08
+M-4002,2026-08-12,LIC-TOYS-002,TOYS,GB,SUB-EU-WEST,EU,Brighthouse Distribution,80000.00,4000.00,1000.00,2000.00,800.00,72200.00,USD,2026-08
+M-4003,2026-08-14,LIC-TOYS-002,TOYS,GB,SUB-UNREGISTERED-99,EU,Shadow Distributors,50000.00,2500.00,500.00,2000.00,0.00,45000.00,USD,2026-08
