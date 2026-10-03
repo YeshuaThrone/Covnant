@@ -74,9 +74,8 @@ import {
   type DeveloperTierBand,
 } from "@/modules/developer/records";
 import type { ParsedStatementLine, DeveloperLineDetail } from "./records";
-import {
-  agentToolCallSplit,
-  copackageSplitCents,
+import { postInstantToolCallSettlement } from "@/lib/server/developerToolCallSettlements";
+import {  copackageSplitCents,
   dependencyFeeMicros,
   developerMicrosToCents,
   developerRowEventId,
@@ -128,6 +127,9 @@ export interface DeveloperWriteCounts {
   toolCallSettlementsWritten: number;
   toolCallSettlementsReplayed: number;
   toolCallSkippedNoPolicy: number;
+  /** PR 45: the instant postings — journals written the moment the
+   * detector's events priced (sub-cent pots post rows, no journal). */
+  toolCallInstantPostings: number;
   /** The committed money, integer cents. */
   netCodeUsagePoolCents: number;
   microRoyaltyCents: number;
@@ -174,6 +176,7 @@ export async function writeDeveloperRowsToStore(
     toolCallSettlementsWritten: 0,
     toolCallSettlementsReplayed: 0,
     toolCallSkippedNoPolicy: 0,
+    toolCallInstantPostings: 0,
     netCodeUsagePoolCents: 0,
     microRoyaltyCents: 0,
     marketplacePlatformCents: 0,
@@ -702,45 +705,37 @@ async function walkToolCallSettlement(
 ): Promise<void> {
   const sourceEventId = developerRowEventId("toolcall", detail);
 
-  const existing = await store.getDeveloperToolCallApplication(sourceEventId);
-  if (existing !== undefined) {
-    counts.toolCallSettlementsReplayed += 1;
-    return;
-  }
-
-  // The tool settlement policy of record — none registered, no
-  // settlement (the walk never guesses a payee or a rate).
-  const policy = await store.getDeveloperToolPolicy(detail.toolId);
-  if (policy === undefined) {
-    counts.toolCallSkippedNoPolicy += 1;
-    return;
-  }
-
-  // THE TOOL-CALL MICRO-SETTLEMENT — the pot prices per call and the
-  // builder's share floors off it; the legs conserve the pot exactly.
-  const settlement = agentToolCallSplit({
-    callCount: detail.callCount,
-    microsPerCall: policy.micros_per_call,
-    builderShareBps: policy.builder_share_bps,
-  });
-
-  await store.insertDeveloperToolCallApplication({
+  // PR 45 — the instant micro-settlement: EVERY detected agent tool-call
+  // event prices and posts the moment the walk reaches it (per-event, on
+  // detection — not a batch-end sweep). ONE pricing/posting path: the
+  // lane owns the replay guard, the fail-closed policy read, the PR 44
+  // split economics, the application row of record, and the immediate
+  // posting (builder ledger through the taxed cascade + platform share).
+  const result = await postInstantToolCallSettlement(store, {
     source_event_id: sourceEventId,
     agent_id: detail.agentId,
     tool_id: detail.toolId,
     call_count: detail.callCount,
     period: detail.period,
     currency: detail.currency,
-    policy_ref: policy.id,
-    builder_payee_id: policy.builder_payee_id,
-    micros_per_call: policy.micros_per_call,
-    settlement_micros: Number(settlement.settlementMicros),
-    settlement_cents: settlement.settlementCents,
-    builder_share_bps: policy.builder_share_bps,
-    builder_cents: settlement.builderCents,
-    platform_cents: settlement.platformCents,
   });
+  if (!result.ok) {
+    if (result.code === "tool_policy_missing") {
+      // The walk's counted fail-closed skip — never a guessed rate.
+      counts.toolCallSkippedNoPolicy += 1;
+      return;
+    }
+    throw new Error(`developer_toolcall_settlement_refused:${result.code}:${result.message}`);
+  }
+  const { value } = result;
+  if (value.replayed) {
+    counts.toolCallSettlementsReplayed += 1;
+    return;
+  }
   counts.toolCallSettlementsWritten += 1;
-  counts.toolCallBuilderCents += settlement.builderCents;
-  counts.toolCallPlatformCents += settlement.platformCents;
+  if (value.journal_id !== null) {
+    counts.toolCallInstantPostings += 1;
+  }
+  counts.toolCallBuilderCents += value.builder_cents;
+  counts.toolCallPlatformCents += value.platform_cents;
 }

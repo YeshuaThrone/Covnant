@@ -281,6 +281,12 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  SoftwareAuditEscrowDrawdownRecord,
+  SoftwareAuditEscrowPolicyRecord,
+  SoftwareAuditEscrowReconciliationRecord,
+  SoftwarePayoutGateStateRecord,
+} from '@/modules/software/records';
+import type {
   DeveloperAgentToolCallApplicationRecord,
   DeveloperApiCallMonthRecord,
   DeveloperApiMicroRoyaltyApplicationRecord,
@@ -609,6 +615,16 @@ export class InMemoryStore implements Store {
     ServiceAuditEscrowReconciliationRecord
   >();
   private servicesPayoutGateStates = new Map<string, ServicesPayoutGateStateRecord>();
+  // SOFTWARE_AUDIT_ESCROW (PR 45, migration 0049) — the software lane's
+  // policy rows, position-locked drawdowns, reconciliations of record,
+  // and payout gate states.
+  private softwareAuditEscrowPolicies = new Map<string, SoftwareAuditEscrowPolicyRecord>();
+  private softwareAuditEscrowDrawdowns: SoftwareAuditEscrowDrawdownRecord[] = [];
+  private softwareAuditEscrowReconciliations = new Map<
+    string,
+    SoftwareAuditEscrowReconciliationRecord
+  >();
+  private softwarePayoutGateStates = new Map<string, SoftwarePayoutGateStateRecord>();
   // Migration 0048 — the developer lane's registries of record, the two
   // cumulative monthly trackers, and the seven application ledgers.
   private developerApiRoyaltyPolicies = new Map<
@@ -6857,6 +6873,153 @@ export class InMemoryStore implements Store {
   ): Promise<ServicesPayoutGateStateRecord | undefined> {
     const found = this.servicesPayoutGateStates.get(
       `${payeeId}|${salonLocationId}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSoftwareAuditEscrowPolicy(
+    row: Omit<SoftwareAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwareAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.softwareAuditEscrowPolicies.get(row.scope_key);
+    const record: SoftwareAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.softwareAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getSoftwareAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SoftwareAuditEscrowPolicyRecord | undefined> {
+    const found = this.softwareAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSoftwareAuditEscrowDrawdown(
+    row: Omit<SoftwareAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.softwareAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('software_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.softwareAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('software_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: SoftwareAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.softwareAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listSoftwareAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.softwareAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertSoftwareAuditEscrowReconciliation(
+    row: Omit<SoftwareAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.softwareAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('software_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: SoftwareAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.softwareAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getSoftwareAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SoftwareAuditEscrowReconciliationRecord | undefined> {
+    const found = this.softwareAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleSoftwareAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'software_audit_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertSoftwarePayoutGateState(
+    row: Omit<SoftwarePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SoftwarePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, api_endpoint_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.api_endpoint_id}`;
+    const existing = this.softwarePayoutGateStates.get(key);
+    const record: SoftwarePayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.softwarePayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getSoftwarePayoutGateState(
+    payeeId: string,
+    apiEndpointId: string,
+  ): Promise<SoftwarePayoutGateStateRecord | undefined> {
+    const found = this.softwarePayoutGateStates.get(
+      `${payeeId}|${apiEndpointId}`,
     );
     return found === undefined ? undefined : { ...found };
   }

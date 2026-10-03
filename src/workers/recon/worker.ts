@@ -1277,6 +1277,7 @@ async function parseDeveloper(
     developer_tool_call_settlements_committed: counts.toolCallSettlementsWritten,
     developer_tool_call_settlements_replayed: counts.toolCallSettlementsReplayed,
     developer_tool_call_skipped_no_policy: counts.toolCallSkippedNoPolicy,
+    developer_tool_call_instant_postings: counts.toolCallInstantPostings,
     developer_net_code_usage_pool_cents: counts.netCodeUsagePoolCents,
     developer_micro_royalty_cents: counts.microRoyaltyCents,
     developer_marketplace_platform_cents: counts.marketplacePlatformCents,

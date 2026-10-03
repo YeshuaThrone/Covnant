@@ -608,6 +608,15 @@ export const JOURNAL_KINDS = [
   "service_audit_escrow_route",
   "service_audit_escrow_drawdown",
   "service_audit_escrow_release",
+  // PR 45, the founder software directive: the SOFTWARE_AUDIT_ESCROW's
+  // route/drawdown/release journals (the service twin's shapes) and the
+  // instant developer tool-call settlement post — the per-call pot split
+  // between the tool builder's vault and the platform the moment the PR
+  // 44 detector prices a tool-call batch.
+  "software_audit_escrow_route",
+  "software_audit_escrow_drawdown",
+  "software_audit_escrow_release",
+  "developer_toolcall_settlement_post",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -750,6 +759,33 @@ export function serviceAuditEscrowGlAccount(scopeKey: string): string {
 // policy, refused.
 export const SERVICE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
 export const SERVICE_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
+
+// SOFTWARE_AUDIT_ESCROW (PR 45, the founder software directive): the
+// software twin of the NIL, spatial, fitness, culinary, and service audit
+// escrows — 5–10% of a developer IP payout locks per (developer, API
+// endpoint) scope while the payout's exposure runs: uptime outage penalty
+// refunds, API rate-limit breach credits, and quarterly security
+// compliance audits draw it down, and the verified reconciliation of
+// record opens the release. Sentinel payee + GL account per scope key —
+// the no-fold discipline: the escrow is its own escrow-shaped money,
+// never folded into platform dust, unclaimed holding, or any other
+// escrow state.
+export const SOFTWARE_AUDIT_ESCROW_PAYEE_PREFIX = "software_audit_escrow";
+export function softwareAuditEscrowPayeeId(scopeKey: string): string {
+  return `${SOFTWARE_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function softwareAuditEscrowPayeeName(scopeKey: string): string {
+  return `SOFTWARE_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_SOFTWARE_AUDIT_ESCROW = "software_audit_escrow";
+export function softwareAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_SOFTWARE_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder band, enforced at registration AND at use: a 5–10% share of
+// the developer IP payout. Anything outside the band is a hostile policy,
+// refused.
+export const SOFTWARE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const SOFTWARE_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

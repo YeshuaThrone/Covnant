@@ -14,6 +14,7 @@ import {
   fitnessAuditEscrowGlAccount,
   culinaryAuditEscrowGlAccount,
   serviceAuditEscrowGlAccount,
+  softwareAuditEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
@@ -541,6 +542,26 @@ export function serviceAuditEscrowDebit(scopeKey: string, amountCents: number): 
 export function serviceAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: serviceAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// SOFTWARE_AUDIT_ESCROW legs (PR 45, the founder software directive) — the
+// service twin's shape over the software scope's own GL account. The route
+// locks the founder-banded share with a credit leg, the drawdown and the
+// release debit it back out; nothing else ever touches the account.
+export function softwareAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: softwareAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function softwareAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: softwareAuditEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };
