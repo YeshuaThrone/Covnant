@@ -233,6 +233,26 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  SportsBiometricMicroPayoutApplicationRecord,
+  SportsBiometricRoyaltyPolicyRecord,
+  SportsBiometricTrackingPostRecord,
+  SportsBroadcastingContractRecord,
+  SportsGateReconciliationRecord,
+  SportsGroupLicensingApplicationRecord,
+  SportsLicenseeClass,
+  SportsLeaguePoolDistributionRecord,
+  SportsLeaguePoolPolicyRecord,
+  SportsLeagueTeamRegistrationRecord,
+  SportsNetVenueRealizationRecord,
+  SportsNilDealReconciliationRecord,
+  SportsResaleRoyaltyApplicationRecord,
+  SportsResaleRoyaltyPolicyRecord,
+  SportsResaleSalePostRecord,
+  SportsStudentAthleteProfileRecord,
+  SportsTicketSalePostRecord,
+  SportsTurnstileScanPostRecord,
+} from '@/modules/sports/records';
+import type {
   FoodCobrandSplitApplicationRecord,
   FoodCobrandWeightingRecord,
   FoodCookCyclePolicyRecord,
@@ -4813,6 +4833,365 @@ CREATE TABLE IF NOT EXISTS energy_resource_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (payee_id, parcel_id)
+);
+
+-- PR 50 — the sports lane (ticketing, turnstile, resale, league pools,
+-- group licensing, NIL reconciliation, biometric payouts). The SQLite
+-- mirror keeps the Postgres wall types as TEXT; the CHECK vocabulary
+-- pins the same facts migration 0054 pins (byte-identical token lists).
+
+CREATE TABLE IF NOT EXISTS sports_student_athlete_profiles (
+  id TEXT PRIMARY KEY,
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  full_name TEXT NOT NULL CHECK (length(full_name) > 0),
+  school_id TEXT NOT NULL CHECK (length(school_id) > 0),
+  -- Every athlete belongs to a union ledger of record.
+  union_code TEXT NOT NULL CHECK (union_code IN ('NFLPA', 'NBAPA')),
+  nil_athlete_id TEXT NOT NULL CHECK (length(nil_athlete_id) > 0),
+  wallet_payee_id TEXT NOT NULL CHECK (length(wallet_payee_id) > 0),
+  eligible INTEGER NOT NULL CHECK (eligible IN (0, 1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (athlete_glan)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_profiles_nil_athlete
+  ON sports_student_athlete_profiles (nil_athlete_id);
+
+CREATE TABLE IF NOT EXISTS sports_resale_royalty_policies (
+  id TEXT PRIMARY KEY,
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  promoter_payee_id TEXT NOT NULL CHECK (length(promoter_payee_id) > 0),
+  promoter_payee_name TEXT NOT NULL CHECK (length(promoter_payee_name) > 0),
+  venue_payee_id TEXT NOT NULL CHECK (length(venue_payee_id) > 0),
+  venue_payee_name TEXT NOT NULL CHECK (length(venue_payee_name) > 0),
+  league_payee_id TEXT NOT NULL CHECK (length(league_payee_id) > 0),
+  league_payee_name TEXT NOT NULL CHECK (length(league_payee_name) > 0),
+  -- The founder resale royalty band — 5 to 10 percent.
+  resale_royalty_bps INTEGER NOT NULL CHECK (resale_royalty_bps >= 500 AND resale_royalty_bps <= 1000),
+  promoter_share_bps INTEGER NOT NULL CHECK (promoter_share_bps >= 0),
+  venue_share_bps INTEGER NOT NULL CHECK (venue_share_bps >= 0),
+  league_share_bps INTEGER NOT NULL CHECK (league_share_bps >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (venue_gln, league_rights_code),
+  -- THE THREE-WAY SPLIT, pinned: the shares conserve into the full pot.
+  CHECK (promoter_share_bps + venue_share_bps + league_share_bps = 10000)
+);
+
+CREATE TABLE IF NOT EXISTS sports_league_pool_policies (
+  id TEXT PRIMARY KEY,
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  equal_share_bps INTEGER NOT NULL CHECK (equal_share_bps >= 0),
+  market_balance_bps INTEGER NOT NULL CHECK (market_balance_bps >= 0),
+  performance_incentive_bps INTEGER NOT NULL CHECK (performance_incentive_bps >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (league_rights_code),
+  CHECK (equal_share_bps + market_balance_bps + performance_incentive_bps = 10000)
+);
+
+CREATE TABLE IF NOT EXISTS sports_league_team_registrations (
+  id TEXT PRIMARY KEY,
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  team_code TEXT NOT NULL CHECK (length(team_code) > 0),
+  owner_payee_id TEXT NOT NULL CHECK (length(owner_payee_id) > 0),
+  owner_payee_name TEXT NOT NULL CHECK (length(owner_payee_name) > 0),
+  market_size_micros INTEGER NOT NULL CHECK (market_size_micros >= 1),
+  payroll_micros INTEGER NOT NULL CHECK (payroll_micros >= 0),
+  cap_threshold_micros INTEGER NOT NULL CHECK (cap_threshold_micros >= 1),
+  -- The team performance incentive band — 0 to 1000 bps.
+  performance_incentive_bps INTEGER NOT NULL CHECK (performance_incentive_bps >= 0 AND performance_incentive_bps <= 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (league_rights_code, team_code)
+);
+
+CREATE TABLE IF NOT EXISTS sports_biometric_royalty_policies (
+  id TEXT PRIMARY KEY,
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  licensee_class TEXT NOT NULL CHECK (licensee_class IN ('sportsbook', 'media_network', 'health_tech')),
+  league_data_payee_id TEXT NOT NULL CHECK (length(league_data_payee_id) > 0),
+  league_data_payee_name TEXT NOT NULL CHECK (length(league_data_payee_name) > 0),
+  -- The micro-payout rate — money micros per quantity micro.
+  micros_per_unit INTEGER NOT NULL CHECK (micros_per_unit >= 1),
+  athlete_share_bps INTEGER NOT NULL CHECK (athlete_share_bps >= 0 AND athlete_share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (league_rights_code, licensee_class)
+);
+
+CREATE TABLE IF NOT EXISTS sports_ticket_sale_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  -- The founder's five identity columns — the Net Gate Pool tuple.
+  nil_contract_id TEXT NOT NULL CHECK (length(nil_contract_id) > 0),
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  turnstile_scan_hash TEXT NOT NULL CHECK (length(turnstile_scan_hash) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_ticket_revenue_cents INTEGER NOT NULL CHECK (gross_ticket_revenue_cents >= 0),
+  facility_surcharges_cents INTEGER NOT NULL CHECK (facility_surcharges_cents >= 0),
+  municipal_taxes_cents INTEGER NOT NULL CHECK (municipal_taxes_cents >= 0),
+  insurance_reserves_cents INTEGER NOT NULL CHECK (insurance_reserves_cents >= 0),
+  processor_fee_cuts_cents INTEGER NOT NULL CHECK (processor_fee_cuts_cents >= 0),
+  ticket_count INTEGER NOT NULL CHECK (ticket_count >= 1),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_ticket_sale_posts_recon
+  ON sports_ticket_sale_posts (venue_gln, period, currency);
+CREATE INDEX IF NOT EXISTS idx_sports_ticket_sale_posts_realization
+  ON sports_ticket_sale_posts (nil_contract_id, athlete_glan, venue_gln,
+    league_rights_code, turnstile_scan_hash, period, currency);
+
+CREATE TABLE IF NOT EXISTS sports_resale_sale_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  resale_gross_cents INTEGER NOT NULL CHECK (resale_gross_cents >= 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_resale_sale_posts_scope
+  ON sports_resale_sale_posts (venue_gln, period, currency);
+
+CREATE TABLE IF NOT EXISTS sports_turnstile_scan_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  turnstile_scan_hash TEXT NOT NULL CHECK (length(turnstile_scan_hash) > 0),
+  scan_count INTEGER NOT NULL CHECK (scan_count >= 1),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_turnstile_scan_posts_scope
+  ON sports_turnstile_scan_posts (venue_gln, period, currency);
+
+CREATE TABLE IF NOT EXISTS sports_biometric_tracking_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  tracking_modality TEXT NOT NULL CHECK (tracking_modality IN ('wearable', 'optical')),
+  licensee_class TEXT NOT NULL CHECK (licensee_class IN ('sportsbook', 'media_network', 'health_tech')),
+  licensed_quantity_micros INTEGER NOT NULL CHECK (licensed_quantity_micros >= 1),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS sports_broadcasting_contracts (
+  id TEXT PRIMARY KEY,
+  -- The contract_ref is the replay key (UNIQUE — a re-shipped contract
+  -- is a conflict, never a second row).
+  contract_ref TEXT NOT NULL CHECK (length(contract_ref) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  contract_class TEXT NOT NULL CHECK (contract_class IN (
+    'broadcasting_national', 'broadcasting_international', 'merchandise_pool',
+    'group_licensing_video_games', 'group_licensing_trading_cards',
+    'group_licensing_apparel')),
+  contract_gross_cents INTEGER NOT NULL CHECK (contract_gross_cents >= 0),
+  -- The group licensing royalty pot — 0 for the league pool classes.
+  royalty_pool_cents INTEGER NOT NULL CHECK (royalty_pool_cents >= 0),
+  union_code TEXT NOT NULL CHECK (union_code IN ('NFLPA', 'NBAPA', 'none')),
+  union_share_bps INTEGER NOT NULL CHECK (union_share_bps >= 0 AND union_share_bps <= 10000),
+  -- The group licensing roster — the athlete GLANs; '[]' for pool classes.
+  athlete_roster_json TEXT NOT NULL CHECK (length(athlete_roster_json) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (contract_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_broadcasting_contracts_pool
+  ON sports_broadcasting_contracts (league_rights_code, period, currency);
+
+CREATE TABLE IF NOT EXISTS sports_gate_reconciliations (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  ticket_count_sum INTEGER NOT NULL CHECK (ticket_count_sum >= 0),
+  scan_count_sum INTEGER NOT NULL CHECK (scan_count_sum >= 0),
+  -- scans − tickets, signed; flagged verdicts carry the delta.
+  variance_scan_delta INTEGER NOT NULL,
+  gross_ticket_revenue_cents INTEGER NOT NULL CHECK (gross_ticket_revenue_cents >= 0),
+  verdict TEXT NOT NULL CHECK (verdict IN ('reconciled', 'variance_flagged', 'unreconciled')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The venue scope's position of record — one per scope, replaced in
+  -- place by the recompute.
+  UNIQUE (venue_gln, period, currency),
+  -- THE RECONCILIATION DELTA, pinned: the delta is the scan side minus
+  -- the receipt side.
+  CHECK (variance_scan_delta = scan_count_sum - ticket_count_sum)
+);
+
+CREATE TABLE IF NOT EXISTS sports_net_venue_realizations (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  -- The founder's five identity columns.
+  nil_contract_id TEXT NOT NULL CHECK (length(nil_contract_id) > 0),
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  turnstile_scan_hash TEXT NOT NULL CHECK (length(turnstile_scan_hash) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_ticket_revenue_cents INTEGER NOT NULL CHECK (gross_ticket_revenue_cents >= 0),
+  facility_surcharges_cents INTEGER NOT NULL CHECK (facility_surcharges_cents >= 0),
+  municipal_taxes_cents INTEGER NOT NULL CHECK (municipal_taxes_cents >= 0),
+  insurance_reserves_cents INTEGER NOT NULL CHECK (insurance_reserves_cents >= 0),
+  processor_fee_cuts_cents INTEGER NOT NULL CHECK (processor_fee_cuts_cents >= 0),
+  -- THE NET GATE POOL — may be negative (the held verdict).
+  net_gate_pool_cents INTEGER NOT NULL,
+  -- The scope's gate reconciliation identity at recompute time.
+  gate_reconciliation_event_id TEXT NOT NULL CHECK (length(gate_reconciliation_event_id) > 0),
+  gate_reconciliation_verdict TEXT NOT NULL CHECK (gate_reconciliation_verdict IN ('reconciled', 'variance_flagged', 'unreconciled')),
+  verdict TEXT NOT NULL CHECK (verdict IN ('posted', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- One realization of record per the founder's tuple — the recompute
+  -- replaces the sums in place.
+  UNIQUE (nil_contract_id, athlete_glan, venue_gln, league_rights_code, turnstile_scan_hash, period, currency),
+  -- THE NET VENUE REALIZATION, pinned: gross ticket revenue minus
+  -- facility surcharges minus municipal taxes minus insurance reserves
+  -- minus payment processor fee cuts = the Net Gate Pool.
+  CHECK (
+    net_gate_pool_cents
+    = gross_ticket_revenue_cents
+      - facility_surcharges_cents - municipal_taxes_cents
+      - insurance_reserves_cents - processor_fee_cuts_cents
+  ),
+  CHECK (
+    (net_gate_pool_cents < 0 AND verdict = 'held_negative_net')
+    OR (net_gate_pool_cents >= 0 AND verdict = 'posted')
+  )
+);
+
+CREATE TABLE IF NOT EXISTS sports_resale_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  resale_sale_event_id TEXT NOT NULL CHECK (length(resale_sale_event_id) > 0),
+  venue_gln TEXT NOT NULL CHECK (length(venue_gln) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  resale_gross_cents INTEGER NOT NULL CHECK (resale_gross_cents >= 0),
+  resale_royalty_bps INTEGER NOT NULL CHECK (resale_royalty_bps >= 500 AND resale_royalty_bps <= 1000),
+  promoter_share_bps INTEGER NOT NULL CHECK (promoter_share_bps >= 0),
+  venue_share_bps INTEGER NOT NULL CHECK (venue_share_bps >= 0),
+  league_share_bps INTEGER NOT NULL CHECK (league_share_bps >= 0),
+  royalty_pot_cents INTEGER NOT NULL CHECK (royalty_pot_cents >= 0),
+  promoter_leg_cents INTEGER NOT NULL CHECK (promoter_leg_cents >= 0),
+  venue_leg_cents INTEGER NOT NULL CHECK (venue_leg_cents >= 0),
+  league_leg_cents INTEGER NOT NULL CHECK (league_leg_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE PERPETUAL ROYALTY, pinned: the three legs conserve the pot.
+  CHECK (promoter_leg_cents + venue_leg_cents + league_leg_cents = royalty_pot_cents)
+);
+
+CREATE TABLE IF NOT EXISTS sports_league_pool_distributions (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  pool_cents INTEGER NOT NULL CHECK (pool_cents >= 0),
+  equal_share_bps INTEGER NOT NULL CHECK (equal_share_bps >= 0),
+  market_balance_bps INTEGER NOT NULL CHECK (market_balance_bps >= 0),
+  performance_incentive_bps INTEGER NOT NULL CHECK (performance_incentive_bps >= 0),
+  -- The team legs of record (JSON text: per team, the shares and cents).
+  legs_json TEXT NOT NULL CHECK (length(legs_json) > 0),
+  distributed_cents INTEGER NOT NULL CHECK (distributed_cents >= 0),
+  dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The scope's position of record — one per league scope.
+  UNIQUE (league_rights_code, period, currency),
+  -- THE POOL WATERFALL, pinned: the distributed legs plus the dust
+  -- conserve the pool exactly.
+  CHECK (distributed_cents + dust_cents = pool_cents),
+  CHECK (equal_share_bps + market_balance_bps + performance_incentive_bps = 10000)
+);
+
+CREATE TABLE IF NOT EXISTS sports_group_licensing_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  contract_ref TEXT NOT NULL CHECK (length(contract_ref) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  union_code TEXT NOT NULL CHECK (union_code IN ('NFLPA', 'NBAPA')),
+  union_payee_id TEXT NOT NULL CHECK (length(union_payee_id) > 0),
+  union_share_bps INTEGER NOT NULL CHECK (union_share_bps >= 0 AND union_share_bps <= 10000),
+  royalty_pool_cents INTEGER NOT NULL CHECK (royalty_pool_cents >= 0),
+  union_leg_cents INTEGER NOT NULL CHECK (union_leg_cents >= 0),
+  athlete_pool_cents INTEGER NOT NULL CHECK (athlete_pool_cents >= 0),
+  athlete_wallets_json TEXT NOT NULL CHECK (length(athlete_wallets_json) > 0),
+  wallet_count INTEGER NOT NULL CHECK (wallet_count >= 1),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE GROUP LICENSING SPLIT, pinned: the union leg plus the athlete
+  -- pool conserve the royalty pot.
+  CHECK (union_leg_cents + athlete_pool_cents = royalty_pool_cents)
+);
+
+CREATE TABLE IF NOT EXISTS sports_nil_deal_reconciliations (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  nil_contract_id TEXT NOT NULL CHECK (length(nil_contract_id) > 0),
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  endorsement_deal_cents INTEGER NOT NULL CHECK (endorsement_deal_cents >= 0),
+  booster_collective_cents INTEGER NOT NULL CHECK (booster_collective_cents >= 0),
+  -- Carried at zero today: the NIL lane has no fan-club sender yet.
+  fan_club_subscription_cents INTEGER NOT NULL CHECK (fan_club_subscription_cents >= 0),
+  nil_deal_gross_cents INTEGER NOT NULL CHECK (nil_deal_gross_cents >= 0),
+  verdict TEXT NOT NULL CHECK (verdict IN ('reconciled', 'unmatched_profile', 'profile_ineligible')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- The scope's position of record — one per (contract, athlete, period).
+  UNIQUE (nil_contract_id, athlete_glan, period),
+  -- THE NIL WATERFALL, pinned: the gross is the sum of the three legs.
+  CHECK (
+    nil_deal_gross_cents
+    = endorsement_deal_cents + booster_collective_cents
+      + fan_club_subscription_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS sports_biometric_micro_payout_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  biometric_post_event_id TEXT NOT NULL CHECK (length(biometric_post_event_id) > 0),
+  athlete_glan TEXT NOT NULL CHECK (length(athlete_glan) > 0),
+  league_rights_code TEXT NOT NULL CHECK (length(league_rights_code) > 0),
+  tracking_modality TEXT NOT NULL CHECK (tracking_modality IN ('wearable', 'optical')),
+  licensee_class TEXT NOT NULL CHECK (licensee_class IN ('sportsbook', 'media_network', 'health_tech')),
+  licensed_quantity_micros INTEGER NOT NULL CHECK (licensed_quantity_micros >= 1),
+  micros_per_unit INTEGER NOT NULL CHECK (micros_per_unit >= 1),
+  athlete_share_bps INTEGER NOT NULL CHECK (athlete_share_bps >= 0 AND athlete_share_bps <= 10000),
+  payout_pot_cents INTEGER NOT NULL CHECK (payout_pot_cents >= 0),
+  athlete_wallet_payee_id TEXT NOT NULL CHECK (length(athlete_wallet_payee_id) > 0),
+  athlete_leg_cents INTEGER NOT NULL CHECK (athlete_leg_cents >= 0),
+  league_data_payee_id TEXT NOT NULL CHECK (length(league_data_payee_id) > 0),
+  league_leg_cents INTEGER NOT NULL CHECK (league_leg_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE MICRO-PAYOUT, pinned: the athlete leg plus the league data leg
+  -- conserve the payout pot.
+  CHECK (athlete_leg_cents + league_leg_cents = payout_pot_cents)
 );
 `;
 
@@ -20763,6 +21142,1322 @@ export class SqliteStore implements Store {
       journal_id: row.journal_id as string | null,
       created_at: row.created_at as string,
     }));
+  }
+
+  // ------------------------------------------------------------------
+  // PR 50 — the sports lane. The SQLite mirror of the sports store
+  // seam: registry upserts converge on their natural keys, posts are
+  // replay-guarded by UNIQUE(source_event_id) (contract_ref for the
+  // contracts), and the positions of record replace in place — no id
+  // in any conflict payload (the PR 33 lesson).
+  // ------------------------------------------------------------------
+
+  async upsertSportsStudentAthleteProfile(
+    row: Omit<SportsStudentAthleteProfileRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsStudentAthleteProfileRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_student_athlete_profiles
+           (id, athlete_glan, full_name, school_id, union_code, nil_athlete_id,
+            wallet_payee_id, eligible, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (athlete_glan) DO UPDATE SET
+           full_name = excluded.full_name,
+           school_id = excluded.school_id,
+           union_code = excluded.union_code,
+           nil_athlete_id = excluded.nil_athlete_id,
+           wallet_payee_id = excluded.wallet_payee_id,
+           eligible = excluded.eligible,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.athlete_glan,
+        row.full_name,
+        row.school_id,
+        row.union_code,
+        row.nil_athlete_id,
+        row.wallet_payee_id,
+        row.eligible ? 1 : 0,
+        now,
+        now,
+      );
+    const found = await this.getSportsStudentAthleteProfile(row.athlete_glan);
+    if (found === undefined) {
+      throw new Error('sports_student_athlete_profile_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsStudentAthleteProfile(
+    athleteGlan: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_student_athlete_profiles WHERE athlete_glan = ?`)
+      .get(athleteGlan) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      athlete_glan: row.athlete_glan as string,
+      full_name: row.full_name as string,
+      school_id: row.school_id as string,
+      union_code: row.union_code as SportsStudentAthleteProfileRecord['union_code'],
+      nil_athlete_id: row.nil_athlete_id as string,
+      wallet_payee_id: row.wallet_payee_id as string,
+      eligible: row.eligible === 1,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async getSportsStudentAthleteProfileByNilAthleteId(
+    nilAthleteId: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_student_athlete_profiles WHERE nil_athlete_id = ?`,
+      )
+      .get(nilAthleteId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      athlete_glan: row.athlete_glan as string,
+      full_name: row.full_name as string,
+      school_id: row.school_id as string,
+      union_code: row.union_code as SportsStudentAthleteProfileRecord['union_code'],
+      nil_athlete_id: row.nil_athlete_id as string,
+      wallet_payee_id: row.wallet_payee_id as string,
+      eligible: row.eligible === 1,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSportsResaleRoyaltyPolicy(
+    row: Omit<SportsResaleRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsResaleRoyaltyPolicyRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_resale_royalty_policies
+           (id, venue_gln, league_rights_code, promoter_payee_id, promoter_payee_name,
+            venue_payee_id, venue_payee_name, league_payee_id, league_payee_name,
+            resale_royalty_bps, promoter_share_bps, venue_share_bps, league_share_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_gln, league_rights_code) DO UPDATE SET
+           promoter_payee_id = excluded.promoter_payee_id,
+           promoter_payee_name = excluded.promoter_payee_name,
+           venue_payee_id = excluded.venue_payee_id,
+           venue_payee_name = excluded.venue_payee_name,
+           league_payee_id = excluded.league_payee_id,
+           league_payee_name = excluded.league_payee_name,
+           resale_royalty_bps = excluded.resale_royalty_bps,
+           promoter_share_bps = excluded.promoter_share_bps,
+           venue_share_bps = excluded.venue_share_bps,
+           league_share_bps = excluded.league_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.venue_gln,
+        row.league_rights_code,
+        row.promoter_payee_id,
+        row.promoter_payee_name,
+        row.venue_payee_id,
+        row.venue_payee_name,
+        row.league_payee_id,
+        row.league_payee_name,
+        row.resale_royalty_bps,
+        row.promoter_share_bps,
+        row.venue_share_bps,
+        row.league_share_bps,
+        now,
+        now,
+      );
+    const found = await this.getSportsResaleRoyaltyPolicy(
+      row.venue_gln,
+      row.league_rights_code,
+    );
+    if (found === undefined) {
+      throw new Error('sports_resale_royalty_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsResaleRoyaltyPolicy(
+    venueGln: string,
+    leagueRightsCode: string,
+  ): Promise<SportsResaleRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_resale_royalty_policies
+           WHERE venue_gln = ? AND league_rights_code = ?`,
+      )
+      .get(venueGln, leagueRightsCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      promoter_payee_id: row.promoter_payee_id as string,
+      promoter_payee_name: row.promoter_payee_name as string,
+      venue_payee_id: row.venue_payee_id as string,
+      venue_payee_name: row.venue_payee_name as string,
+      league_payee_id: row.league_payee_id as string,
+      league_payee_name: row.league_payee_name as string,
+      resale_royalty_bps: row.resale_royalty_bps as number,
+      promoter_share_bps: row.promoter_share_bps as number,
+      venue_share_bps: row.venue_share_bps as number,
+      league_share_bps: row.league_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSportsLeaguePoolPolicy(
+    row: Omit<SportsLeaguePoolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolPolicyRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_league_pool_policies
+           (id, league_rights_code, equal_share_bps, market_balance_bps,
+            performance_incentive_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (league_rights_code) DO UPDATE SET
+           equal_share_bps = excluded.equal_share_bps,
+           market_balance_bps = excluded.market_balance_bps,
+           performance_incentive_bps = excluded.performance_incentive_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.league_rights_code,
+        row.equal_share_bps,
+        row.market_balance_bps,
+        row.performance_incentive_bps,
+        now,
+        now,
+      );
+    const found = await this.getSportsLeaguePoolPolicy(row.league_rights_code);
+    if (found === undefined) {
+      throw new Error('sports_league_pool_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsLeaguePoolPolicy(
+    leagueRightsCode: string,
+  ): Promise<SportsLeaguePoolPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_league_pool_policies WHERE league_rights_code = ?`)
+      .get(leagueRightsCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      league_rights_code: row.league_rights_code as string,
+      equal_share_bps: row.equal_share_bps as number,
+      market_balance_bps: row.market_balance_bps as number,
+      performance_incentive_bps: row.performance_incentive_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSportsLeagueTeam(
+    row: Omit<SportsLeagueTeamRegistrationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeagueTeamRegistrationRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_league_team_registrations
+           (id, league_rights_code, team_code, owner_payee_id, owner_payee_name,
+            market_size_micros, payroll_micros, cap_threshold_micros,
+            performance_incentive_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (league_rights_code, team_code) DO UPDATE SET
+           owner_payee_id = excluded.owner_payee_id,
+           owner_payee_name = excluded.owner_payee_name,
+           market_size_micros = excluded.market_size_micros,
+           payroll_micros = excluded.payroll_micros,
+           cap_threshold_micros = excluded.cap_threshold_micros,
+           performance_incentive_bps = excluded.performance_incentive_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.league_rights_code,
+        row.team_code,
+        row.owner_payee_id,
+        row.owner_payee_name,
+        row.market_size_micros,
+        row.payroll_micros,
+        row.cap_threshold_micros,
+        row.performance_incentive_bps,
+        now,
+        now,
+      );
+    const found = this.db
+      .prepare(
+        `SELECT * FROM sports_league_team_registrations
+           WHERE league_rights_code = ? AND team_code = ?`,
+      )
+      .get(row.league_rights_code, row.team_code) as Record<string, unknown> | undefined;
+    if (found === undefined) {
+      throw new Error('sports_league_team_upsert_failed');
+    }
+    return this.projectSportsLeagueTeam(found);
+  }
+
+  private projectSportsLeagueTeam(
+    row: Record<string, unknown>,
+  ): SportsLeagueTeamRegistrationRecord {
+    return {
+      id: row.id as string,
+      league_rights_code: row.league_rights_code as string,
+      team_code: row.team_code as string,
+      owner_payee_id: row.owner_payee_id as string,
+      owner_payee_name: row.owner_payee_name as string,
+      market_size_micros: row.market_size_micros as number,
+      payroll_micros: row.payroll_micros as number,
+      cap_threshold_micros: row.cap_threshold_micros as number,
+      performance_incentive_bps: row.performance_incentive_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listSportsLeagueTeams(
+    leagueRightsCode: string,
+  ): Promise<SportsLeagueTeamRegistrationRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sports_league_team_registrations
+           WHERE league_rights_code = ? ORDER BY team_code ASC`,
+      )
+      .all(leagueRightsCode) as Record<string, unknown>[];
+    return rows.map((row) => this.projectSportsLeagueTeam(row));
+  }
+
+  async upsertSportsBiometricRoyaltyPolicy(
+    row: Omit<SportsBiometricRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_biometric_royalty_policies
+           (id, league_rights_code, licensee_class, league_data_payee_id,
+            league_data_payee_name, micros_per_unit, athlete_share_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (league_rights_code, licensee_class) DO UPDATE SET
+           league_data_payee_id = excluded.league_data_payee_id,
+           league_data_payee_name = excluded.league_data_payee_name,
+           micros_per_unit = excluded.micros_per_unit,
+           athlete_share_bps = excluded.athlete_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.league_rights_code,
+        row.licensee_class,
+        row.league_data_payee_id,
+        row.league_data_payee_name,
+        row.micros_per_unit,
+        row.athlete_share_bps,
+        now,
+        now,
+      );
+    const found = await this.getSportsBiometricRoyaltyPolicy(
+      row.league_rights_code,
+      row.licensee_class,
+    );
+    if (found === undefined) {
+      throw new Error('sports_biometric_royalty_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsBiometricRoyaltyPolicy(
+    leagueRightsCode: string,
+    licenseeClass: SportsLicenseeClass,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_biometric_royalty_policies
+           WHERE league_rights_code = ? AND licensee_class = ?`,
+      )
+      .get(leagueRightsCode, licenseeClass) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      league_rights_code: row.league_rights_code as string,
+      licensee_class: row.licensee_class as SportsLicenseeClass,
+      league_data_payee_id: row.league_data_payee_id as string,
+      league_data_payee_name: row.league_data_payee_name as string,
+      micros_per_unit: row.micros_per_unit as number,
+      athlete_share_bps: row.athlete_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSportsTicketSalePost(
+    row: Omit<SportsTicketSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTicketSalePostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_ticket_sale_posts
+           (id, source_event_id, nil_contract_id, athlete_glan, venue_gln,
+            league_rights_code, turnstile_scan_hash, period, currency,
+            gross_ticket_revenue_cents, facility_surcharges_cents,
+            municipal_taxes_cents, insurance_reserves_cents,
+            processor_fee_cuts_cents, ticket_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.nil_contract_id,
+        record.athlete_glan,
+        record.venue_gln,
+        record.league_rights_code,
+        record.turnstile_scan_hash,
+        record.period,
+        record.currency,
+        record.gross_ticket_revenue_cents,
+        record.facility_surcharges_cents,
+        record.municipal_taxes_cents,
+        record.insurance_reserves_cents,
+        record.processor_fee_cuts_cents,
+        record.ticket_count,
+        record.created_at,
+      );
+    return record;
+  }
+
+  private projectSportsTicketSalePost(
+    row: Record<string, unknown>,
+  ): SportsTicketSalePostRecord {
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_glan: row.athlete_glan as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      turnstile_scan_hash: row.turnstile_scan_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_ticket_revenue_cents: row.gross_ticket_revenue_cents as number,
+      facility_surcharges_cents: row.facility_surcharges_cents as number,
+      municipal_taxes_cents: row.municipal_taxes_cents as number,
+      insurance_reserves_cents: row.insurance_reserves_cents as number,
+      processor_fee_cuts_cents: row.processor_fee_cuts_cents as number,
+      ticket_count: row.ticket_count as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async getSportsTicketSalePost(
+    sourceEventId: string,
+  ): Promise<SportsTicketSalePostRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_ticket_sale_posts WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : this.projectSportsTicketSalePost(row);
+  }
+
+  async insertSportsResaleSalePost(
+    row: Omit<SportsResaleSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleSalePostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_resale_sale_posts
+           (id, source_event_id, venue_gln, league_rights_code,
+            resale_gross_cents, period, currency, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.venue_gln,
+        record.league_rights_code,
+        record.resale_gross_cents,
+        record.period,
+        record.currency,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsResaleSalePost(
+    sourceEventId: string,
+  ): Promise<SportsResaleSalePostRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_resale_sale_posts WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      resale_gross_cents: row.resale_gross_cents as number,
+      period: row.period as string,
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertSportsTurnstileScanPost(
+    row: Omit<SportsTurnstileScanPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTurnstileScanPostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_turnstile_scan_posts
+           (id, source_event_id, venue_gln, turnstile_scan_hash, scan_count,
+            period, currency, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.venue_gln,
+        record.turnstile_scan_hash,
+        record.scan_count,
+        record.period,
+        record.currency,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsTurnstileScanPost(
+    sourceEventId: string,
+  ): Promise<SportsTurnstileScanPostRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_turnstile_scan_posts WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      venue_gln: row.venue_gln as string,
+      turnstile_scan_hash: row.turnstile_scan_hash as string,
+      scan_count: row.scan_count as number,
+      period: row.period as string,
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertSportsBiometricTrackingPost(
+    row: Omit<SportsBiometricTrackingPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricTrackingPostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_biometric_tracking_posts
+           (id, source_event_id, athlete_glan, league_rights_code,
+            tracking_modality, licensee_class, licensed_quantity_micros,
+            period, currency, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.athlete_glan,
+        record.league_rights_code,
+        record.tracking_modality,
+        record.licensee_class,
+        record.licensed_quantity_micros,
+        record.period,
+        record.currency,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsBiometricTrackingPost(
+    sourceEventId: string,
+  ): Promise<SportsBiometricTrackingPostRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_biometric_tracking_posts WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      athlete_glan: row.athlete_glan as string,
+      league_rights_code: row.league_rights_code as string,
+      tracking_modality: row.tracking_modality as SportsBiometricTrackingPostRecord['tracking_modality'],
+      licensee_class: row.licensee_class as SportsBiometricTrackingPostRecord['licensee_class'],
+      licensed_quantity_micros: row.licensed_quantity_micros as number,
+      period: row.period as string,
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertSportsBroadcastingContract(
+    row: Omit<SportsBroadcastingContractRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBroadcastingContractRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_broadcasting_contracts
+           (id, contract_ref, league_rights_code, contract_class,
+            contract_gross_cents, royalty_pool_cents, union_code,
+            union_share_bps, athlete_roster_json, period, currency, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.contract_ref,
+        record.league_rights_code,
+        record.contract_class,
+        record.contract_gross_cents,
+        record.royalty_pool_cents,
+        record.union_code,
+        record.union_share_bps,
+        record.athlete_roster_json,
+        record.period,
+        record.currency,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsBroadcastingContract(
+    contractRef: string,
+  ): Promise<SportsBroadcastingContractRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_broadcasting_contracts WHERE contract_ref = ?`)
+      .get(contractRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      contract_ref: row.contract_ref as string,
+      league_rights_code: row.league_rights_code as string,
+      contract_class: row.contract_class as SportsBroadcastingContractRecord['contract_class'],
+      contract_gross_cents: row.contract_gross_cents as number,
+      royalty_pool_cents: row.royalty_pool_cents as number,
+      union_code: row.union_code as SportsBroadcastingContractRecord['union_code'],
+      union_share_bps: row.union_share_bps as number,
+      athlete_roster_json: row.athlete_roster_json as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async sumSportsGateLegs(
+    nilContractId: string,
+    athleteGlan: string,
+    venueGln: string,
+    leagueRightsCode: string,
+    turnstileScanHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_ticket_revenue_cents: number;
+    facility_surcharges_cents: number;
+    municipal_taxes_cents: number;
+    insurance_reserves_cents: number;
+    processor_fee_cuts_cents: number;
+    ticket_count: number;
+  }> {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(gross_ticket_revenue_cents), 0) AS gross_ticket_revenue_cents,
+           COALESCE(SUM(facility_surcharges_cents), 0) AS facility_surcharges_cents,
+           COALESCE(SUM(municipal_taxes_cents), 0) AS municipal_taxes_cents,
+           COALESCE(SUM(insurance_reserves_cents), 0) AS insurance_reserves_cents,
+           COALESCE(SUM(processor_fee_cuts_cents), 0) AS processor_fee_cuts_cents,
+           COALESCE(SUM(ticket_count), 0) AS ticket_count
+         FROM sports_ticket_sale_posts
+         WHERE nil_contract_id = ? AND athlete_glan = ? AND venue_gln = ?
+           AND league_rights_code = ? AND turnstile_scan_hash = ?
+           AND period = ? AND currency = ?`,
+      )
+      .get(
+        nilContractId,
+        athleteGlan,
+        venueGln,
+        leagueRightsCode,
+        turnstileScanHash,
+        period,
+        currency,
+      ) as Record<string, unknown>;
+    return {
+      gross_ticket_revenue_cents: row.gross_ticket_revenue_cents as number,
+      facility_surcharges_cents: row.facility_surcharges_cents as number,
+      municipal_taxes_cents: row.municipal_taxes_cents as number,
+      insurance_reserves_cents: row.insurance_reserves_cents as number,
+      processor_fee_cuts_cents: row.processor_fee_cuts_cents as number,
+      ticket_count: row.ticket_count as number,
+    };
+  }
+
+  async listSportsTicketSaleKeysForHash(
+    venueGln: string,
+    turnstileScanHash: string,
+  ): Promise<
+    Array<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }>
+  > {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT nil_contract_id, athlete_glan, venue_gln,
+                league_rights_code, turnstile_scan_hash, period, currency
+         FROM sports_ticket_sale_posts
+         WHERE venue_gln = ? AND turnstile_scan_hash = ?`,
+      )
+      .all(venueGln, turnstileScanHash) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_glan: row.athlete_glan as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      turnstile_scan_hash: row.turnstile_scan_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+    }));
+  }
+
+  async sumSportsGateReconciliationSides(
+    venueGln: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    ticket_count_sum: number;
+    scan_count_sum: number;
+    gross_ticket_revenue_cents: number;
+  }> {
+    const ticketRow = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(ticket_count), 0) AS ticket_count_sum,
+                COALESCE(SUM(gross_ticket_revenue_cents), 0) AS gross_ticket_revenue_cents
+         FROM sports_ticket_sale_posts
+         WHERE venue_gln = ? AND period = ? AND currency = ?`,
+      )
+      .get(venueGln, period, currency) as Record<string, unknown>;
+    const scanRow = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(scan_count), 0) AS scan_count_sum
+         FROM sports_turnstile_scan_posts
+         WHERE venue_gln = ? AND period = ? AND currency = ?`,
+      )
+      .get(venueGln, period, currency) as Record<string, unknown>;
+    return {
+      ticket_count_sum: ticketRow.ticket_count_sum as number,
+      scan_count_sum: scanRow.scan_count_sum as number,
+      gross_ticket_revenue_cents: ticketRow.gross_ticket_revenue_cents as number,
+    };
+  }
+
+  async upsertSportsGateReconciliation(
+    row: Omit<SportsGateReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsGateReconciliationRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_gate_reconciliations
+           (id, source_event_id, venue_gln, period, currency,
+            ticket_count_sum, scan_count_sum, variance_scan_delta,
+            gross_ticket_revenue_cents, verdict, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (venue_gln, period, currency) DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           ticket_count_sum = excluded.ticket_count_sum,
+           scan_count_sum = excluded.scan_count_sum,
+           variance_scan_delta = excluded.variance_scan_delta,
+           gross_ticket_revenue_cents = excluded.gross_ticket_revenue_cents,
+           verdict = excluded.verdict,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.source_event_id,
+        row.venue_gln,
+        row.period,
+        row.currency,
+        row.ticket_count_sum,
+        row.scan_count_sum,
+        row.variance_scan_delta,
+        row.gross_ticket_revenue_cents,
+        row.verdict,
+        now,
+        now,
+      );
+    const found = await this.getSportsGateReconciliation(row.source_event_id);
+    if (found === undefined) {
+      throw new Error('sports_gate_reconciliation_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsGateReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsGateReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_gate_reconciliations WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      venue_gln: row.venue_gln as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      ticket_count_sum: row.ticket_count_sum as number,
+      scan_count_sum: row.scan_count_sum as number,
+      variance_scan_delta: row.variance_scan_delta as number,
+      gross_ticket_revenue_cents: row.gross_ticket_revenue_cents as number,
+      verdict: row.verdict as SportsGateReconciliationRecord['verdict'],
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertSportsNetVenueRealization(
+    row: Omit<SportsNetVenueRealizationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNetVenueRealizationRecord> {
+    // The realization position of record — UNIQUE per the founder's
+    // tuple; the recompute replaces the sums in place (no id in the
+    // conflict payload — the PR 33 lesson).
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_net_venue_realizations
+           (id, source_event_id, nil_contract_id, athlete_glan, venue_gln,
+            league_rights_code, turnstile_scan_hash, period, currency,
+            gross_ticket_revenue_cents, facility_surcharges_cents,
+            municipal_taxes_cents, insurance_reserves_cents,
+            processor_fee_cuts_cents, net_gate_pool_cents,
+            gate_reconciliation_event_id, gate_reconciliation_verdict,
+            verdict, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (nil_contract_id, athlete_glan, venue_gln,
+                      league_rights_code, turnstile_scan_hash, period, currency)
+         DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           gross_ticket_revenue_cents = excluded.gross_ticket_revenue_cents,
+           facility_surcharges_cents = excluded.facility_surcharges_cents,
+           municipal_taxes_cents = excluded.municipal_taxes_cents,
+           insurance_reserves_cents = excluded.insurance_reserves_cents,
+           processor_fee_cuts_cents = excluded.processor_fee_cuts_cents,
+           net_gate_pool_cents = excluded.net_gate_pool_cents,
+           gate_reconciliation_event_id = excluded.gate_reconciliation_event_id,
+           gate_reconciliation_verdict = excluded.gate_reconciliation_verdict,
+           verdict = excluded.verdict,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.source_event_id,
+        row.nil_contract_id,
+        row.athlete_glan,
+        row.venue_gln,
+        row.league_rights_code,
+        row.turnstile_scan_hash,
+        row.period,
+        row.currency,
+        row.gross_ticket_revenue_cents,
+        row.facility_surcharges_cents,
+        row.municipal_taxes_cents,
+        row.insurance_reserves_cents,
+        row.processor_fee_cuts_cents,
+        row.net_gate_pool_cents,
+        row.gate_reconciliation_event_id,
+        row.gate_reconciliation_verdict,
+        row.verdict,
+        now,
+        now,
+      );
+    const found = await this.getSportsNetVenueRealization(row.source_event_id);
+    if (found === undefined) {
+      throw new Error('sports_net_venue_realization_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsNetVenueRealization(
+    sourceEventId: string,
+  ): Promise<SportsNetVenueRealizationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM sports_net_venue_realizations WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_glan: row.athlete_glan as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      turnstile_scan_hash: row.turnstile_scan_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_ticket_revenue_cents: row.gross_ticket_revenue_cents as number,
+      facility_surcharges_cents: row.facility_surcharges_cents as number,
+      municipal_taxes_cents: row.municipal_taxes_cents as number,
+      insurance_reserves_cents: row.insurance_reserves_cents as number,
+      processor_fee_cuts_cents: row.processor_fee_cuts_cents as number,
+      net_gate_pool_cents: row.net_gate_pool_cents as number,
+      gate_reconciliation_event_id: row.gate_reconciliation_event_id as string,
+      gate_reconciliation_verdict:
+        row.gate_reconciliation_verdict as SportsNetVenueRealizationRecord['gate_reconciliation_verdict'],
+      verdict: row.verdict as SportsNetVenueRealizationRecord['verdict'],
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSportsResaleRoyaltyApplication(
+    row: Omit<SportsResaleRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleRoyaltyApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_resale_royalty_applications
+           (id, source_event_id, resale_sale_event_id, venue_gln,
+            league_rights_code, resale_gross_cents, resale_royalty_bps,
+            promoter_share_bps, venue_share_bps, league_share_bps,
+            royalty_pot_cents, promoter_leg_cents, venue_leg_cents,
+            league_leg_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.resale_sale_event_id,
+        record.venue_gln,
+        record.league_rights_code,
+        record.resale_gross_cents,
+        record.resale_royalty_bps,
+        record.promoter_share_bps,
+        record.venue_share_bps,
+        record.league_share_bps,
+        record.royalty_pot_cents,
+        record.promoter_leg_cents,
+        record.venue_leg_cents,
+        record.league_leg_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsResaleRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_resale_royalty_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      resale_sale_event_id: row.resale_sale_event_id as string,
+      venue_gln: row.venue_gln as string,
+      league_rights_code: row.league_rights_code as string,
+      resale_gross_cents: row.resale_gross_cents as number,
+      resale_royalty_bps: row.resale_royalty_bps as number,
+      promoter_share_bps: row.promoter_share_bps as number,
+      venue_share_bps: row.venue_share_bps as number,
+      league_share_bps: row.league_share_bps as number,
+      royalty_pot_cents: row.royalty_pot_cents as number,
+      promoter_leg_cents: row.promoter_leg_cents as number,
+      venue_leg_cents: row.venue_leg_cents as number,
+      league_leg_cents: row.league_leg_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async sumSportsLeaguePoolContractGross(
+    leagueRightsCode: string,
+    period: string,
+    currency: string,
+  ): Promise<number> {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(contract_gross_cents), 0) AS pool_cents
+         FROM sports_broadcasting_contracts
+         WHERE league_rights_code = ? AND period = ? AND currency = ?`,
+      )
+      .get(leagueRightsCode, period, currency) as Record<string, unknown>;
+    return row.pool_cents as number;
+  }
+
+  async upsertSportsLeaguePoolDistribution(
+    row: Omit<SportsLeaguePoolDistributionRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolDistributionRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_league_pool_distributions
+           (id, source_event_id, league_rights_code, period, currency,
+            pool_cents, equal_share_bps, market_balance_bps,
+            performance_incentive_bps, legs_json, distributed_cents,
+            dust_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (league_rights_code, period, currency) DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           pool_cents = excluded.pool_cents,
+           equal_share_bps = excluded.equal_share_bps,
+           market_balance_bps = excluded.market_balance_bps,
+           performance_incentive_bps = excluded.performance_incentive_bps,
+           legs_json = excluded.legs_json,
+           distributed_cents = excluded.distributed_cents,
+           dust_cents = excluded.dust_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.source_event_id,
+        row.league_rights_code,
+        row.period,
+        row.currency,
+        row.pool_cents,
+        row.equal_share_bps,
+        row.market_balance_bps,
+        row.performance_incentive_bps,
+        row.legs_json,
+        row.distributed_cents,
+        row.dust_cents,
+        now,
+        now,
+      );
+    const found = await this.getSportsLeaguePoolDistribution(row.source_event_id);
+    if (found === undefined) {
+      throw new Error('sports_league_pool_distribution_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsLeaguePoolDistribution(
+    sourceEventId: string,
+  ): Promise<SportsLeaguePoolDistributionRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_league_pool_distributions WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      league_rights_code: row.league_rights_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      pool_cents: row.pool_cents as number,
+      equal_share_bps: row.equal_share_bps as number,
+      market_balance_bps: row.market_balance_bps as number,
+      performance_incentive_bps: row.performance_incentive_bps as number,
+      legs_json: row.legs_json as string,
+      distributed_cents: row.distributed_cents as number,
+      dust_cents: row.dust_cents as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSportsGroupLicensingApplication(
+    row: Omit<SportsGroupLicensingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsGroupLicensingApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_group_licensing_applications
+           (id, source_event_id, contract_ref, league_rights_code, union_code,
+            union_payee_id, union_share_bps, royalty_pool_cents,
+            union_leg_cents, athlete_pool_cents, athlete_wallets_json,
+            wallet_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.contract_ref,
+        record.league_rights_code,
+        record.union_code,
+        record.union_payee_id,
+        record.union_share_bps,
+        record.royalty_pool_cents,
+        record.union_leg_cents,
+        record.athlete_pool_cents,
+        record.athlete_wallets_json,
+        record.wallet_count,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsGroupLicensingApplication(
+    sourceEventId: string,
+  ): Promise<SportsGroupLicensingApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_group_licensing_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      contract_ref: row.contract_ref as string,
+      league_rights_code: row.league_rights_code as string,
+      union_code: row.union_code as SportsGroupLicensingApplicationRecord['union_code'],
+      union_payee_id: row.union_payee_id as string,
+      union_share_bps: row.union_share_bps as number,
+      royalty_pool_cents: row.royalty_pool_cents as number,
+      union_leg_cents: row.union_leg_cents as number,
+      athlete_pool_cents: row.athlete_pool_cents as number,
+      athlete_wallets_json: row.athlete_wallets_json as string,
+      wallet_count: row.wallet_count as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async listNilPayoutApplicationsForAthlete(
+    athleteId: string,
+    period: string,
+  ): Promise<NilPayoutApplicationRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM nil_payout_applications
+           WHERE athlete_id = ? AND period = ? ORDER BY source_event_id ASC`,
+      )
+      .all(athleteId, period) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      source_event_id: row.source_event_id as string,
+      period: row.period as string,
+      gross_cents: row.gross_cents as number,
+      agency_mode: row.agency_mode as NilPayoutApplicationRecord['agency_mode'],
+      agency_bps: row.agency_bps as number,
+      agency_fee_cents: row.agency_fee_cents as number,
+      net_payout_cents: row.net_payout_cents as number,
+      verdict: row.verdict as NilPayoutApplicationRecord['verdict'],
+      state_rule_ref: row.state_rule_ref as string | null,
+      cap_verified_ref: row.cap_verified_ref as string | null,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async upsertSportsNilDealReconciliation(
+    row: Omit<SportsNilDealReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNilDealReconciliationRecord> {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sports_nil_deal_reconciliations
+           (id, source_event_id, nil_contract_id, athlete_glan, period,
+            endorsement_deal_cents, booster_collective_cents,
+            fan_club_subscription_cents, nil_deal_gross_cents, verdict,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (nil_contract_id, athlete_glan, period) DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           endorsement_deal_cents = excluded.endorsement_deal_cents,
+           booster_collective_cents = excluded.booster_collective_cents,
+           fan_club_subscription_cents = excluded.fan_club_subscription_cents,
+           nil_deal_gross_cents = excluded.nil_deal_gross_cents,
+           verdict = excluded.verdict,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        randomUUID(),
+        row.source_event_id,
+        row.nil_contract_id,
+        row.athlete_glan,
+        row.period,
+        row.endorsement_deal_cents,
+        row.booster_collective_cents,
+        row.fan_club_subscription_cents,
+        row.nil_deal_gross_cents,
+        row.verdict,
+        now,
+        now,
+      );
+    const found = await this.getSportsNilDealReconciliation(row.source_event_id);
+    if (found === undefined) {
+      throw new Error('sports_nil_deal_reconciliation_upsert_failed');
+    }
+    return found;
+  }
+
+  async getSportsNilDealReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsNilDealReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_nil_deal_reconciliations WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_glan: row.athlete_glan as string,
+      period: row.period as string,
+      endorsement_deal_cents: row.endorsement_deal_cents as number,
+      booster_collective_cents: row.booster_collective_cents as number,
+      fan_club_subscription_cents: row.fan_club_subscription_cents as number,
+      nil_deal_gross_cents: row.nil_deal_gross_cents as number,
+      verdict: row.verdict as SportsNilDealReconciliationRecord['verdict'],
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertSportsBiometricMicroPayoutApplication(
+    row: Omit<SportsBiometricMicroPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_biometric_micro_payout_applications
+           (id, source_event_id, biometric_post_event_id, athlete_glan,
+            league_rights_code, tracking_modality, licensee_class,
+            licensed_quantity_micros, micros_per_unit, athlete_share_bps,
+            payout_pot_cents, athlete_wallet_payee_id, athlete_leg_cents,
+            league_data_payee_id, league_leg_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.biometric_post_event_id,
+        record.athlete_glan,
+        record.league_rights_code,
+        record.tracking_modality,
+        record.licensee_class,
+        record.licensed_quantity_micros,
+        record.micros_per_unit,
+        record.athlete_share_bps,
+        record.payout_pot_cents,
+        record.athlete_wallet_payee_id,
+        record.athlete_leg_cents,
+        record.league_data_payee_id,
+        record.league_leg_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getSportsBiometricMicroPayoutApplication(
+    sourceEventId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_biometric_micro_payout_applications
+           WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      biometric_post_event_id: row.biometric_post_event_id as string,
+      athlete_glan: row.athlete_glan as string,
+      league_rights_code: row.league_rights_code as string,
+      tracking_modality: row.tracking_modality as SportsBiometricMicroPayoutApplicationRecord['tracking_modality'],
+      licensee_class: row.licensee_class as SportsBiometricMicroPayoutApplicationRecord['licensee_class'],
+      licensed_quantity_micros: row.licensed_quantity_micros as number,
+      micros_per_unit: row.micros_per_unit as number,
+      athlete_share_bps: row.athlete_share_bps as number,
+      payout_pot_cents: row.payout_pot_cents as number,
+      athlete_wallet_payee_id: row.athlete_wallet_payee_id as string,
+      athlete_leg_cents: row.athlete_leg_cents as number,
+      league_data_payee_id: row.league_data_payee_id as string,
+      league_leg_cents: row.league_leg_cents as number,
+      created_at: row.created_at as string,
+    };
   }
 }
 

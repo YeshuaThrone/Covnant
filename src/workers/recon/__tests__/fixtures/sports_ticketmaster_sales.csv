@@ -1,0 +1,6 @@
+Ticket Event ID,Nil Contract ID,Athlete GLAN,Venue GLN,League Rights Code,Turnstile Scan Hash,Gross Ticket Revenue,Facility Surcharges,Municipal Taxes,Insurance Reserves,Payment Processor Fee Cuts,Tickets Sold,Currency,Reporting Period
+TM-2026-03-0001,nil-contract-77,athlete:qb-one,VEN-METRO-1,NFL-LIC-2026,hash-turnstile-a,"$150,000.03",12000.00,9000.00,3000.00,4500.00,15000,USD,2026-03
+TM-2026-03-0002,nil-contract-77,athlete:qb-one,VEN-METRO-1,NFL-LIC-2026,hash-turnstile-a,"$200,000.00",15000.00,11000.00,4000.00,5000.00,20000,USD,2026-03
+TM-2026-03-0003,nil-contract-held,athlete:wr-two,VEN-METRO-1,NFL-LIC-2026,hash-turnstile-a,"$10.00",6.00,2.00,3.00,2.00,10,USD,2026-03
+TM-2026-03-0004,nil-contract-orphan,athlete:ghost,VEN-ORPHAN-1,NFL-LIC-2026,hash-turnstile-c,"$5.00",0.00,0.00,0.00,0.00,5,USD,2026-03
+TM-2026-03-0005,nil-contract-99,athlete:rb-three,VEN-ORPHAN-1,NFL-LIC-2026,hash-turnstile-c,"$2.00",0.00,0.00,0.00,0.00,2,USD,2026-03

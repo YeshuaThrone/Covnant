@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers eighty-one profiles in dispatch order", () => {
+  it("registers eighty-nine profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -174,6 +174,19 @@ describe("profile registry", () => {
       "energy_gpu_utilization_csv",
       "energy_pipeline_flow_meter_csv",
       "energy_carbon_offset_mints_csv",
+      // The sports lane (PR 50, the founder sports directive) — dispatched
+      // last, its own rights family (primary ticketer and secondary resale
+      // settlement legs, venue turnstile scan counts, league media rights
+      // and merchandise pools, and wearable/optical biometric tracking
+      // posts; never music-rights split math).
+      "sports_ticketmaster_sales_csv",
+      "sports_axs_sales_csv",
+      "sports_seatgeek_sales_csv",
+      "sports_stubhub_resale_csv",
+      "sports_vividseats_resale_csv",
+      "sports_turnstile_telemetry_csv",
+      "sports_league_contracts_csv",
+      "sports_biometric_tracking_csv",
     ]);
   });
 

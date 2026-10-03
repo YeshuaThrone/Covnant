@@ -1,0 +1,9 @@
+Contract Ref,League Rights Code,Contract Class,Contract Gross,Royalty Pool,Union Code,Union Share Bps,Athlete Roster,Currency,Reporting Period
+CONTRACT-NAT-2026,NFL-LIC-2026,broadcasting_national,"$1,000,000.01",0.00,none,0,,USD,2026-03
+CONTRACT-INTL-2026,NFL-LIC-2026,broadcasting_international,"$400,000.00",0.00,none,0,,USD,2026-03
+CONTRACT-MERCH-2026,NFL-LIC-2026,merchandise_pool,"$100,000.00",0.00,none,0,,USD,2026-03
+CONTRACT-GAME-2026,NFL-LIC-2026,group_licensing_video_games,0.00,"$1,000,000.00",NFLPA,2000,athlete:qb-one;athlete:wr-two;athlete:rb-three,USD,2026-03
+CONTRACT-CARDS-2026,NFL-LIC-2026,group_licensing_trading_cards,0.00,"$250,000.00",NFLPA,2000,athlete:qb-one;athlete:wr-two;athlete:rb-three,USD,2026-03
+CONTRACT-APPAREL-ORPHAN,NFL-LIC-2026,group_licensing_apparel,0.00,"$10,000.00",NFLPA,2000,athlete:ghost,USD,2026-03
+CONTRACT-APPAREL-MISMATCH,NFL-LIC-2026,group_licensing_apparel,0.00,"$10,000.00",NFLPA,2000,athlete:c-four,USD,2026-03
+CONTRACT-APPAREL-NBAPA,NFL-LIC-2026,group_licensing_apparel,0.00,"$20,000.00",NBAPA,2000,athlete:c-four,USD,2026-03

@@ -313,6 +313,27 @@ import type {
   ResourceAuditEscrowReconciliationRecord,
   ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
+
+import type {
+  SportsBiometricMicroPayoutApplicationRecord,
+  SportsBiometricRoyaltyPolicyRecord,
+  SportsBiometricTrackingPostRecord,
+  SportsBroadcastingContractRecord,
+  SportsGateReconciliationRecord,
+  SportsGroupLicensingApplicationRecord,
+  SportsLicenseeClass,
+  SportsLeaguePoolDistributionRecord,
+  SportsLeaguePoolPolicyRecord,
+  SportsLeagueTeamRegistrationRecord,
+  SportsNetVenueRealizationRecord,
+  SportsNilDealReconciliationRecord,
+  SportsResaleRoyaltyApplicationRecord,
+  SportsResaleRoyaltyPolicyRecord,
+  SportsResaleSalePostRecord,
+  SportsStudentAthleteProfileRecord,
+  SportsTicketSalePostRecord,
+  SportsTurnstileScanPostRecord,
+} from '@/modules/sports/records';
 import type {
   MatchQueueRecord,
   MatchQueueResolution,
@@ -5487,6 +5508,327 @@ export interface Store {
   getEnergyCarbonOffsetPayoutApplication(
     sourceEventId: string,
   ): Promise<EnergyCarbonOffsetPayoutApplicationRecord | undefined>;
+
+  // ---------------------------------------------------------------------------
+  // Sports lane (PR 50, migration 0054) — the sports registries, posts,
+  // reconciliations, and applications. The same discipline as the energy
+  // lane: append-only posts with UNIQUE source_event_id replay guards,
+  // positions of record recomputed in place (no id in the conflict
+  // payload — the PR 33 lesson), and fail-closed policies of record.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Registers one student-athlete profile of record — the group
+   * licensing, biometric payout, and NIL reconciliation walks' identity.
+   * UNIQUE per athlete_glan: a re-registration converges.
+   */
+  upsertSportsStudentAthleteProfile(
+    row: Omit<SportsStudentAthleteProfileRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsStudentAthleteProfileRecord>;
+
+  /** One athlete profile of record by its GLAN; undefined when none. */
+  getSportsStudentAthleteProfile(
+    athleteGlan: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined>;
+
+  /** One athlete profile of record by the NIL lane's athlete id — the
+   * NIL reconciliation's join read; undefined when none. */
+  getSportsStudentAthleteProfileByNilAthleteId(
+    nilAthleteId: string,
+  ): Promise<SportsStudentAthleteProfileRecord | undefined>;
+
+  /**
+   * Registers one (venue, league) scope's resale royalty policy of
+   * record — the founder band, 500–1000 bps (5–10%), and the three-way
+   * split. UNIQUE per (venue_gln, league_rights_code): converges.
+   */
+  upsertSportsResaleRoyaltyPolicy(
+    row: Omit<SportsResaleRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsResaleRoyaltyPolicyRecord>;
+
+  /** One resale royalty policy of record by scope; undefined when
+   * none — the resale walk's fail-closed read. */
+  getSportsResaleRoyaltyPolicy(
+    venueGln: string,
+    leagueRightsCode: string,
+  ): Promise<SportsResaleRoyaltyPolicyRecord | undefined>;
+
+  /**
+   * Registers one league's pool split policy of record — the
+   * equal-share, market-balance, and performance-incentive weights.
+   * UNIQUE per league_rights_code: converges.
+   */
+  upsertSportsLeaguePoolPolicy(
+    row: Omit<SportsLeaguePoolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolPolicyRecord>;
+
+  /** One league pool policy of record; undefined when none — the pool
+   * walk's fail-closed read. */
+  getSportsLeaguePoolPolicy(
+    leagueRightsCode: string,
+  ): Promise<SportsLeaguePoolPolicyRecord | undefined>;
+
+  /**
+   * Registers one team owner's registration of record — the market
+   * size, payroll, cap threshold, and incentive inputs. UNIQUE per
+   * (league_rights_code, team_code): converges.
+   */
+  upsertSportsLeagueTeam(
+    row: Omit<SportsLeagueTeamRegistrationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeagueTeamRegistrationRecord>;
+
+  /** One league's team registrations of record; empty when none — the
+   * pool walk's fail-closed read. */
+  listSportsLeagueTeams(leagueRightsCode: string): Promise<SportsLeagueTeamRegistrationRecord[]>;
+
+  /**
+   * Registers one (league, licensee) biometric royalty policy of
+   * record — the micro-payout rate and the athlete's share. UNIQUE per
+   * (league_rights_code, licensee_class): converges.
+   */
+  upsertSportsBiometricRoyaltyPolicy(
+    row: Omit<SportsBiometricRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord>;
+
+  /** One biometric royalty policy of record by scope; undefined when
+   * none — the payout walk's fail-closed read. */
+  getSportsBiometricRoyaltyPolicy(
+    leagueRightsCode: string,
+    licenseeClass: SportsLicenseeClass,
+  ): Promise<SportsBiometricRoyaltyPolicyRecord | undefined>;
+
+  /** Appends one ticketer settlement row post. UNIQUE per
+   * source_event_id — the replay guard. */
+  insertSportsTicketSalePost(
+    row: Omit<SportsTicketSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTicketSalePostRecord>;
+
+  /** One ticket sale post of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getSportsTicketSalePost(
+    sourceEventId: string,
+  ): Promise<SportsTicketSalePostRecord | undefined>;
+
+  /** Appends one resale row post. UNIQUE per source_event_id. */
+  insertSportsResaleSalePost(
+    row: Omit<SportsResaleSalePostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleSalePostRecord>;
+
+  /** One resale sale post of record by its source event id; undefined
+   * when none — the replay check's read. */
+  getSportsResaleSalePost(
+    sourceEventId: string,
+  ): Promise<SportsResaleSalePostRecord | undefined>;
+
+  /** Appends one turnstile scan batch post. UNIQUE per
+   * source_event_id. */
+  insertSportsTurnstileScanPost(
+    row: Omit<SportsTurnstileScanPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsTurnstileScanPostRecord>;
+
+  /** One turnstile scan post of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getSportsTurnstileScanPost(
+    sourceEventId: string,
+  ): Promise<SportsTurnstileScanPostRecord | undefined>;
+
+  /** Appends one biometric tracking row post. UNIQUE per
+   * source_event_id. */
+  insertSportsBiometricTrackingPost(
+    row: Omit<SportsBiometricTrackingPostRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricTrackingPostRecord>;
+
+  /** One biometric tracking post of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getSportsBiometricTrackingPost(
+    sourceEventId: string,
+  ): Promise<SportsBiometricTrackingPostRecord | undefined>;
+
+  /** Appends one parsed league contract of record. UNIQUE per
+   * source_event_id — the replay guard. */
+  insertSportsBroadcastingContract(
+    row: Omit<SportsBroadcastingContractRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBroadcastingContractRecord>;
+
+  /** One league contract of record by its contract_ref; undefined
+   * when none — the replay check's read (the contract_ref is the
+   * contract table's UNIQUE replay key). */
+  getSportsBroadcastingContract(
+    contractRef: string,
+  ): Promise<SportsBroadcastingContractRecord | undefined>;
+
+  /**
+   * Sums the posted gate legs and ticket count for one realization key
+   * (the founder's five identity columns plus period and currency) —
+   * the realization recompute's aggregation (exact integer cents,
+   * zeros when none).
+   */
+  sumSportsGateLegs(
+    nilContractId: string,
+    athleteGlan: string,
+    venueGln: string,
+    leagueRightsCode: string,
+    turnstileScanHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_ticket_revenue_cents: number;
+    facility_surcharges_cents: number;
+    municipal_taxes_cents: number;
+    insurance_reserves_cents: number;
+    processor_fee_cuts_cents: number;
+    ticket_count: number;
+  }>;
+
+  /** The distinct realization keys posted for one (venue, scan hash) —
+   * the scan batch's re-realize read (a new scan batch re-prices the
+   * ticket keys it reconciles against). */
+  listSportsTicketSaleKeysForHash(
+    venueGln: string,
+    turnstileScanHash: string,
+  ): Promise<
+    Array<{
+      nil_contract_id: string;
+      athlete_glan: string;
+      venue_gln: string;
+      league_rights_code: string;
+      turnstile_scan_hash: string;
+      period: string;
+      currency: string;
+    }>
+  >;
+
+  /**
+   * Sums the venue scope's reconciliation sides — the posted ticket
+   * counts and gross receipts, and the posted scan counts — the gate
+   * reconciliation's aggregation (zeros when none).
+   */
+  sumSportsGateReconciliationSides(
+    venueGln: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    ticket_count_sum: number;
+    scan_count_sum: number;
+    gross_ticket_revenue_cents: number;
+  }>;
+
+  /**
+   * Upserts one gate reconciliation of record per (venue, period,
+   * currency) scope — the recompute replaces in place (no id in the
+   * conflict payload — the PR 33 lesson).
+   */
+  upsertSportsGateReconciliation(
+    row: Omit<SportsGateReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsGateReconciliationRecord>;
+
+  /** One gate reconciliation of record by its source event id;
+   * undefined when none — the replay-check read. */
+  getSportsGateReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsGateReconciliationRecord | undefined>;
+
+  /**
+   * Upserts one Net Gate Pool realization of record per the founder's
+   * five-tuple plus period and currency — the recompute replaces the
+   * sums in place (no id in the conflict payload).
+   */
+  upsertSportsNetVenueRealization(
+    row: Omit<SportsNetVenueRealizationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNetVenueRealizationRecord>;
+
+  /** One realization of record by its source event id; undefined when
+   * none — the replay-check read. */
+  getSportsNetVenueRealization(
+    sourceEventId: string,
+  ): Promise<SportsNetVenueRealizationRecord | undefined>;
+
+  /** Appends one resale royalty routing. UNIQUE per source_event_id —
+   * the replay guard. */
+  insertSportsResaleRoyaltyApplication(
+    row: Omit<SportsResaleRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsResaleRoyaltyApplicationRecord>;
+
+  /** One resale royalty application of record by its source event id;
+   * undefined when none — the replay-check read. */
+  getSportsResaleRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined>;
+
+  /**
+   * Sums the posted broadcasting and merchandise contract gross for
+   * one league scope — the pool distribution's aggregation (zero when
+   * none).
+   */
+  sumSportsLeaguePoolContractGross(
+    leagueRightsCode: string,
+    period: string,
+    currency: string,
+  ): Promise<number>;
+
+  /**
+   * Upserts one league pool distribution of record per (league,
+   * period, currency) scope — the recompute replaces in place (no id
+   * in the conflict payload).
+   */
+  upsertSportsLeaguePoolDistribution(
+    row: Omit<SportsLeaguePoolDistributionRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsLeaguePoolDistributionRecord>;
+
+  /** One pool distribution of record by its source event id; undefined
+   * when none — the replay-check read. */
+  getSportsLeaguePoolDistribution(
+    sourceEventId: string,
+  ): Promise<SportsLeaguePoolDistributionRecord | undefined>;
+
+  /** Appends one group licensing routing. UNIQUE per source_event_id —
+   * the replay guard. */
+  insertSportsGroupLicensingApplication(
+    row: Omit<SportsGroupLicensingApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsGroupLicensingApplicationRecord>;
+
+  /** One group licensing application of record by its source event id;
+   * undefined when none — the replay-check read. */
+  getSportsGroupLicensingApplication(
+    sourceEventId: string,
+  ): Promise<SportsGroupLicensingApplicationRecord | undefined>;
+
+  /**
+   * Lists the NIL lane's deal payout applications of record for one
+   * athlete and period — the sports NIL reconciliation's read side
+   * (the NIL lane's own applications, unmodified).
+   */
+  listNilPayoutApplicationsForAthlete(
+    athleteId: string,
+    period: string,
+  ): Promise<NilPayoutApplicationRecord[]>;
+
+  /**
+   * Upserts one NIL deal reconciliation of record per (nil contract,
+   * athlete, period) scope — the recompute replaces in place (no id in the
+   * conflict payload).
+   */
+  upsertSportsNilDealReconciliation(
+    row: Omit<SportsNilDealReconciliationRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsNilDealReconciliationRecord>;
+
+  /** One NIL reconciliation of record by its source event id;
+   * undefined when none — the replay-check read. */
+  getSportsNilDealReconciliation(
+    sourceEventId: string,
+  ): Promise<SportsNilDealReconciliationRecord | undefined>;
+
+  /** Appends one biometric micro-payout routing. UNIQUE per
+   * source_event_id — the replay guard. */
+  insertSportsBiometricMicroPayoutApplication(
+    row: Omit<SportsBiometricMicroPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord>;
+
+  /** One biometric micro-payout application of record by its source
+   * event id; undefined when none — the replay-check read. */
+  getSportsBiometricMicroPayoutApplication(
+    sourceEventId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined>;
 }
 
 
@@ -5540,6 +5882,27 @@ export type {
   EnergyPipelineDeductionPostRecord,
   EnergyStatutoryInterestApplicationRecord,
 } from '@/modules/energy/records';
+export type {
+  SportsLicenseeClass,
+  SportsBiometricMicroPayoutApplicationRecord,
+  SportsBiometricRoyaltyPolicyRecord,
+  SportsBiometricTrackingPostRecord,
+  SportsBroadcastingContractRecord,
+  SportsGateReconciliationRecord,
+  SportsGroupLicensingApplicationRecord,
+  SportsLeaguePoolDistributionRecord,
+  SportsLeaguePoolLeg,
+  SportsLeaguePoolPolicyRecord,
+  SportsLeagueTeamRegistrationRecord,
+  SportsNetVenueRealizationRecord,
+  SportsNilDealReconciliationRecord,
+  SportsResaleRoyaltyApplicationRecord,
+  SportsResaleRoyaltyPolicyRecord,
+  SportsResaleSalePostRecord,
+  SportsStudentAthleteProfileRecord,
+  SportsTicketSalePostRecord,
+  SportsTurnstileScanPostRecord,
+} from '@/modules/sports/records';
 export type {
   MatchQueueRecord,
   MatchQueueResolution,
