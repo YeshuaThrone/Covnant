@@ -177,6 +177,10 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   book_reserve_drawdown: 'Book returns reserve drawn',
   book_returns_reserve_release: 'Book returns reserve released',
   book_print_net_release: 'Book print net released',
+  // PR 31 — the touring/comedy settlement-protection lanes.
+  promoter_settlement_post: 'Promoter box office net locked in settlement escrow',
+  promoter_settlement_release: 'Promoter settlement released after audit close',
+  comedy_audio_rights_post: 'Comedy special audio royalty received',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

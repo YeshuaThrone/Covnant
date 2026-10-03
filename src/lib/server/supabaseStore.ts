@@ -117,6 +117,9 @@ import type {
   TheatricalStopSettlementRecord,
   TheatricalRecoupmentApplicationRecord,
   TheatricalSplitAccrualRecord,
+  PromoterSettlementAuditRecord,
+  TheatricalPayoutGateStateRecord,
+  VenueHallFeePolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -376,6 +379,13 @@ const TABLES = {
   theatricalStopSettlements: 'theatrical_stop_settlements',
   theatricalRecoupmentApplications: 'theatrical_recoupment_applications',
   theatricalSplitAccruals: 'theatrical_split_accruals',
+  // Migration 0035 — the promoter settlement audit closes of record (the
+  // escrow release's fail-closed gate), the theater payout gate states per
+  // (payee, production) — grand_rights_cleared / venue_settlement_reconciled
+  // — and the founder-banded venue hall fee policies per (tour, venue).
+  promoterSettlementAudits: 'promoter_settlement_audits',
+  theatricalPayoutGateStates: 'theatrical_payout_gate_states',
+  venueHallFeePolicies: 'venue_hall_fee_policies',
 } as const;
 
 /**
@@ -2983,6 +2993,147 @@ export class SupabaseStore implements Store {
         .eq('deal_id', dealId)
         .order('created_at', { ascending: true }),
       'listTheatricalSplitAccruals',
+    );
+  }
+
+  // --- Promoter settlement escrow + theater gates + comedy audio (PR 31,
+  // --- migration 0035) ---
+
+  async listPromoterSettlementEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    // Newest first — the release path's discovery order (the
+    // translation-localization escrow listing's convention mirrored for a
+    // deterministic settle walk). Released credits (status 'settled') are
+    // history, not holdings — they never appear here.
+    return this.many<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .select()
+        .eq('kind', 'promoter_box_office_settlement_pending')
+        .eq('status', 'promoter_box_office_settlement_pending')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      'listPromoterSettlementEscrowCredits',
+    );
+  }
+
+  async settlePromoterSettlementEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The same CAS as the film-escrow/gaming-cashout/holdback/translation
+    // settles, scoped to the promoter lock state only: no returned row
+    // means the receipt is absent or no longer locked — this call lost.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'promoter_box_office_settlement_pending')
+        .select()
+        .maybeSingle(),
+      'settlePromoterSettlementEscrow',
+    );
+  }
+
+  async upsertPromoterSettlementAudit(
+    row: Omit<PromoterSettlementAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PromoterSettlementAuditRecord> {
+    // UNIQUE per (production_id, venue_id, show_date) — a re-recording
+    // converges (the newest close governs the next release).
+    return this.oneStrict<PromoterSettlementAuditRecord>(
+      this.client
+        .from(TABLES.promoterSettlementAudits)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'production_id,venue_id,show_date' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertPromoterSettlementAudit',
+    );
+  }
+
+  async getPromoterSettlementAudit(
+    productionId: string,
+    venueId: string,
+    showDate: string,
+  ): Promise<PromoterSettlementAuditRecord | undefined> {
+    return this.one<PromoterSettlementAuditRecord>(
+      this.client
+        .from(TABLES.promoterSettlementAudits)
+        .select()
+        .eq('production_id', productionId)
+        .eq('venue_id', venueId)
+        .eq('show_date', showDate)
+        .maybeSingle(),
+      'getPromoterSettlementAudit',
+    );
+  }
+
+  async upsertTheatricalPayoutGateState(
+    row: Omit<TheatricalPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<TheatricalPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, production_id) — an upsert converges (the newest
+    // states govern the next dispatch).
+    return this.oneStrict<TheatricalPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.theatricalPayoutGateStates)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'payee_id,production_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertTheatricalPayoutGateState',
+    );
+  }
+
+  async getTheatricalPayoutGateState(
+    payeeId: string,
+    productionId: string,
+  ): Promise<TheatricalPayoutGateStateRecord | undefined> {
+    return this.one<TheatricalPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.theatricalPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('production_id', productionId)
+        .maybeSingle(),
+      'getTheatricalPayoutGateState',
+    );
+  }
+
+  async upsertVenueHallFeePolicy(
+    row: Omit<VenueHallFeePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<VenueHallFeePolicyRecord> {
+    // UNIQUE per (tour_id, venue_id) — an upsert converges.
+    return this.oneStrict<VenueHallFeePolicyRecord>(
+      this.client
+        .from(TABLES.venueHallFeePolicies)
+        .upsert(
+          { ...row, id: crypto.randomUUID(), updated_at: new Date().toISOString() },
+          { onConflict: 'tour_id,venue_id' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertVenueHallFeePolicy',
+    );
+  }
+
+  async getVenueHallFeePolicy(
+    tourId: string,
+    venueId: string,
+  ): Promise<VenueHallFeePolicyRecord | undefined> {
+    return this.one<VenueHallFeePolicyRecord>(
+      this.client
+        .from(TABLES.venueHallFeePolicies)
+        .select()
+        .eq('tour_id', tourId)
+        .eq('venue_id', venueId)
+        .maybeSingle(),
+      'getVenueHallFeePolicy',
     );
   }
 

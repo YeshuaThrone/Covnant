@@ -121,6 +121,9 @@ import type {
   TheatricalStopSettlementRecord,
   TheatricalRecoupmentApplicationRecord,
   TheatricalSplitAccrualRecord,
+  PromoterSettlementAuditRecord,
+  TheatricalPayoutGateStateRecord,
+  VenueHallFeePolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -288,6 +291,12 @@ export class InMemoryStore implements Store {
   private theatricalStopSettlements: TheatricalStopSettlementRecord[] = [];
   private theatricalRecoupmentApplications: TheatricalRecoupmentApplicationRecord[] = [];
   private theatricalSplitAccruals: TheatricalSplitAccrualRecord[] = [];
+  // Migration 0035 — the promoter settlement audit closes of record per
+  // (production, venue, show date), the theater payout gate states per
+  // (payee, production), and the venue hall fee policies per (tour, venue).
+  private promoterSettlementAudits = new Map<string, PromoterSettlementAuditRecord>();
+  private theatricalPayoutGateStates = new Map<string, TheatricalPayoutGateStateRecord>();
+  private venueHallFeePolicies = new Map<string, VenueHallFeePolicyRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -2467,6 +2476,119 @@ export class InMemoryStore implements Store {
       (row) => row.created_at,
       'asc',
     );
+  }
+
+  // --- Promoter settlement escrow + theater gates + comedy audio (PR 31,
+  // --- migration 0035) ---
+
+  async listPromoterSettlementEscrowCredits(
+    limit: number = DEFAULT_LIST_SHOWS_LIMIT,
+  ): Promise<LedgerTransactionRecord[]> {
+    return sortByTime(
+      this.ledgerTransactions.filter(
+        (row) =>
+          row.kind === 'promoter_box_office_settlement_pending' &&
+          row.status === 'promoter_box_office_settlement_pending',
+      ),
+      (row) => row.created_at,
+      'desc',
+    ).slice(0, limit);
+  }
+
+  async settlePromoterSettlementEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'promoter_box_office_settlement_pending') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async upsertPromoterSettlementAudit(
+    row: Omit<PromoterSettlementAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PromoterSettlementAuditRecord> {
+    // UNIQUE per (production_id, venue_id, show_date) — a re-recording
+    // converges (the newest close governs the next release).
+    const key = `${row.production_id}:${row.venue_id}:${row.show_date}`;
+    const now = new Date().toISOString();
+    const existing = this.promoterSettlementAudits.get(key);
+    const record: PromoterSettlementAuditRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.promoterSettlementAudits.set(key, record);
+    return { ...record };
+  }
+
+  async getPromoterSettlementAudit(
+    productionId: string,
+    venueId: string,
+    showDate: string,
+  ): Promise<PromoterSettlementAuditRecord | undefined> {
+    const found = this.promoterSettlementAudits.get(
+      `${productionId}:${venueId}:${showDate}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertTheatricalPayoutGateState(
+    row: Omit<TheatricalPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<TheatricalPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, production_id) — an upsert converges (the newest
+    // states govern the next dispatch).
+    const key = `${row.payee_id}:${row.production_id}`;
+    const now = new Date().toISOString();
+    const existing = this.theatricalPayoutGateStates.get(key);
+    const record: TheatricalPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.theatricalPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getTheatricalPayoutGateState(
+    payeeId: string,
+    productionId: string,
+  ): Promise<TheatricalPayoutGateStateRecord | undefined> {
+    const found = this.theatricalPayoutGateStates.get(`${payeeId}:${productionId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertVenueHallFeePolicy(
+    row: Omit<VenueHallFeePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<VenueHallFeePolicyRecord> {
+    // UNIQUE per (tour_id, venue_id) — an upsert converges.
+    const key = `${row.tour_id}:${row.venue_id}`;
+    const now = new Date().toISOString();
+    const existing = this.venueHallFeePolicies.get(key);
+    const record: VenueHallFeePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.venueHallFeePolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getVenueHallFeePolicy(
+    tourId: string,
+    venueId: string,
+  ): Promise<VenueHallFeePolicyRecord | undefined> {
+    const found = this.venueHallFeePolicies.get(`${tourId}:${venueId}`);
+    return found === undefined ? undefined : { ...found };
   }
 
   async listTranslationLocalizationEscrowCredits(

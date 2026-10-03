@@ -8,10 +8,12 @@
 import {
   GL_ACCOUNT_FBO_CASH,
   GL_ACCOUNT_UNCLAIMED_HOLDING,
+  comedyAudioRightsGlAccount,
   esportsPoolEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   merchReturnsReserveGlAccount,
+  promoterSettlementGlAccount,
   bookReturnsReserveGlAccount,
   tier5InvestorPoolGlAccount,
   tier5ProducerPoolGlAccount,
@@ -258,6 +260,59 @@ export function bookReturnsReserveDebit(isbn: string, amountCents: number): GlLe
 export function bookReturnsReserveCredit(isbn: string, amountCents: number): GlLegInput {
   return {
     account: bookReturnsReserveGlAccount(isbn),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Promoter box office settlement escrow legs (PR 31): the per-stop escrow
+// obligation account — the book reserve legs' mirror at (production, venue,
+// show date) scope. A locked stop's box office net credits it against an
+// FBO debit; the verified audit-close release debits it against the stop's
+// designated payout legs — never a vault bucket at post, never the dust
+// payee's account, never the unclaimed holding account, never any other
+// escrow's account.
+export function promoterSettlementDebit(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: promoterSettlementGlAccount(productionId, venueId, showDate),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function promoterSettlementCredit(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: promoterSettlementGlAccount(productionId, venueId, showDate),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Comedy audio rights legs (PR 31): the per-special audio royalty stream
+// account — SiriusXM/Spotify licensed-recording money lives HERE, never in
+// the theatrical box office stream's accounts and never in unclaimed
+// holding; the isolation is the account identity.
+export function comedyAudioRightsDebit(specialId: string, amountCents: number): GlLegInput {
+  return {
+    account: comedyAudioRightsGlAccount(specialId),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function comedyAudioRightsCredit(specialId: string, amountCents: number): GlLegInput {
+  return {
+    account: comedyAudioRightsGlAccount(specialId),
     debit_cents: 0,
     credit_cents: amountCents,
   };

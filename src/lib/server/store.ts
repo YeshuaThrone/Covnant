@@ -109,6 +109,9 @@ import type {
   TheatricalStopSettlementRecord,
   TheatricalRecoupmentApplicationRecord,
   TheatricalSplitAccrualRecord,
+  PromoterSettlementAuditRecord,
+  TheatricalPayoutGateStateRecord,
+  VenueHallFeePolicyRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1514,6 +1517,86 @@ export interface Store {
 
   /** One deal's executed splits, created_at ASC — the accrual ledger. */
   listTheatricalSplitAccruals(dealId: string): Promise<TheatricalSplitAccrualRecord[]>;
+
+  // --- Promoter settlement escrow + theater gates + comedy audio (PR 31,
+  // --- migration 0035) ---
+
+  /**
+   * The held promoter settlement escrow credits (kind AND status
+   * 'promoter_box_office_settlement_pending'), newest first — the audit-
+   * close release path's discovery surface. Released credits (status
+   * 'settled') are history, not holdings — they never appear here.
+   */
+  listPromoterSettlementEscrowCredits(
+    limit?: number,
+  ): Promise<LedgerTransactionRecord[]>;
+
+  /**
+   * The verified-release CAS — the settlement concurrency canon applied to
+   * a locked stop's escrow: flips ONE row from status
+   * 'promoter_box_office_settlement_pending' to 'settled' (settled_at = the
+   * passed instant) in a single conditional statement. Returns the row only
+   * when THIS call won the transition; undefined when the id is unknown OR
+   * the receipt is no longer locked. The flip happens BEFORE any payout leg
+   * (insert-as-lock): a crash mid-release fails toward "nothing moved
+   * twice" — the settled row with no promoter_settlement_release journal
+   * is the visible alarm.
+   */
+  settlePromoterSettlementEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the final night-of-show audit close of record for one stop
+   * (migration 0035) — UNIQUE per (production_id, venue_id, show_date): a
+   * re-recording converges (the newest close governs the next release).
+   */
+  upsertPromoterSettlementAudit(
+    row: Omit<PromoterSettlementAuditRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<PromoterSettlementAuditRecord>;
+
+  /** One stop's audit close of record; undefined when none — fail-closed. */
+  getPromoterSettlementAudit(
+    productionId: string,
+    venueId: string,
+    showDate: string,
+  ): Promise<PromoterSettlementAuditRecord | undefined>;
+
+  /**
+   * Upserts the theater payout gate's states of record for one payee in
+   * one production (migration 0035) — UNIQUE per (payee_id, production_id):
+   * an upsert converges (the newest states govern the next dispatch).
+   */
+  upsertTheatricalPayoutGateState(
+    row: Omit<TheatricalPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<TheatricalPayoutGateStateRecord>;
+
+  /**
+   * One payee × production's gate states of record; undefined when none —
+   * the theater vertical's compliance state resolves fail-closed through
+   * this (absent → null → the gate refuses with vertical_state_unknown).
+   */
+  getTheatricalPayoutGateState(
+    payeeId: string,
+    productionId: string,
+  ): Promise<TheatricalPayoutGateStateRecord | undefined>;
+
+  /**
+   * Upserts the venue hall fee policy of record for one (tour, venue)
+   * pairing (migration 0035) — the founder-banded 15–25% venue cut on tour
+   * merchandise. UNIQUE per (tour_id, venue_id): an upsert converges.
+   */
+  upsertVenueHallFeePolicy(
+    row: Omit<VenueHallFeePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<VenueHallFeePolicyRecord>;
+
+  /** One (tour, venue) pairing's hall fee policy; undefined when none —
+   * the merch hall-fee release refuses (fail-closed), never guesses. */
+  getVenueHallFeePolicy(
+    tourId: string,
+    venueId: string,
+  ): Promise<VenueHallFeePolicyRecord | undefined>;
 
   /**
    * The locked translation-localization escrow receipts (kind AND status

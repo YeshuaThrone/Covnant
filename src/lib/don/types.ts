@@ -156,6 +156,21 @@ export const LEDGER_STATUSES = [
   // position-locked, and the verified release after the window settles the
   // remainder to the beneficiary of record (status → 'settled').
   "book_returns_reserve",
+  // PROMOTER_BOX_OFFICE_SETTLEMENT_PENDING (PR 31, the founder
+  // touring/comedy settlement-protection directive): a tour stop's box
+  // office net LOCKS here — keyed per stop by the escrow row's
+  // 'promoter_settlement:{production}:{venue}:{showDate}' payee — until the
+  // FINAL night-of-show audit closes and the close of record verifies. No
+  // migration: ledger_transactions.status is free text (0006 has no check
+  // constraint), so the state extends the existing ledger contract in
+  // place, the film/esports escrow precedent.
+  "promoter_box_office_settlement_pending",
+  // COMEDY_AUDIO_RIGHTS_PENDING (PR 31): a comedy special's AUDIO royalty
+  // (SiriusXM, Spotify) posts here — its OWN rights stream, isolated in
+  // payee, GL account, and kind from the physical live ticket sales
+  // streams. Audio money is licensed-recording money; ticket money is box
+  // office money; kind never lets a query fold one into the other.
+  "comedy_audio_rights_pending",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -214,6 +229,18 @@ export const LEDGER_KINDS = [
   // 'book_returns_reserve' with status 'settled'), the same division PR 7,
   // PR 9, PR 13, PR 14, PR 15, PR 20, and PR 23 use.
   "book_returns_reserve",
+  // Promoter box office settlement pending (PR 31): a tour stop's box
+  // office net, locked per stop until the final night-of-show audit closes.
+  // Kind marks WHAT the row is for its whole life (a released receipt stays
+  // kind 'promoter_box_office_settlement_pending' with status 'settled'),
+  // the same division PR 7, PR 9, PR 13, PR 14, PR 15, PR 20, PR 23, and
+  // PR 27 use.
+  "promoter_box_office_settlement_pending",
+  // Comedy audio rights pending (PR 31): a comedy special's AUDIO royalty
+  // (SiriusXM, Spotify), its own rights stream — NEVER a box office account,
+  // never a ticket-sales kind. Kind marks WHAT the row is for its whole
+  // life, the same division every escrow state above uses.
+  "comedy_audio_rights_pending",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

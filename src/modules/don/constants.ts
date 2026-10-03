@@ -165,6 +165,81 @@ export const BOOK_RETURNS_RESERVE_MAX_RATE_BPS = 2_000;
 export const BOOK_RETURNS_RESERVE_MIN_WINDOW_DAYS = 90;
 export const BOOK_RETURNS_RESERVE_MAX_WINDOW_DAYS = 120;
 
+// The venue hall fee band (PR 31, the founder touring directive): the
+// venue's cut of TOUR MERCHANDISE sales — 15–25% of the gross merch sales
+// at the venue — deducted from the gross BEFORE the artist's apparel net
+// releases. Whole basis points; anything outside the band is a hostile
+// contract, refused (the merch/book reserve band discipline).
+export const VENUE_HALL_FEE_MIN_BPS = 1_500;
+export const VENUE_HALL_FEE_MAX_BPS = 2_500;
+
+// Promoter box office settlement escrow (PR 31, the founder touring/comedy
+// directive): a stop's box office net locks in the settlement escrow until
+// the FINAL NIGHT-OF-SHOW audit closes — the venue's box office statement
+// audited, the close of record verified — and the verified release pays the
+// stop's designated payouts. The lock is PER-STOP — the payee and GL account
+// carry the (production, venue, show date) scope the way the film escrow
+// carries the film id — because the deal terms, the settlement sheet, and
+// the audit close are all per-stop. Deliberately NOT 'platform', NOT the
+// unclaimed holding sentinel, NOT any prior escrow prefix: held box office
+// nets are distinct from company dust, from every creator vault, from
+// unallocated recon funds, and from every other escrow state, in payee, GL
+// account, and ledger kind, so no query can fold one into another.
+export const PROMOTER_SETTLEMENT_PAYEE_PREFIX = "promoter_settlement";
+export function promoterSettlementScope(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+): string {
+  return `${productionId}:${venueId}:${showDate}`;
+}
+export function promoterSettlementPayeeId(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+): string {
+  return `${PROMOTER_SETTLEMENT_PAYEE_PREFIX}:${promoterSettlementScope(productionId, venueId, showDate)}`;
+}
+export function promoterSettlementPayeeName(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+): string {
+  return `Promoter Box Office Settlement Pending — ${productionId} @ ${venueId} ${showDate}`;
+}
+export function promoterSettlementGlAccount(
+  productionId: string,
+  venueId: string,
+  showDate: string,
+): string {
+  return `promoter_box_office_settlement_pending:${promoterSettlementScope(productionId, venueId, showDate)}`;
+}
+
+// Live comedy recording audio rights (PR 31): a comedy special's AUDIO
+// royalties — SiriusXM satellite radio and Spotify streaming — post under
+// their OWN rights stream, isolated in payee, GL account, and ledger kind
+// from the physical live ticket sales streams (the theatrical lane's
+// settlement money). Audio money is licensed-recording money; ticket money
+// is box office money; no query can fold one into another and no posting
+// may route one through the other's stream.
+export const COMEDY_AUDIO_RIGHTS_PAYEE_PREFIX = "comedy_audio_rights";
+export function comedyAudioRightsPayeeId(specialId: string): string {
+  return `${COMEDY_AUDIO_RIGHTS_PAYEE_PREFIX}:${specialId}`;
+}
+export function comedyAudioRightsPayeeName(specialId: string): string {
+  return `Comedy Special Audio Rights — ${specialId}`;
+}
+export function comedyAudioRightsGlAccount(specialId: string): string {
+  return `comedy_audio_rights:${specialId}`;
+}
+// The two audio senders the directive names — distinct from every
+// theatrical box office sender (axs, ticketmaster, eventbrite, venuepos).
+export const COMEDY_AUDIO_SENDERS = ["siriusxm", "spotify"] as const;
+export type ComedyAudioSenderCode = (typeof COMEDY_AUDIO_SENDERS)[number];
+export function isComedyAudioSenderCode(value: string): value is ComedyAudioSenderCode {
+  return (COMEDY_AUDIO_SENDERS as readonly string[]).includes(value);
+}
+
 // The studio role-group vocabulary — the three bands' keys. A schedule role
 // outside the vocabulary is a hostile registration.
 export const WEBTOON_STUDIO_ROLE_GROUPS = [
@@ -362,6 +437,20 @@ export const JOURNAL_KINDS = [
   // offset's credits go back to FBO), and the post-offset remainder routes
   // through the same taxed cascade every payout rides. Additive only.
   "book_print_net_release",
+  // Promoter box office settlement escrow (PR 31): a stop's box office net
+  // locks in the per-stop settlement escrow (post), then the verified
+  // release — the FINAL NIGHT-OF-SHOW audit closed of record, the theater
+  // payout gate's states cleared/reconciled — routes the stop's designated
+  // payouts through the taxed cascade. Additive only.
+  "promoter_settlement_post",
+  "promoter_settlement_release",
+  // Live comedy recording audio rights (PR 31): a comedy special's audio
+  // royalties (SiriusXM, Spotify) post into their OWN rights stream under
+  // the audio payee/GL space — the same FBO-debit/holding-credit legs the
+  // holding post rides, with the DISTINCT kind as the audit trail that the
+  // money is licensed-recording money and never ticket-sales money.
+  // Additive only.
+  "comedy_audio_rights_post",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
