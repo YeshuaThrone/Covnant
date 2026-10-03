@@ -90,7 +90,7 @@ function registerPolicies(store: InMemoryStore): void {
     {
       leg_id: "brand-leg",
       payee_id: "brand-truffleco",
-      payee_role: "ingredient_brand" as const,
+      payee_role: "brand" as const,
       weight_bps: 3000,
     },
   ]) {
@@ -102,7 +102,7 @@ function registerPolicies(store: InMemoryStore): void {
     {
       leg_id: "brand-leg",
       payee_id: "brand-scorchio",
-      payee_role: "ingredient_brand" as const,
+      payee_role: "brand" as const,
       weight_bps: 3000,
     },
   ]) {
@@ -373,7 +373,7 @@ describe("the food lane's full pass over the five senders", () => {
       {
         leg_id: "brand-leg",
         payee_id: "brand-truffleco",
-        payee_role: "ingredient_brand",
+        payee_role: "brand",
         weight_bps: 3000,
         allocated_cents: 29_700,
       },
@@ -629,7 +629,7 @@ describe("the food lane's pure founder math", () => {
       {
         leg_id: "brand-leg",
         payee_id: "brand",
-        payee_role: "ingredient_brand" as const,
+        payee_role: "brand" as const,
         weight_bps: 3000,
       },
     ];
