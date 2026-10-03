@@ -246,6 +246,22 @@ export const LEDGER_STATUSES = [
   // migration: ledger_transactions.status is free text, the same
   // extension-in-place discipline as every escrow state above.
   "fitness_audit_escrow",
+  // CULINARY_AUDIT_ESCROW (PR 41, the founder culinary directive): the
+  // 5–10% (founder-banded, per-scope policy of record) of a culinary IP
+  // payout that locks here — keyed per (chef, ghost kitchen) scope by the
+  // escrow row's 'culinary_audit_escrow:{scopeKey}' sentinel payee —
+  // while the kitchen's compliance exposure runs (health inspections,
+  // territorial exclusivity). Customer refund allowances, food spoilage
+  // chargebacks, and quarterly ingredient supplier quality audits draw it
+  // down position-locked; the verified reconciliation of record opens the
+  // release (fail-closed: no reconciliation of record, no release), and
+  // the released remainder settles it (status → 'settled'). A viral-menu
+  // pop-up scope must ALSO have its post-campaign packaging write-off of
+  // record before any release (fail-closed). Kind marks WHAT the row is
+  // for its whole life. No migration: ledger_transactions.status is free
+  // text, the same extension-in-place discipline as every escrow state
+  // above.
+  "culinary_audit_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -379,6 +395,16 @@ export const LEDGER_KINDS = [
   // stays kind 'fitness_audit_escrow' with status 'settled'), the same
   // division every escrow kind above uses.
   "fitness_audit_escrow",
+  // Culinary audit escrow (PR 41, the founder culinary directive): the
+  // 5–10% of a culinary IP payout auto-locked while the ghost kitchen's
+  // health-inspection and territorial-exclusivity exposure runs — drawn
+  // down by customer refund allowances, food spoilage chargebacks, and
+  // quarterly ingredient supplier quality audits; released on the
+  // verified reconciliation of record, with a viral-menu pop-up scope
+  // additionally gated on its post-campaign packaging write-off. Kind
+  // marks WHAT the row is for its whole life, the same division every
+  // escrow kind above uses.
+  "culinary_audit_escrow",
   // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the

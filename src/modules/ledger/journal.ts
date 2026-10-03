@@ -12,6 +12,7 @@ import {
   comedyAudioRightsGlAccount,
   esportsPoolEscrowGlAccount,
   fitnessAuditEscrowGlAccount,
+  culinaryAuditEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
@@ -493,6 +494,29 @@ export function fitnessAuditEscrowDebit(scopeKey: string, amountCents: number): 
 export function fitnessAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: fitnessAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// CULINARY_AUDIT_ESCROW (PR 41) — the culinary mirror at (chef, ghost
+// kitchen) scope. A routed culinary IP payout's reserve locks here
+// against the holding account's debit; customer refund allowances, food
+// spoilage chargebacks, and quarterly ingredient supplier quality audits
+// debit it back to FBO cash; the verified release debits it into the
+// chef's payout legs — never the dust payee's account, never the
+// unclaimed holding account, never any other escrow's account.
+export function culinaryAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: culinaryAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function culinaryAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: culinaryAuditEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

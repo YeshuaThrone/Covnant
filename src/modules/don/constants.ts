@@ -585,6 +585,18 @@ export const JOURNAL_KINDS = [
   "fitness_audit_escrow_route",
   "fitness_audit_escrow_drawdown",
   "fitness_audit_escrow_release",
+  // Culinary audit escrow (PR 41, the founder culinary directive): a
+  // culinary IP payout's release splits the held credit — the 5–10%
+  // CULINARY_AUDIT_ESCROW locks into the per-(chef, ghost kitchen) scope
+  // escrow (route), customer refund allowances, food spoilage
+  // chargebacks, and quarterly ingredient supplier quality audits draw it
+  // down (drawdown), and the verified reconciliation of record opens the
+  // release that pays the remaining escrow through the taxed cascade
+  // (release). A pop-up scope's release is additionally gated on its
+  // post-campaign packaging write-off of record. Additive only.
+  "culinary_audit_escrow_route",
+  "culinary_audit_escrow_drawdown",
+  "culinary_audit_escrow_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -674,6 +686,33 @@ export function fitnessAuditEscrowGlAccount(scopeKey: string): string {
 // refused.
 export const FITNESS_AUDIT_ESCROW_MIN_RATE_BPS = 500;
 export const FITNESS_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
+
+// CULINARY_AUDIT_ESCROW (PR 41, the founder culinary directive): the
+// culinary twin of the NIL, spatial, and fitness audit escrows — 5–10% of
+// a culinary IP payout locks per (chef, ghost kitchen) scope while the
+// payout's exposure runs: customer refund allowances, food spoilage
+// chargebacks, and quarterly ingredient supplier quality audits draw it
+// down, and the verified reconciliation of record opens the release (a
+// pop-up scope also needs its post-campaign packaging write-off of
+// record). Sentinel payee + GL account per scope key — the no-fold
+// discipline: the escrow is its own escrow-shaped money, never folded
+// into platform dust, unclaimed holding, or any other escrow state.
+export const CULINARY_AUDIT_ESCROW_PAYEE_PREFIX = "culinary_audit_escrow";
+export function culinaryAuditEscrowPayeeId(scopeKey: string): string {
+  return `${CULINARY_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function culinaryAuditEscrowPayeeName(scopeKey: string): string {
+  return `CULINARY_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_CULINARY_AUDIT_ESCROW = "culinary_audit_escrow";
+export function culinaryAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_CULINARY_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder band, enforced at registration AND at use: a 5–10% share of
+// the culinary IP payout. Anything outside the band is a hostile policy,
+// refused.
+export const CULINARY_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const CULINARY_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

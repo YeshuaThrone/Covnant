@@ -221,6 +221,14 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  CulinaryAuditEscrowDrawdownRecord,
+  CulinaryAuditEscrowPolicyRecord,
+  CulinaryAuditEscrowReconciliationRecord,
+  CulinaryPayoutGateStateRecord,
+  CulinaryPopupExperienceRecord,
+  CulinaryPopupWriteoffRecord,
+} from '@/modules/culinary/records';
+import type {
   FoodCobrandSplitApplicationRecord,
   FoodCobrandWeightingRecord,
   FoodCookCyclePolicyRecord,
@@ -3666,6 +3674,118 @@ export interface Store {
     payeeId: string,
     studioFranchiseCode: string,
   ): Promise<FitnessPayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the CULINARY_AUDIT_ESCROW's founder-banded
+   * rate of record for one scope (migration 0045) — upsert converges:
+   * the newest rate governs the next routing. NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertCulinaryAuditEscrowPolicy(
+    row: Omit<CulinaryAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getCulinaryAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<CulinaryAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0045) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertCulinaryAuditEscrowDrawdown(
+    row: Omit<CulinaryAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listCulinaryAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0045) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertCulinaryAuditEscrowReconciliation(
+    row: Omit<CulinaryAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getCulinaryAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `culinary_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleCulinaryAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the culinary payout gate's states of record for one payee
+   * in one ghost kitchen location (migration 0045) — UNIQUE per
+   * (payee_id, ghost_kitchen_location_code): an upsert converges (a
+   * verification heals 'unknown'; states never regress through this
+   * table). NEVER carries the id in the conflict payload (the id
+   * rotates on conflict).
+   */
+  upsertCulinaryPayoutGateState(
+    row: Omit<CulinaryPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPayoutGateStateRecord>;
+
+  /**
+   * One payee × ghost kitchen location's gate states of record;
+   * undefined when none — the culinary payout gate resolves fail-closed
+   * through this (absent → null → the gate refuses).
+   */
+  getCulinaryPayoutGateState(
+    payeeId: string,
+    ghostKitchenLocationCode: string,
+  ): Promise<CulinaryPayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers one viral-menu pop-up campaign's window of record
+   * (migration 0045) — insert-as-lock, UNIQUE per popup_ref: the FIRST
+   * registration wins; a re-shipped sheet or a lost race throws here
+   * (the caller reads the winner through the getter).
+   */
+  insertCulinaryPopupExperience(
+    row: Omit<CulinaryPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPopupExperienceRecord>;
+
+  /** One pop-up campaign's registration of record; undefined when none. */
+  getCulinaryPopupExperience(
+    popupRef: string,
+  ): Promise<CulinaryPopupExperienceRecord | undefined>;
+
+  /**
+   * Appends one post-campaign packaging inventory write-off (migration
+   * 0045) — UNIQUE per (popup_experience_id, source_event_id): a
+   * replayed calculation throws here, never a double-priced write-off.
+   */
+  insertCulinaryPopupWriteoff(
+    row: Omit<CulinaryPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryPopupWriteoffRecord>;
+
+  /** One pop-up campaign's write-offs in calculation order — the
+   * append-only truth the release gate reads. */
+  listCulinaryPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<CulinaryPopupWriteoffRecord[]>;
+
 
   /**
    * Registers (or replaces) one program's instant live-event bonus rate
