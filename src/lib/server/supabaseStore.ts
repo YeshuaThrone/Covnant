@@ -240,6 +240,9 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceAuditEscrowDrawdownRecord,
+  ServiceAuditEscrowPolicyRecord,
+  ServiceAuditEscrowReconciliationRecord,
   ServiceBoothLeasePolicyRecord,
   ServiceBoothLeaseApplicationRecord,
   ServiceBreakageAllocationRecord,
@@ -253,6 +256,7 @@ import type {
   ServiceRebateWaterfallRecord,
   ServiceRedemptionPolicyRecord,
   ServiceRedemptionSplitApplicationRecord,
+  ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
   CulinaryAuditEscrowDrawdownRecord,
@@ -613,6 +617,12 @@ const TABLES = {
   serviceBreakageAllocations: 'service_breakage_allocations',
   serviceRebateApplications: 'service_rebate_applications',
   serviceBoothLeaseApplications: 'service_booth_lease_applications',
+  // Migration 0047 — the service audit escrow (the founder services
+  // directive) and the services payout gate states it reads fail-closed.
+  serviceAuditEscrowPolicies: 'service_audit_escrow_policies',
+  serviceAuditEscrowDrawdowns: 'service_audit_escrow_drawdowns',
+  serviceAuditEscrowReconciliations: 'service_audit_escrow_reconciliations',
+  servicesPayoutGateStates: 'services_payout_gate_states',
 } as const;
 
 /**
@@ -8203,6 +8213,157 @@ export class SupabaseStore implements Store {
       throw new Error(`listCulinaryPopupWriteoffs failed: ${error.message}`);
     }
     return (data ?? []) as CulinaryPopupWriteoffRecord[];
+  }
+
+  // ------------------------------------------------------------------
+  // The service audit escrow + services payout gate states (PR 43) —
+  // the founder-banded escrow rate of record, the position-locked
+  // drawdowns, the verified reconciliation of record, and the two
+  // durable gate states the services payout gate reads fail-closed.
+  // ------------------------------------------------------------------
+
+  async upsertServiceAuditEscrowPolicy(
+    row: Omit<ServiceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<ServiceAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.serviceAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceAuditEscrowPolicy',
+    );
+  }
+
+  async getServiceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ServiceAuditEscrowPolicyRecord | undefined> {
+    return this.one<ServiceAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.serviceAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getServiceAuditEscrowPolicy',
+    );
+  }
+
+  async insertServiceAuditEscrowDrawdown(
+    row: Omit<ServiceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<ServiceAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.serviceAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceAuditEscrowDrawdown',
+    );
+  }
+
+  async listServiceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // fitness, spatial, and culinary drawdown lists run.
+    const { data, error } = await this.client
+      .from(TABLES.serviceAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listServiceAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as ServiceAuditEscrowDrawdownRecord[];
+  }
+
+  async insertServiceAuditEscrowReconciliation(
+    row: Omit<ServiceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<ServiceAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.serviceAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceAuditEscrowReconciliation',
+    );
+  }
+
+  async getServiceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowReconciliationRecord | undefined> {
+    return this.one<ServiceAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.serviceAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getServiceAuditEscrowReconciliation',
+    );
+  }
+
+  async settleServiceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'service_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleServiceAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertServicesPayoutGateState(
+    row: Omit<ServicesPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServicesPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, salon_location_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<ServicesPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.servicesPayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,salon_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServicesPayoutGateState',
+    );
+  }
+
+  async getServicesPayoutGateState(
+    payeeId: string,
+    salonLocationId: string,
+  ): Promise<ServicesPayoutGateStateRecord | undefined> {
+    return this.one<ServicesPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.servicesPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('salon_location_id', salonLocationId)
+        .maybeSingle(),
+      'getServicesPayoutGateState',
+    );
   }
 
   // ------------------------------------------------------------------

@@ -262,6 +262,9 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceAuditEscrowDrawdownRecord,
+  ServiceAuditEscrowPolicyRecord,
+  ServiceAuditEscrowReconciliationRecord,
   ServiceBoothLeasePolicyRecord,
   ServiceBoothLeaseApplicationRecord,
   ServiceBreakageAllocationRecord,
@@ -275,6 +278,7 @@ import type {
   ServiceRebateWaterfallRecord,
   ServiceRedemptionPolicyRecord,
   ServiceRedemptionSplitApplicationRecord,
+  ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
@@ -581,6 +585,13 @@ export class InMemoryStore implements Store {
   private culinaryPayoutGateStates = new Map<string, CulinaryPayoutGateStateRecord>();
   private culinaryPopupExperiences = new Map<string, CulinaryPopupExperienceRecord>();
   private culinaryPopupWriteoffs: CulinaryPopupWriteoffRecord[] = [];
+  private serviceAuditEscrowPolicies = new Map<string, ServiceAuditEscrowPolicyRecord>();
+  private serviceAuditEscrowDrawdowns: ServiceAuditEscrowDrawdownRecord[] = [];
+  private serviceAuditEscrowReconciliations = new Map<
+    string,
+    ServiceAuditEscrowReconciliationRecord
+  >();
+  private servicesPayoutGateStates = new Map<string, ServicesPayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -6646,6 +6657,153 @@ export class InMemoryStore implements Store {
       .filter((row) => row.popup_experience_id === popupExperienceId)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map((row) => ({ ...row }));
+  }
+
+  async upsertServiceAuditEscrowPolicy(
+    row: Omit<ServiceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.serviceAuditEscrowPolicies.get(row.scope_key);
+    const record: ServiceAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getServiceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ServiceAuditEscrowPolicyRecord | undefined> {
+    const found = this.serviceAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceAuditEscrowDrawdown(
+    row: Omit<ServiceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.serviceAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.serviceAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('service_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: ServiceAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listServiceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.serviceAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertServiceAuditEscrowReconciliation(
+    row: Omit<ServiceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.serviceAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('service_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: ServiceAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getServiceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowReconciliationRecord | undefined> {
+    const found = this.serviceAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleServiceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'service_audit_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertServicesPayoutGateState(
+    row: Omit<ServicesPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServicesPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, salon_location_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.salon_location_id}`;
+    const existing = this.servicesPayoutGateStates.get(key);
+    const record: ServicesPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.servicesPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getServicesPayoutGateState(
+    payeeId: string,
+    salonLocationId: string,
+  ): Promise<ServicesPayoutGateStateRecord | undefined> {
+    const found = this.servicesPayoutGateStates.get(
+      `${payeeId}|${salonLocationId}`,
+    );
+    return found === undefined ? undefined : { ...found };
   }
 
   async upsertFitnessLiveEventBonusPolicy(

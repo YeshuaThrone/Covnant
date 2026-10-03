@@ -597,6 +597,17 @@ export const JOURNAL_KINDS = [
   "culinary_audit_escrow_route",
   "culinary_audit_escrow_drawdown",
   "culinary_audit_escrow_release",
+  // Service audit escrow (PR 43, the founder services directive): a
+  // franchise service payout's release splits the held credit — the 5–10%
+  // SERVICE_AUDIT_ESCROW locks into the per-(stylist, salon location)
+  // scope escrow (route), client refund allowances, product return
+  // chargebacks, and quarterly backbar inventory audits draw it down
+  // (drawdown), and the verified reconciliation of record opens the
+  // release that pays the remaining escrow through the taxed cascade
+  // (release). Additive only.
+  "service_audit_escrow_route",
+  "service_audit_escrow_drawdown",
+  "service_audit_escrow_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -713,6 +724,32 @@ export function culinaryAuditEscrowGlAccount(scopeKey: string): string {
 // refused.
 export const CULINARY_AUDIT_ESCROW_MIN_RATE_BPS = 500;
 export const CULINARY_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
+
+// SERVICE_AUDIT_ESCROW (PR 43, the founder services directive): the
+// services twin of the NIL, spatial, fitness, and culinary audit escrows —
+// 5–10% of a franchise service payout locks per (stylist, salon location)
+// scope while the payout's exposure runs: client refund allowances,
+// product return chargebacks, and quarterly backbar inventory audits draw
+// it down, and the verified reconciliation of record opens the release.
+// Sentinel payee + GL account per scope key — the no-fold discipline: the
+// escrow is its own escrow-shaped money, never folded into platform dust,
+// unclaimed holding, or any other escrow state.
+export const SERVICE_AUDIT_ESCROW_PAYEE_PREFIX = "service_audit_escrow";
+export function serviceAuditEscrowPayeeId(scopeKey: string): string {
+  return `${SERVICE_AUDIT_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function serviceAuditEscrowPayeeName(scopeKey: string): string {
+  return `SERVICE_AUDIT_ESCROW — ${scopeKey}`;
+}
+export const GL_ACCOUNT_SERVICE_AUDIT_ESCROW = "service_audit_escrow";
+export function serviceAuditEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_SERVICE_AUDIT_ESCROW}:${scopeKey}`;
+}
+// The founder band, enforced at registration AND at use: a 5–10% share of
+// the franchise service payout. Anything outside the band is a hostile
+// policy, refused.
+export const SERVICE_AUDIT_ESCROW_MIN_RATE_BPS = 500;
+export const SERVICE_AUDIT_ESCROW_MAX_RATE_BPS = 1_000;
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];

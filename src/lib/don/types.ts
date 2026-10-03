@@ -262,6 +262,20 @@ export const LEDGER_STATUSES = [
   // text, the same extension-in-place discipline as every escrow state
   // above.
   "culinary_audit_escrow",
+  // SERVICE_AUDIT_ESCROW (PR 43, the founder services directive): the
+  // 5–10% (founder-banded, per-scope policy of record) of a franchise
+  // service payout that locks here — keyed per (stylist, salon location)
+  // scope by the escrow row's 'service_audit_escrow:{scopeKey}' sentinel
+  // payee — while the location's compliance exposure runs (health board
+  // licensing, territorial franchise exclusivity). Client refund
+  // allowances, product return chargebacks, and quarterly backbar
+  // inventory audits draw it down position-locked; the verified
+  // reconciliation of record opens the release (fail-closed: no
+  // reconciliation of record, no release), and the released remainder
+  // settles it (status → 'settled'). Kind marks WHAT the row is for its
+  // whole life. No migration: ledger_transactions.status is free text,
+  // the same extension-in-place discipline as every escrow state above.
+  "service_audit_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -405,6 +419,15 @@ export const LEDGER_KINDS = [
   // marks WHAT the row is for its whole life, the same division every
   // escrow kind above uses.
   "culinary_audit_escrow",
+  // Service audit escrow (PR 43, the founder services directive): the
+  // 5–10% of a franchise service payout auto-locked while the salon
+  // location's health-board-licensing and territorial-franchise-
+  // exclusivity exposure runs — drawn down by client refund allowances,
+  // product return chargebacks, and quarterly backbar inventory audits;
+  // released on the verified reconciliation of record. Kind marks WHAT
+  // the row is for its whole life, the same division every escrow kind
+  // above uses.
+  "service_audit_escrow",
   // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the

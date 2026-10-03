@@ -7,6 +7,7 @@ import type {
 } from "@/modules/don/records";
 import type { FitnessPayoutGateStateRecord } from "@/modules/fitness/records";
 import type { CulinaryPayoutGateStateRecord } from "@/modules/culinary/records";
+import type { ServicesPayoutGateStateRecord } from "@/modules/service/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -551,6 +552,39 @@ export async function resolveCulinaryVerticalComplianceState(
     vertical: "culinary",
     health_inspection_cleared: record.health_inspection_state === "cleared",
     territorial_kitchen_exclusivity_verified: record.territorial_exclusivity_state === "verified",
+  };
+}
+
+/**
+ * The services vertical's compliance state (PR 43, the founder services
+ * directive), resolved from the services payout-gate states of record
+ * (migration 0047) — the store-backed reader the service payout path uses
+ * for the 'services' vertical (the culinary resolver's pattern, scoped
+ * per payee × salon location). FAIL-CLOSED on both failure modes the
+ * directive names: an ABSENT record returns null (the gate refuses with
+ * vertical_state_unknown), and an 'unknown' stored state maps to false
+ * (the gate refuses with services_license_not_verified /
+ * services_exclusivity_unverified). The booleans are true ONLY on the
+ * health_board_license_verified / territorial_franchise_exclusivity_verified
+ * states of record — nothing defaults to allowing.
+ */
+export async function resolveServicesVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  salonLocationId: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "services" }> | null> {
+  const record: ServicesPayoutGateStateRecord | undefined = await store.getServicesPayoutGateState(
+    payeeId,
+    salonLocationId,
+  );
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "services",
+    health_board_license_verified: record.health_license_state === "verified",
+    territorial_franchise_exclusivity_verified:
+      record.territorial_exclusivity_state === "verified",
   };
 }
 

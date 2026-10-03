@@ -441,6 +441,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // routing, booth-lease split); still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0046_service_pos_membership_splits_protocol_micro_royalties.sql',
+      // Services audit escrow + payout gates (PR 43, the founder services
+      // directive): the SERVICE_AUDIT_ESCROW policy/drawdown/reconciliation
+      // ledgers and the services payout gate states of record; still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0047_service_audit_escrow_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

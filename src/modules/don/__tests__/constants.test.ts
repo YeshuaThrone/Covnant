@@ -142,6 +142,13 @@ describe('don constants', () => {
       'culinary_audit_escrow_route',
       'culinary_audit_escrow_drawdown',
       'culinary_audit_escrow_release',
+      // PR 43 (the founder services directive): the SERVICE_AUDIT_ESCROW
+      // journals — the 5–10% franchise service payout's automatic escrow
+      // routing, the refund-allowance/return-chargeback/backbar-audit
+      // drawdown, and the verified-reconciliation release.
+      'service_audit_escrow_route',
+      'service_audit_escrow_drawdown',
+      'service_audit_escrow_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

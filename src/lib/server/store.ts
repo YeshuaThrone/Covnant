@@ -243,6 +243,9 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceAuditEscrowDrawdownRecord,
+  ServiceAuditEscrowPolicyRecord,
+  ServiceAuditEscrowReconciliationRecord,
   ServiceBoothLeasePolicyRecord,
   ServiceBoothLeaseApplicationRecord,
   ServiceBreakageAllocationRecord,
@@ -256,6 +259,7 @@ import type {
   ServiceRebateWaterfallRecord,
   ServiceRedemptionPolicyRecord,
   ServiceRedemptionSplitApplicationRecord,
+  ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
   MatchQueueRecord,
@@ -3800,6 +3804,86 @@ export interface Store {
   listCulinaryPopupWriteoffs(
     popupExperienceId: string,
   ): Promise<CulinaryPopupWriteoffRecord[]>;
+
+  /**
+   * Registers (or replaces) the SERVICE_AUDIT_ESCROW's founder-banded
+   * rate of record for one scope (migration 0047) — upsert converges:
+   * the newest rate governs the next routing. NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertServiceAuditEscrowPolicy(
+    row: Omit<ServiceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getServiceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ServiceAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0047) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertServiceAuditEscrowDrawdown(
+    row: Omit<ServiceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listServiceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0047) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertServiceAuditEscrowReconciliation(
+    row: Omit<ServiceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getServiceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ServiceAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `service_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleServiceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the services payout gate's states of record for one payee
+   * in one salon location (migration 0047) — UNIQUE per (payee_id,
+   * salon_location_id): an upsert converges (a verification heals
+   * 'unknown'; states never regress through this table). NEVER carries
+   * the id in the conflict payload (the id rotates on conflict).
+   */
+  upsertServicesPayoutGateState(
+    row: Omit<ServicesPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServicesPayoutGateStateRecord>;
+
+  /**
+   * One payee × salon location's gate states of record; undefined when
+   * none — the services payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getServicesPayoutGateState(
+    payeeId: string,
+    salonLocationId: string,
+  ): Promise<ServicesPayoutGateStateRecord | undefined>;
 
 
   /**

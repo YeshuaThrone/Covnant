@@ -488,3 +488,114 @@ export type ServiceBoothLeaseApplicationRecord = {
   studio_owner_cents: number;
   created_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// The service audit escrow (PR 43, the founder services directive) — the
+// services twin of the NIL / spatial / fitness / culinary audit escrows:
+// a founder-banded 5–10% share of a franchise service payout locks into
+// the SERVICE_AUDIT_ESCROW per (stylist, salon location) scope while the
+// location's compliance exposure runs, client refund allowances, product
+// return chargebacks, and quarterly backbar inventory audits draw it down
+// position-locked, and the verified reconciliation of record opens the
+// release (fail-closed: no reconciliation of record, no release).
+// ---------------------------------------------------------------------------
+
+/** The escrow's three drawdown classes of record — exactly the exposures
+ * the founder directive names. Anything else refuses. This array is the
+ * TS side of the vocabulary the SQL CHECKs enforce byte-identically
+ * (migration 0047; the PR 129/130 lesson). */
+export const SERVICE_AUDIT_ESCROW_DRAWDOWN_CLASSES = [
+  "refund_allowance",
+  "product_return_chargeback",
+  "backbar_inventory_audit",
+] as const;
+export type ServiceAuditEscrowDrawdownClass =
+  (typeof SERVICE_AUDIT_ESCROW_DRAWDOWN_CLASSES)[number];
+
+/** One scope's escrow rate of record (migration 0047) — a founder-banded
+ * 500–1000 bps share of the scope's franchise service payouts that locks
+ * into the SERVICE_AUDIT_ESCROW bucket at routing. */
+export interface ServiceAuditEscrowPolicyRecord {
+  readonly id: string;
+  /** `stylist:{stylistId}:location:{salonLocationId}` — the scope key the
+   * escrow's sentinel payee and GL account cite (the service lane's own
+   * identifier space, the same columns the 0046 tables key on). */
+  readonly scope_key: string;
+  /** The founder band: 500–1000 bps, checked at registration and again
+   * at use (a hostile policy out-of-band refuses). */
+  readonly reserve_rate_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One position-locked escrow drawdown (migration 0047) — append-only.
+ * UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+ * UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position lock
+ * the balance is derived from. */
+export interface ServiceAuditEscrowDrawdownRecord {
+  readonly id: string;
+  /** The escrow bucket's ledger_transactions row of record. */
+  readonly reserve_ledger_id: string;
+  readonly scope_key: string;
+  readonly drawdown_class: ServiceAuditEscrowDrawdownClass;
+  /** The drawing event's identity of record — the replay guard. */
+  readonly source_event_id: string;
+  /** The bucket balance this draw was taken against (the spend position). */
+  readonly drawn_before_cents: number;
+  /** The drawn amount: 0 < drawn_cents <= drawn_before_cents. */
+  readonly drawn_cents: number;
+  /** drawn_before_cents - drawn_cents, pinned in a CHECK. */
+  readonly remaining_cents: number;
+  readonly created_at: string;
+}
+
+/** The verified reconciliation of record for one escrow bucket (migration
+ * 0047) — insert-as-lock, one per bucket: the release refuses fail-closed
+ * until this row exists. */
+export interface ServiceAuditEscrowReconciliationRecord {
+  readonly id: string;
+  readonly reserve_ledger_id: string;
+  /** The reconciliation evidence of record (report ref, export hash). */
+  readonly evidence_ref: string;
+  /** Who verified the reconciliation of record. */
+  readonly reconciled_by: string;
+  readonly created_at: string;
+}
+
+/**
+ * The services payout gate's states of record for one payee in one salon
+ * location (migration 0047) — the two states the payout gate's services
+ * case reads, fail-closed: `health_board_license_verified` is true only
+ * when the license state is 'verified',
+ * `territorial_franchise_exclusivity_verified` is true only when the
+ * exclusivity state is 'verified'; an absent record resolves null and
+ * 'unknown' resolves false.
+ */
+export interface ServicesPayoutGateStateRecord {
+  readonly id: string;
+  /** The payout's beneficiary of record (the stylist). */
+  readonly payee_id: string;
+  /** The salon location whose franchise exclusivity terms govern the
+   * payout. */
+  readonly salon_location_id: string;
+  /** Health board licensing over the location's operation. */
+  readonly health_license_state: "unknown" | "verified";
+  /** Territorial franchise exclusivity verification. */
+  readonly territorial_exclusivity_state: "unknown" | "verified";
+  /** The verification evidence of record. */
+  readonly evidence_ref: string;
+  /** Who verified the states of record. */
+  readonly verified_by: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** The service audit escrow's scope key — injective in the (stylist,
+ * salon location) pair, the same identifier space the 0046 service lane
+ * keys on. The sentinel payee id, GL account, and policy row all cite it. */
+export function serviceAuditEscrowScopeKey(
+  stylistId: string,
+  salonLocationId: string,
+): string {
+  return `stylist:${stylistId}:location:${salonLocationId}`;
+}

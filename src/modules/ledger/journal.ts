@@ -13,6 +13,7 @@ import {
   esportsPoolEscrowGlAccount,
   fitnessAuditEscrowGlAccount,
   culinaryAuditEscrowGlAccount,
+  serviceAuditEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
@@ -517,6 +518,29 @@ export function culinaryAuditEscrowDebit(scopeKey: string, amountCents: number):
 export function culinaryAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: culinaryAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// SERVICE_AUDIT_ESCROW (PR 43) — the services mirror at (stylist, salon
+// location) scope. A routed franchise service payout's reserve locks here
+// against the holding account's debit; client refund allowances, product
+// return chargebacks, and quarterly backbar inventory audits debit it
+// back to FBO cash; the verified release debits it into the stylist's
+// payout legs — never the dust payee's account, never the unclaimed
+// holding account, never any other escrow's account.
+export function serviceAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: serviceAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function serviceAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: serviceAuditEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };
