@@ -535,6 +535,65 @@ export interface ReconJobResult {
   food_brand_licensor_holdback_cents?: number;
   food_cook_cycle_royalty_cents?: number;
   food_supplier_rebate_routed_cents?: number;
+  // The service lane (PR 42) — the same result discipline: the service_*
+  // block is absent on every other lane; its presence is the
+  // discriminator.
+  /** Service lane: the Net Service Realization applications — the
+   * calculator rows committed, the counted replay no-ops, and the
+   * negative-net holds (the money pauses, visible). */
+  service_realization_applications_committed?: number;
+  service_realization_applications_replayed?: number;
+  service_realization_held_negative_net?: number;
+  /** Service lane: the franchise contract's three-way gross partition —
+   * committed / counted replay no-ops / fail-closed skips (no schedule
+   * of record for the location). */
+  service_franchise_splits_committed?: number;
+  service_franchise_splits_replayed?: number;
+  service_franchise_skipped_no_schedule?: number;
+  /** Service lane: the protocol execution micro-royalties — committed /
+   * counted replay no-ops / fail-closed skips (no protocol policy of
+   * record). */
+  service_protocol_royalties_committed?: number;
+  service_protocol_royalties_replayed?: number;
+  service_protocol_skipped_no_policy?: number;
+  /** Service lane: the cross-location redemption splits — committed /
+   * counted replay no-ops / fail-closed skips (no redemption policy of
+   * record at the home location). */
+  service_redemption_splits_committed?: number;
+  service_redemption_splits_replayed?: number;
+  service_redemption_skipped_no_policy?: number;
+  /** Service lane: the breakage allocations — committed / counted replay
+   * no-ops / fail-closed skips (no breakage policy of record at the home
+   * location). */
+  service_breakage_allocations_committed?: number;
+  service_breakage_allocations_replayed?: number;
+  service_breakage_skipped_no_policy?: number;
+  /** Service lane: the vendor rebate routings — committed / counted
+   * replay no-ops / fail-closed skips (no registered waterfall of
+   * record). */
+  service_rebate_routings_committed?: number;
+  service_rebate_routings_replayed?: number;
+  service_rebate_skipped_no_waterfall?: number;
+  /** Service lane: the booth-lease splits — committed / counted replay
+   * no-ops / fail-closed skips (no booth-lease policy of record). */
+  service_booth_lease_splits_committed?: number;
+  service_booth_lease_splits_replayed?: number;
+  service_booth_skipped_no_policy?: number;
+  /** Service lane: the committed money, integer cents — the realized
+   * pool and every leg the walks priced. */
+  service_net_realized_service_pool_cents?: number;
+  service_franchisor_royalty_cents?: number;
+  service_technician_commission_cents?: number;
+  service_house_margin_cents?: number;
+  service_protocol_royalty_cents?: number;
+  service_redemption_franchisor_royalty_cents?: number;
+  service_home_admin_cents?: number;
+  service_visiting_location_cents?: number;
+  service_breakage_franchisor_cents?: number;
+  service_breakage_franchisee_cents?: number;
+  service_rebate_routed_cents?: number;
+  service_chair_rent_cents?: number;
+  service_retail_commission_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

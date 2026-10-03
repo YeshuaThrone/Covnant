@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers fifty-nine profiles in dispatch order", () => {
+  it("registers sixty-five profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -130,6 +130,18 @@ describe("profile registry", () => {
       "food_meal_kit_production_csv",
       "food_grocery_cpg_scans_csv",
       "food_supplier_rebates_csv",
+      // The service lane (PR 42, the founder service directive) —
+      // dispatched last, its own rights family (salon/spa POS ticket
+      // streams, recurring membership billing logs, hotel guest room
+      // folio charges, distributor rebate statements, and booth-lease
+      // ledgers; never music-rights split math — the lane keys the
+      // stylist, protocol, and salon-location identity columns).
+      "service_pos_tickets_csv",
+      "service_membership_redemptions_csv",
+      "service_membership_breakage_csv",
+      "service_hotel_folio_charges_csv",
+      "service_vendor_rebates_csv",
+      "service_booth_lease_csv",
     ]);
   });
 

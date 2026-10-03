@@ -126,7 +126,19 @@ export type StatementProfileKind =
   | "food_pos_tickets_csv"
   | "food_meal_kit_production_csv"
   | "food_grocery_cpg_scans_csv"
-  | "food_supplier_rebates_csv";
+  | "food_supplier_rebates_csv"
+  // The service lane (PR 42, the founder service directive) — the six
+  // strict senders the directive names (salon and spa POS ticket streams,
+  // the membership billing logs' redemption and breakage layouts, hotel
+  // guest room folio charges, bulk backbar distributor rebate statements,
+  // and the hybrid salon's booth-lease ledger), one strict profile per
+  // sender's sheet.
+  | "service_pos_tickets_csv"
+  | "service_membership_redemptions_csv"
+  | "service_membership_breakage_csv"
+  | "service_hotel_folio_charges_csv"
+  | "service_vendor_rebates_csv"
+  | "service_booth_lease_csv";
 
 /**
  * Identifier kinds the worker emits — every one is a vault lookup kind
@@ -1011,6 +1023,14 @@ export interface ParsedStatementLine {
    * usage legs); null on every non-food line — the presence IS the lane
    * discriminator. Optional for the same reason as bookDetail. */
   foodDetail?: FoodLineDetail | null;
+
+  /** Service lane context (the statement sender, the sender row id of
+   * record, the stylist/protocol/location keys the Net Service
+   * Realization calculator and every walk key on, and the sender-specific
+   * money or usage legs); null on every non-service line — the presence
+   * IS the lane discriminator. Optional for the same reason as
+   * bookDetail. */
+  serviceDetail?: ServiceLineDetail | null;
 }
 
 /** The spatial lane's per-line context (PR 36, the founder spatial
@@ -1283,6 +1303,120 @@ export type FoodLineDetail =
   | FoodMealKitDetail
   | FoodCobrandScanDetail
   | FoodRebateDetail;
+
+/** The service lane's per-line context (PR 42) — one discriminated shape
+ * per sender family. Every sender repeats the identity columns the
+ * founder's directive keys the lane on — stylist_id, protocol_id, and
+ * salon_location_id on the treatment rows (the Net Service Realization's
+ * keys); the membership rows key on the member and the home location, the
+ * hotel folio rows add the hotel's own location id as provenance, and the
+ * rebate statement routes by location, so it repeats stylist/protocol-free
+ * (the food rebate precedent). */
+export type ServicePosTicketDetail = {
+  readonly sender: "pos_ticket";
+  /** The sender's ticket id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The salon/spa POS platform of record (bounded vocabulary). */
+  readonly platform: "mindbody" | "boulevard" | "zenoti" | "square";
+  readonly stylistId: string;
+  readonly protocolId: string;
+  readonly salonLocationId: string;
+  readonly period: string;
+  /** The row's ISO currency of record (validated at parse). */
+  readonly currency: string;
+  /** The four realization legs of record — the ticket stream's own
+   * figures, never a rate guess. */
+  readonly grossServiceTicketCents: number;
+  readonly backbarProductCogsCents: number;
+  readonly cardProcessingEngineCutCents: number;
+  readonly serviceSalesTaxesCents: number;
+};
+
+export type ServiceHotelFolioDetail = {
+  readonly sender: "hotel_folio";
+  /** The sender's folio charge id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The hotel's own location id of record — provenance, and part of the
+   * row identity (two hotels' folio systems can reuse a charge id). */
+  readonly hotelLocationId: string;
+  readonly stylistId: string;
+  readonly protocolId: string;
+  /** The franchised salon/spa location inside the hotel — the walks' key. */
+  readonly salonLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  readonly grossServiceChargeCents: number;
+  readonly backbarProductCogsCents: number;
+  readonly cardProcessingEngineCutCents: number;
+  readonly serviceSalesTaxesCents: number;
+};
+
+export type ServiceMembershipRedemptionDetail = {
+  readonly sender: "membership_redemption";
+  /** The sender's redemption id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly memberId: string;
+  /** The enrollment location (A) — the policy of record's key. */
+  readonly homeLocationId: string;
+  /** The redeeming location (B) — the allocation fee's direct route. */
+  readonly visitingLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The service allocation fee of record — the split's basis. */
+  readonly serviceAllocationFeeCents: number;
+};
+
+export type ServiceMembershipBreakageDetail = {
+  readonly sender: "membership_breakage";
+  /** The sender's breakage id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly memberId: string;
+  /** The enrollment location — the breakage policy of record's key. */
+  readonly homeLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The unredeemed funds of record — the split's basis. */
+  readonly unredeemedAmountCents: number;
+};
+
+export type ServiceVendorRebateDetail = {
+  readonly sender: "vendor_rebate";
+  /** The sender's rebate id of record — part of the row identity. */
+  readonly senderRowId: string;
+  /** The bulk backbar distributor of record (bounded vocabulary). */
+  readonly distributor: "loreal" | "estee_lauder";
+  /** The purchasing location the rebate routes through — the waterfall's
+   * key. */
+  readonly salonLocationId: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The rebate program's purchase basis of record. */
+  readonly rebateBasisCents: number;
+  /** The volume kickback of record — the routing's pot. */
+  readonly volumeRebateCents: number;
+};
+
+export type ServiceBoothLeaseDetail = {
+  readonly sender: "booth_lease";
+  /** The sender's entry id of record — part of the row identity. */
+  readonly senderRowId: string;
+  readonly salonLocationId: string;
+  /** The isolated leg's source row kind of record (bounded vocabulary) —
+   * the weekly flat chair rent payment or the retail product sale. */
+  readonly entryKind: "chair_rent" | "retail_sale";
+  readonly period: string;
+  readonly currency: string;
+  /** The row's money basis of record — the rent payment or the sale. */
+  readonly amountCents: number;
+};
+
+export type ServiceLineDetail =
+  | ServicePosTicketDetail
+  | ServiceHotelFolioDetail
+  | ServiceMembershipRedemptionDetail
+  | ServiceMembershipBreakageDetail
+  | ServiceVendorRebateDetail
+  | ServiceBoothLeaseDetail;
 
 /** The NIL lane's per-line context (PR 34) — the four strict senders'
  * identity and fee legs. The addendum 13 identifiers (athlete_id,

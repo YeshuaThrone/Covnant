@@ -261,6 +261,21 @@ import type {
   FoodRecipeRoyaltyScheduleRecord,
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
+import type {
+  ServiceBoothLeasePolicyRecord,
+  ServiceBoothLeaseApplicationRecord,
+  ServiceBreakageAllocationRecord,
+  ServiceBreakagePolicyRecord,
+  ServiceFranchiseScheduleRecord,
+  ServiceFranchiseSplitApplicationRecord,
+  ServiceProtocolMicroRoyaltyRecord,
+  ServiceProtocolPolicyRecord,
+  ServiceRealizationApplicationRecord,
+  ServiceRebateApplicationRecord,
+  ServiceRebateWaterfallRecord,
+  ServiceRedemptionPolicyRecord,
+  ServiceRedemptionSplitApplicationRecord,
+} from '@/modules/service/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -525,6 +540,36 @@ export class InMemoryStore implements Store {
   private foodHostOperatorSplitApplications: FoodHostOperatorSplitApplicationRecord[] = [];
   private foodCookCycleRoyalties: FoodCookCycleRoyaltyRecord[] = [];
   private foodSupplierRebateApplications: FoodSupplierRebateApplicationRecord[] = [];
+  // Migration 0046 — the service lane's policies of record, waterfalls,
+  // and seven application ledgers.
+  private serviceFranchiseSchedules = new Map<
+    string,
+    ServiceFranchiseScheduleRecord
+  >();
+  private serviceProtocolPolicies = new Map<
+    string,
+    ServiceProtocolPolicyRecord
+  >();
+  private serviceRedemptionPolicies = new Map<
+    string,
+    ServiceRedemptionPolicyRecord
+  >();
+  private serviceBreakagePolicies = new Map<
+    string,
+    ServiceBreakagePolicyRecord
+  >();
+  private serviceRebateWaterfalls: ServiceRebateWaterfallRecord[] = [];
+  private serviceBoothLeasePolicies = new Map<
+    string,
+    ServiceBoothLeasePolicyRecord
+  >();
+  private serviceRealizationApplications: ServiceRealizationApplicationRecord[] = [];
+  private serviceFranchiseSplits: ServiceFranchiseSplitApplicationRecord[] = [];
+  private serviceProtocolRoyalties: ServiceProtocolMicroRoyaltyRecord[] = [];
+  private serviceRedemptionSplits: ServiceRedemptionSplitApplicationRecord[] = [];
+  private serviceBreakageAllocations: ServiceBreakageAllocationRecord[] = [];
+  private serviceRebateApplications: ServiceRebateApplicationRecord[] = [];
+  private serviceBoothLeaseSplits: ServiceBoothLeaseApplicationRecord[] = [];
   // Migration 0045 — the culinary audit escrow, the payout gate states,
   // and the viral-menu pop-up decommissioning facts.
   private culinaryAuditEscrowPolicies = new Map<string, CulinaryAuditEscrowPolicyRecord>();
@@ -7017,7 +7062,377 @@ export class InMemoryStore implements Store {
     );
     return found === undefined ? undefined : { ...found };
   }
+
+  // ------------------------------------------------------------------
+  // The service lane (PR 42) — the policies of record, the waterfalls,
+  // and the seven application ledgers.
+  // ------------------------------------------------------------------
+
+  async upsertServiceFranchiseSchedule(
+    row: Omit<ServiceFranchiseScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceFranchiseScheduleRecord> {
+    // UNIQUE per salon_location_id — a re-registered schedule replaces
+    // the row atomically.
+    const now = new Date().toISOString();
+    const existing = this.serviceFranchiseSchedules.get(row.salon_location_id);
+    const record: ServiceFranchiseScheduleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceFranchiseSchedules.set(row.salon_location_id, record);
+    return { ...record };
+  }
+
+  async getServiceFranchiseSchedule(
+    salonLocationId: string,
+  ): Promise<ServiceFranchiseScheduleRecord | undefined> {
+    const found = this.serviceFranchiseSchedules.get(salonLocationId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertServiceProtocolPolicy(
+    row: Omit<ServiceProtocolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceProtocolPolicyRecord> {
+    // UNIQUE per protocol_id — a re-registered policy replaces the row
+    // atomically.
+    const now = new Date().toISOString();
+    const existing = this.serviceProtocolPolicies.get(row.protocol_id);
+    const record: ServiceProtocolPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceProtocolPolicies.set(row.protocol_id, record);
+    return { ...record };
+  }
+
+  async getServiceProtocolPolicy(
+    protocolId: string,
+  ): Promise<ServiceProtocolPolicyRecord | undefined> {
+    const found = this.serviceProtocolPolicies.get(protocolId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertServiceRedemptionPolicy(
+    row: Omit<ServiceRedemptionPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRedemptionPolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically.
+    const now = new Date().toISOString();
+    const existing = this.serviceRedemptionPolicies.get(row.home_location_id);
+    const record: ServiceRedemptionPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceRedemptionPolicies.set(row.home_location_id, record);
+    return { ...record };
+  }
+
+  async getServiceRedemptionPolicy(
+    homeLocationId: string,
+  ): Promise<ServiceRedemptionPolicyRecord | undefined> {
+    const found = this.serviceRedemptionPolicies.get(homeLocationId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertServiceBreakagePolicy(
+    row: Omit<ServiceBreakagePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBreakagePolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically.
+    const now = new Date().toISOString();
+    const existing = this.serviceBreakagePolicies.get(row.home_location_id);
+    const record: ServiceBreakagePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceBreakagePolicies.set(row.home_location_id, record);
+    return { ...record };
+  }
+
+  async getServiceBreakagePolicy(
+    homeLocationId: string,
+  ): Promise<ServiceBreakagePolicyRecord | undefined> {
+    const found = this.serviceBreakagePolicies.get(homeLocationId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertServiceRebateWaterfallLeg(
+    row: Omit<ServiceRebateWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRebateWaterfallRecord> {
+    // UNIQUE per (salon_location_id, ledger_id) — a re-registered leg
+    // converges.
+    const now = new Date().toISOString();
+    const index = this.serviceRebateWaterfalls.findIndex(
+      (leg) =>
+        leg.salon_location_id === row.salon_location_id &&
+        leg.ledger_id === row.ledger_id,
+    );
+    if (index >= 0) {
+      const existing = this.serviceRebateWaterfalls[index] as ServiceRebateWaterfallRecord;
+      const record: ServiceRebateWaterfallRecord = {
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: now,
+      };
+      this.serviceRebateWaterfalls[index] = record;
+      return { ...record };
+    }
+    const record: ServiceRebateWaterfallRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.serviceRebateWaterfalls.push(record);
+    return { ...record };
+  }
+
+  async listServiceRebateWaterfallLegs(
+    salonLocationId: string,
+  ): Promise<ServiceRebateWaterfallRecord[]> {
+    // Registration order (the insertion order the rebate walk reads).
+    return this.serviceRebateWaterfalls
+      .filter((leg) => leg.salon_location_id === salonLocationId)
+      .map((leg) => ({ ...leg }));
+  }
+
+  async upsertServiceBoothLeasePolicy(
+    row: Omit<ServiceBoothLeasePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBoothLeasePolicyRecord> {
+    // UNIQUE per salon_location_id — a re-registered policy replaces
+    // the row atomically.
+    const now = new Date().toISOString();
+    const existing = this.serviceBoothLeasePolicies.get(row.salon_location_id);
+    const record: ServiceBoothLeasePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.serviceBoothLeasePolicies.set(row.salon_location_id, record);
+    return { ...record };
+  }
+
+  async getServiceBoothLeasePolicy(
+    salonLocationId: string,
+  ): Promise<ServiceBoothLeasePolicyRecord | undefined> {
+    const found = this.serviceBoothLeasePolicies.get(salonLocationId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceRealizationApplication(
+    row: Omit<ServiceRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceRealizationApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_realization_applications.source_event_id');
+    }
+    const record: ServiceRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getServiceRealizationApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRealizationApplicationRecord | undefined> {
+    const found = this.serviceRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceFranchiseSplitApplication(
+    row: Omit<ServiceFranchiseSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceFranchiseSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceFranchiseSplits.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_franchise_splits.source_event_id');
+    }
+    const record: ServiceFranchiseSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceFranchiseSplits.push(record);
+    return { ...record };
+  }
+
+  async getServiceFranchiseSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceFranchiseSplitApplicationRecord | undefined> {
+    const found = this.serviceFranchiseSplits.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceProtocolMicroRoyalty(
+    row: Omit<ServiceProtocolMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceProtocolRoyalties.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_protocol_micro_royalties.source_event_id');
+    }
+    const record: ServiceProtocolMicroRoyaltyRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceProtocolRoyalties.push(record);
+    return { ...record };
+  }
+
+  async getServiceProtocolMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord | undefined> {
+    const found = this.serviceProtocolRoyalties.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceRedemptionSplitApplication(
+    row: Omit<ServiceRedemptionSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRedemptionSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceRedemptionSplits.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_redemption_splits.source_event_id');
+    }
+    const record: ServiceRedemptionSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceRedemptionSplits.push(record);
+    return { ...record };
+  }
+
+  async getServiceRedemptionSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRedemptionSplitApplicationRecord | undefined> {
+    const found = this.serviceRedemptionSplits.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceBreakageAllocation(
+    row: Omit<ServiceBreakageAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBreakageAllocationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceBreakageAllocations.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_breakage_allocations.source_event_id');
+    }
+    const record: ServiceBreakageAllocationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceBreakageAllocations.push(record);
+    return { ...record };
+  }
+
+  async getServiceBreakageAllocation(
+    sourceEventId: string,
+  ): Promise<ServiceBreakageAllocationRecord | undefined> {
+    const found = this.serviceBreakageAllocations.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceRebateApplication(
+    row: Omit<ServiceRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceRebateApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_rebate_applications.source_event_id');
+    }
+    const record: ServiceRebateApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceRebateApplications.push(record);
+    return { ...record };
+  }
+
+  async getServiceRebateApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRebateApplicationRecord | undefined> {
+    const found = this.serviceRebateApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertServiceBoothLeaseApplication(
+    row: Omit<ServiceBoothLeaseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBoothLeaseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.serviceBoothLeaseSplits.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('service_booth_lease_splits.source_event_id');
+    }
+    const record: ServiceBoothLeaseApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.serviceBoothLeaseSplits.push(record);
+    return { ...record };
+  }
+
+  async getServiceBoothLeaseApplication(
+    sourceEventId: string,
+  ): Promise<ServiceBoothLeaseApplicationRecord | undefined> {
+    const found = this.serviceBoothLeaseSplits.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
 }
+
 
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
 function compareTierCreditRows(a: UniversalRoyaltyLedgerRow, b: UniversalRoyaltyLedgerRow): number {

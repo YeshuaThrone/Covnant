@@ -1,0 +1,4 @@
+Breakage ID,Member ID,Home Location ID,Unredeemed Amount,Currency,Reporting Period
+BRK-2026-03-0001,member-m1,LOC-AUSTIN,123.45,USD,2026-03
+BRK-2026-03-0002,member-m2,LOC-AUSTIN,0.99,USD,2026-03
+BRK-2026-03-0003,member-m5,LOC-RENO,20.00,USD,2026-03

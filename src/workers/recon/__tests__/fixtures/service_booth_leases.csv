@@ -1,0 +1,4 @@
+Entry ID,Salon Location ID,Entry Kind,Amount,Currency,Reporting Period
+CHAIR-2026-03-0001,LOC-AUSTIN,chair_rent,200.00,USD,2026-03
+RET-2026-03-0002,LOC-AUSTIN,retail_sale,500.00,USD,2026-03
+CHAIR-2026-03-0003,LOC-RENO,chair_rent,150.00,USD,2026-03

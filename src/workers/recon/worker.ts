@@ -63,6 +63,8 @@ import { writeNilRowsToStore } from "./nilQueue";
 import { writeSpatialRowsToStore } from "./spatialQueue";
 import { writeFitnessRowsToStore } from "./fitnessQueue";
 import { writeFoodRowsToStore } from "./foodQueue";
+import { isServiceProfileKind } from "./serviceProfiles";
+import { writeServiceRowsToStore } from "./serviceQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
@@ -323,6 +325,22 @@ async function processJobBody(
     // record; match_queue never sees a food row.
     if (isFoodProfileKind(matchedProfile.kind)) {
       return await parseFood(deps, matchedProfile, content);
+    }
+    // The service lane branches the same way (PR 42, the founder service
+    // directive): its rows are the six strict senders' POS-ticket /
+    // membership-redemption / membership-breakage / hotel-folio /
+    // vendor-rebate / booth-lease lines whose money runs the Net Service
+    // Realization identity (gross service ticket − backbar product COGS
+    // − credit card processing engine cut − local service and sales
+    // taxes = the Net Realized Service Pool), the franchise contract's
+    // three-way gross partition, the cross-location redemption splits,
+    // the breakage allocations, the protocol micro-royalties, the vendor
+    // rebate waterfalls, and the isolated booth-lease legs — never the
+    // music queue's split math, the food walks, or any other lane's
+    // machinery. The store applications ARE the lane's money of record;
+    // match_queue never sees a service row.
+    if (isServiceProfileKind(matchedProfile.kind)) {
+      return await parseService(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1111,6 +1129,77 @@ async function parseFood(
     food_brand_licensor_holdback_cents: counts.brandLicensorHoldbackCents,
     food_cook_cycle_royalty_cents: counts.cookCycleRoyaltyCents,
     food_supplier_rebate_routed_cents: counts.supplierRebateRoutedCents,
+  };
+}
+
+/**
+ * The service lane (PR 42): the six strict senders' rows (salon and spa
+ * POS ticket streams, recurring membership redemption and breakage logs,
+ * hotel guest room folio charges, vendor rebate statements, and booth-
+ * lease ledgers) convert through the Net Service Realization calculator,
+ * the franchise contract's three-way gross partition, the cross-location
+ * redemption splits, the breakage allocations, the protocol execution
+ * micro-royalties, the vendor rebate waterfalls, and the isolated
+ * booth-lease legs. No match_queue row, no holding post: replay guards
+ * and the fail-closed policies of record govern everything. The result's
+ * service_* block is absent on every other lane — its presence is the
+ * discriminator.
+ */
+async function parseService(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeServiceRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationWritten +
+      counts.franchiseSplitsWritten +
+      counts.protocolRoyaltiesWritten +
+      counts.redemptionSplitsWritten +
+      counts.breakageAllocationsWritten +
+      counts.rebateRoutingsWritten +
+      counts.boothLeaseSplitsWritten,
+    matched: 0, // no vault matching on this lane — the service tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    service_realization_applications_committed: counts.realizationWritten,
+    service_realization_applications_replayed: counts.realizationReplayed,
+    service_realization_held_negative_net: counts.realizationHeldNegativeNet,
+    service_franchise_splits_committed: counts.franchiseSplitsWritten,
+    service_franchise_splits_replayed: counts.franchiseSplitsReplayed,
+    service_franchise_skipped_no_schedule: counts.franchiseSkippedNoSchedule,
+    service_protocol_royalties_committed: counts.protocolRoyaltiesWritten,
+    service_protocol_royalties_replayed: counts.protocolRoyaltiesReplayed,
+    service_protocol_skipped_no_policy: counts.protocolSkippedNoPolicy,
+    service_redemption_splits_committed: counts.redemptionSplitsWritten,
+    service_redemption_splits_replayed: counts.redemptionSplitsReplayed,
+    service_redemption_skipped_no_policy: counts.redemptionSkippedNoPolicy,
+    service_breakage_allocations_committed: counts.breakageAllocationsWritten,
+    service_breakage_allocations_replayed: counts.breakageAllocationsReplayed,
+    service_breakage_skipped_no_policy: counts.breakageSkippedNoPolicy,
+    service_rebate_routings_committed: counts.rebateRoutingsWritten,
+    service_rebate_routings_replayed: counts.rebateRoutingsReplayed,
+    service_rebate_skipped_no_waterfall: counts.rebateSkippedNoWaterfall,
+    service_booth_lease_splits_committed: counts.boothLeaseSplitsWritten,
+    service_booth_lease_splits_replayed: counts.boothLeaseSplitsReplayed,
+    service_booth_skipped_no_policy: counts.boothSkippedNoPolicy,
+    service_net_realized_service_pool_cents: counts.netRealizedServicePoolCents,
+    service_franchisor_royalty_cents: counts.franchisorRoyaltyCents,
+    service_technician_commission_cents: counts.technicianCommissionCents,
+    service_house_margin_cents: counts.houseMarginCents,
+    service_protocol_royalty_cents: counts.protocolRoyaltyCents,
+    service_redemption_franchisor_royalty_cents: counts.redemptionFranchisorRoyaltyCents,
+    service_home_admin_cents: counts.homeAdminCents,
+    service_visiting_location_cents: counts.visitingLocationCents,
+    service_breakage_franchisor_cents: counts.breakageFranchisorCents,
+    service_breakage_franchisee_cents: counts.breakageFranchiseeCents,
+    service_rebate_routed_cents: counts.rebateRoutedCents,
+    service_chair_rent_cents: counts.chairRentCents,
+    service_retail_commission_cents: counts.retailCommissionCents,
   };
 }
 

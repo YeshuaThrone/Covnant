@@ -247,6 +247,21 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceBoothLeasePolicyRecord,
+  ServiceBoothLeaseApplicationRecord,
+  ServiceBreakageAllocationRecord,
+  ServiceBreakagePolicyRecord,
+  ServiceFranchiseScheduleRecord,
+  ServiceFranchiseSplitApplicationRecord,
+  ServiceProtocolMicroRoyaltyRecord,
+  ServiceProtocolPolicyRecord,
+  ServiceRealizationApplicationRecord,
+  ServiceRebateApplicationRecord,
+  ServiceRebateWaterfallRecord,
+  ServiceRedemptionPolicyRecord,
+  ServiceRedemptionSplitApplicationRecord,
+} from '@/modules/service/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -2902,6 +2917,265 @@ CREATE TABLE IF NOT EXISTS food_supplier_rebate_applications (
   -- The rebate conserves exactly: the legs' routed shares sum to the
   -- volume kickback.
   CHECK (routed_total_cents = volume_rebate_cents)
+);
+
+-- The service lane (migration 0046, PR 42) — the founder service
+-- directive's policies of record, waterfalls, and seven application
+-- ledgers for salon, med-spa, and hospitality franchise reconciliation.
+-- The CHECK vocabularies here are byte-identical to the TS unions in
+-- src/modules/service/records.ts (the PR 129 lesson: the applied
+-- CHECK rejects any token the TypeScript side still accepts, so the two
+-- sides are built together).
+
+CREATE TABLE IF NOT EXISTS service_franchise_schedules (
+  id TEXT PRIMARY KEY,
+  salon_location_id TEXT NOT NULL UNIQUE,
+  master_franchisor_royalty_bps INTEGER NOT NULL CHECK (master_franchisor_royalty_bps >= 0 AND master_franchisor_royalty_bps <= 10000),
+  technician_commission_bps INTEGER NOT NULL CHECK (technician_commission_bps >= 0 AND technician_commission_bps <= 10000),
+  house_margin_bps INTEGER NOT NULL CHECK (house_margin_bps >= 0 AND house_margin_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- The three legs partition the gross EXACTLY (the validator's clause).
+  CHECK (
+    master_franchisor_royalty_bps
+    + technician_commission_bps
+    + house_margin_bps
+    = 10000
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_protocol_policies (
+  id TEXT PRIMARY KEY,
+  protocol_id TEXT NOT NULL UNIQUE,
+  payee_id TEXT NOT NULL,
+  micros_per_treatment INTEGER NOT NULL CHECK (micros_per_treatment >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS service_redemption_policies (
+  id TEXT PRIMARY KEY,
+  home_location_id TEXT NOT NULL UNIQUE,
+  franchisor_royalty_bps INTEGER NOT NULL CHECK (franchisor_royalty_bps >= 0 AND franchisor_royalty_bps <= 10000),
+  home_admin_bps INTEGER NOT NULL CHECK (home_admin_bps >= 0 AND home_admin_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- The two rates sum to AT MOST 10000 — the visiting location routes
+  -- the residual (the validator's clause).
+  CHECK (franchisor_royalty_bps + home_admin_bps <= 10000)
+);
+
+CREATE TABLE IF NOT EXISTS service_breakage_policies (
+  id TEXT PRIMARY KEY,
+  home_location_id TEXT NOT NULL UNIQUE,
+  franchisor_breakage_bps INTEGER NOT NULL CHECK (franchisor_breakage_bps >= 0 AND franchisor_breakage_bps <= 10000),
+  franchisee_breakage_bps INTEGER NOT NULL CHECK (franchisee_breakage_bps >= 0 AND franchisee_breakage_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- The unredeemed funds allocate fully across the two contractual legs.
+  CHECK (franchisor_breakage_bps + franchisee_breakage_bps = 10000)
+);
+
+CREATE TABLE IF NOT EXISTS service_rebate_waterfalls (
+  id TEXT PRIMARY KEY,
+  salon_location_id TEXT NOT NULL,
+  ledger_id TEXT NOT NULL,
+  weight_bps INTEGER NOT NULL CHECK (weight_bps > 0 AND weight_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (salon_location_id, ledger_id)
+);
+CREATE INDEX IF NOT EXISTS idx_service_rebate_waterfalls_location
+  ON service_rebate_waterfalls (salon_location_id);
+
+CREATE TABLE IF NOT EXISTS service_booth_lease_policies (
+  id TEXT PRIMARY KEY,
+  salon_location_id TEXT NOT NULL UNIQUE,
+  chair_rent_payee_id TEXT NOT NULL,
+  retail_commission_bps INTEGER NOT NULL CHECK (retail_commission_bps >= 0 AND retail_commission_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS service_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL CHECK (sender IN ('pos_ticket', 'hotel_folio')),
+  stylist_id TEXT NOT NULL,
+  protocol_id TEXT NOT NULL,
+  salon_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  gross_service_ticket_cents INTEGER NOT NULL CHECK (gross_service_ticket_cents >= 0),
+  backbar_product_cogs_cents INTEGER NOT NULL CHECK (backbar_product_cogs_cents >= 0),
+  card_processing_engine_cut_cents INTEGER NOT NULL CHECK (card_processing_engine_cut_cents >= 0),
+  service_sales_taxes_cents INTEGER NOT NULL CHECK (service_sales_taxes_cents >= 0),
+  net_realized_service_pool_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- THE NET SERVICE REALIZATION identity, pinned: the four legs conserve
+  -- the gross service ticket exactly.
+  CHECK (
+    backbar_product_cogs_cents
+    + card_processing_engine_cut_cents
+    + service_sales_taxes_cents
+    + net_realized_service_pool_cents
+    = gross_service_ticket_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_franchise_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL CHECK (sender IN ('pos_ticket', 'hotel_folio')),
+  stylist_id TEXT NOT NULL,
+  protocol_id TEXT NOT NULL,
+  salon_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  gross_service_ticket_cents INTEGER NOT NULL CHECK (gross_service_ticket_cents >= 0),
+  schedule_ref TEXT NOT NULL,
+  master_franchisor_royalty_bps INTEGER NOT NULL CHECK (master_franchisor_royalty_bps >= 0 AND master_franchisor_royalty_bps <= 10000),
+  master_franchisor_royalty_cents INTEGER NOT NULL CHECK (master_franchisor_royalty_cents >= 0),
+  technician_commission_bps INTEGER NOT NULL CHECK (technician_commission_bps >= 0 AND technician_commission_bps <= 10000),
+  technician_commission_cents INTEGER NOT NULL CHECK (technician_commission_cents >= 0),
+  house_margin_bps INTEGER NOT NULL CHECK (house_margin_bps >= 0 AND house_margin_bps <= 10000),
+  house_margin_cents INTEGER NOT NULL CHECK (house_margin_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The three legs conserve the gross exactly — the house location
+  -- margin routes the residual (the founder's 5 / 45 / 50 example).
+  CHECK (
+    master_franchisor_royalty_cents
+    + technician_commission_cents
+    + house_margin_cents
+    = gross_service_ticket_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_protocol_micro_royalties (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL CHECK (sender IN ('pos_ticket', 'hotel_folio')),
+  stylist_id TEXT NOT NULL,
+  protocol_id TEXT NOT NULL,
+  salon_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  micros_per_treatment INTEGER NOT NULL CHECK (micros_per_treatment >= 0),
+  royalty_micros INTEGER NOT NULL CHECK (royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- One treatment per logged row; the fee floors into payable cents
+  -- (one cent = 1,000,000 statement micros, per migration 0046).
+  CHECK (
+    royalty_micros = micros_per_treatment
+    AND royalty_cents = royalty_micros / 1000000
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_redemption_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  home_location_id TEXT NOT NULL,
+  visiting_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  service_allocation_fee_cents INTEGER NOT NULL CHECK (service_allocation_fee_cents >= 0),
+  franchisor_royalty_bps INTEGER NOT NULL CHECK (franchisor_royalty_bps >= 0 AND franchisor_royalty_bps <= 10000),
+  franchisor_royalty_cents INTEGER NOT NULL CHECK (franchisor_royalty_cents >= 0),
+  home_admin_bps INTEGER NOT NULL CHECK (home_admin_bps >= 0 AND home_admin_bps <= 10000),
+  home_admin_cents INTEGER NOT NULL CHECK (home_admin_cents >= 0),
+  visiting_location_cents INTEGER NOT NULL CHECK (visiting_location_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The fee conserves exactly: the fee routes DIRECTLY to the visiting
+  -- location; the royalty and the home admin cut distribute.
+  CHECK (
+    franchisor_royalty_cents
+    + home_admin_cents
+    + visiting_location_cents
+    = service_allocation_fee_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_breakage_allocations (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  home_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  unredeemed_amount_cents INTEGER NOT NULL CHECK (unredeemed_amount_cents >= 0),
+  franchisor_breakage_bps INTEGER NOT NULL CHECK (franchisor_breakage_bps >= 0 AND franchisor_breakage_bps <= 10000),
+  franchisor_breakage_cents INTEGER NOT NULL CHECK (franchisor_breakage_cents >= 0),
+  franchisee_breakage_cents INTEGER NOT NULL CHECK (franchisee_breakage_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The funds conserve exactly: the franchisee routes the residual.
+  CHECK (
+    franchisor_breakage_cents
+    + franchisee_breakage_cents
+    = unredeemed_amount_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS service_rebate_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  distributor TEXT NOT NULL CHECK (distributor IN ('loreal', 'estee_lauder')),
+  salon_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  rebate_basis_cents INTEGER NOT NULL CHECK (rebate_basis_cents >= 0),
+  volume_rebate_cents INTEGER NOT NULL CHECK (volume_rebate_cents >= 0),
+  routing_legs TEXT NOT NULL,
+  routed_total_cents INTEGER NOT NULL CHECK (routed_total_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The rebate conserves exactly: the legs' routed shares sum to the
+  -- volume kickback.
+  CHECK (routed_total_cents = volume_rebate_cents)
+);
+
+CREATE TABLE IF NOT EXISTS service_booth_lease_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  salon_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  leg_kind TEXT NOT NULL CHECK (leg_kind IN ('chair_rent', 'retail_commission')),
+  gross_cents INTEGER NOT NULL CHECK (gross_cents >= 0),
+  retail_commission_bps INTEGER NOT NULL CHECK (retail_commission_bps >= 0 AND retail_commission_bps <= 10000),
+  studio_owner_cents INTEGER NOT NULL CHECK (studio_owner_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- THE ISOLATION, pinned: the flat chair rent routes exact to the
+  -- studio owner (never commissioned); the retail sale routes its
+  -- floored commission (never the flat rent).
+  CHECK (
+    (
+      leg_kind = 'chair_rent'
+      AND studio_owner_cents = gross_cents
+      AND retail_commission_bps = 0
+    )
+    OR
+    (
+      leg_kind = 'retail_commission'
+      AND studio_owner_cents = (gross_cents * retail_commission_bps) / 10000
+    )
+  )
 );
 
 -- The culinary audit escrow (migration 0045, PR 41) — the founder
@@ -14394,6 +14668,773 @@ export class SqliteStore implements Store {
       volume_rebate_cents: row.volume_rebate_cents as number,
       routing_legs: row.routing_legs as string,
       routed_total_cents: row.routed_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // The service lane (PR 42) — the policies of record, the waterfalls,
+  // and the seven application ledgers.
+  // ------------------------------------------------------------------
+
+  async upsertServiceFranchiseSchedule(
+    row: Omit<ServiceFranchiseScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceFranchiseScheduleRecord> {
+    // UNIQUE per salon_location_id — a re-registered schedule replaces
+    // the row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_franchise_schedules
+           (id, salon_location_id, master_franchisor_royalty_bps,
+            technician_commission_bps, house_margin_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (salon_location_id) DO UPDATE SET
+           master_franchisor_royalty_bps = excluded.master_franchisor_royalty_bps,
+           technician_commission_bps = excluded.technician_commission_bps,
+           house_margin_bps = excluded.house_margin_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.salon_location_id,
+        record.master_franchisor_royalty_bps,
+        record.technician_commission_bps,
+        record.house_margin_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getServiceFranchiseSchedule(record.salon_location_id) as Promise<
+      ServiceFranchiseScheduleRecord
+    >;
+  }
+
+  async getServiceFranchiseSchedule(
+    salonLocationId: string,
+  ): Promise<ServiceFranchiseScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_franchise_schedules WHERE salon_location_id = ?`)
+      .get(salonLocationId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      salon_location_id: row.salon_location_id as string,
+      master_franchisor_royalty_bps: row.master_franchisor_royalty_bps as number,
+      technician_commission_bps: row.technician_commission_bps as number,
+      house_margin_bps: row.house_margin_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertServiceProtocolPolicy(
+    row: Omit<ServiceProtocolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceProtocolPolicyRecord> {
+    // UNIQUE per protocol_id — a re-registered policy replaces the row
+    // atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_protocol_policies
+           (id, protocol_id, payee_id, micros_per_treatment, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (protocol_id) DO UPDATE SET
+           payee_id = excluded.payee_id,
+           micros_per_treatment = excluded.micros_per_treatment,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.protocol_id,
+        record.payee_id,
+        record.micros_per_treatment,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getServiceProtocolPolicy(record.protocol_id) as Promise<
+      ServiceProtocolPolicyRecord
+    >;
+  }
+
+  async getServiceProtocolPolicy(
+    protocolId: string,
+  ): Promise<ServiceProtocolPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_protocol_policies WHERE protocol_id = ?`)
+      .get(protocolId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      protocol_id: row.protocol_id as string,
+      payee_id: row.payee_id as string,
+      micros_per_treatment: row.micros_per_treatment as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertServiceRedemptionPolicy(
+    row: Omit<ServiceRedemptionPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRedemptionPolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_redemption_policies
+           (id, home_location_id, franchisor_royalty_bps, home_admin_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (home_location_id) DO UPDATE SET
+           franchisor_royalty_bps = excluded.franchisor_royalty_bps,
+           home_admin_bps = excluded.home_admin_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.home_location_id,
+        record.franchisor_royalty_bps,
+        record.home_admin_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getServiceRedemptionPolicy(record.home_location_id) as Promise<
+      ServiceRedemptionPolicyRecord
+    >;
+  }
+
+  async getServiceRedemptionPolicy(
+    homeLocationId: string,
+  ): Promise<ServiceRedemptionPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_redemption_policies WHERE home_location_id = ?`)
+      .get(homeLocationId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      home_location_id: row.home_location_id as string,
+      franchisor_royalty_bps: row.franchisor_royalty_bps as number,
+      home_admin_bps: row.home_admin_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertServiceBreakagePolicy(
+    row: Omit<ServiceBreakagePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBreakagePolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_breakage_policies
+           (id, home_location_id, franchisor_breakage_bps, franchisee_breakage_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (home_location_id) DO UPDATE SET
+           franchisor_breakage_bps = excluded.franchisor_breakage_bps,
+           franchisee_breakage_bps = excluded.franchisee_breakage_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.home_location_id,
+        record.franchisor_breakage_bps,
+        record.franchisee_breakage_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getServiceBreakagePolicy(record.home_location_id) as Promise<
+      ServiceBreakagePolicyRecord
+    >;
+  }
+
+  async getServiceBreakagePolicy(
+    homeLocationId: string,
+  ): Promise<ServiceBreakagePolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_breakage_policies WHERE home_location_id = ?`)
+      .get(homeLocationId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      home_location_id: row.home_location_id as string,
+      franchisor_breakage_bps: row.franchisor_breakage_bps as number,
+      franchisee_breakage_bps: row.franchisee_breakage_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertServiceRebateWaterfallLeg(
+    row: Omit<ServiceRebateWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRebateWaterfallRecord> {
+    // UNIQUE per (salon_location_id, ledger_id) — a re-registered leg
+    // converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_rebate_waterfalls
+           (id, salon_location_id, ledger_id, weight_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (salon_location_id, ledger_id) DO UPDATE SET
+           weight_bps = excluded.weight_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.salon_location_id,
+        record.ledger_id,
+        record.weight_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async listServiceRebateWaterfallLegs(
+    salonLocationId: string,
+  ): Promise<ServiceRebateWaterfallRecord[]> {
+    // Registration order (created_at ASC, id ASC is this backend's
+    // insertion_order).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM service_rebate_waterfalls
+           WHERE salon_location_id = ?
+           ORDER BY created_at ASC, id ASC`,
+      )
+      .all(salonLocationId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      salon_location_id: row.salon_location_id as string,
+      ledger_id: row.ledger_id as string,
+      weight_bps: row.weight_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertServiceBoothLeasePolicy(
+    row: Omit<ServiceBoothLeasePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBoothLeasePolicyRecord> {
+    // UNIQUE per salon_location_id — a re-registered policy replaces
+    // the row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_booth_lease_policies
+           (id, salon_location_id, chair_rent_payee_id, retail_commission_bps,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (salon_location_id) DO UPDATE SET
+           chair_rent_payee_id = excluded.chair_rent_payee_id,
+           retail_commission_bps = excluded.retail_commission_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.salon_location_id,
+        record.chair_rent_payee_id,
+        record.retail_commission_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getServiceBoothLeasePolicy(record.salon_location_id) as Promise<
+      ServiceBoothLeasePolicyRecord
+    >;
+  }
+
+  async getServiceBoothLeasePolicy(
+    salonLocationId: string,
+  ): Promise<ServiceBoothLeasePolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_booth_lease_policies WHERE salon_location_id = ?`)
+      .get(salonLocationId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      salon_location_id: row.salon_location_id as string,
+      chair_rent_payee_id: row.chair_rent_payee_id as string,
+      retail_commission_bps: row.retail_commission_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertServiceRealizationApplication(
+    row: Omit<ServiceRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-shipped sheet
+    // throws here, never a double application.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_realization_applications
+           (id, source_event_id, sender, stylist_id, protocol_id, salon_location_id,
+            period, currency, gross_service_ticket_cents, backbar_product_cogs_cents,
+            card_processing_engine_cut_cents, service_sales_taxes_cents,
+            net_realized_service_pool_cents, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.stylist_id,
+        record.protocol_id,
+        record.salon_location_id,
+        record.period,
+        record.currency,
+        record.gross_service_ticket_cents,
+        record.backbar_product_cogs_cents,
+        record.card_processing_engine_cut_cents,
+        record.service_sales_taxes_cents,
+        record.net_realized_service_pool_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceRealizationApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_realization_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as ServiceRealizationApplicationRecord['sender'],
+      stylist_id: row.stylist_id as string,
+      protocol_id: row.protocol_id as string,
+      salon_location_id: row.salon_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_service_ticket_cents: row.gross_service_ticket_cents as number,
+      backbar_product_cogs_cents: row.backbar_product_cogs_cents as number,
+      card_processing_engine_cut_cents: row.card_processing_engine_cut_cents as number,
+      service_sales_taxes_cents: row.service_sales_taxes_cents as number,
+      net_realized_service_pool_cents: row.net_realized_service_pool_cents as number,
+      verdict: row.verdict as ServiceRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceFranchiseSplitApplication(
+    row: Omit<ServiceFranchiseSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceFranchiseSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_franchise_split_applications
+           (id, source_event_id, sender, stylist_id, protocol_id, salon_location_id,
+            period, currency, gross_service_ticket_cents, schedule_ref,
+            master_franchisor_royalty_bps, master_franchisor_royalty_cents,
+            technician_commission_bps, technician_commission_cents,
+            house_margin_bps, house_margin_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.stylist_id,
+        record.protocol_id,
+        record.salon_location_id,
+        record.period,
+        record.currency,
+        record.gross_service_ticket_cents,
+        record.schedule_ref,
+        record.master_franchisor_royalty_bps,
+        record.master_franchisor_royalty_cents,
+        record.technician_commission_bps,
+        record.technician_commission_cents,
+        record.house_margin_bps,
+        record.house_margin_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceFranchiseSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceFranchiseSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM service_franchise_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as ServiceFranchiseSplitApplicationRecord['sender'],
+      stylist_id: row.stylist_id as string,
+      protocol_id: row.protocol_id as string,
+      salon_location_id: row.salon_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_service_ticket_cents: row.gross_service_ticket_cents as number,
+      schedule_ref: row.schedule_ref as string,
+      master_franchisor_royalty_bps: row.master_franchisor_royalty_bps as number,
+      master_franchisor_royalty_cents: row.master_franchisor_royalty_cents as number,
+      technician_commission_bps: row.technician_commission_bps as number,
+      technician_commission_cents: row.technician_commission_cents as number,
+      house_margin_bps: row.house_margin_bps as number,
+      house_margin_cents: row.house_margin_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceProtocolMicroRoyalty(
+    row: Omit<ServiceProtocolMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_protocol_micro_royalties
+           (id, source_event_id, sender, stylist_id, protocol_id, salon_location_id,
+            period, currency, payee_id, micros_per_treatment, royalty_micros,
+            royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.stylist_id,
+        record.protocol_id,
+        record.salon_location_id,
+        record.period,
+        record.currency,
+        record.payee_id,
+        record.micros_per_treatment,
+        record.royalty_micros,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceProtocolMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM service_protocol_micro_royalties WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as ServiceProtocolMicroRoyaltyRecord['sender'],
+      stylist_id: row.stylist_id as string,
+      protocol_id: row.protocol_id as string,
+      salon_location_id: row.salon_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      payee_id: row.payee_id as string,
+      micros_per_treatment: row.micros_per_treatment as number,
+      royalty_micros: row.royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceRedemptionSplitApplication(
+    row: Omit<ServiceRedemptionSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRedemptionSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_redemption_split_applications
+           (id, source_event_id, member_id, home_location_id, visiting_location_id,
+            period, currency, service_allocation_fee_cents, franchisor_royalty_bps,
+            franchisor_royalty_cents, home_admin_bps, home_admin_cents,
+            visiting_location_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.member_id,
+        record.home_location_id,
+        record.visiting_location_id,
+        record.period,
+        record.currency,
+        record.service_allocation_fee_cents,
+        record.franchisor_royalty_bps,
+        record.franchisor_royalty_cents,
+        record.home_admin_bps,
+        record.home_admin_cents,
+        record.visiting_location_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceRedemptionSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRedemptionSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM service_redemption_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      member_id: row.member_id as string,
+      home_location_id: row.home_location_id as string,
+      visiting_location_id: row.visiting_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      service_allocation_fee_cents: row.service_allocation_fee_cents as number,
+      franchisor_royalty_bps: row.franchisor_royalty_bps as number,
+      franchisor_royalty_cents: row.franchisor_royalty_cents as number,
+      home_admin_bps: row.home_admin_bps as number,
+      home_admin_cents: row.home_admin_cents as number,
+      visiting_location_cents: row.visiting_location_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceBreakageAllocation(
+    row: Omit<ServiceBreakageAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBreakageAllocationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_breakage_allocations
+           (id, source_event_id, member_id, home_location_id, period, currency,
+            unredeemed_amount_cents, franchisor_breakage_bps,
+            franchisor_breakage_cents, franchisee_breakage_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.member_id,
+        record.home_location_id,
+        record.period,
+        record.currency,
+        record.unredeemed_amount_cents,
+        record.franchisor_breakage_bps,
+        record.franchisor_breakage_cents,
+        record.franchisee_breakage_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceBreakageAllocation(
+    sourceEventId: string,
+  ): Promise<ServiceBreakageAllocationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_breakage_allocations WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      member_id: row.member_id as string,
+      home_location_id: row.home_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      unredeemed_amount_cents: row.unredeemed_amount_cents as number,
+      franchisor_breakage_bps: row.franchisor_breakage_bps as number,
+      franchisor_breakage_cents: row.franchisor_breakage_cents as number,
+      franchisee_breakage_cents: row.franchisee_breakage_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceRebateApplication(
+    row: Omit<ServiceRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_rebate_applications
+           (id, source_event_id, distributor, salon_location_id, period, currency,
+            rebate_basis_cents, volume_rebate_cents, routing_legs,
+            routed_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.distributor,
+        record.salon_location_id,
+        record.period,
+        record.currency,
+        record.rebate_basis_cents,
+        record.volume_rebate_cents,
+        record.routing_legs,
+        record.routed_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceRebateApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRebateApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_rebate_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      distributor: row.distributor as ServiceRebateApplicationRecord['distributor'],
+      salon_location_id: row.salon_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      rebate_basis_cents: row.rebate_basis_cents as number,
+      volume_rebate_cents: row.volume_rebate_cents as number,
+      routing_legs: row.routing_legs as string,
+      routed_total_cents: row.routed_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertServiceBoothLeaseApplication(
+    row: Omit<ServiceBoothLeaseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBoothLeaseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO service_booth_lease_applications
+           (id, source_event_id, salon_location_id, period, currency, leg_kind,
+            gross_cents, retail_commission_bps, studio_owner_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.salon_location_id,
+        record.period,
+        record.currency,
+        record.leg_kind,
+        record.gross_cents,
+        record.retail_commission_bps,
+        record.studio_owner_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getServiceBoothLeaseApplication(
+    sourceEventId: string,
+  ): Promise<ServiceBoothLeaseApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM service_booth_lease_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      salon_location_id: row.salon_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      leg_kind: row.leg_kind as ServiceBoothLeaseApplicationRecord['leg_kind'],
+      gross_cents: row.gross_cents as number,
+      retail_commission_bps: row.retail_commission_bps as number,
+      studio_owner_cents: row.studio_owner_cents as number,
       created_at: row.created_at as string,
     };
   }

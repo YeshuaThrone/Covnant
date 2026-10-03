@@ -240,6 +240,21 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  ServiceBoothLeasePolicyRecord,
+  ServiceBoothLeaseApplicationRecord,
+  ServiceBreakageAllocationRecord,
+  ServiceBreakagePolicyRecord,
+  ServiceFranchiseScheduleRecord,
+  ServiceFranchiseSplitApplicationRecord,
+  ServiceProtocolMicroRoyaltyRecord,
+  ServiceProtocolPolicyRecord,
+  ServiceRealizationApplicationRecord,
+  ServiceRebateApplicationRecord,
+  ServiceRebateWaterfallRecord,
+  ServiceRedemptionPolicyRecord,
+  ServiceRedemptionSplitApplicationRecord,
+} from '@/modules/service/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -582,6 +597,22 @@ const TABLES = {
   culinaryPayoutGateStates: 'culinary_payout_gate_states',
   culinaryPopupExperiences: 'culinary_popup_experiences',
   culinaryPopupWriteoffs: 'culinary_popup_writeoffs',
+  // Migration 0046 — the service lane: franchise schedules, protocol
+  // micro-royalty policies, redemption and breakage policies, the vendor
+  // rebate waterfall, booth-lease policy, and the application ledgers.
+  serviceFranchiseSchedules: 'service_franchise_schedules',
+  serviceProtocolPolicies: 'service_protocol_policies',
+  serviceRedemptionPolicies: 'service_redemption_policies',
+  serviceBreakagePolicies: 'service_breakage_policies',
+  serviceRebateWaterfalls: 'service_rebate_waterfalls',
+  serviceBoothLeasePolicies: 'service_booth_lease_policies',
+  serviceRealizationApplications: 'service_realization_applications',
+  serviceFranchiseSplitApplications: 'service_franchise_split_applications',
+  serviceProtocolMicroRoyalties: 'service_protocol_micro_royalties',
+  serviceRedemptionSplitApplications: 'service_redemption_split_applications',
+  serviceBreakageAllocations: 'service_breakage_allocations',
+  serviceRebateApplications: 'service_rebate_applications',
+  serviceBoothLeaseApplications: 'service_booth_lease_applications',
 } as const;
 
 /**
@@ -8172,5 +8203,371 @@ export class SupabaseStore implements Store {
       throw new Error(`listCulinaryPopupWriteoffs failed: ${error.message}`);
     }
     return (data ?? []) as CulinaryPopupWriteoffRecord[];
+  }
+
+  // ------------------------------------------------------------------
+  // The service lane (PR 42) — the policies of record, the waterfalls,
+  // and the seven application ledgers.
+  // ------------------------------------------------------------------
+
+  async upsertServiceFranchiseSchedule(
+    row: Omit<ServiceFranchiseScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceFranchiseScheduleRecord> {
+    // UNIQUE per salon_location_id — a re-registered schedule replaces
+    // the row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceFranchiseScheduleRecord>(
+      this.client
+        .from(TABLES.serviceFranchiseSchedules)
+        .upsert(row, { onConflict: 'salon_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceFranchiseSchedule',
+    );
+  }
+
+  async getServiceFranchiseSchedule(
+    salonLocationId: string,
+  ): Promise<ServiceFranchiseScheduleRecord | undefined> {
+    return this.one<ServiceFranchiseScheduleRecord>(
+      this.client
+        .from(TABLES.serviceFranchiseSchedules)
+        .select()
+        .eq('salon_location_id', salonLocationId)
+        .maybeSingle(),
+      'getServiceFranchiseSchedule',
+    );
+  }
+
+  async upsertServiceProtocolPolicy(
+    row: Omit<ServiceProtocolPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceProtocolPolicyRecord> {
+    // UNIQUE per protocol_id — a re-registered policy replaces the row
+    // atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceProtocolPolicyRecord>(
+      this.client
+        .from(TABLES.serviceProtocolPolicies)
+        .upsert(row, { onConflict: 'protocol_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceProtocolPolicy',
+    );
+  }
+
+  async getServiceProtocolPolicy(
+    protocolId: string,
+  ): Promise<ServiceProtocolPolicyRecord | undefined> {
+    return this.one<ServiceProtocolPolicyRecord>(
+      this.client
+        .from(TABLES.serviceProtocolPolicies)
+        .select()
+        .eq('protocol_id', protocolId)
+        .maybeSingle(),
+      'getServiceProtocolPolicy',
+    );
+  }
+
+  async upsertServiceRedemptionPolicy(
+    row: Omit<ServiceRedemptionPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRedemptionPolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceRedemptionPolicyRecord>(
+      this.client
+        .from(TABLES.serviceRedemptionPolicies)
+        .upsert(row, { onConflict: 'home_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceRedemptionPolicy',
+    );
+  }
+
+  async getServiceRedemptionPolicy(
+    homeLocationId: string,
+  ): Promise<ServiceRedemptionPolicyRecord | undefined> {
+    return this.one<ServiceRedemptionPolicyRecord>(
+      this.client
+        .from(TABLES.serviceRedemptionPolicies)
+        .select()
+        .eq('home_location_id', homeLocationId)
+        .maybeSingle(),
+      'getServiceRedemptionPolicy',
+    );
+  }
+
+  async upsertServiceBreakagePolicy(
+    row: Omit<ServiceBreakagePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBreakagePolicyRecord> {
+    // UNIQUE per home_location_id — a re-registered policy replaces the
+    // row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceBreakagePolicyRecord>(
+      this.client
+        .from(TABLES.serviceBreakagePolicies)
+        .upsert(row, { onConflict: 'home_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceBreakagePolicy',
+    );
+  }
+
+  async getServiceBreakagePolicy(
+    homeLocationId: string,
+  ): Promise<ServiceBreakagePolicyRecord | undefined> {
+    return this.one<ServiceBreakagePolicyRecord>(
+      this.client
+        .from(TABLES.serviceBreakagePolicies)
+        .select()
+        .eq('home_location_id', homeLocationId)
+        .maybeSingle(),
+      'getServiceBreakagePolicy',
+    );
+  }
+
+  async upsertServiceRebateWaterfallLeg(
+    row: Omit<ServiceRebateWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceRebateWaterfallRecord> {
+    // UNIQUE per (salon_location_id, ledger_id) — a re-registered leg
+    // converges. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceRebateWaterfallRecord>(
+      this.client
+        .from(TABLES.serviceRebateWaterfalls)
+        .upsert(row, { onConflict: 'salon_location_id,ledger_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceRebateWaterfallLeg',
+    );
+  }
+
+  async listServiceRebateWaterfallLegs(
+    salonLocationId: string,
+  ): Promise<ServiceRebateWaterfallRecord[]> {
+    // Registration order (the insertion order the rebate walk reads).
+    const { data, error } = await this.client
+      .from(TABLES.serviceRebateWaterfalls)
+      .select()
+      .eq('salon_location_id', salonLocationId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listServiceRebateWaterfallLegs failed: ${error.message}`);
+    }
+    return (data ?? []) as ServiceRebateWaterfallRecord[];
+  }
+
+  async upsertServiceBoothLeasePolicy(
+    row: Omit<ServiceBoothLeasePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ServiceBoothLeasePolicyRecord> {
+    // UNIQUE per salon_location_id — a re-registered policy replaces the
+    // row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<ServiceBoothLeasePolicyRecord>(
+      this.client
+        .from(TABLES.serviceBoothLeasePolicies)
+        .upsert(row, { onConflict: 'salon_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertServiceBoothLeasePolicy',
+    );
+  }
+
+  async getServiceBoothLeasePolicy(
+    salonLocationId: string,
+  ): Promise<ServiceBoothLeasePolicyRecord | undefined> {
+    return this.one<ServiceBoothLeasePolicyRecord>(
+      this.client
+        .from(TABLES.serviceBoothLeasePolicies)
+        .select()
+        .eq('salon_location_id', salonLocationId)
+        .maybeSingle(),
+      'getServiceBoothLeasePolicy',
+    );
+  }
+
+  async insertServiceRealizationApplication(
+    row: Omit<ServiceRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-shipped sheet
+    // throws here, never a double application; the caller re-derives
+    // from the application of record.
+    return this.oneStrict<ServiceRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRealizationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceRealizationApplication',
+    );
+  }
+
+  async getServiceRealizationApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRealizationApplicationRecord | undefined> {
+    return this.one<ServiceRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceRealizationApplication',
+    );
+  }
+
+  async insertServiceFranchiseSplitApplication(
+    row: Omit<ServiceFranchiseSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceFranchiseSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceFranchiseSplitApplicationRecord>(
+      this.client
+        .from(TABLES.serviceFranchiseSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceFranchiseSplitApplication',
+    );
+  }
+
+  async getServiceFranchiseSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceFranchiseSplitApplicationRecord | undefined> {
+    return this.one<ServiceFranchiseSplitApplicationRecord>(
+      this.client
+        .from(TABLES.serviceFranchiseSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceFranchiseSplitApplication',
+    );
+  }
+
+  async insertServiceProtocolMicroRoyalty(
+    row: Omit<ServiceProtocolMicroRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceProtocolMicroRoyaltyRecord>(
+      this.client
+        .from(TABLES.serviceProtocolMicroRoyalties)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceProtocolMicroRoyalty',
+    );
+  }
+
+  async getServiceProtocolMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<ServiceProtocolMicroRoyaltyRecord | undefined> {
+    return this.one<ServiceProtocolMicroRoyaltyRecord>(
+      this.client
+        .from(TABLES.serviceProtocolMicroRoyalties)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceProtocolMicroRoyalty',
+    );
+  }
+
+  async insertServiceRedemptionSplitApplication(
+    row: Omit<ServiceRedemptionSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRedemptionSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceRedemptionSplitApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRedemptionSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceRedemptionSplitApplication',
+    );
+  }
+
+  async getServiceRedemptionSplitApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRedemptionSplitApplicationRecord | undefined> {
+    return this.one<ServiceRedemptionSplitApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRedemptionSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceRedemptionSplitApplication',
+    );
+  }
+
+  async insertServiceBreakageAllocation(
+    row: Omit<ServiceBreakageAllocationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBreakageAllocationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceBreakageAllocationRecord>(
+      this.client
+        .from(TABLES.serviceBreakageAllocations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceBreakageAllocation',
+    );
+  }
+
+  async getServiceBreakageAllocation(
+    sourceEventId: string,
+  ): Promise<ServiceBreakageAllocationRecord | undefined> {
+    return this.one<ServiceBreakageAllocationRecord>(
+      this.client
+        .from(TABLES.serviceBreakageAllocations)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceBreakageAllocation',
+    );
+  }
+
+  async insertServiceRebateApplication(
+    row: Omit<ServiceRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceRebateApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRebateApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceRebateApplication',
+    );
+  }
+
+  async getServiceRebateApplication(
+    sourceEventId: string,
+  ): Promise<ServiceRebateApplicationRecord | undefined> {
+    return this.one<ServiceRebateApplicationRecord>(
+      this.client
+        .from(TABLES.serviceRebateApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceRebateApplication',
+    );
+  }
+
+  async insertServiceBoothLeaseApplication(
+    row: Omit<ServiceBoothLeaseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<ServiceBoothLeaseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<ServiceBoothLeaseApplicationRecord>(
+      this.client
+        .from(TABLES.serviceBoothLeaseApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertServiceBoothLeaseApplication',
+    );
+  }
+
+  async getServiceBoothLeaseApplication(
+    sourceEventId: string,
+  ): Promise<ServiceBoothLeaseApplicationRecord | undefined> {
+    return this.one<ServiceBoothLeaseApplicationRecord>(
+      this.client
+        .from(TABLES.serviceBoothLeaseApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getServiceBoothLeaseApplication',
+    );
   }
 }

@@ -33,6 +33,7 @@ import { NIL_PROFILES } from "./nilProfiles";
 import { SPATIAL_PROFILES } from "./spatialProfiles";
 import { FITNESS_PROFILES } from "./fitnessProfiles";
 import { FOOD_PROFILES } from "./foodProfiles";
+import { SERVICE_PROFILES } from "./serviceProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -600,6 +601,14 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // waterfalls are food-only, and food rows never touch the music split
   // machinery).
   ...FOOD_PROFILES,
+  // The service lane (PR 42) — same dispatch opinion; the worker branches
+  // on the profile kind before the music machinery (the Net Service
+  // Realization calculator, the franchise contract's three-way gross
+  // partition, the cross-location redemption splits, the breakage
+  // allocations, the protocol micro-royalties, the vendor rebate
+  // waterfalls, and the isolated booth-lease legs are service-only, and
+  // service rows never touch the music split machinery).
+  ...SERVICE_PROFILES,
 ];
 
 /**
