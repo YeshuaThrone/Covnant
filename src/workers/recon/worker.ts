@@ -68,6 +68,8 @@ import { isDeveloperProfileKind } from "./developerProfiles";
 import { writeDeveloperRowsToStore } from "./developerQueue";
 import { isHardwareProfileKind } from "./hardwareProfiles";
 import { writeHardwareRowsToStore } from "./hardwareQueue";
+import { isEnergyProfileKind } from "./energyProfiles";
+import { writeEnergyRowsToStore } from "./energyQueue";
 import { writeServiceRowsToStore } from "./serviceQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
@@ -378,6 +380,22 @@ async function processJobBody(
     // never sees a hardware row.
     if (isHardwareProfileKind(matchedProfile.kind)) {
       return await parseHardware(deps, matchedProfile, content);
+    }
+    // The energy lane branches the same way (PR 48, the founder
+    // resource directive): its rows are the four strict senders'
+    // SCADA-smart-meter-sale / pipeline-flow-meter / GPU-utilization /
+    // carbon-offset-mint lines whose money runs the Net Resource
+    // Realization identity (gross energy and mineral sales −
+    // transportation and pipeline deductions − grid transmission fees −
+    // processing and refining base fees = the Net Realized Resource
+    // Pool), the tiered fractional royalties, the acreage-ratio
+    // divisions, the statutory interest accruals, the tiered GPU yields,
+    // the telemetry-weighted grid splits, and the per-tonne carbon
+    // payouts — never the music queue's split math, the hardware walks,
+    // or any other lane's machinery. The store applications ARE the
+    // lane's money of record; match_queue never sees an energy row.
+    if (isEnergyProfileKind(matchedProfile.kind)) {
+      return await parseEnergy(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1374,6 +1392,66 @@ async function parseHardware(
     hardware_cross_license_net_dispatch_cents: counts.crossLicenseNetDispatchCents,
     hardware_ota_licensor_cents: counts.otaLicensorCents,
     hardware_ota_platform_cents: counts.otaPlatformCents,
+  };
+}
+
+/**
+ * The energy lane (PR 48, the founder resource directive): the four
+ * strict senders' rows (SCADA smart meter utility logs, pipeline
+ * flow-meter volume feeds, GPU data center utilization metrics, and
+ * carbon offset registry mints) convert through the Net Resource
+ * Realization calculator (gross energy and mineral sales −
+ * transportation and pipeline deductions − grid transmission fees −
+ * processing and refining base fees = the Net Realized Resource Pool),
+ * the tiered fractional royalties, the acreage-ratio divisions, the
+ * statutory interest accruals, the tiered GPU yields, the
+ * telemetry-weighted grid splits, and the per-tonne carbon payouts. No
+ * match_queue row, no holding post: replay guards and the fail-closed
+ * policies of record govern everything. The result's energy_* block is
+ * absent on every other lane — its presence is the discriminator.
+ */
+async function parseEnergy(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeEnergyRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationsWritten +
+      counts.parcelRoyaltiesWritten +
+      counts.divisionsWritten +
+      counts.statutoryInterestAccrualsWritten +
+      counts.gpuYieldsWritten +
+      counts.gridSplitsWritten +
+      counts.carbonPayoutsWritten,
+    matched: 0, // no vault matching on this lane — the energy tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    energy_realizations_committed: counts.realizationsWritten,
+    energy_rows_replayed: counts.rowsReplayed,
+    energy_realization_held_negative_net: counts.realizationsHeldNegativeNet,
+    energy_parcel_royalties_committed: counts.parcelRoyaltiesWritten,
+    energy_parcel_royalties_skipped_no_policy: counts.parcelRoyaltiesSkippedNoPolicy,
+    energy_divisions_committed: counts.divisionsWritten,
+    energy_divisions_skipped_no_interests: counts.divisionsSkippedNoInterests,
+    energy_statutory_interest_accruals_committed: counts.statutoryInterestAccrualsWritten,
+    energy_gpu_yields_committed: counts.gpuYieldsWritten,
+    energy_gpu_yields_skipped_no_policy: counts.gpuYieldsSkippedNoPolicy,
+    energy_grid_splits_committed: counts.gridSplitsWritten,
+    energy_grid_splits_skipped_no_participants: counts.gridSplitsSkippedNoParticipants,
+    energy_carbon_payouts_committed: counts.carbonPayoutsWritten,
+    energy_carbon_payouts_skipped_no_policy: counts.carbonPayoutsSkippedNoPolicy,
+    energy_net_realized_resource_pool_delta_cents: counts.netRealizedResourcePoolDeltaCents,
+    energy_parcel_royalty_cents: counts.parcelRoyaltyCents,
+    energy_divided_cents: counts.dividedCents,
+    energy_statutory_interest_accrued_cents: counts.statutoryInterestAccruedCents,
+    energy_gpu_yield_cents: counts.gpuYieldCents,
+    energy_grid_split_cents: counts.gridSplitCents,
+    energy_carbon_payout_total_cents: counts.carbonPayoutTotalCents,
   };
 }
 

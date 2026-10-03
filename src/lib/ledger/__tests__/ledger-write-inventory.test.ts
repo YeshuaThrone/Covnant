@@ -479,6 +479,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // DDL on universal_royalty_ledger — the referencing pin below
       // holds.
       '0051_patent_litigation_escrow_gate_states_net_dispatches.sql',
+      // PR 48 (the founder energy directive): eighteen energy tables —
+      // the SCADA/GPU/pipeline/carbon ingestion-and-payout surfaces
+      // (registries, cumulative positions, row posts, applications,
+      // realizations) — with named table-level ck_ constraints,
+      // deny-all RLS, and service_role grants; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0052_scada_grid_fractional_resource_division_orders.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

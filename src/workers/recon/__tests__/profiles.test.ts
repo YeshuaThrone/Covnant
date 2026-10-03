@@ -26,7 +26,7 @@ function dispatchFixture(
 }
 
 describe("profile registry", () => {
-  it("registers seventy-seven profiles in dispatch order", () => {
+  it("registers eighty-one profiles in dispatch order", () => {
     expect(STATEMENT_PROFILES.map((profile) => profile.kind)).toEqual([
       "distrokid_csv",
       "tunecore_tsv",
@@ -165,6 +165,15 @@ describe("profile registry", () => {
       "hardware_mac_address_logs_csv",
       "hardware_production_serials_csv",
       "hardware_smart_grid_telemetry_csv",
+      // The energy lane (PR 48, the founder energy directive) —
+      // dispatched last, its own rights family (SCADA smart meter
+      // utility logs, GPU data center utilization metrics, pipeline
+      // flow-meter volume feeds, and carbon offset registry mints;
+      // never music-rights split math).
+      "energy_scada_meter_sales_csv",
+      "energy_gpu_utilization_csv",
+      "energy_pipeline_flow_meter_csv",
+      "energy_carbon_offset_mints_csv",
     ]);
   });
 

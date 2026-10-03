@@ -321,6 +321,26 @@ import type {
   CulinaryPopupWriteoffRecord,
 } from '@/modules/culinary/records';
 import type {
+  EnergyCarbonOffsetPayoutApplicationRecord,
+  EnergyCarbonOffsetPolicyRecord,
+  EnergyComputeGridSplitApplicationRecord,
+  EnergyComputeYieldPolicyRecord,
+  EnergyComputeYieldPositionRecord,
+  EnergyDeedTransferRecord,
+  EnergyDivisionOrderRecord,
+  EnergyGpuUtilizationPostRecord,
+  EnergyGridParticipantRegistrationRecord,
+  EnergyLandParcelRecord,
+  EnergyMeterSalesPostRecord,
+  EnergyNetRealizationApplicationRecord,
+  EnergyParcelDivisionApplicationRecord,
+  EnergyParcelOwnerInterestRecord,
+  EnergyParcelRoyaltyPolicyRecord,
+  EnergyParcelRoyaltyPositionRecord,
+  EnergyPipelineDeductionPostRecord,
+  EnergyStatutoryInterestApplicationRecord,
+} from '@/modules/energy/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -4056,6 +4076,325 @@ CREATE TABLE IF NOT EXISTS hardware_cross_license_net_dispatches (
   -- in the tuple so a re-net that revisits an earlier net cannot
   -- collide with the row that first reached it.
   UNIQUE (agreement_ref, period, net_before_cents, net_after_cents)
+);
+
+-- The energy resource lane (migration 0052, PR 48). The founder resource
+-- directive's facts of record: the surveyed land parcels, their deeded
+-- fractional owner acreage interests, the tiered parcel royalty policies
+-- (the mineral ORRI ladder), the cumulative parcel royalty and GPU yield
+-- positions, the grid participant registrations, the parsed title
+-- division orders, the deed transfers (the statutory rate of record at
+-- transfer), the per-tonne carbon offset policies, the three append-only
+-- post ledgers (meter sales, pipeline deductions, GPU utilization), and
+-- the five append-only application ledgers (net realization — keyed and
+-- recomputed in place — acreage division, dynamic grid split, statutory
+-- interest, and carbon offset payout). The CHECK vocabularies are byte-
+-- identical to the TS-side arrays in modules/energy/records.ts (the
+-- PR 129/130/133/134 lesson); the identities pin the founder's exact
+-- money math at the database.
+CREATE TABLE IF NOT EXISTS energy_land_parcels (
+  id TEXT PRIMARY KEY,
+  parcel_id TEXT NOT NULL UNIQUE,
+  parcel_name TEXT NOT NULL CHECK (length(parcel_name) > 0),
+  region TEXT NOT NULL CHECK (length(region) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_parcel_owner_interests (
+  id TEXT PRIMARY KEY,
+  parcel_id TEXT NOT NULL,
+  owner_payee_id TEXT NOT NULL CHECK (length(owner_payee_id) > 0),
+  owner_name TEXT NOT NULL CHECK (length(owner_name) > 0),
+  -- The deeded surveyed acreage in micros (1 acre = 1e6 micros) — the
+  -- division's ratio basis (> 0: a zero-acre deed is a hostile
+  -- registration).
+  deeded_acres_micros INTEGER NOT NULL CHECK (deeded_acres_micros >= 1),
+  interest_class TEXT NOT NULL CHECK (interest_class IN ('mineral', 'surface', 'wind', 'mixed')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (parcel_id, owner_payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_parcel_owner_interests_parcel
+  ON energy_parcel_owner_interests (parcel_id);
+
+CREATE TABLE IF NOT EXISTS energy_parcel_royalty_policies (
+  id TEXT PRIMARY KEY,
+  parcel_id TEXT NOT NULL UNIQUE,
+  -- The tier bands of record (JSON text, ascending, open top last).
+  tier_bands TEXT NOT NULL CHECK (length(tier_bands) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_parcel_royalty_positions (
+  id TEXT PRIMARY KEY,
+  parcel_id TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  cumulative_revenue_cents INTEGER NOT NULL CHECK (cumulative_revenue_cents >= 0),
+  cumulative_royalty_cents INTEGER NOT NULL CHECK (cumulative_royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (parcel_id, period, currency)
+);
+
+CREATE TABLE IF NOT EXISTS energy_compute_yield_policies (
+  id TEXT PRIMARY KEY,
+  gpu_cluster_hash TEXT NOT NULL UNIQUE,
+  sponsor_payee_id TEXT NOT NULL CHECK (length(sponsor_payee_id) > 0),
+  sponsor_payee_name TEXT NOT NULL CHECK (length(sponsor_payee_name) > 0),
+  tier_bands TEXT NOT NULL CHECK (length(tier_bands) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_compute_yield_positions (
+  id TEXT PRIMARY KEY,
+  gpu_cluster_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  cumulative_compute_revenue_cents INTEGER NOT NULL CHECK (cumulative_compute_revenue_cents >= 0),
+  cumulative_yield_cents INTEGER NOT NULL CHECK (cumulative_yield_cents >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (gpu_cluster_hash, period, currency)
+);
+
+CREATE TABLE IF NOT EXISTS energy_grid_participant_registrations (
+  id TEXT PRIMARY KEY,
+  gpu_cluster_hash TEXT NOT NULL,
+  participant_payee_id TEXT NOT NULL CHECK (length(participant_payee_id) > 0),
+  participant_payee_name TEXT NOT NULL CHECK (length(participant_payee_name) > 0),
+  participant_class TEXT NOT NULL CHECK (participant_class IN ('gpu_hardware_owner', 'power_plant_operator', 'colocation_manager')),
+  -- The registered telemetry weight in micros (> 0 — a zero-weight
+  -- participant never splits and never registers).
+  weight_micros INTEGER NOT NULL CHECK (weight_micros >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (gpu_cluster_hash, participant_payee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_grid_participant_registrations_cluster
+  ON energy_grid_participant_registrations (gpu_cluster_hash);
+
+CREATE TABLE IF NOT EXISTS energy_division_orders (
+  id TEXT PRIMARY KEY,
+  order_ref TEXT NOT NULL UNIQUE,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  owner_payee_id TEXT NOT NULL CHECK (length(owner_payee_id) > 0),
+  owner_payee_name TEXT NOT NULL CHECK (length(owner_payee_name) > 0),
+  -- The order's stated fractional interest, in bps of the parcel.
+  interest_bps INTEGER NOT NULL CHECK (interest_bps >= 0 AND interest_bps <= 10000),
+  effective_on TEXT NOT NULL CHECK (effective_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_deed_transfers (
+  id TEXT PRIMARY KEY,
+  deed_ref TEXT NOT NULL UNIQUE,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  from_payee_id TEXT NOT NULL CHECK (length(from_payee_id) > 0),
+  to_payee_id TEXT NOT NULL CHECK (length(to_payee_id) > 0),
+  transferred_acres_micros INTEGER NOT NULL CHECK (transferred_acres_micros >= 1),
+  -- The statutory interest rate of record AT the transfer — the rate the
+  -- rerouted legs accrue at.
+  statutory_interest_bps INTEGER NOT NULL CHECK (statutory_interest_bps >= 0 AND statutory_interest_bps <= 10000),
+  recorded_on TEXT NOT NULL CHECK (recorded_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (from_payee_id <> to_payee_id)
+);
+
+CREATE TABLE IF NOT EXISTS energy_carbon_offset_policies (
+  id TEXT PRIMARY KEY,
+  parcel_id TEXT NOT NULL UNIQUE,
+  trust_payee_id TEXT NOT NULL CHECK (length(trust_payee_id) > 0),
+  trust_payee_name TEXT NOT NULL CHECK (length(trust_payee_name) > 0),
+  developer_payee_id TEXT NOT NULL CHECK (length(developer_payee_id) > 0),
+  developer_payee_name TEXT NOT NULL CHECK (length(developer_payee_name) > 0),
+  micros_per_tonne INTEGER NOT NULL CHECK (micros_per_tonne >= 1),
+  trust_share_bps INTEGER NOT NULL CHECK (trust_share_bps >= 0 AND trust_share_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_meter_sales_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  well_meter_id TEXT NOT NULL CHECK (length(well_meter_id) > 0),
+  -- The GPU cluster hash of record ('' where the parcel carries no
+  -- compute — the NULL-distinctness avoidance; NOT NULL so the
+  -- realization's five-tuple UNIQUE never collapses on NULLs).
+  gpu_cluster_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_energy_sales_cents INTEGER NOT NULL CHECK (gross_energy_sales_cents >= 0),
+  gross_mineral_sales_cents INTEGER NOT NULL CHECK (gross_mineral_sales_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id — the replay guard.
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_meter_sales_posts_key
+  ON energy_meter_sales_posts (parcel_id, well_meter_id, period);
+
+CREATE TABLE IF NOT EXISTS energy_pipeline_deduction_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  well_meter_id TEXT NOT NULL CHECK (length(well_meter_id) > 0),
+  gpu_cluster_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  transportation_pipeline_deductions_cents INTEGER NOT NULL CHECK (transportation_pipeline_deductions_cents >= 0),
+  grid_transmission_fees_cents INTEGER NOT NULL CHECK (grid_transmission_fees_cents >= 0),
+  processing_refining_base_fees_cents INTEGER NOT NULL CHECK (processing_refining_base_fees_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_pipeline_deduction_posts_key
+  ON energy_pipeline_deduction_posts (parcel_id, well_meter_id, period);
+
+CREATE TABLE IF NOT EXISTS energy_gpu_utilization_posts (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  gpu_cluster_hash TEXT NOT NULL CHECK (length(gpu_cluster_hash) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  -- The row's compute hours in micros and its average power draw in
+  -- kilowatt micros (> 0 — a zero row prices nothing and posts nothing).
+  compute_hours_micros INTEGER NOT NULL CHECK (compute_hours_micros >= 1),
+  power_draw_kw_micros INTEGER NOT NULL CHECK (power_draw_kw_micros >= 1),
+  compute_revenue_cents INTEGER NOT NULL CHECK (compute_revenue_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_gpu_utilization_posts_key
+  ON energy_gpu_utilization_posts (gpu_cluster_hash, period);
+
+CREATE TABLE IF NOT EXISTS energy_net_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  -- The founder-specified realization keys of record.
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  well_meter_id TEXT NOT NULL CHECK (length(well_meter_id) > 0),
+  gpu_cluster_hash TEXT NOT NULL,
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  gross_energy_sales_cents INTEGER NOT NULL CHECK (gross_energy_sales_cents >= 0),
+  gross_mineral_sales_cents INTEGER NOT NULL CHECK (gross_mineral_sales_cents >= 0),
+  transportation_pipeline_deductions_cents INTEGER NOT NULL CHECK (transportation_pipeline_deductions_cents >= 0),
+  grid_transmission_fees_cents INTEGER NOT NULL CHECK (grid_transmission_fees_cents >= 0),
+  processing_refining_base_fees_cents INTEGER NOT NULL CHECK (processing_refining_base_fees_cents >= 0),
+  -- THE NET REALIZED RESOURCE POOL — may be negative (the held verdict).
+  net_realized_resource_pool_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('posted', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- The walk's replay-check handle.
+  UNIQUE (source_event_id),
+  -- The founder's exact identity: one realization of record per
+  -- (parcel, meter, cluster, period, currency) — the recompute replaces
+  -- the sums in place.
+  UNIQUE (parcel_id, well_meter_id, gpu_cluster_hash, period, currency),
+  -- THE NET RESOURCE REALIZATION, pinned: gross energy and mineral sales
+  -- revenue minus transportation and pipeline deductions minus grid
+  -- transmission fees minus processing and refining base fees = the Net
+  -- Realized Resource Pool; the held verdict records the negative net.
+  CHECK (
+    net_realized_resource_pool_cents
+    = gross_energy_sales_cents + gross_mineral_sales_cents
+      - transportation_pipeline_deductions_cents
+      - grid_transmission_fees_cents
+      - processing_refining_base_fees_cents
+  ),
+  CHECK (
+    (net_realized_resource_pool_cents < 0 AND verdict = 'held_negative_net')
+    OR (net_realized_resource_pool_cents >= 0 AND verdict = 'posted')
+  )
+);
+
+CREATE TABLE IF NOT EXISTS energy_parcel_division_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  -- The royalty pot the tier walk priced — the division's basis.
+  revenue_basis_cents INTEGER NOT NULL CHECK (revenue_basis_cents > 0),
+  -- The division legs of record (JSON text: per heir, the deeded acres
+  -- and allocated cents).
+  division_legs TEXT NOT NULL CHECK (length(division_legs) > 0),
+  allocated_total_cents INTEGER NOT NULL CHECK (allocated_total_cents > 0),
+  owner_count INTEGER NOT NULL CHECK (owner_count >= 1),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE ACREAGE DIVISION, pinned: the pot conserves exactly across the
+  -- heirs (the dust rides the largest deeded tracts).
+  CHECK (allocated_total_cents = revenue_basis_cents)
+);
+
+CREATE TABLE IF NOT EXISTS energy_compute_grid_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  gpu_cluster_hash TEXT NOT NULL CHECK (length(gpu_cluster_hash) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  compute_revenue_cents INTEGER NOT NULL CHECK (compute_revenue_cents > 0),
+  -- The split legs of record (JSON text: per participant, the class,
+  -- the effective telemetry weight, and the allocated cents).
+  split_legs TEXT NOT NULL CHECK (length(split_legs) > 0),
+  allocated_total_cents INTEGER NOT NULL CHECK (allocated_total_cents > 0),
+  -- The instant posting's journal of record (null when the split
+  -- recorded but the posting did not run — the reconciliation gap).
+  journal_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE DYNAMIC GRID SPLIT, pinned: the compute pot conserves exactly
+  -- across the participants (the dust rides the heaviest telemetry).
+  CHECK (allocated_total_cents = compute_revenue_cents)
+);
+
+CREATE TABLE IF NOT EXISTS energy_statutory_interest_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  deed_ref TEXT NOT NULL CHECK (length(deed_ref) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  base_cents INTEGER NOT NULL CHECK (base_cents > 0),
+  late_days INTEGER NOT NULL CHECK (late_days >= 1),
+  statutory_interest_bps INTEGER NOT NULL CHECK (statutory_interest_bps >= 0 AND statutory_interest_bps <= 10000),
+  interest_cents INTEGER NOT NULL CHECK (interest_cents > 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE STATUTORY INTEREST, pinned: base × late days × the transfer's
+  -- rate of record, integer-exact (the 365-day year at bps scale).
+  CHECK (interest_cents = (base_cents * late_days * statutory_interest_bps) / 3650000)
+);
+
+CREATE TABLE IF NOT EXISTS energy_carbon_offset_payout_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL CHECK (length(parcel_id) > 0),
+  registry_ref TEXT NOT NULL CHECK (length(registry_ref) > 0),
+  period TEXT NOT NULL CHECK (period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  currency TEXT NOT NULL,
+  -- The satellite-verified tonnage of record (statement micros).
+  tonnes_verified_micros INTEGER NOT NULL CHECK (tonnes_verified_micros >= 1),
+  micros_per_tonne INTEGER NOT NULL CHECK (micros_per_tonne >= 1),
+  trust_share_bps INTEGER NOT NULL CHECK (trust_share_bps >= 0 AND trust_share_bps <= 10000),
+  trust_payee_id TEXT NOT NULL CHECK (length(trust_payee_id) > 0),
+  trust_payout_cents INTEGER NOT NULL CHECK (trust_payout_cents >= 0),
+  developer_payee_id TEXT NOT NULL CHECK (length(developer_payee_id) > 0),
+  developer_payout_cents INTEGER NOT NULL CHECK (developer_payout_cents >= 0),
+  total_payout_cents INTEGER NOT NULL CHECK (total_payout_cents > 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (source_event_id),
+  -- THE PER-TONNE PAYOUT, pinned: the trust and developer legs conserve
+  -- the mint exactly.
+  CHECK (total_payout_cents = trust_payout_cents + developer_payout_cents)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -18619,6 +18958,1152 @@ export class SqliteStore implements Store {
       )
       .get(licenseeId, payeeId, period) as Record<string, unknown> | undefined;
     return (row?.total as number) ?? 0;
+  }
+
+  // -------------------------------------------------------------------------
+  // The energy lane (PR 48, migration 0052) — the founder resource
+  // directive's registries, posts, and application ledgers.
+  // -------------------------------------------------------------------------
+
+  async upsertEnergyLandParcel(
+    row: Omit<EnergyLandParcelRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyLandParcelRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_land_parcels (id, parcel_id, parcel_name, region, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id) DO UPDATE SET
+           parcel_name = excluded.parcel_name,
+           region = excluded.region,
+           updated_at = excluded.updated_at`,
+      )
+      .run(id, row.parcel_id, row.parcel_name, row.region, now, now);
+    const found = await this.getEnergyLandParcel(row.parcel_id);
+    if (found === undefined) {
+      throw new Error('energy_land_parcel_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyLandParcel(
+    parcelId: string,
+  ): Promise<EnergyLandParcelRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_land_parcels WHERE parcel_id = ?`)
+      .get(parcelId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      parcel_id: row.parcel_id as string,
+      parcel_name: row.parcel_name as string,
+      region: row.region as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertEnergyParcelOwnerInterest(
+    row: Omit<EnergyParcelOwnerInterestRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelOwnerInterestRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_parcel_owner_interests
+           (id, parcel_id, owner_payee_id, owner_name, deeded_acres_micros,
+            interest_class, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id, owner_payee_id) DO UPDATE SET
+           owner_name = excluded.owner_name,
+           deeded_acres_micros = excluded.deeded_acres_micros,
+           interest_class = excluded.interest_class,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.parcel_id,
+        row.owner_payee_id,
+        row.owner_name,
+        row.deeded_acres_micros,
+        row.interest_class,
+        now,
+        now,
+      );
+    const found = await this.listEnergyParcelOwnerInterests(row.parcel_id);
+    const exact = found.find(
+      (candidate: EnergyParcelOwnerInterestRecord) =>
+        candidate.owner_payee_id === row.owner_payee_id,
+    );
+    if (exact === undefined) {
+      throw new Error('energy_parcel_owner_interest_upsert_failed');
+    }
+    return exact;
+  }
+
+  async listEnergyParcelOwnerInterests(
+    parcelId: string,
+  ): Promise<EnergyParcelOwnerInterestRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM energy_parcel_owner_interests
+         WHERE parcel_id = ? ORDER BY rowid ASC`,
+      )
+      .all(parcelId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      parcel_id: row.parcel_id as string,
+      owner_payee_id: row.owner_payee_id as string,
+      owner_name: row.owner_name as string,
+      deeded_acres_micros: row.deeded_acres_micros as number,
+      interest_class: row.interest_class as EnergyParcelOwnerInterestRecord['interest_class'],
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertEnergyParcelRoyaltyPolicy(
+    row: Omit<EnergyParcelRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_parcel_royalty_policies (id, parcel_id, tier_bands, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id) DO UPDATE SET
+           tier_bands = excluded.tier_bands,
+           updated_at = excluded.updated_at`,
+      )
+      .run(id, row.parcel_id, row.tier_bands, now, now);
+    const found = await this.getEnergyParcelRoyaltyPolicy(row.parcel_id);
+    if (found === undefined) {
+      throw new Error('energy_parcel_royalty_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyParcelRoyaltyPolicy(
+    parcelId: string,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_parcel_royalty_policies WHERE parcel_id = ?`)
+      .get(parcelId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      parcel_id: row.parcel_id as string,
+      tier_bands: row.tier_bands as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+    revenueCentsAdded: number,
+    royaltyCentsAdded: number,
+  ): Promise<EnergyParcelRoyaltyPositionRecord> {
+    // The cumulative position of record — an upsert that ADDS the walk's
+    // cents to the (parcel, period, currency) position.
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_parcel_royalty_positions
+           (id, parcel_id, period, currency, cumulative_revenue_cents,
+            cumulative_royalty_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id, period, currency) DO UPDATE SET
+           cumulative_revenue_cents = cumulative_revenue_cents + excluded.cumulative_revenue_cents,
+           cumulative_royalty_cents = cumulative_royalty_cents + excluded.cumulative_royalty_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        parcelId,
+        period,
+        currency,
+        revenueCentsAdded,
+        royaltyCentsAdded,
+        now,
+        now,
+      );
+    const found = await this.getEnergyParcelRoyaltyPosition(
+      parcelId,
+      period,
+      currency,
+    );
+    if (found === undefined) {
+      throw new Error('energy_parcel_royalty_position_advance_failed');
+    }
+    return found;
+  }
+
+  async getEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyParcelRoyaltyPositionRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_parcel_royalty_positions
+         WHERE parcel_id = ? AND period = ? AND currency = ?`,
+      )
+      .get(parcelId, period, currency) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      parcel_id: row.parcel_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      cumulative_revenue_cents: row.cumulative_revenue_cents as number,
+      cumulative_royalty_cents: row.cumulative_royalty_cents as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertEnergyComputeYieldPolicy(
+    row: Omit<EnergyComputeYieldPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyComputeYieldPolicyRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_compute_yield_policies
+           (id, gpu_cluster_hash, sponsor_payee_id, sponsor_payee_name, tier_bands, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (gpu_cluster_hash) DO UPDATE SET
+           sponsor_payee_id = excluded.sponsor_payee_id,
+           sponsor_payee_name = excluded.sponsor_payee_name,
+           tier_bands = excluded.tier_bands,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.gpu_cluster_hash,
+        row.sponsor_payee_id,
+        row.sponsor_payee_name,
+        row.tier_bands,
+        now,
+        now,
+      );
+    const found = await this.getEnergyComputeYieldPolicy(row.gpu_cluster_hash);
+    if (found === undefined) {
+      throw new Error('energy_compute_yield_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyComputeYieldPolicy(
+    gpuClusterHash: string,
+  ): Promise<EnergyComputeYieldPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_compute_yield_policies WHERE gpu_cluster_hash = ?`,
+      )
+      .get(gpuClusterHash) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      sponsor_payee_id: row.sponsor_payee_id as string,
+      sponsor_payee_name: row.sponsor_payee_name as string,
+      tier_bands: row.tier_bands as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+    computeRevenueCentsAdded: number,
+    yieldCentsAdded: number,
+  ): Promise<EnergyComputeYieldPositionRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_compute_yield_positions
+           (id, gpu_cluster_hash, period, currency, cumulative_compute_revenue_cents,
+            cumulative_yield_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (gpu_cluster_hash, period, currency) DO UPDATE SET
+           cumulative_compute_revenue_cents = cumulative_compute_revenue_cents + excluded.cumulative_compute_revenue_cents,
+           cumulative_yield_cents = cumulative_yield_cents + excluded.cumulative_yield_cents,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        gpuClusterHash,
+        period,
+        currency,
+        computeRevenueCentsAdded,
+        yieldCentsAdded,
+        now,
+        now,
+      );
+    const found = await this.getEnergyComputeYieldPosition(
+      gpuClusterHash,
+      period,
+      currency,
+    );
+    if (found === undefined) {
+      throw new Error('energy_compute_yield_position_advance_failed');
+    }
+    return found;
+  }
+
+  async getEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyComputeYieldPositionRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_compute_yield_positions
+         WHERE gpu_cluster_hash = ? AND period = ? AND currency = ?`,
+      )
+      .get(gpuClusterHash, period, currency) as
+      | Record<string, unknown>
+      | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      cumulative_compute_revenue_cents: row.cumulative_compute_revenue_cents as number,
+      cumulative_yield_cents: row.cumulative_yield_cents as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertEnergyGridParticipant(
+    row: Omit<
+      EnergyGridParticipantRegistrationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyGridParticipantRegistrationRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_grid_participant_registrations
+           (id, gpu_cluster_hash, participant_payee_id, participant_payee_name,
+            participant_class, weight_micros, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (gpu_cluster_hash, participant_payee_id) DO UPDATE SET
+           participant_payee_name = excluded.participant_payee_name,
+           participant_class = excluded.participant_class,
+           weight_micros = excluded.weight_micros,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.gpu_cluster_hash,
+        row.participant_payee_id,
+        row.participant_payee_name,
+        row.participant_class,
+        row.weight_micros,
+        now,
+        now,
+      );
+    const found = await this.listEnergyGridParticipants(row.gpu_cluster_hash);
+    const exact = found.find(
+      (candidate) => candidate.participant_payee_id === row.participant_payee_id,
+    );
+    if (exact === undefined) {
+      throw new Error('energy_grid_participant_upsert_failed');
+    }
+    return exact;
+  }
+
+  async listEnergyGridParticipants(
+    gpuClusterHash: string,
+  ): Promise<EnergyGridParticipantRegistrationRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM energy_grid_participant_registrations
+         WHERE gpu_cluster_hash = ? ORDER BY rowid ASC`,
+      )
+      .all(gpuClusterHash) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      participant_payee_id: row.participant_payee_id as string,
+      participant_payee_name: row.participant_payee_name as string,
+      participant_class: row.participant_class as EnergyGridParticipantRegistrationRecord['participant_class'],
+      weight_micros: row.weight_micros as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertEnergyDivisionOrder(
+    row: Omit<EnergyDivisionOrderRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDivisionOrderRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_division_orders
+           (id, order_ref, parcel_id, owner_payee_id, owner_payee_name,
+            interest_bps, effective_on, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (order_ref) DO UPDATE SET
+           parcel_id = excluded.parcel_id,
+           owner_payee_id = excluded.owner_payee_id,
+           owner_payee_name = excluded.owner_payee_name,
+           interest_bps = excluded.interest_bps,
+           effective_on = excluded.effective_on,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.order_ref,
+        row.parcel_id,
+        row.owner_payee_id,
+        row.owner_payee_name,
+        row.interest_bps,
+        row.effective_on,
+        now,
+        now,
+      );
+    const found = await this.getEnergyDivisionOrder(row.order_ref);
+    if (found === undefined) {
+      throw new Error('energy_division_order_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyDivisionOrder(
+    orderRef: string,
+  ): Promise<EnergyDivisionOrderRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_division_orders WHERE order_ref = ?`)
+      .get(orderRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      order_ref: row.order_ref as string,
+      parcel_id: row.parcel_id as string,
+      owner_payee_id: row.owner_payee_id as string,
+      owner_payee_name: row.owner_payee_name as string,
+      interest_bps: row.interest_bps as number,
+      effective_on: row.effective_on as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertEnergyDeedTransfer(
+    row: Omit<EnergyDeedTransferRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDeedTransferRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_deed_transfers
+           (id, deed_ref, parcel_id, from_payee_id, to_payee_id,
+            transferred_acres_micros, statutory_interest_bps, recorded_on, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (deed_ref) DO UPDATE SET
+           parcel_id = excluded.parcel_id,
+           from_payee_id = excluded.from_payee_id,
+           to_payee_id = excluded.to_payee_id,
+           transferred_acres_micros = excluded.transferred_acres_micros,
+           statutory_interest_bps = excluded.statutory_interest_bps,
+           recorded_on = excluded.recorded_on,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.deed_ref,
+        row.parcel_id,
+        row.from_payee_id,
+        row.to_payee_id,
+        row.transferred_acres_micros,
+        row.statutory_interest_bps,
+        row.recorded_on,
+        now,
+        now,
+      );
+    const found = await this.getEnergyDeedTransfer(row.deed_ref);
+    if (found === undefined) {
+      throw new Error('energy_deed_transfer_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyDeedTransfer(
+    deedRef: string,
+  ): Promise<EnergyDeedTransferRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_deed_transfers WHERE deed_ref = ?`)
+      .get(deedRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      deed_ref: row.deed_ref as string,
+      parcel_id: row.parcel_id as string,
+      from_payee_id: row.from_payee_id as string,
+      to_payee_id: row.to_payee_id as string,
+      transferred_acres_micros: row.transferred_acres_micros as number,
+      statutory_interest_bps: row.statutory_interest_bps as number,
+      recorded_on: row.recorded_on as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async listEnergyDeedTransfersForParcel(
+    parcelId: string,
+  ): Promise<EnergyDeedTransferRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM energy_deed_transfers
+         WHERE parcel_id = ? ORDER BY rowid ASC`,
+      )
+      .all(parcelId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      deed_ref: row.deed_ref as string,
+      parcel_id: row.parcel_id as string,
+      from_payee_id: row.from_payee_id as string,
+      to_payee_id: row.to_payee_id as string,
+      transferred_acres_micros: row.transferred_acres_micros as number,
+      statutory_interest_bps: row.statutory_interest_bps as number,
+      recorded_on: row.recorded_on as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertEnergyCarbonOffsetPolicy(
+    row: Omit<EnergyCarbonOffsetPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyCarbonOffsetPolicyRecord> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_carbon_offset_policies
+           (id, parcel_id, trust_payee_id, trust_payee_name, developer_payee_id,
+            developer_payee_name, micros_per_tonne, trust_share_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id) DO UPDATE SET
+           trust_payee_id = excluded.trust_payee_id,
+           trust_payee_name = excluded.trust_payee_name,
+           developer_payee_id = excluded.developer_payee_id,
+           developer_payee_name = excluded.developer_payee_name,
+           micros_per_tonne = excluded.micros_per_tonne,
+           trust_share_bps = excluded.trust_share_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.parcel_id,
+        row.trust_payee_id,
+        row.trust_payee_name,
+        row.developer_payee_id,
+        row.developer_payee_name,
+        row.micros_per_tonne,
+        row.trust_share_bps,
+        now,
+        now,
+      );
+    const found = await this.getEnergyCarbonOffsetPolicy(row.parcel_id);
+    if (found === undefined) {
+      throw new Error('energy_carbon_offset_policy_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyCarbonOffsetPolicy(
+    parcelId: string,
+  ): Promise<EnergyCarbonOffsetPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_carbon_offset_policies WHERE parcel_id = ?`)
+      .get(parcelId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      parcel_id: row.parcel_id as string,
+      trust_payee_id: row.trust_payee_id as string,
+      trust_payee_name: row.trust_payee_name as string,
+      developer_payee_id: row.developer_payee_id as string,
+      developer_payee_name: row.developer_payee_name as string,
+      micros_per_tonne: row.micros_per_tonne as number,
+      trust_share_bps: row.trust_share_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertEnergyMeterSalesPost(
+    row: Omit<EnergyMeterSalesPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyMeterSalesPostRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_meter_sales_posts
+           (id, source_event_id, parcel_id, well_meter_id, gpu_cluster_hash,
+            period, currency, gross_energy_sales_cents, gross_mineral_sales_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.parcel_id,
+        record.well_meter_id,
+        record.gpu_cluster_hash,
+        record.period,
+        record.currency,
+        record.gross_energy_sales_cents,
+        record.gross_mineral_sales_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyMeterSalesPost(
+    sourceEventId: string,
+  ): Promise<EnergyMeterSalesPostRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM energy_meter_sales_posts WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      well_meter_id: row.well_meter_id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_energy_sales_cents: row.gross_energy_sales_cents as number,
+      gross_mineral_sales_cents: row.gross_mineral_sales_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertEnergyPipelineDeductionPost(
+    row: Omit<EnergyPipelineDeductionPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyPipelineDeductionPostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_pipeline_deduction_posts
+           (id, source_event_id, parcel_id, well_meter_id, gpu_cluster_hash,
+            period, currency, transportation_pipeline_deductions_cents,
+            grid_transmission_fees_cents, processing_refining_base_fees_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.parcel_id,
+        record.well_meter_id,
+        record.gpu_cluster_hash,
+        record.period,
+        record.currency,
+        record.transportation_pipeline_deductions_cents,
+        record.grid_transmission_fees_cents,
+        record.processing_refining_base_fees_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyPipelineDeductionPost(
+    sourceEventId: string,
+  ): Promise<EnergyPipelineDeductionPostRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_pipeline_deduction_posts WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      well_meter_id: row.well_meter_id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      transportation_pipeline_deductions_cents:
+        row.transportation_pipeline_deductions_cents as number,
+      grid_transmission_fees_cents: row.grid_transmission_fees_cents as number,
+      processing_refining_base_fees_cents:
+        row.processing_refining_base_fees_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertEnergyGpuUtilizationPost(
+    row: Omit<EnergyGpuUtilizationPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyGpuUtilizationPostRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_gpu_utilization_posts
+           (id, source_event_id, gpu_cluster_hash, period, currency,
+            compute_hours_micros, power_draw_kw_micros, compute_revenue_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.gpu_cluster_hash,
+        record.period,
+        record.currency,
+        record.compute_hours_micros,
+        record.power_draw_kw_micros,
+        record.compute_revenue_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyGpuUtilizationPost(
+    sourceEventId: string,
+  ): Promise<EnergyGpuUtilizationPostRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_gpu_utilization_posts WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      compute_hours_micros: row.compute_hours_micros as number,
+      power_draw_kw_micros: row.power_draw_kw_micros as number,
+      compute_revenue_cents: row.compute_revenue_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async sumEnergyRealizationPosts(
+    parcelId: string,
+    wellMeterId: string,
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_energy_sales_cents: number;
+    gross_mineral_sales_cents: number;
+    transportation_pipeline_deductions_cents: number;
+    grid_transmission_fees_cents: number;
+    processing_refining_base_fees_cents: number;
+  }> {
+    // The realization recompute's aggregation — the posted meter rows
+    // (gross) and pipeline rows (deductions) for the exact key.
+    const meterRow = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(gross_energy_sales_cents), 0) AS gross_energy,
+                COALESCE(SUM(gross_mineral_sales_cents), 0) AS gross_mineral
+         FROM energy_meter_sales_posts
+         WHERE parcel_id = ? AND well_meter_id = ? AND gpu_cluster_hash = ?
+           AND period = ? AND currency = ?`,
+      )
+      .get(parcelId, wellMeterId, gpuClusterHash, period, currency) as
+      | Record<string, unknown>
+      | undefined;
+    const pipelineRow = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(transportation_pipeline_deductions_cents), 0) AS transportation,
+                COALESCE(SUM(grid_transmission_fees_cents), 0) AS grid_fees,
+                COALESCE(SUM(processing_refining_base_fees_cents), 0) AS processing
+         FROM energy_pipeline_deduction_posts
+         WHERE parcel_id = ? AND well_meter_id = ? AND gpu_cluster_hash = ?
+           AND period = ? AND currency = ?`,
+      )
+      .get(parcelId, wellMeterId, gpuClusterHash, period, currency) as
+      | Record<string, unknown>
+      | undefined;
+    return {
+      gross_energy_sales_cents: (meterRow?.gross_energy as number) ?? 0,
+      gross_mineral_sales_cents: (meterRow?.gross_mineral as number) ?? 0,
+      transportation_pipeline_deductions_cents:
+        (pipelineRow?.transportation as number) ?? 0,
+      grid_transmission_fees_cents: (pipelineRow?.grid_fees as number) ?? 0,
+      processing_refining_base_fees_cents:
+        (pipelineRow?.processing as number) ?? 0,
+    };
+  }
+
+  async upsertEnergyNetRealizationApplication(
+    row: Omit<
+      EnergyNetRealizationApplicationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyNetRealizationApplicationRecord> {
+    // The realization position of record — UNIQUE per the founder's
+    // five-tuple; the recompute replaces the sums in place (the id and
+    // created_at of record survive — the PR 33 lesson, no id in the
+    // conflict payload).
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO energy_net_realization_applications
+           (id, source_event_id, parcel_id, well_meter_id, gpu_cluster_hash,
+            period, currency, gross_energy_sales_cents, gross_mineral_sales_cents,
+            transportation_pipeline_deductions_cents, grid_transmission_fees_cents,
+            processing_refining_base_fees_cents, net_realized_resource_pool_cents,
+            verdict, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (parcel_id, well_meter_id, gpu_cluster_hash, period, currency) DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           gross_energy_sales_cents = excluded.gross_energy_sales_cents,
+           gross_mineral_sales_cents = excluded.gross_mineral_sales_cents,
+           transportation_pipeline_deductions_cents = excluded.transportation_pipeline_deductions_cents,
+           grid_transmission_fees_cents = excluded.grid_transmission_fees_cents,
+           processing_refining_base_fees_cents = excluded.processing_refining_base_fees_cents,
+           net_realized_resource_pool_cents = excluded.net_realized_resource_pool_cents,
+           verdict = excluded.verdict,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        row.source_event_id,
+        row.parcel_id,
+        row.well_meter_id,
+        row.gpu_cluster_hash,
+        row.period,
+        row.currency,
+        row.gross_energy_sales_cents,
+        row.gross_mineral_sales_cents,
+        row.transportation_pipeline_deductions_cents,
+        row.grid_transmission_fees_cents,
+        row.processing_refining_base_fees_cents,
+        row.net_realized_resource_pool_cents,
+        row.verdict,
+        now,
+        now,
+      );
+    const found = await this.getEnergyNetRealizationApplication(
+      row.source_event_id,
+    );
+    if (found === undefined) {
+      throw new Error('energy_net_realization_upsert_failed');
+    }
+    return found;
+  }
+
+  async getEnergyNetRealizationApplication(
+    sourceEventId: string,
+  ): Promise<EnergyNetRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_net_realization_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      well_meter_id: row.well_meter_id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_energy_sales_cents: row.gross_energy_sales_cents as number,
+      gross_mineral_sales_cents: row.gross_mineral_sales_cents as number,
+      transportation_pipeline_deductions_cents:
+        row.transportation_pipeline_deductions_cents as number,
+      grid_transmission_fees_cents: row.grid_transmission_fees_cents as number,
+      processing_refining_base_fees_cents:
+        row.processing_refining_base_fees_cents as number,
+      net_realized_resource_pool_cents:
+        row.net_realized_resource_pool_cents as number,
+      verdict: row.verdict as EnergyNetRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertEnergyParcelDivisionApplication(
+    row: Omit<EnergyParcelDivisionApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyParcelDivisionApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_parcel_division_applications
+           (id, source_event_id, parcel_id, period, currency, revenue_basis_cents,
+            division_legs, allocated_total_cents, owner_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.parcel_id,
+        record.period,
+        record.currency,
+        record.revenue_basis_cents,
+        record.division_legs,
+        record.allocated_total_cents,
+        record.owner_count,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyParcelDivisionApplication(
+    sourceEventId: string,
+  ): Promise<EnergyParcelDivisionApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_parcel_division_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      revenue_basis_cents: row.revenue_basis_cents as number,
+      division_legs: row.division_legs as string,
+      allocated_total_cents: row.allocated_total_cents as number,
+      owner_count: row.owner_count as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertEnergyComputeGridSplitApplication(
+    row: Omit<EnergyComputeGridSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyComputeGridSplitApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_compute_grid_split_applications
+           (id, source_event_id, gpu_cluster_hash, period, currency,
+            compute_revenue_cents, split_legs, allocated_total_cents, journal_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.gpu_cluster_hash,
+        record.period,
+        record.currency,
+        record.compute_revenue_cents,
+        record.split_legs,
+        record.allocated_total_cents,
+        record.journal_id,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyComputeGridSplitApplication(
+    sourceEventId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_compute_grid_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      gpu_cluster_hash: row.gpu_cluster_hash as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      compute_revenue_cents: row.compute_revenue_cents as number,
+      split_legs: row.split_legs as string,
+      allocated_total_cents: row.allocated_total_cents as number,
+      journal_id: (row.journal_id as string | null) ?? null,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertEnergyStatutoryInterestApplication(
+    row: Omit<EnergyStatutoryInterestApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyStatutoryInterestApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_statutory_interest_applications
+           (id, source_event_id, parcel_id, deed_ref, period, currency,
+            base_cents, late_days, statutory_interest_bps, interest_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.parcel_id,
+        record.deed_ref,
+        record.period,
+        record.currency,
+        record.base_cents,
+        record.late_days,
+        record.statutory_interest_bps,
+        record.interest_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyStatutoryInterestApplication(
+    sourceEventId: string,
+  ): Promise<EnergyStatutoryInterestApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_statutory_interest_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      deed_ref: row.deed_ref as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      base_cents: row.base_cents as number,
+      late_days: row.late_days as number,
+      statutory_interest_bps: row.statutory_interest_bps as number,
+      interest_cents: row.interest_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertEnergyCarbonOffsetPayoutApplication(
+    row: Omit<EnergyCarbonOffsetPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord> {
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_carbon_offset_payout_applications
+           (id, source_event_id, parcel_id, registry_ref, period, currency,
+            tonnes_verified_micros, micros_per_tonne, trust_share_bps,
+            trust_payee_id, trust_payout_cents, developer_payee_id,
+            developer_payout_cents, total_payout_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.parcel_id,
+        record.registry_ref,
+        record.period,
+        record.currency,
+        record.tonnes_verified_micros,
+        record.micros_per_tonne,
+        record.trust_share_bps,
+        record.trust_payee_id,
+        record.trust_payout_cents,
+        record.developer_payee_id,
+        record.developer_payout_cents,
+        record.total_payout_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getEnergyCarbonOffsetPayoutApplication(
+    sourceEventId: string,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_carbon_offset_payout_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      parcel_id: row.parcel_id as string,
+      registry_ref: row.registry_ref as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      tonnes_verified_micros: row.tonnes_verified_micros as number,
+      micros_per_tonne: row.micros_per_tonne as number,
+      trust_share_bps: row.trust_share_bps as number,
+      trust_payee_id: row.trust_payee_id as string,
+      trust_payout_cents: row.trust_payout_cents as number,
+      developer_payee_id: row.developer_payee_id as string,
+      developer_payout_cents: row.developer_payout_cents as number,
+      total_payout_cents: row.total_payout_cents as number,
+      created_at: row.created_at as string,
+    };
   }
 
   async upsertPatentLitigationEscrowPolicy(

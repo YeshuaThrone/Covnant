@@ -1,0 +1,3 @@
+Flow Event ID,Parcel ID,Well Meter ID,GPU Cluster Hash,Transportation Pipeline Deductions,Grid Transmission Fees,Processing Refining Base Fees,Currency,Reporting Period
+PFM-2026-03-0001,TRACT-HELD,WELL-H-1,cluster-held,"$11.00",0.00,0.00,USD,2026-03
+PFM-2026-03-0002,TRACT-77,WELL-77-A,a1b2c3-cluster-hash,"$1,234.56","$78.90","$12.34",USD,2026-03

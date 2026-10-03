@@ -327,6 +327,26 @@ import type {
   HardwareSepUnitMonthRecord,
   HardwareTelemetryRoyaltyApplicationRecord,
 } from '@/modules/hardware/records';
+import type {
+  EnergyCarbonOffsetPayoutApplicationRecord,
+  EnergyCarbonOffsetPolicyRecord,
+  EnergyComputeGridSplitApplicationRecord,
+  EnergyComputeYieldPolicyRecord,
+  EnergyComputeYieldPositionRecord,
+  EnergyDeedTransferRecord,
+  EnergyDivisionOrderRecord,
+  EnergyGpuUtilizationPostRecord,
+  EnergyGridParticipantRegistrationRecord,
+  EnergyLandParcelRecord,
+  EnergyMeterSalesPostRecord,
+  EnergyNetRealizationApplicationRecord,
+  EnergyParcelDivisionApplicationRecord,
+  EnergyParcelOwnerInterestRecord,
+  EnergyParcelRoyaltyPolicyRecord,
+  EnergyParcelRoyaltyPositionRecord,
+  EnergyPipelineDeductionPostRecord,
+  EnergyStatutoryInterestApplicationRecord,
+} from '@/modules/energy/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -717,6 +737,26 @@ export class InMemoryStore implements Store {
   >();
   private hardwarePayoutGateStates = new Map<string, HardwarePayoutGateStateRecord>();
   private hardwareCrossLicenseNetDispatches: HardwareCrossLicenseNetDispatchRecord[] = [];
+  // The energy lane (PR 48, migration 0052) — the founder resource
+  // directive's registries, posts, and application ledgers.
+  private energyLandParcels: EnergyLandParcelRecord[] = [];
+  private energyParcelOwnerInterests: EnergyParcelOwnerInterestRecord[] = [];
+  private energyParcelRoyaltyPolicies: EnergyParcelRoyaltyPolicyRecord[] = [];
+  private energyParcelRoyaltyPositions: EnergyParcelRoyaltyPositionRecord[] = [];
+  private energyComputeYieldPolicies: EnergyComputeYieldPolicyRecord[] = [];
+  private energyComputeYieldPositions: EnergyComputeYieldPositionRecord[] = [];
+  private energyGridParticipants: EnergyGridParticipantRegistrationRecord[] = [];
+  private energyDivisionOrders: EnergyDivisionOrderRecord[] = [];
+  private energyDeedTransfers: EnergyDeedTransferRecord[] = [];
+  private energyCarbonOffsetPolicies: EnergyCarbonOffsetPolicyRecord[] = [];
+  private energyMeterSalesPosts: EnergyMeterSalesPostRecord[] = [];
+  private energyPipelineDeductionPosts: EnergyPipelineDeductionPostRecord[] = [];
+  private energyGpuUtilizationPosts: EnergyGpuUtilizationPostRecord[] = [];
+  private energyNetRealizationApplications: EnergyNetRealizationApplicationRecord[] = [];
+  private energyParcelDivisionApplications: EnergyParcelDivisionApplicationRecord[] = [];
+  private energyComputeGridSplitApplications: EnergyComputeGridSplitApplicationRecord[] = [];
+  private energyStatutoryInterestApplications: EnergyStatutoryInterestApplicationRecord[] = [];
+  private energyCarbonOffsetPayoutApplications: EnergyCarbonOffsetPayoutApplicationRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -9016,6 +9056,683 @@ export class InMemoryStore implements Store {
           record.period === period,
       )
       .reduce((sum, record) => sum + record.royalty_cents, 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // The energy lane (PR 48, migration 0052) — the founder resource
+  // directive's registries, posts, and application ledgers.
+  // -------------------------------------------------------------------------
+
+  async upsertEnergyLandParcel(
+    row: Omit<EnergyLandParcelRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyLandParcelRecord> {
+    const existing = this.energyLandParcels.find(
+      (candidate) => candidate.parcel_id === row.parcel_id,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyLandParcelRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyLandParcels[this.energyLandParcels.indexOf(existing)] = record;
+    } else {
+      this.energyLandParcels.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyLandParcel(
+    parcelId: string,
+  ): Promise<EnergyLandParcelRecord | undefined> {
+    const found = this.energyLandParcels.find(
+      (record) => record.parcel_id === parcelId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertEnergyParcelOwnerInterest(
+    row: Omit<EnergyParcelOwnerInterestRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelOwnerInterestRecord> {
+    const existing = this.energyParcelOwnerInterests.find(
+      (candidate) =>
+        candidate.parcel_id === row.parcel_id &&
+        candidate.owner_payee_id === row.owner_payee_id,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyParcelOwnerInterestRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyParcelOwnerInterests[
+        this.energyParcelOwnerInterests.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyParcelOwnerInterests.push(record);
+    }
+    return { ...record };
+  }
+
+  async listEnergyParcelOwnerInterests(
+    parcelId: string,
+  ): Promise<EnergyParcelOwnerInterestRecord[]> {
+    return this.energyParcelOwnerInterests
+      .filter((record) => record.parcel_id === parcelId)
+      .map((record) => ({ ...record }));
+  }
+
+  async upsertEnergyParcelRoyaltyPolicy(
+    row: Omit<EnergyParcelRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord> {
+    const existing = this.energyParcelRoyaltyPolicies.find(
+      (candidate) => candidate.parcel_id === row.parcel_id,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyParcelRoyaltyPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyParcelRoyaltyPolicies[
+        this.energyParcelRoyaltyPolicies.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyParcelRoyaltyPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyParcelRoyaltyPolicy(
+    parcelId: string,
+  ): Promise<EnergyParcelRoyaltyPolicyRecord | undefined> {
+    const found = this.energyParcelRoyaltyPolicies.find(
+      (record) => record.parcel_id === parcelId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+    revenueCentsAdded: number,
+    royaltyCentsAdded: number,
+  ): Promise<EnergyParcelRoyaltyPositionRecord> {
+    const existing = this.energyParcelRoyaltyPositions.find(
+      (candidate) =>
+        candidate.parcel_id === parcelId &&
+        candidate.period === period &&
+        candidate.currency === currency,
+    );
+    const now = new Date().toISOString();
+    if (existing !== undefined) {
+      existing.cumulative_revenue_cents += revenueCentsAdded;
+      existing.cumulative_royalty_cents += royaltyCentsAdded;
+      existing.updated_at = now;
+      return { ...existing };
+    }
+    const record: EnergyParcelRoyaltyPositionRecord = {
+      id: randomUUID(),
+      parcel_id: parcelId,
+      period,
+      currency,
+      cumulative_revenue_cents: revenueCentsAdded,
+      cumulative_royalty_cents: royaltyCentsAdded,
+      created_at: now,
+      updated_at: now,
+    };
+    this.energyParcelRoyaltyPositions.push(record);
+    return { ...record };
+  }
+
+  async getEnergyParcelRoyaltyPosition(
+    parcelId: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyParcelRoyaltyPositionRecord | undefined> {
+    const found = this.energyParcelRoyaltyPositions.find(
+      (record) =>
+        record.parcel_id === parcelId &&
+        record.period === period &&
+        record.currency === currency,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertEnergyComputeYieldPolicy(
+    row: Omit<EnergyComputeYieldPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyComputeYieldPolicyRecord> {
+    const existing = this.energyComputeYieldPolicies.find(
+      (candidate) => candidate.gpu_cluster_hash === row.gpu_cluster_hash,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyComputeYieldPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyComputeYieldPolicies[
+        this.energyComputeYieldPolicies.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyComputeYieldPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyComputeYieldPolicy(
+    gpuClusterHash: string,
+  ): Promise<EnergyComputeYieldPolicyRecord | undefined> {
+    const found = this.energyComputeYieldPolicies.find(
+      (record) => record.gpu_cluster_hash === gpuClusterHash,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+    computeRevenueCentsAdded: number,
+    yieldCentsAdded: number,
+  ): Promise<EnergyComputeYieldPositionRecord> {
+    const existing = this.energyComputeYieldPositions.find(
+      (candidate) =>
+        candidate.gpu_cluster_hash === gpuClusterHash &&
+        candidate.period === period &&
+        candidate.currency === currency,
+    );
+    const now = new Date().toISOString();
+    if (existing !== undefined) {
+      existing.cumulative_compute_revenue_cents += computeRevenueCentsAdded;
+      existing.cumulative_yield_cents += yieldCentsAdded;
+      existing.updated_at = now;
+      return { ...existing };
+    }
+    const record: EnergyComputeYieldPositionRecord = {
+      id: randomUUID(),
+      gpu_cluster_hash: gpuClusterHash,
+      period,
+      currency,
+      cumulative_compute_revenue_cents: computeRevenueCentsAdded,
+      cumulative_yield_cents: yieldCentsAdded,
+      created_at: now,
+      updated_at: now,
+    };
+    this.energyComputeYieldPositions.push(record);
+    return { ...record };
+  }
+
+  async getEnergyComputeYieldPosition(
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<EnergyComputeYieldPositionRecord | undefined> {
+    const found = this.energyComputeYieldPositions.find(
+      (record) =>
+        record.gpu_cluster_hash === gpuClusterHash &&
+        record.period === period &&
+        record.currency === currency,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertEnergyGridParticipant(
+    row: Omit<
+      EnergyGridParticipantRegistrationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyGridParticipantRegistrationRecord> {
+    const existing = this.energyGridParticipants.find(
+      (candidate) =>
+        candidate.gpu_cluster_hash === row.gpu_cluster_hash &&
+        candidate.participant_payee_id === row.participant_payee_id,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyGridParticipantRegistrationRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyGridParticipants[
+        this.energyGridParticipants.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyGridParticipants.push(record);
+    }
+    return { ...record };
+  }
+
+  async listEnergyGridParticipants(
+    gpuClusterHash: string,
+  ): Promise<EnergyGridParticipantRegistrationRecord[]> {
+    return this.energyGridParticipants
+      .filter((record) => record.gpu_cluster_hash === gpuClusterHash)
+      .map((record) => ({ ...record }));
+  }
+
+  async upsertEnergyDivisionOrder(
+    row: Omit<EnergyDivisionOrderRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDivisionOrderRecord> {
+    const existing = this.energyDivisionOrders.find(
+      (candidate) => candidate.order_ref === row.order_ref,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyDivisionOrderRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyDivisionOrders[
+        this.energyDivisionOrders.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyDivisionOrders.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyDivisionOrder(
+    orderRef: string,
+  ): Promise<EnergyDivisionOrderRecord | undefined> {
+    const found = this.energyDivisionOrders.find(
+      (record) => record.order_ref === orderRef,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertEnergyDeedTransfer(
+    row: Omit<EnergyDeedTransferRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyDeedTransferRecord> {
+    const existing = this.energyDeedTransfers.find(
+      (candidate) => candidate.deed_ref === row.deed_ref,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyDeedTransferRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyDeedTransfers[
+        this.energyDeedTransfers.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyDeedTransfers.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyDeedTransfer(
+    deedRef: string,
+  ): Promise<EnergyDeedTransferRecord | undefined> {
+    const found = this.energyDeedTransfers.find(
+      (record) => record.deed_ref === deedRef,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listEnergyDeedTransfersForParcel(
+    parcelId: string,
+  ): Promise<EnergyDeedTransferRecord[]> {
+    return this.energyDeedTransfers
+      .filter((record) => record.parcel_id === parcelId)
+      .map((record) => ({ ...record }));
+  }
+
+  async upsertEnergyCarbonOffsetPolicy(
+    row: Omit<EnergyCarbonOffsetPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EnergyCarbonOffsetPolicyRecord> {
+    const existing = this.energyCarbonOffsetPolicies.find(
+      (candidate) => candidate.parcel_id === row.parcel_id,
+    );
+    const now = new Date().toISOString();
+    const record: EnergyCarbonOffsetPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing !== undefined) {
+      this.energyCarbonOffsetPolicies[
+        this.energyCarbonOffsetPolicies.indexOf(existing)
+      ] = record;
+    } else {
+      this.energyCarbonOffsetPolicies.push(record);
+    }
+    return { ...record };
+  }
+
+  async getEnergyCarbonOffsetPolicy(
+    parcelId: string,
+  ): Promise<EnergyCarbonOffsetPolicyRecord | undefined> {
+    const found = this.energyCarbonOffsetPolicies.find(
+      (record) => record.parcel_id === parcelId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyMeterSalesPost(
+    row: Omit<EnergyMeterSalesPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyMeterSalesPostRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.energyMeterSalesPosts.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_meter_sales_posts.source_event_id');
+    }
+    const record: EnergyMeterSalesPostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyMeterSalesPosts.push(record);
+    return { ...record };
+  }
+
+  async getEnergyMeterSalesPost(
+    sourceEventId: string,
+  ): Promise<EnergyMeterSalesPostRecord | undefined> {
+    const found = this.energyMeterSalesPosts.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyPipelineDeductionPost(
+    row: Omit<EnergyPipelineDeductionPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyPipelineDeductionPostRecord> {
+    if (
+      this.energyPipelineDeductionPosts.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_pipeline_deduction_posts.source_event_id');
+    }
+    const record: EnergyPipelineDeductionPostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyPipelineDeductionPosts.push(record);
+    return { ...record };
+  }
+
+  async getEnergyPipelineDeductionPost(
+    sourceEventId: string,
+  ): Promise<EnergyPipelineDeductionPostRecord | undefined> {
+    const found = this.energyPipelineDeductionPosts.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyGpuUtilizationPost(
+    row: Omit<EnergyGpuUtilizationPostRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyGpuUtilizationPostRecord> {
+    if (
+      this.energyGpuUtilizationPosts.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_gpu_utilization_posts.source_event_id');
+    }
+    const record: EnergyGpuUtilizationPostRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyGpuUtilizationPosts.push(record);
+    return { ...record };
+  }
+
+  async getEnergyGpuUtilizationPost(
+    sourceEventId: string,
+  ): Promise<EnergyGpuUtilizationPostRecord | undefined> {
+    const found = this.energyGpuUtilizationPosts.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async sumEnergyRealizationPosts(
+    parcelId: string,
+    wellMeterId: string,
+    gpuClusterHash: string,
+    period: string,
+    currency: string,
+  ): Promise<{
+    gross_energy_sales_cents: number;
+    gross_mineral_sales_cents: number;
+    transportation_pipeline_deductions_cents: number;
+    grid_transmission_fees_cents: number;
+    processing_refining_base_fees_cents: number;
+  }> {
+    // The realization recompute's aggregation — the posted meter rows
+    // (gross) and pipeline rows (deductions) for the exact key.
+    const meterSums = this.energyMeterSalesPosts
+      .filter(
+        (record) =>
+          record.parcel_id === parcelId &&
+          record.well_meter_id === wellMeterId &&
+          record.gpu_cluster_hash === gpuClusterHash &&
+          record.period === period &&
+          record.currency === currency,
+      )
+      .reduce(
+        (sums, record) => ({
+          gross_energy_sales_cents:
+            sums.gross_energy_sales_cents + record.gross_energy_sales_cents,
+          gross_mineral_sales_cents:
+            sums.gross_mineral_sales_cents + record.gross_mineral_sales_cents,
+        }),
+        { gross_energy_sales_cents: 0, gross_mineral_sales_cents: 0 },
+      );
+    const pipelineSums = this.energyPipelineDeductionPosts
+      .filter(
+        (record) =>
+          record.parcel_id === parcelId &&
+          record.well_meter_id === wellMeterId &&
+          record.gpu_cluster_hash === gpuClusterHash &&
+          record.period === period &&
+          record.currency === currency,
+      )
+      .reduce(
+        (sums, record) => ({
+          transportation_pipeline_deductions_cents:
+            sums.transportation_pipeline_deductions_cents +
+            record.transportation_pipeline_deductions_cents,
+          grid_transmission_fees_cents:
+            sums.grid_transmission_fees_cents + record.grid_transmission_fees_cents,
+          processing_refining_base_fees_cents:
+            sums.processing_refining_base_fees_cents +
+            record.processing_refining_base_fees_cents,
+        }),
+        {
+          transportation_pipeline_deductions_cents: 0,
+          grid_transmission_fees_cents: 0,
+          processing_refining_base_fees_cents: 0,
+        },
+      );
+    return { ...meterSums, ...pipelineSums };
+  }
+
+  async upsertEnergyNetRealizationApplication(
+    row: Omit<
+      EnergyNetRealizationApplicationRecord,
+      'id' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<EnergyNetRealizationApplicationRecord> {
+    // The realization position of record — UNIQUE per the founder's
+    // five-tuple; the recompute replaces the sums in place (the id and
+    // created_at survive — no id in the conflict payload, the PR 33
+    // lesson).
+    const existing = this.energyNetRealizationApplications.find(
+      (candidate) =>
+        candidate.parcel_id === row.parcel_id &&
+        candidate.well_meter_id === row.well_meter_id &&
+        candidate.gpu_cluster_hash === row.gpu_cluster_hash &&
+        candidate.period === row.period &&
+        candidate.currency === row.currency,
+    );
+    if (existing !== undefined) {
+      const merged: EnergyNetRealizationApplicationRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: new Date().toISOString(),
+      };
+      this.energyNetRealizationApplications[
+        this.energyNetRealizationApplications.indexOf(existing)
+      ] = merged;
+      return { ...merged };
+    }
+    const record: EnergyNetRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.energyNetRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getEnergyNetRealizationApplication(
+    sourceEventId: string,
+  ): Promise<EnergyNetRealizationApplicationRecord | undefined> {
+    const found = this.energyNetRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyParcelDivisionApplication(
+    row: Omit<EnergyParcelDivisionApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyParcelDivisionApplicationRecord> {
+    if (
+      this.energyParcelDivisionApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_parcel_division_applications.source_event_id');
+    }
+    const record: EnergyParcelDivisionApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyParcelDivisionApplications.push(record);
+    return { ...record };
+  }
+
+  async getEnergyParcelDivisionApplication(
+    sourceEventId: string,
+  ): Promise<EnergyParcelDivisionApplicationRecord | undefined> {
+    const found = this.energyParcelDivisionApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyComputeGridSplitApplication(
+    row: Omit<EnergyComputeGridSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyComputeGridSplitApplicationRecord> {
+    if (
+      this.energyComputeGridSplitApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_compute_grid_split_applications.source_event_id');
+    }
+    const record: EnergyComputeGridSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyComputeGridSplitApplications.push(record);
+    return { ...record };
+  }
+
+  async getEnergyComputeGridSplitApplication(
+    sourceEventId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    const found = this.energyComputeGridSplitApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyStatutoryInterestApplication(
+    row: Omit<EnergyStatutoryInterestApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyStatutoryInterestApplicationRecord> {
+    if (
+      this.energyStatutoryInterestApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_statutory_interest_applications.source_event_id');
+    }
+    const record: EnergyStatutoryInterestApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyStatutoryInterestApplications.push(record);
+    return { ...record };
+  }
+
+  async getEnergyStatutoryInterestApplication(
+    sourceEventId: string,
+  ): Promise<EnergyStatutoryInterestApplicationRecord | undefined> {
+    const found = this.energyStatutoryInterestApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEnergyCarbonOffsetPayoutApplication(
+    row: Omit<EnergyCarbonOffsetPayoutApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord> {
+    if (
+      this.energyCarbonOffsetPayoutApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_carbon_offset_payout_applications.source_event_id');
+    }
+    const record: EnergyCarbonOffsetPayoutApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.energyCarbonOffsetPayoutApplications.push(record);
+    return { ...record };
+  }
+
+  async getEnergyCarbonOffsetPayoutApplication(
+    sourceEventId: string,
+  ): Promise<EnergyCarbonOffsetPayoutApplicationRecord | undefined> {
+    const found = this.energyCarbonOffsetPayoutApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
   }
 }
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */
