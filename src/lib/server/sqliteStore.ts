@@ -113,6 +113,11 @@ import type {
   ArtSplitScheduleRecord,
   ArtSplitAccrualRecord,
   ArtLicensingAgencyPolicyRecord,
+  EstateSuccessionCertificateRecord,
+  EstateHeirScheduleRecord,
+  EstateSuccessionTransitionRecord,
+  EstateSplitAccrualRecord,
+  EstatePayoutGateStateRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1241,6 +1246,80 @@ CREATE TABLE IF NOT EXISTS art_licensing_agency_policies (
   agency_code TEXT NOT NULL UNIQUE CHECK (agency_code IN ('ars', 'dacs')),
   agency_name TEXT NOT NULL,
   collection_fee_bps INTEGER NOT NULL CHECK (collection_fee_bps >= 1500 AND collection_fee_bps <= 2000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Estate succession + multi-heir splitting (migration 0033, PR 29). The
+-- verified legal certificate of record per (artist, certificate_ref), the
+-- probate split schedule of record per certificate, the append-only
+-- receiving-entity transition ledger, the executed multi-heir accruals
+-- (the provenance triple is the once-only key), and the per-payee payout
+-- gate states the art vertical resolves through (fail-closed).
+CREATE TABLE IF NOT EXISTS estate_succession_certificates (
+  id TEXT PRIMARY KEY,
+  artist_payee_id TEXT NOT NULL,
+  certificate_ref TEXT NOT NULL,
+  certificate_hash TEXT NOT NULL,
+  estate_entity_payee_id TEXT NOT NULL,
+  estate_entity_payee_name TEXT NOT NULL,
+  validation_state TEXT NOT NULL CHECK (validation_state IN ('pending', 'verified', 'rejected')),
+  verified_by TEXT,
+  verified_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (artist_payee_id, certificate_ref)
+);
+CREATE INDEX IF NOT EXISTS estate_succession_certificates_artist_idx
+  ON estate_succession_certificates (artist_payee_id);
+
+CREATE TABLE IF NOT EXISTS estate_heir_schedules (
+  id TEXT PRIMARY KEY,
+  certificate_id TEXT NOT NULL UNIQUE,
+  heirs TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS estate_succession_transitions (
+  id TEXT PRIMARY KEY,
+  certificate_id TEXT NOT NULL,
+  artist_payee_id TEXT NOT NULL,
+  estate_entity_payee_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  artwork_id TEXT,
+  provenance_hash TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (certificate_id, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS estate_succession_transitions_certificate_idx
+  ON estate_succession_transitions (certificate_id);
+
+CREATE TABLE IF NOT EXISTS estate_split_accruals (
+  id TEXT PRIMARY KEY,
+  schedule_id TEXT NOT NULL,
+  certificate_id TEXT NOT NULL,
+  artist_payee_id TEXT NOT NULL,
+  estate_entity_payee_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  artwork_id TEXT NOT NULL,
+  provenance_hash TEXT NOT NULL,
+  basis_cents INTEGER NOT NULL CHECK (basis_cents >= 0),
+  allocations TEXT NOT NULL,
+  dust_cents INTEGER NOT NULL CHECK (dust_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (certificate_id, artwork_id, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS estate_split_accruals_certificate_idx
+  ON estate_split_accruals (certificate_id);
+
+CREATE TABLE IF NOT EXISTS estate_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL UNIQUE,
+  estate_succession_state TEXT NOT NULL CHECK (estate_succession_state IN ('unknown', 'verified')),
+  certificate_ref TEXT,
+  verified_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -4173,6 +4252,238 @@ export class SqliteStore implements Store {
       this.db
         .prepare(`SELECT * FROM art_licensing_agency_policies WHERE agency_code = ?`)
         .get(agencyCode) as ArtLicensingAgencyPolicyRecord | undefined,
+    );
+  }
+
+  async upsertEstateSuccessionCertificate(
+    row: Omit<EstateSuccessionCertificateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstateSuccessionCertificateRecord> {
+    // UNIQUE per (artist_payee_id, certificate_ref) — a re-validation
+    // converges on the row (the newest validation state governs).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM estate_succession_certificates
+         WHERE artist_payee_id = ? AND certificate_ref = ?`,
+      )
+      .get(row.artist_payee_id, row.certificate_ref) as
+      | EstateSuccessionCertificateRecord
+      | undefined;
+    const record: EstateSuccessionCertificateRecord = existing === undefined
+      ? { ...row, id: randomUUID(), created_at: now, updated_at: now }
+      : { ...existing, ...row, id: existing.id, created_at: existing.created_at, updated_at: now };
+    this.db
+      .prepare(
+        `INSERT INTO estate_succession_certificates
+           (id, artist_payee_id, certificate_ref, certificate_hash, estate_entity_payee_id,
+            estate_entity_payee_name, validation_state, verified_by, verified_at, created_at, updated_at)
+         VALUES (@id, @artist_payee_id, @certificate_ref, @certificate_hash, @estate_entity_payee_id,
+            @estate_entity_payee_name, @validation_state, @verified_by, @verified_at, @created_at, @updated_at)
+         ON CONFLICT (artist_payee_id, certificate_ref) DO UPDATE SET
+           certificate_hash = excluded.certificate_hash,
+           estate_entity_payee_id = excluded.estate_entity_payee_id,
+           estate_entity_payee_name = excluded.estate_entity_payee_name,
+           validation_state = excluded.validation_state,
+           verified_by = excluded.verified_by,
+           verified_at = excluded.verified_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getEstateSuccessionCertificate(
+    artistPayeeId: string,
+    certificateRef: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM estate_succession_certificates
+           WHERE artist_payee_id = ? AND certificate_ref = ?`,
+        )
+        .get(artistPayeeId, certificateRef) as
+        | EstateSuccessionCertificateRecord
+        | undefined,
+    );
+  }
+
+  async getEstateSuccessionCertificateById(
+    certificateId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM estate_succession_certificates WHERE id = ?`)
+        .get(certificateId) as EstateSuccessionCertificateRecord | undefined,
+    );
+  }
+
+  async getVerifiedEstateSuccessionCertificate(
+    artistPayeeId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM estate_succession_certificates
+           WHERE artist_payee_id = ? AND validation_state = 'verified'
+           ORDER BY updated_at DESC LIMIT 1`,
+        )
+        .get(artistPayeeId) as EstateSuccessionCertificateRecord | undefined,
+    );
+  }
+
+  async upsertEstateHeirSchedule(
+    row: EstateHeirScheduleRecord,
+  ): Promise<EstateHeirScheduleRecord> {
+    // UNIQUE per certificate_id — a re-registration replaces the row
+    // atomically, identity and created_at preserved (the art schedule
+    // upsert discipline; the engine builds the versioned row).
+    const existing = this.db
+      .prepare(`SELECT * FROM estate_heir_schedules WHERE certificate_id = ?`)
+      .get(row.certificate_id) as EstateHeirScheduleRecord | undefined;
+    const dbRow = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? row.created_at,
+      heirs: JSON.stringify(row.heirs),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO estate_heir_schedules
+           (id, certificate_id, heirs, version, created_at, updated_at)
+         VALUES (@id, @certificate_id, @heirs, @version, @created_at, @updated_at)
+         ON CONFLICT (certificate_id) DO UPDATE SET
+           heirs = excluded.heirs,
+           version = excluded.version,
+           updated_at = excluded.updated_at`,
+      )
+      .run(dbRow as unknown as Record<string, unknown>);
+    // Return the record as persisted — the converged identity and
+    // created_at, not the engine's freshly-built row.
+    return Promise.resolve({ ...row, id: dbRow.id, created_at: dbRow.created_at });
+  }
+
+  async getEstateHeirSchedule(
+    certificateId: string,
+  ): Promise<EstateHeirScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM estate_heir_schedules WHERE certificate_id = ?`)
+      .get(certificateId) as (EstateHeirScheduleRecord & { heirs: string }) | undefined;
+    if (row === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({
+      ...row,
+      heirs: JSON.parse(row.heirs) as EstateHeirScheduleRecord['heirs'],
+    });
+  }
+
+  async insertEstateSuccessionTransition(
+    row: Omit<EstateSuccessionTransitionRecord, 'id'>,
+  ): Promise<EstateSuccessionTransitionRecord> {
+    // UNIQUE per (certificate_id, source_event_id) — a replayed transition
+    // is the unique violation, never a double handoff. Append-only: the
+    // row, once written, is never updated or deleted.
+    const record: EstateSuccessionTransitionRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO estate_succession_transitions
+           (id, certificate_id, artist_payee_id, estate_entity_payee_id, source_event_id,
+            artwork_id, provenance_hash, created_at)
+         VALUES (@id, @certificate_id, @artist_payee_id, @estate_entity_payee_id, @source_event_id,
+            @artwork_id, @provenance_hash, @created_at)`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listEstateSuccessionTransitions(
+    certificateId: string,
+  ): Promise<EstateSuccessionTransitionRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM estate_succession_transitions
+           WHERE certificate_id = ? ORDER BY created_at ASC`,
+        )
+        .all(certificateId) as EstateSuccessionTransitionRecord[],
+    );
+  }
+
+  async insertEstateSplitAccrual(
+    row: Omit<EstateSplitAccrualRecord, 'id'>,
+  ): Promise<EstateSplitAccrualRecord> {
+    // UNIQUE per (certificate_id, artwork_id, source_event_id) — a
+    // replayed accrual is the unique violation, never a double designation
+    // (the provenance triple IS the once-only key).
+    const record: EstateSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.db
+      .prepare(
+        `INSERT INTO estate_split_accruals
+           (id, schedule_id, certificate_id, artist_payee_id, estate_entity_payee_id,
+            source_event_id, artwork_id, provenance_hash, basis_cents, allocations, dust_cents, created_at)
+         VALUES (@id, @schedule_id, @certificate_id, @artist_payee_id, @estate_entity_payee_id,
+            @source_event_id, @artwork_id, @provenance_hash, @basis_cents, @allocations, @dust_cents, @created_at)`,
+      )
+      .run({
+        ...record,
+        allocations: JSON.stringify(record.allocations),
+      } as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async listEstateSplitAccruals(
+    certificateId: string,
+  ): Promise<EstateSplitAccrualRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM estate_split_accruals
+         WHERE certificate_id = ? ORDER BY created_at ASC`,
+      )
+      .all(certificateId) as (EstateSplitAccrualRecord & { allocations: string })[];
+    return Promise.resolve(
+      rows.map((row) => ({
+        ...row,
+        allocations: JSON.parse(row.allocations) as EstateSplitAccrualRecord['allocations'],
+      })),
+    );
+  }
+
+  async upsertEstatePayoutGateState(
+    row: Omit<EstatePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstatePayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare(`SELECT * FROM estate_payout_gate_states WHERE payee_id = ?`)
+      .get(row.payee_id) as EstatePayoutGateStateRecord | undefined;
+    const record: EstatePayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO estate_payout_gate_states
+           (id, payee_id, estate_succession_state, certificate_ref, verified_by, created_at, updated_at)
+         VALUES (@id, @payee_id, @estate_succession_state, @certificate_ref, @verified_by, @created_at, @updated_at)
+         ON CONFLICT (payee_id) DO UPDATE SET
+           estate_succession_state = excluded.estate_succession_state,
+           certificate_ref = excluded.certificate_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record as unknown as Record<string, unknown>);
+    return Promise.resolve(record);
+  }
+
+  async getEstatePayoutGateState(
+    payeeId: string,
+  ): Promise<EstatePayoutGateStateRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM estate_payout_gate_states WHERE payee_id = ?`)
+        .get(payeeId) as EstatePayoutGateStateRecord | undefined,
     );
   }
 

@@ -48,6 +48,7 @@ import {
   evaluatePayoutCompliance,
   getVerticalComplianceStateSource,
   resolveAiVerticalComplianceState,
+  resolveArtVerticalComplianceState,
   resolveCreatorKycStatus,
   type AssetVertical,
 } from "@/modules/compliance/payoutGate";
@@ -356,6 +357,17 @@ export async function releaseUnclaimedHolding(
       // record (migration 0029) — fail-closed on absent (null stays null)
       // and on 'unknown' (maps to false, the specific condition refuses).
       verticalState = await resolveAiVerticalComplianceState(
+        store,
+        party.payee_id,
+      );
+    }
+    if (verticalState === null && input.vertical === "art") {
+      // The art vertical's fallback (PR 29): the same fail-closed pattern,
+      // resolved from the estate payout-gate states of record (migration
+      // 0033) — absent stays null (vertical_state_unknown refuses) and an
+      // 'unknown' state of record maps to false (the estate condition
+      // refuses). Only the verified estate succession state passes.
+      verticalState = await resolveArtVerticalComplianceState(
         store,
         party.payee_id,
       );

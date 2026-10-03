@@ -112,6 +112,11 @@ import type {
   ArtSplitScheduleRecord,
   ArtSplitAccrualRecord,
   ArtLicensingAgencyPolicyRecord,
+  EstateSuccessionCertificateRecord,
+  EstateHeirScheduleRecord,
+  EstateSuccessionTransitionRecord,
+  EstateSplitAccrualRecord,
+  EstatePayoutGateStateRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -270,6 +275,11 @@ export class InMemoryStore implements Store {
   private artRecoupmentApplications: ArtRecoupmentApplicationRecord[] = [];
   private artSplitAccruals: ArtSplitAccrualRecord[] = [];
   private artLicensingAgencyPolicies: ArtLicensingAgencyPolicyRecord[] = [];
+  private estateSuccessionCertificates: EstateSuccessionCertificateRecord[] = [];
+  private estateHeirSchedules: EstateHeirScheduleRecord[] = [];
+  private estateSuccessionTransitions: EstateSuccessionTransitionRecord[] = [];
+  private estateSplitAccruals: EstateSplitAccrualRecord[] = [];
+  private estatePayoutGateStates = new Map<string, EstatePayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -2110,6 +2120,195 @@ export class InMemoryStore implements Store {
     const found = this.artLicensingAgencyPolicies.find(
       (candidate) => candidate.agency_code === agencyCode,
     );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertEstateSuccessionCertificate(
+    row: Omit<EstateSuccessionCertificateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstateSuccessionCertificateRecord> {
+    // UNIQUE per (artist_payee_id, certificate_ref) — a re-validation
+    // converges on the row (the newest validation state governs).
+    const now = new Date().toISOString();
+    const existing = this.estateSuccessionCertificates.find(
+      (candidate) =>
+        candidate.artist_payee_id === row.artist_payee_id &&
+        candidate.certificate_ref === row.certificate_ref,
+    );
+    if (existing !== undefined) {
+      const updated: EstateSuccessionCertificateRecord = {
+        ...existing,
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: now,
+      };
+      this.estateSuccessionCertificates[
+        this.estateSuccessionCertificates.indexOf(existing)
+      ] = updated;
+      return { ...updated };
+    }
+    const record: EstateSuccessionCertificateRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.estateSuccessionCertificates.push(record);
+    return { ...record };
+  }
+
+  async getEstateSuccessionCertificate(
+    artistPayeeId: string,
+    certificateRef: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    const found = this.estateSuccessionCertificates.find(
+      (candidate) =>
+        candidate.artist_payee_id === artistPayeeId &&
+        candidate.certificate_ref === certificateRef,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async getEstateSuccessionCertificateById(
+    certificateId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    const found = this.estateSuccessionCertificates.find(
+      (candidate) => candidate.id === certificateId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async getVerifiedEstateSuccessionCertificate(
+    artistPayeeId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    const verified = this.estateSuccessionCertificates
+      .filter(
+        (candidate) =>
+          candidate.artist_payee_id === artistPayeeId &&
+          candidate.validation_state === 'verified',
+      )
+      .sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+    return verified[0] === undefined ? undefined : { ...verified[0] };
+  }
+
+  async upsertEstateHeirSchedule(
+    row: EstateHeirScheduleRecord,
+  ): Promise<EstateHeirScheduleRecord> {
+    // UNIQUE per certificate_id — a re-registration replaces the row
+    // atomically, identity and created_at preserved (the art schedule
+    // upsert discipline; the engine builds the versioned row).
+    const existing = this.estateHeirSchedules.find(
+      (candidate) => candidate.certificate_id === row.certificate_id,
+    );
+    if (existing !== undefined) {
+      const updated: EstateHeirScheduleRecord = {
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: row.updated_at,
+      };
+      this.estateHeirSchedules[this.estateHeirSchedules.indexOf(existing)] = updated;
+      return { ...updated };
+    }
+    this.estateHeirSchedules.push({ ...row });
+    return { ...row };
+  }
+
+  async getEstateHeirSchedule(
+    certificateId: string,
+  ): Promise<EstateHeirScheduleRecord | undefined> {
+    const found = this.estateHeirSchedules.find(
+      (candidate) => candidate.certificate_id === certificateId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEstateSuccessionTransition(
+    row: Omit<EstateSuccessionTransitionRecord, 'id'>,
+  ): Promise<EstateSuccessionTransitionRecord> {
+    // UNIQUE per (certificate_id, source_event_id) — a replayed transition
+    // is the unique violation, never a double handoff. Append-only: the
+    // row, once written, is never updated or deleted.
+    if (
+      this.estateSuccessionTransitions.some(
+        (candidate) =>
+          candidate.certificate_id === row.certificate_id &&
+          candidate.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('estate_succession_transitions.certificate_id_source_event_id');
+    }
+    const record: EstateSuccessionTransitionRecord = { ...row, id: randomUUID() };
+    this.estateSuccessionTransitions.push(record);
+    return { ...record };
+  }
+
+  async listEstateSuccessionTransitions(
+    certificateId: string,
+  ): Promise<EstateSuccessionTransitionRecord[]> {
+    return sortByTime(
+      this.estateSuccessionTransitions
+        .filter((candidate) => candidate.certificate_id === certificateId)
+        .map((candidate) => ({ ...candidate })),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async insertEstateSplitAccrual(
+    row: Omit<EstateSplitAccrualRecord, 'id'>,
+  ): Promise<EstateSplitAccrualRecord> {
+    // UNIQUE per (certificate_id, artwork_id, source_event_id) — a
+    // replayed accrual is the unique violation, never a double designation
+    // (the provenance triple IS the once-only key).
+    if (
+      this.estateSplitAccruals.some(
+        (candidate) =>
+          candidate.certificate_id === row.certificate_id &&
+          candidate.artwork_id === row.artwork_id &&
+          candidate.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('estate_split_accruals.certificate_id_artwork_id_source_event_id');
+    }
+    const record: EstateSplitAccrualRecord = { ...row, id: randomUUID() };
+    this.estateSplitAccruals.push(record);
+    return { ...record };
+  }
+
+  async listEstateSplitAccruals(
+    certificateId: string,
+  ): Promise<EstateSplitAccrualRecord[]> {
+    return sortByTime(
+      this.estateSplitAccruals
+        .filter((candidate) => candidate.certificate_id === certificateId)
+        .map((candidate) => ({ ...candidate })),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  async upsertEstatePayoutGateState(
+    row: Omit<EstatePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstatePayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    const now = new Date().toISOString();
+    const existing = this.estatePayoutGateStates.get(row.payee_id);
+    const record: EstatePayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.estatePayoutGateStates.set(row.payee_id, record);
+    return { ...record };
+  }
+
+  async getEstatePayoutGateState(
+    payeeId: string,
+  ): Promise<EstatePayoutGateStateRecord | undefined> {
+    const found = this.estatePayoutGateStates.get(payeeId);
     return found === undefined ? undefined : { ...found };
   }
 

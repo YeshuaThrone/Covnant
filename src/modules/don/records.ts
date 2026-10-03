@@ -1289,6 +1289,211 @@ export type ArtLicensingAgencyPolicyRecord = {
   created_at: string;
   updated_at: string;
 };
+// --- Estate succession + multi-heir splitting (PR 29, migration 0033) -------
+
+/**
+ * The legal certificate's validation states — the transition gate's
+ * vocabulary. Only an explicit 'verified' state gates the receiving-entity
+ * transition and the estate payout gate: 'pending' is a certificate of
+ * record still in validation, 'rejected' a failed validation; absent,
+ * pending, and rejected all refuse — fail-closed (the publishing
+ * ip_rights vocabulary discipline).
+ */
+export const ESTATE_CERTIFICATE_VALIDATION_STATES = [
+  "pending",
+  "verified",
+  "rejected",
+] as const;
+export type EstateCertificateValidationState =
+  (typeof ESTATE_CERTIFICATE_VALIDATION_STATES)[number];
+
+export function isEstateCertificateValidationState(
+  value: string,
+): value is EstateCertificateValidationState {
+  return (ESTATE_CERTIFICATE_VALIDATION_STATES as readonly string[]).includes(value);
+}
+
+/**
+ * The estate succession certificate of record (migration 0033) — the
+ * verified legal fact that an artist's receiving entity transitions to the
+ * named estate entity. UNIQUE per (artist_payee_id, certificate_ref): a
+ * re-validation converges on the row (the newest state governs).
+ * certificate_hash is the certificate document's SHA-256 hex digest — the
+ * audit anchor; validation_state is the gate: only 'verified' transitions.
+ */
+export type EstateSuccessionCertificateRecord = {
+  id: string;
+  /** UNIQUE with certificate_ref — the artist whose succession this certifies. */
+  artist_payee_id: string;
+  /** UNIQUE with artist_payee_id — the legal certificate's reference of record. */
+  certificate_ref: string;
+  /** The certificate document's SHA-256 hex digest — the audit anchor. */
+  certificate_hash: string;
+  /** The receiving entity AFTER the transition (the estate/foundation payee). */
+  estate_entity_payee_id: string;
+  estate_entity_payee_name: string;
+  /** The transition gate — only 'verified' transitions. */
+  validation_state: EstateCertificateValidationState;
+  /** The operator identity that recorded the validation. */
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The heir relationships a probate names — the founder's example split is
+ * spouse / child / child; 'other' carries every other beneficiary a probate
+ * of record designates. Descriptive metadata on the cut (the money keys on
+ * the payee), recorded for the audit trail (the art contributor-role
+ * discipline).
+ */
+export const ESTATE_HEIR_RELATIONSHIPS = [
+  "spouse",
+  "child",
+  "other",
+] as const;
+export type EstateHeirRelationship = (typeof ESTATE_HEIR_RELATIONSHIPS)[number];
+
+export function isEstateHeirRelationship(value: string): value is EstateHeirRelationship {
+  return (ESTATE_HEIR_RELATIONSHIPS as readonly string[]).includes(value);
+}
+
+/**
+ * One heir's probate share of record — the VERIFIED probate percentages
+ * (whole basis points of the estate net, 1..10000). Configurable per
+ * probate: the schedule of record is versioned, and accrued splits keep
+ * their version's history — never re-cut.
+ */
+export type EstateHeirSpec = {
+  heir_payee_id: string;
+  heir_payee_name: string;
+  relationship: EstateHeirRelationship;
+  /** Whole basis points of the estate net (1..10000). */
+  percentage_bps: number;
+};
+
+/**
+ * The multi-heir fractional split of record (migration 0033) — one per
+ * verified certificate, CONFIGURABLE per probate (e.g. spouse 50% /
+ * child A 25% / child B 25%). heirs is the jsonb roster of EstateHeirSpec
+ * rows read whole (the 0030/0032 contributors discipline); the roster's
+ * Σ percentage_bps ≤ 10,000 is lane-validated at registration. UNIQUE per
+ * certificate_id: a re-registration (a probate amendment) replaces the row
+ * atomically and increments version — accrued splits keep their version's
+ * history, never re-cut.
+ */
+export type EstateHeirScheduleRecord = {
+  id: string;
+  /** UNIQUE — the verified certificate the probate split hangs from. */
+  certificate_id: string;
+  heirs: EstateHeirSpec[];
+  /** The schedule's revision — a re-registration increments it. */
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One receiving-entity transition (migration 0033) — the append-only
+ * handoff ledger: from the artist (the pre-transition receiving entity) to
+ * the estate entity, gated on the certificate's verified state. The
+ * transition INSERTS history; it never updates or deletes a ledger row —
+ * the existing trail stays intact (the AI allocation-archive discipline:
+ * append-only, audit-preserving). UNIQUE per (certificate_id,
+ * source_event_id): a replayed transition is the unique violation, never a
+ * double handoff. artwork_id + provenance_hash carry the funds' provenance
+ * for audit.
+ */
+export type EstateSuccessionTransitionRecord = {
+  id: string;
+  certificate_id: string;
+  /** The from-entity — the artist's payee. */
+  artist_payee_id: string;
+  /** The to-entity — the estate's payee. */
+  estate_entity_payee_id: string;
+  /** The funding event that drove this transition — the replay guard's key. */
+  source_event_id: string;
+  /** The artwork the funds relate to (null = an estate-wide handoff). */
+  artwork_id: string | null;
+  /** The funds' provenance hash, carried for audit. */
+  provenance_hash: string | null;
+  created_at: string;
+};
+
+/** One heir's designated share on an estate split accrual. */
+export type EstateHeirAllocation = {
+  heir_payee_id: string;
+  heir_payee_name: string;
+  relationship: EstateHeirRelationship;
+  share_cents: number;
+};
+
+/**
+ * One executed estate split (migration 0033) — the append-only multi-heir
+ * accrual ledger. UNIQUE per (certificate_id, artwork_id, source_event_id):
+ * a replayed split is the unique violation, never a double designation —
+ * the provenance triple IS the once-only key. allocations is the jsonb
+ * array of per-heir designated shares; dust_cents is the visible residue —
+ * conservation: allocations + dust = basis, EXACT, nothing rounds up into
+ * an heir's credit, and the dust routes to the platform variance payee
+ * ('platform', never an heir — the locked Don dust discipline). The
+ * accrual DESIGNATES the routing; the money moves through the standing
+ * release machinery (the payout gates) — the accrual row is the gate's
+ * verified input. artwork_id + provenance_hash carry the funds' provenance
+ * on the line item for audit.
+ */
+export type EstateSplitAccrualRecord = {
+  id: string;
+  schedule_id: string;
+  certificate_id: string;
+  artist_payee_id: string;
+  estate_entity_payee_id: string;
+  /** The funding row's event id — part of the once-only provenance key. */
+  source_event_id: string;
+  /** The artwork the funds relate to — the provenance key. */
+  artwork_id: string;
+  /** The funds' provenance hash — carried on the line item for audit. */
+  provenance_hash: string;
+  /** The split's funding base, integer cents. */
+  basis_cents: number;
+  allocations: EstateHeirAllocation[];
+  /** The visible residue routed to the platform variance payee. */
+  dust_cents: number;
+  created_at: string;
+};
+
+/**
+ * The estate payout gate's stored states (migration 0033) — the persisted
+ * fact the art vertical's compliance state resolves through (the AI
+ * payout-gate states' per-payee pattern, migration 0029). UNIQUE per
+ * payee_id: an upsert converges (the newest state governs the next
+ * dispatch). The art payout gate reads these FAIL-CLOSED: an ABSENT record
+ * returns null (the gate refuses with vertical_state_unknown), an
+ * 'unknown' stored state maps to false (the gate refuses the specific
+ * estate condition), and only 'verified' passes — nothing defaults to
+ * allowing.
+ */
+export const ESTATE_PAYOUT_GATE_STATES = ["unknown", "verified"] as const;
+export type EstatePayoutGateState = (typeof ESTATE_PAYOUT_GATE_STATES)[number];
+
+export function isEstatePayoutGateState(value: string): value is EstatePayoutGateState {
+  return (ESTATE_PAYOUT_GATE_STATES as readonly string[]).includes(value);
+}
+
+export type EstatePayoutGateStateRecord = {
+  id: string;
+  /** UNIQUE — the receiving payee whose estate payouts this gates (the
+   * estate entity or an heir of record). */
+  payee_id: string;
+  estate_succession_state: EstatePayoutGateState;
+  /** The verified certificate reference the state was recorded against. */
+  certificate_ref: string | null;
+  /** The operator identity that recorded the state. */
+  verified_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 // --- IP adaptation optioning (PR 21, migration 0025) -----------------------
 

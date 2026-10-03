@@ -108,6 +108,11 @@ import type {
   ArtSplitScheduleRecord,
   ArtSplitAccrualRecord,
   ArtLicensingAgencyPolicyRecord,
+  EstateSuccessionCertificateRecord,
+  EstateHeirScheduleRecord,
+  EstateSuccessionTransitionRecord,
+  EstateSplitAccrualRecord,
+  EstatePayoutGateStateRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -325,6 +330,20 @@ const TABLES = {
   artRecoupmentApplications: 'art_recoupment_applications',
   artSplitAccruals: 'art_split_accruals',
   artLicensingAgencyPolicies: 'art_licensing_agency_policies',
+  // Migration 0033 (PR 29) — the estate succession + multi-heir splitting
+  // layer: the verified legal certificate of record per
+  // (artist_payee_id, certificate_ref), the probate split schedule of
+  // record per certificate (upsert on certificate_id), the append-only
+  // receiving-entity transition ledger (UNIQUE per
+  // (certificate_id, source_event_id)), the executed multi-heir accruals
+  // (UNIQUE per (certificate_id, artwork_id, source_event_id) — the
+  // provenance triple is the once-only key), and the per-payee payout
+  // gate states the art vertical resolves through (fail-closed).
+  estateSuccessionCertificates: 'estate_succession_certificates',
+  estateHeirSchedules: 'estate_heir_schedules',
+  estateSuccessionTransitions: 'estate_succession_transitions',
+  estateSplitAccruals: 'estate_split_accruals',
+  estatePayoutGateStates: 'estate_payout_gate_states',
   // Migration 0031 (PR 27) — the foreign tax hold + book returns reserve
   // layer: the withholding-tax-credit verification of record per
   // (country_code, tax_year) and the ISBN rights verification of record per
@@ -2622,6 +2641,196 @@ export class SupabaseStore implements Store {
         .eq('agency_code', agencyCode)
         .maybeSingle(),
       'getArtLicensingAgencyPolicy',
+    );
+  }
+
+  async upsertEstateSuccessionCertificate(
+    row: Omit<EstateSuccessionCertificateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstateSuccessionCertificateRecord> {
+    // UNIQUE per (artist_payee_id, certificate_ref) — a re-validation
+    // converges on the row: the identity is read and preserved BEFORE the
+    // upsert (a schedule of record hangs off certificate_id, so a
+    // re-validation may never mint a new id — the read-then-write
+    // discipline), and the newest validation state governs the transition
+    // gate.
+    const existing = await this.getEstateSuccessionCertificate(
+      row.artist_payee_id,
+      row.certificate_ref,
+    );
+    return this.oneStrict<EstateSuccessionCertificateRecord>(
+      this.client
+        .from(TABLES.estateSuccessionCertificates)
+        .upsert(
+          {
+            ...row,
+            ...(existing === undefined
+              ? { id: crypto.randomUUID() }
+              : { id: existing.id, created_at: existing.created_at }),
+          },
+          { onConflict: 'artist_payee_id,certificate_ref' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertEstateSuccessionCertificate',
+    );
+  }
+
+  async getEstateSuccessionCertificate(
+    artistPayeeId: string,
+    certificateRef: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return this.one<EstateSuccessionCertificateRecord>(
+      this.client
+        .from(TABLES.estateSuccessionCertificates)
+        .select()
+        .eq('artist_payee_id', artistPayeeId)
+        .eq('certificate_ref', certificateRef)
+        .maybeSingle(),
+      'getEstateSuccessionCertificate',
+    );
+  }
+
+  async getEstateSuccessionCertificateById(
+    certificateId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return this.one<EstateSuccessionCertificateRecord>(
+      this.client
+        .from(TABLES.estateSuccessionCertificates)
+        .select()
+        .eq('id', certificateId)
+        .maybeSingle(),
+      'getEstateSuccessionCertificateById',
+    );
+  }
+
+  async getVerifiedEstateSuccessionCertificate(
+    artistPayeeId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined> {
+    return this.one<EstateSuccessionCertificateRecord>(
+      this.client
+        .from(TABLES.estateSuccessionCertificates)
+        .select()
+        .eq('artist_payee_id', artistPayeeId)
+        .eq('validation_state', 'verified')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      'getVerifiedEstateSuccessionCertificate',
+    );
+  }
+
+  async upsertEstateHeirSchedule(
+    row: EstateHeirScheduleRecord,
+  ): Promise<EstateHeirScheduleRecord> {
+    // UNIQUE per certificate_id — a re-registration (a probate amendment)
+    // replaces the row atomically, identity and created_at preserved (the
+    // art schedule upsert discipline; the engine builds the versioned row).
+    return this.oneStrict<EstateHeirScheduleRecord>(
+      this.client
+        .from(TABLES.estateHeirSchedules)
+        .upsert({ ...row, id: row.id || crypto.randomUUID() }, { onConflict: 'certificate_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEstateHeirSchedule',
+    );
+  }
+
+  async getEstateHeirSchedule(
+    certificateId: string,
+  ): Promise<EstateHeirScheduleRecord | undefined> {
+    return this.one<EstateHeirScheduleRecord>(
+      this.client
+        .from(TABLES.estateHeirSchedules)
+        .select()
+        .eq('certificate_id', certificateId)
+        .maybeSingle(),
+      'getEstateHeirSchedule',
+    );
+  }
+
+  async insertEstateSuccessionTransition(
+    row: Omit<EstateSuccessionTransitionRecord, 'id'>,
+  ): Promise<EstateSuccessionTransitionRecord> {
+    // UNIQUE per (certificate_id, source_event_id): a replayed transition
+    // throws here — the once-only handoff guard, never a double handoff.
+    // Append-only: nothing ever updates or deletes a transition row.
+    return this.oneStrict<EstateSuccessionTransitionRecord>(
+      this.client
+        .from(TABLES.estateSuccessionTransitions)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertEstateSuccessionTransition',
+    );
+  }
+
+  async listEstateSuccessionTransitions(
+    certificateId: string,
+  ): Promise<EstateSuccessionTransitionRecord[]> {
+    return this.many<EstateSuccessionTransitionRecord>(
+      this.client
+        .from(TABLES.estateSuccessionTransitions)
+        .select()
+        .eq('certificate_id', certificateId)
+        .order('created_at', { ascending: true }),
+      'listEstateSuccessionTransitions',
+    );
+  }
+
+  async insertEstateSplitAccrual(
+    row: Omit<EstateSplitAccrualRecord, 'id'>,
+  ): Promise<EstateSplitAccrualRecord> {
+    // UNIQUE per (certificate_id, artwork_id, source_event_id): a replayed
+    // accrual throws here — the once-only designation guard, never a
+    // double split (the provenance triple IS the once-only key).
+    return this.oneStrict<EstateSplitAccrualRecord>(
+      this.client
+        .from(TABLES.estateSplitAccruals)
+        .insert({ ...row, id: crypto.randomUUID() })
+        .select()
+        .maybeSingle(),
+      'insertEstateSplitAccrual',
+    );
+  }
+
+  async listEstateSplitAccruals(
+    certificateId: string,
+  ): Promise<EstateSplitAccrualRecord[]> {
+    return this.many<EstateSplitAccrualRecord>(
+      this.client
+        .from(TABLES.estateSplitAccruals)
+        .select()
+        .eq('certificate_id', certificateId)
+        .order('created_at', { ascending: true }),
+      'listEstateSplitAccruals',
+    );
+  }
+
+  async upsertEstatePayoutGateState(
+    row: Omit<EstatePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstatePayoutGateStateRecord> {
+    // UNIQUE per payee_id — a re-recording converges (the newest state
+    // governs the next dispatch).
+    return this.oneStrict<EstatePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.estatePayoutGateStates)
+        .upsert({ ...row, id: crypto.randomUUID() }, { onConflict: 'payee_id' })
+        .select()
+        .maybeSingle(),
+      'upsertEstatePayoutGateState',
+    );
+  }
+
+  async getEstatePayoutGateState(
+    payeeId: string,
+  ): Promise<EstatePayoutGateStateRecord | undefined> {
+    return this.one<EstatePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.estatePayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .maybeSingle(),
+      'getEstatePayoutGateState',
     );
   }
 
