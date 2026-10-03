@@ -1,0 +1,5 @@
+Revenue Event ID,Package ID,Developer ID,API Endpoint ID,SDK Package Hash,Revenue Kind,Gross Revenue,Currency,Reporting Period
+CPK-2026-03-0001,proj-lumina-core,dev-nova,ep-nova-1,sha256:nova-sdk-v3,subscription,4000.00,USD,2026-03
+CPK-2026-03-0002,proj-lumina-core,dev-quasar,ep-quasar-1,sha256:quasar-sdk-v1,sponsorship,1000.00,USD,2026-03
+CPK-2026-03-0003,proj-helios-ui,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,subscription,600.00,USD,2026-03
+CPK-2026-03-0004,proj-helios-ui,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,sponsorship,400.00,USD,2026-03

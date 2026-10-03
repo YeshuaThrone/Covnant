@@ -259,6 +259,23 @@ import type {
   ServicesPayoutGateStateRecord,
 } from '@/modules/service/records';
 import type {
+  DeveloperAgentToolCallApplicationRecord,
+  DeveloperApiCallMonthRecord,
+  DeveloperApiMicroRoyaltyApplicationRecord,
+  DeveloperApiRealizationApplicationRecord,
+  DeveloperApiRoyaltyPolicyRecord,
+  DeveloperCopackageContributionLegRecord,
+  DeveloperCopackageSplitApplicationRecord,
+  DeveloperDependencyFeeApplicationRecord,
+  DeveloperDependencyMaintainerLedgerRecord,
+  DeveloperMarketplaceSplitApplicationRecord,
+  DeveloperMarketplaceSplitPolicyRecord,
+  DeveloperToolRoyaltyPolicyRecord,
+  DeveloperWhitelabelLicenseApplicationRecord,
+  DeveloperWhitelabelLicenseDealRecord,
+  DeveloperWhitelabelUsageMonthRecord,
+} from '@/modules/developer/records';
+import type {
   CulinaryAuditEscrowDrawdownRecord,
   CulinaryAuditEscrowPolicyRecord,
   CulinaryAuditEscrowReconciliationRecord,
@@ -623,6 +640,24 @@ const TABLES = {
   serviceAuditEscrowDrawdowns: 'service_audit_escrow_drawdowns',
   serviceAuditEscrowReconciliations: 'service_audit_escrow_reconciliations',
   servicesPayoutGateStates: 'services_payout_gate_states',
+  // Migration 0048 — the developer lane: the royalty/split/ledger/deal
+  // registries, the two cumulative monthly trackers, and the seven
+  // application ledgers.
+  developerApiRoyaltyPolicies: 'developer_api_royalty_policies',
+  developerApiCallMonths: 'developer_api_call_months',
+  developerMarketplaceSplitPolicies: 'developer_marketplace_split_policies',
+  developerCopackageContributionLegs: 'developer_copackage_contribution_legs',
+  developerDependencyMaintainerLedgers: 'developer_dependency_maintainer_ledgers',
+  developerWhitelabelLicenseDeals: 'developer_whitelabel_license_deals',
+  developerToolRoyaltyPolicies: 'developer_tool_royalty_policies',
+  developerApiRealizationApplications: 'developer_api_realization_applications',
+  developerApiMicroRoyaltyApplications: 'developer_api_micro_royalty_applications',
+  developerMarketplaceSplitApplications: 'developer_marketplace_split_applications',
+  developerCopackageSplitApplications: 'developer_copackage_split_applications',
+  developerDependencyFeeApplications: 'developer_dependency_fee_applications',
+  developerWhitelabelLicenseApplications: 'developer_whitelabel_license_applications',
+  developerWhitelabelUsageMonths: 'developer_whitelabel_usage_months',
+  developerAgentToolCallApplications: 'developer_agent_tool_call_applications',
 } as const;
 
 /**
@@ -8729,6 +8764,471 @@ export class SupabaseStore implements Store {
         .eq('source_event_id', sourceEventId)
         .maybeSingle(),
       'getServiceBoothLeaseApplication',
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // The developer lane (PR 44) — the founder developer directive's
+  // registries of record, the two cumulative monthly trackers, and the
+  // seven application ledgers. Same discipline as the service lane:
+  // every application is UNIQUE per source_event_id (the replay guard);
+  // every registry upsert converges per its natural key and NEVER puts
+  // the id column in the conflict payload (the parity lesson from PR
+  // 33).
+  // ------------------------------------------------------------------
+
+  async upsertDeveloperApiRoyaltyPolicy(
+    row: Omit<DeveloperApiRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord> {
+    // UNIQUE per developer_id — a re-registered policy replaces the row
+    // atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperApiRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.developerApiRoyaltyPolicies)
+        .upsert(row, { onConflict: 'developer_id' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperApiRoyaltyPolicy',
+    );
+  }
+
+  async getDeveloperApiRoyaltyPolicy(
+    developerId: string,
+  ): Promise<DeveloperApiRoyaltyPolicyRecord | undefined> {
+    return this.one<DeveloperApiRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.developerApiRoyaltyPolicies)
+        .select()
+        .eq('developer_id', developerId)
+        .maybeSingle(),
+      'getDeveloperApiRoyaltyPolicy',
+    );
+  }
+
+  async upsertDeveloperMarketplacePolicy(
+    row: Omit<DeveloperMarketplaceSplitPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord> {
+    // UNIQUE per marketplace — a re-registered policy replaces the row
+    // atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperMarketplaceSplitPolicyRecord>(
+      this.client
+        .from(TABLES.developerMarketplaceSplitPolicies)
+        .upsert(row, { onConflict: 'marketplace' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperMarketplacePolicy',
+    );
+  }
+
+  async getDeveloperMarketplacePolicy(
+    marketplace: string,
+  ): Promise<DeveloperMarketplaceSplitPolicyRecord | undefined> {
+    return this.one<DeveloperMarketplaceSplitPolicyRecord>(
+      this.client
+        .from(TABLES.developerMarketplaceSplitPolicies)
+        .select()
+        .eq('marketplace', marketplace)
+        .maybeSingle(),
+      'getDeveloperMarketplacePolicy',
+    );
+  }
+
+  async upsertDeveloperCopackageLeg(
+    row: Omit<DeveloperCopackageContributionLegRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperCopackageContributionLegRecord> {
+    // UNIQUE per (package_id, maintainer_id) — a re-registered leg
+    // converges. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperCopackageContributionLegRecord>(
+      this.client
+        .from(TABLES.developerCopackageContributionLegs)
+        .upsert(row, { onConflict: 'package_id,maintainer_id' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperCopackageLeg',
+    );
+  }
+
+  async listDeveloperCopackageLegs(
+    packageId: string,
+  ): Promise<DeveloperCopackageContributionLegRecord[]> {
+    // Registration order (the insertion order the split walk reads).
+    const { data, error } = await this.client
+      .from(TABLES.developerCopackageContributionLegs)
+      .select()
+      .eq('package_id', packageId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listDeveloperCopackageLegs failed: ${error.message}`);
+    }
+    return (data ?? []) as DeveloperCopackageContributionLegRecord[];
+  }
+
+  async upsertDeveloperDependencyLedger(
+    row: Omit<DeveloperDependencyMaintainerLedgerRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord> {
+    // UNIQUE per component_id — a re-registered ledger replaces the row
+    // atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperDependencyMaintainerLedgerRecord>(
+      this.client
+        .from(TABLES.developerDependencyMaintainerLedgers)
+        .upsert(row, { onConflict: 'component_id' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperDependencyLedger',
+    );
+  }
+
+  async getDeveloperDependencyLedger(
+    componentId: string,
+  ): Promise<DeveloperDependencyMaintainerLedgerRecord | undefined> {
+    return this.one<DeveloperDependencyMaintainerLedgerRecord>(
+      this.client
+        .from(TABLES.developerDependencyMaintainerLedgers)
+        .select()
+        .eq('component_id', componentId)
+        .maybeSingle(),
+      'getDeveloperDependencyLedger',
+    );
+  }
+
+  async upsertDeveloperWhitelabelDeal(
+    row: Omit<DeveloperWhitelabelLicenseDealRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord> {
+    // UNIQUE per sdk_package_hash — a re-registered deal replaces the
+    // row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperWhitelabelLicenseDealRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelLicenseDeals)
+        .upsert(row, { onConflict: 'sdk_package_hash' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperWhitelabelDeal',
+    );
+  }
+
+  async getDeveloperWhitelabelDeal(
+    sdkPackageHash: string,
+  ): Promise<DeveloperWhitelabelLicenseDealRecord | undefined> {
+    return this.one<DeveloperWhitelabelLicenseDealRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelLicenseDeals)
+        .select()
+        .eq('sdk_package_hash', sdkPackageHash)
+        .maybeSingle(),
+      'getDeveloperWhitelabelDeal',
+    );
+  }
+
+  async upsertDeveloperToolPolicy(
+    row: Omit<DeveloperToolRoyaltyPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord> {
+    // UNIQUE per tool_id — a re-registered policy replaces the row
+    // atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<DeveloperToolRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.developerToolRoyaltyPolicies)
+        .upsert(row, { onConflict: 'tool_id' })
+        .select()
+        .maybeSingle(),
+      'upsertDeveloperToolPolicy',
+    );
+  }
+
+  async getDeveloperToolPolicy(
+    toolId: string,
+  ): Promise<DeveloperToolRoyaltyPolicyRecord | undefined> {
+    return this.one<DeveloperToolRoyaltyPolicyRecord>(
+      this.client
+        .from(TABLES.developerToolRoyaltyPolicies)
+        .select()
+        .eq('tool_id', toolId)
+        .maybeSingle(),
+      'getDeveloperToolPolicy',
+    );
+  }
+
+  async advanceDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+    callsAdded: number,
+  ): Promise<DeveloperApiCallMonthRecord> {
+    // UNIQUE per (developer_id, month) — the tracker converges. The
+    // cumulative walk is serialized per developer-month by the recon
+    // lane (one event at a time), so a read-modify-upsert carries the
+    // same position arithmetic the SQLite backend expresses additively
+    // in its ON CONFLICT arm. No id in the payload.
+    const existing = await this.getDeveloperApiCallMonth(developerId, month);
+    return this.oneStrict<DeveloperApiCallMonthRecord>(
+      this.client
+        .from(TABLES.developerApiCallMonths)
+        .upsert(
+          {
+            developer_id: developerId,
+            month,
+            cumulative_calls: (existing?.cumulative_calls ?? 0) + callsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'developer_id,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceDeveloperApiCallMonth',
+    );
+  }
+
+  async getDeveloperApiCallMonth(
+    developerId: string,
+    month: string,
+  ): Promise<DeveloperApiCallMonthRecord | undefined> {
+    return this.one<DeveloperApiCallMonthRecord>(
+      this.client
+        .from(TABLES.developerApiCallMonths)
+        .select()
+        .eq('developer_id', developerId)
+        .eq('month', month)
+        .maybeSingle(),
+      'getDeveloperApiCallMonth',
+    );
+  }
+
+  async advanceDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+    usageCentsAdded: number,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord> {
+    // UNIQUE per (sdk_package_hash, licensor_id, month) — the tracker
+    // converges; same read-modify-upsert as the call tracker. No id in
+    // the payload.
+    const existing = await this.getDeveloperWhitelabelUsageMonth(
+      sdkPackageHash,
+      licensorId,
+      month,
+    );
+    return this.oneStrict<DeveloperWhitelabelUsageMonthRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelUsageMonths)
+        .upsert(
+          {
+            sdk_package_hash: sdkPackageHash,
+            licensor_id: licensorId,
+            month,
+            cumulative_usage_cents:
+              (existing?.cumulative_usage_cents ?? 0) + usageCentsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'sdk_package_hash,licensor_id,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceDeveloperWhitelabelUsageMonth',
+    );
+  }
+
+  async getDeveloperWhitelabelUsageMonth(
+    sdkPackageHash: string,
+    licensorId: string,
+    month: string,
+  ): Promise<DeveloperWhitelabelUsageMonthRecord | undefined> {
+    return this.one<DeveloperWhitelabelUsageMonthRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelUsageMonths)
+        .select()
+        .eq('sdk_package_hash', sdkPackageHash)
+        .eq('licensor_id', licensorId)
+        .eq('month', month)
+        .maybeSingle(),
+      'getDeveloperWhitelabelUsageMonth',
+    );
+  }
+
+  async insertDeveloperRealizationApplication(
+    row: Omit<DeveloperApiRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-shipped event
+    // throws here, never a double application.
+    return this.oneStrict<DeveloperApiRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.developerApiRealizationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperRealizationApplication',
+    );
+  }
+
+  async getDeveloperRealizationApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperApiRealizationApplicationRecord | undefined> {
+    return this.one<DeveloperApiRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.developerApiRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperRealizationApplication',
+    );
+  }
+
+  async insertDeveloperApiMicroRoyalty(
+    row: Omit<DeveloperApiMicroRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperApiMicroRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.developerApiMicroRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperApiMicroRoyalty',
+    );
+  }
+
+  async getDeveloperApiMicroRoyalty(
+    sourceEventId: string,
+  ): Promise<DeveloperApiMicroRoyaltyApplicationRecord | undefined> {
+    return this.one<DeveloperApiMicroRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.developerApiMicroRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperApiMicroRoyalty',
+    );
+  }
+
+  async insertDeveloperMarketplaceSplit(
+    row: Omit<DeveloperMarketplaceSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperMarketplaceSplitApplicationRecord>(
+      this.client
+        .from(TABLES.developerMarketplaceSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperMarketplaceSplit',
+    );
+  }
+
+  async getDeveloperMarketplaceSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperMarketplaceSplitApplicationRecord | undefined> {
+    return this.one<DeveloperMarketplaceSplitApplicationRecord>(
+      this.client
+        .from(TABLES.developerMarketplaceSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperMarketplaceSplit',
+    );
+  }
+
+  async insertDeveloperCopackageSplit(
+    row: Omit<DeveloperCopackageSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperCopackageSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperCopackageSplitApplicationRecord>(
+      this.client
+        .from(TABLES.developerCopackageSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperCopackageSplit',
+    );
+  }
+
+  async getDeveloperCopackageSplit(
+    sourceEventId: string,
+  ): Promise<DeveloperCopackageSplitApplicationRecord | undefined> {
+    return this.one<DeveloperCopackageSplitApplicationRecord>(
+      this.client
+        .from(TABLES.developerCopackageSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperCopackageSplit',
+    );
+  }
+
+  async insertDeveloperDependencyFee(
+    row: Omit<DeveloperDependencyFeeApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperDependencyFeeApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperDependencyFeeApplicationRecord>(
+      this.client
+        .from(TABLES.developerDependencyFeeApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperDependencyFee',
+    );
+  }
+
+  async getDeveloperDependencyFee(
+    sourceEventId: string,
+  ): Promise<DeveloperDependencyFeeApplicationRecord | undefined> {
+    return this.one<DeveloperDependencyFeeApplicationRecord>(
+      this.client
+        .from(TABLES.developerDependencyFeeApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperDependencyFee',
+    );
+  }
+
+  async insertDeveloperWhitelabelLicense(
+    row: Omit<DeveloperWhitelabelLicenseApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperWhitelabelLicenseApplicationRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelLicenseApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperWhitelabelLicense',
+    );
+  }
+
+  async getDeveloperWhitelabelLicense(
+    sourceEventId: string,
+  ): Promise<DeveloperWhitelabelLicenseApplicationRecord | undefined> {
+    return this.one<DeveloperWhitelabelLicenseApplicationRecord>(
+      this.client
+        .from(TABLES.developerWhitelabelLicenseApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperWhitelabelLicense',
+    );
+  }
+
+  async insertDeveloperToolCallApplication(
+    row: Omit<DeveloperAgentToolCallApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<DeveloperAgentToolCallApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<DeveloperAgentToolCallApplicationRecord>(
+      this.client
+        .from(TABLES.developerAgentToolCallApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertDeveloperToolCallApplication',
+    );
+  }
+
+  async getDeveloperToolCallApplication(
+    sourceEventId: string,
+  ): Promise<DeveloperAgentToolCallApplicationRecord | undefined> {
+    return this.one<DeveloperAgentToolCallApplicationRecord>(
+      this.client
+        .from(TABLES.developerAgentToolCallApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getDeveloperToolCallApplication',
     );
   }
 }

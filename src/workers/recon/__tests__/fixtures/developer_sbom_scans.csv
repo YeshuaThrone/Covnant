@@ -1,0 +1,4 @@
+Scan Event ID,Scan Context,Developer ID,Component ID,API Endpoint ID,SDK Package Hash,Deploy Count,Active Instances,Currency,Reporting Period
+SBM-2026-03-0001,ci_deploy,dev-nova,comp-left-pad,ep-nova-1,sha256:nova-sdk-v3,1000,2,USD,2026-03
+SBM-2026-03-0002,runtime_fleet,dev-quasar,comp-tiny-uuid,ep-quasar-1,sha256:quasar-sdk-v1,5,5,USD,2026-03
+SBM-2026-03-0003,ci_deploy,dev-apollo,comp-unregistered,ep-apollo-1,sha256:apollo-sdk-v5,77,0,USD,2026-03

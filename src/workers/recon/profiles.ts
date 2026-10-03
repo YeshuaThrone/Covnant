@@ -34,6 +34,7 @@ import { SPATIAL_PROFILES } from "./spatialProfiles";
 import { FITNESS_PROFILES } from "./fitnessProfiles";
 import { FOOD_PROFILES } from "./foodProfiles";
 import { SERVICE_PROFILES } from "./serviceProfiles";
+import { DEVELOPER_PROFILES } from "./developerProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -609,6 +610,14 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // waterfalls, and the isolated booth-lease legs are service-only, and
   // service rows never touch the music split machinery).
   ...SERVICE_PROFILES,
+  // The developer lane (PR 44) — same dispatch opinion; the worker
+  // branches on the profile kind before the music machinery (the Net API
+  // Realization calculator, the tiered per-call and usage-share
+  // micro-royalties, the marketplace splits, the co-authored package
+  // splits, the SBOM dependency micro-fees, the white-label MMG
+  // recoupment, and the agent tool-call settlements are developer-only,
+  // and developer rows never touch the music split machinery).
+  ...DEVELOPER_PROFILES,
 ];
 
 /**

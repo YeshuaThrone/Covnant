@@ -1,0 +1,5 @@
+Token Event ID,Token Kind,Developer ID,API Endpoint ID,SDK Package Hash,Gross API Transaction Revenue,Cloud Infrastructure Hosting Base,Payment Processing Gate Cut,Enterprise SLA Reserve,Currency,Reporting Period
+TOK-2026-03-0001,inference_token,dev-nova,ep-nova-1,sha256:nova-sdk-v3,750.25,75.02,22.51,0.00,USD,2026-03
+TOK-2026-03-0002,compute_credit,dev-quasar,ep-quasar-1,sha256:quasar-sdk-v1,310.00,31.00,9.30,0.00,USD,2026-03
+TOK-2026-03-0003,storage_gb_hour,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,88.40,8.84,2.65,0.00,USD,2026-03
+TOK-2026-03-0004,egress_gb,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,42.10,4.21,1.26,0.00,USD,2026-03

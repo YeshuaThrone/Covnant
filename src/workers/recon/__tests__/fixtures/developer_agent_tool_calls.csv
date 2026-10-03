@@ -1,0 +1,4 @@
+Batch ID,Tool ID,Agent ID,Developer ID,API Endpoint ID,SDK Package Hash,Call Count,Currency,Reporting Period
+ATC-2026-03-0001,web_search,agent-scout-7,dev-nova,ep-nova-1,sha256:nova-sdk-v3,1200,USD,2026-03
+ATC-2026-03-0002,database_query,agent-scout-7,dev-nova,ep-nova-1,sha256:nova-sdk-v3,800,USD,2026-03
+ATC-2026-03-0003,payment_action,agent-ledger-2,dev-quasar,ep-quasar-1,sha256:quasar-sdk-v1,15,USD,2026-03

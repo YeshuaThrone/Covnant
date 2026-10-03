@@ -1,0 +1,5 @@
+Sale ID,Marketplace,Developer ID,API Endpoint ID,SDK Package Hash,Gross Sale,Currency,Reporting Period
+MKT-2026-03-0001,apple_app_store,dev-nova,ep-nova-1,sha256:nova-sdk-v3,1000.00,USD,2026-03
+MKT-2026-03-0002,google_play,dev-quasar,ep-quasar-1,sha256:quasar-sdk-v1,700.00,USD,2026-03
+MKT-2026-03-0003,unity_asset_store,dev-apollo,ep-apollo-1,sha256:apollo-sdk-v5,250.00,USD,2026-03
+MKT-2026-03-0004,vscode_marketplace,dev-orbit,ep-orbit-1,sha256:orbit-sdk-v2,150.00,USD,2026-03
