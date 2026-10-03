@@ -795,4 +795,3 @@ grant select, insert, update, delete on public.hardware_pool_waterfall_applicati
 grant select, insert, update, delete on public.hardware_telemetry_royalty_applications to service_role;
 grant select, insert, update, delete on public.hardware_ota_unlock_applications to service_role;
 grant select, insert, update, delete on public.hardware_cross_license_net_settlements to service_role;
-rvice_role;
