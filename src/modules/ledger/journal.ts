@@ -16,6 +16,7 @@ import {
   serviceAuditEscrowGlAccount,
   softwareAuditEscrowGlAccount,
   patentLitigationEscrowGlAccount,
+  resourceAuditEscrowGlAccount,
   crossLicenseNettingPositionGlAccount,
   crossLicenseLiabilityGlAccount,
   filmEscrowGlAccount,
@@ -586,6 +587,27 @@ export function patentLitigationEscrowDebit(scopeKey: string, amountCents: numbe
 export function patentLitigationEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: patentLitigationEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// RESOURCE_AUDIT_ESCROW legs (PR 49, the founder resource directive) —
+// the escrow family's shape over the energy lane's owner×parcel scope's
+// own GL account. The route locks the founder-banded share with a credit
+// leg, the drawdown and the release debit it back out; nothing else ever
+// touches the account.
+export function resourceAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: resourceAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function resourceAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: resourceAuditEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

@@ -305,6 +305,16 @@ export const LEDGER_STATUSES = [
   // ledger_transactions.status is free text, the same extension-in-place
   // discipline as every escrow state above.
   "patent_litigation_escrow",
+  // Resource audit escrow (PR 49, the founder resource directive): the
+  // 5–15% of a resource payout auto-locked while the owner's commodity
+  // price reconciliation, pipeline variance audit, and environmental
+  // regulatory exposure run — drawn down by those three classes
+  // position-locked; released on the verified reconciliation of record.
+  // Kind marks WHAT the row is for its whole life, the same division
+  // every escrow kind above uses. No migration:
+  // ledger_transactions.status is free text, the same extension-in-place
+  // discipline as every escrow state above.
+  "resource_audit_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -473,7 +483,18 @@ export const LEDGER_KINDS = [
   // of record. Kind marks WHAT the row is for its whole life, the same
   // division every escrow kind above uses.
   "patent_litigation_escrow",
-  // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
+  // Resource audit escrow (PR 49, the founder resource directive): the
+  // 5–15% of a resource payout locked per (owner payee, parcel) scope —
+  // while the payout's commodity true-up, pipeline variance, and
+  // environmental regulatory exposure run. Monthly commodity price
+  // reconciliations, pipeline variance audits, and environmental
+  // regulatory compliance checks draw it down position-locked; the
+  // verified reconciliation of record opens the release (fail-closed: no
+  // reconciliation of record, no release), and the released remainder
+  // settles it (status → 'settled'). Kind marks WHAT the row is for its
+  // whole life, the same division every escrow kind above uses.
+  "resource_audit_escrow",
+  // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the
   // Don ledger, priced from the venue's reserved-footprint guarantee

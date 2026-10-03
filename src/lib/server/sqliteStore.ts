@@ -339,6 +339,10 @@ import type {
   EnergyParcelRoyaltyPositionRecord,
   EnergyPipelineDeductionPostRecord,
   EnergyStatutoryInterestApplicationRecord,
+  ResourceAuditEscrowDrawdownRecord,
+  ResourceAuditEscrowPolicyRecord,
+  ResourceAuditEscrowReconciliationRecord,
+  ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
 import type {
   MatchQueueRecord,
@@ -4755,6 +4759,61 @@ CREATE TABLE IF NOT EXISTS book_chargeback_offset_applications (
 );
 CREATE INDEX IF NOT EXISTS idx_book_chargeback_offset_applications_chargeback
   ON book_chargeback_offset_applications (chargeback_id);
+
+-- Resource audit escrow + resource payout gate states (migration 0053, PR
+-- 49). The energy lane's escrow family: the founder-banded 5–15% of a
+-- resource payout locked per (owner payee, parcel) scope, the position-
+-- locked drawdowns (monthly commodity price reconciliations, pipeline
+-- variance audits, environmental regulatory compliance checks), the
+-- insert-as-lock verified reconciliation the release reads fail-closed,
+-- and the two durable gate states the resource payout gate reads
+-- (absent and unknown BOTH refuse). No foreign keys: the tables key on
+-- parcel ids and text payee ids — the energy lane's own identifier space.
+CREATE TABLE IF NOT EXISTS energy_resource_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1500),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_resource_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('commodity_price_reconciliation', 'pipeline_variance_audit', 'environmental_compliance_check')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL CHECK (drawn_before_cents >= 0),
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents AND remaining_cents >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_energy_resource_audit_escrow_drawdowns_reserve
+  ON energy_resource_audit_escrow_drawdowns (reserve_ledger_id);
+
+CREATE TABLE IF NOT EXISTS energy_resource_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL CHECK (length(evidence_ref) > 0),
+  reconciled_by TEXT NOT NULL CHECK (length(reconciled_by) > 0),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS energy_resource_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  parcel_id TEXT NOT NULL,
+  environmental_compliance_state TEXT NOT NULL CHECK (environmental_compliance_state IN ('unknown', 'cleared')),
+  title_ownership_state TEXT NOT NULL CHECK (title_ownership_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, parcel_id)
+);
 `;
 
 // --- Royalty recon job queue (migration 0011) — row projection helpers ---
@@ -20103,6 +20162,293 @@ export class SqliteStore implements Store {
       developer_payout_cents: row.developer_payout_cents as number,
       total_payout_cents: row.total_payout_cents as number,
       created_at: row.created_at as string,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 49 — the resource audit escrow, the resource payout gate states, and
+  // the staged grid-split completion (the instant cascade's journal stamp).
+  // ---------------------------------------------------------------------------
+
+  async upsertResourceAuditEscrowPolicy(
+    row: Omit<ResourceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourceAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_resource_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getResourceAuditEscrowPolicy(
+      record.scope_key,
+    ) as Promise<ResourceAuditEscrowPolicyRecord>;
+  }
+
+  async getResourceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ResourceAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_resource_audit_escrow_policies WHERE scope_key = ?`,
+      )
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertResourceAuditEscrowDrawdown(
+    row: Omit<ResourceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — SQLite's constraint throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_resource_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listResourceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM energy_resource_audit_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class:
+        row.drawdown_class as ResourceAuditEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertResourceAuditEscrowReconciliation(
+    row: Omit<ResourceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; SQLite's constraint throws here (the
+    // caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_resource_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.evidence_ref,
+        record.reconciled_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getResourceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_resource_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`,
+      )
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settleResourceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the patent escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'resource_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertResourcePayoutGateState(
+    row: Omit<ResourcePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourcePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, parcel_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO energy_resource_payout_gate_states
+           (id, payee_id, parcel_id, environmental_compliance_state,
+            title_ownership_state, evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, parcel_id) DO UPDATE SET
+           environmental_compliance_state = excluded.environmental_compliance_state,
+           title_ownership_state = excluded.title_ownership_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.parcel_id,
+        record.environmental_compliance_state,
+        record.title_ownership_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getResourcePayoutGateState(
+      record.payee_id,
+      record.parcel_id,
+    ) as Promise<ResourcePayoutGateStateRecord>;
+  }
+
+  async getResourcePayoutGateState(
+    payeeId: string,
+    parcelId: string,
+  ): Promise<ResourcePayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM energy_resource_payout_gate_states WHERE payee_id = ? AND parcel_id = ?`,
+      )
+      .get(payeeId, parcelId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      parcel_id: row.parcel_id as string,
+      environmental_compliance_state:
+        row.environmental_compliance_state as ResourcePayoutGateStateRecord['environmental_compliance_state'],
+      title_ownership_state:
+        row.title_ownership_state as ResourcePayoutGateStateRecord['title_ownership_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async setEnergyComputeGridSplitJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    // The conditional UPDATE IS the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 48 stages
+    // the split, PR 49's instant cascade completes it); the caller that
+    // lost the race (or replayed) reads undefined.
+    const result = this.db
+      .prepare(
+        `UPDATE energy_compute_grid_split_applications
+         SET journal_id = ?
+         WHERE source_event_id = ? AND journal_id IS NULL
+         RETURNING *`,
+      )
+      .get(journalId, sourceEventId) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return {
+      id: result.id as string,
+      source_event_id: result.source_event_id as string,
+      gpu_cluster_hash: result.gpu_cluster_hash as string,
+      period: result.period as string,
+      currency: result.currency as string,
+      compute_revenue_cents: result.compute_revenue_cents as number,
+      split_legs: result.split_legs as string,
+      allocated_total_cents: result.allocated_total_cents as number,
+      journal_id: (result.journal_id as string | null) ?? null,
+      created_at: result.created_at as string,
     };
   }
 

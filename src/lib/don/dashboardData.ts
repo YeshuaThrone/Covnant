@@ -227,6 +227,15 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   spatial_audit_escrow_drawdown: 'Spatial audit escrow drawn down',
   spatial_audit_escrow_release: 'Spatial audit escrow released',
   spatial_msg_shortfall_invoice: 'Spatial MSG shortfall invoiced',
+  // PR 49 — the resource lane (the founder resource directive): the
+  // resource payout's 5–15% audit escrow locks, draws down against
+  // commodity/pipeline/environmental audits, and releases on verified
+  // reconciliation; the GPU grid split's cascade posts instantly between
+  // the silicon lessor, power provider, and hosting facility ledgers.
+  resource_audit_escrow_route: 'Resource audit escrow locked',
+  resource_audit_escrow_drawdown: 'Resource audit escrow drawn down',
+  resource_audit_escrow_release: 'Resource audit escrow released',
+  gpu_cascade_settlement_post: 'Instant GPU cascade settlement posted',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

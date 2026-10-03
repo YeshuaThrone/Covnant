@@ -60,6 +60,7 @@
 
 import type { Store } from "@/lib/server/store";
 import type { EnergyDeedTransferRecord } from "@/modules/energy/records";
+import { executeGpuGridSplitSettlement } from "@/lib/server/gpuGridSplitSettlements";
 import type {
   EnergyCarbonOffsetMintDetail,
   EnergyGpuUtilizationDetail,
@@ -108,6 +109,12 @@ export interface EnergyWriteCounts {
    * skips (no registered participants for the cluster). */
   gridSplitsWritten: number;
   gridSplitsSkippedNoParticipants: number;
+  /** The staged splits' INSTANT cascade postings (PR 49) — completed
+   * journal-stamped postings, and postings refused (the staged row
+   * remains the row of record; the reconciliation of staged
+   * applications against journals surfaces the gap). */
+  gridSplitPostingsPosted: number;
+  gridSplitPostingsRefused: number;
   /** Carbon offset payouts committed / fail-closed skips (no offset
    * policy of record for the parcel). */
   carbonPayoutsWritten: number;
@@ -150,6 +157,8 @@ export async function writeEnergyRowsToStore(
     gpuYieldsSkippedNoPolicy: 0,
     gridSplitsWritten: 0,
     gridSplitsSkippedNoParticipants: 0,
+    gridSplitPostingsPosted: 0,
+    gridSplitPostingsRefused: 0,
     carbonPayoutsWritten: 0,
     carbonPayoutsSkippedNoPolicy: 0,
     netRealizedResourcePoolDeltaCents: 0,
@@ -676,12 +685,13 @@ async function walkComputeGridSplit(
     revenueCents: detail.computeRevenueCents,
   });
 
+  const sourceEventId = energyRowEventId(
+    "grid_split",
+    detail.senderRowId,
+    `${detail.period}:${detail.currency}`,
+  );
   await store.insertEnergyComputeGridSplitApplication({
-    source_event_id: energyRowEventId(
-      "grid_split",
-      detail.senderRowId,
-      `${detail.period}:${detail.currency}`,
-    ),
+    source_event_id: sourceEventId,
     gpu_cluster_hash: detail.gpuClusterHash,
     period: detail.period,
     currency: detail.currency,
@@ -692,6 +702,20 @@ async function walkComputeGridSplit(
   });
   counts.gridSplitsWritten += 1;
   counts.gridSplitCents += split.allocatedTotalCents;
+
+  // THE INSTANT CASCADE (PR 49) — the staged split completes immediately:
+  // the silicon lessors, power providers, and hosting facilities post
+  // between their ledgers the moment the compute block's rental prices.
+  // The staged row is the row of record (the OTA instant-posting
+  // discipline): a refused posting leaves the row journal_id-null — the
+  // reconciliation of staged applications against journals surfaces the
+  // gap — and the walk counts the refusal instead of guessing money.
+  const posted = await executeGpuGridSplitSettlement(store, sourceEventId);
+  if (posted.ok) {
+    counts.gridSplitPostingsPosted += 1;
+  } else {
+    counts.gridSplitPostingsRefused += 1;
+  }
 }
 
 // ---------------------------------------------------------------------------

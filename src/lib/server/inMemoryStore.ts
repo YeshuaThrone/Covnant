@@ -346,6 +346,10 @@ import type {
   EnergyParcelRoyaltyPositionRecord,
   EnergyPipelineDeductionPostRecord,
   EnergyStatutoryInterestApplicationRecord,
+  ResourceAuditEscrowDrawdownRecord,
+  ResourceAuditEscrowPolicyRecord,
+  ResourceAuditEscrowReconciliationRecord,
+  ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
@@ -757,6 +761,15 @@ export class InMemoryStore implements Store {
   private energyComputeGridSplitApplications: EnergyComputeGridSplitApplicationRecord[] = [];
   private energyStatutoryInterestApplications: EnergyStatutoryInterestApplicationRecord[] = [];
   private energyCarbonOffsetPayoutApplications: EnergyCarbonOffsetPayoutApplicationRecord[] = [];
+  // PR 49 — the resource audit escrow, the resource payout gate states, and
+  // the staged grid-split completions (the instant cascade's journal stamp).
+  private resourceAuditEscrowPolicies = new Map<string, ResourceAuditEscrowPolicyRecord>();
+  private resourceAuditEscrowDrawdowns: ResourceAuditEscrowDrawdownRecord[] = [];
+  private resourceAuditEscrowReconciliations = new Map<
+    string,
+    ResourceAuditEscrowReconciliationRecord
+  >();
+  private resourcePayoutGateStates = new Map<string, ResourcePayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -9733,6 +9746,175 @@ export class InMemoryStore implements Store {
       (record) => record.source_event_id === sourceEventId,
     );
     return found === undefined ? undefined : { ...found };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 49 — the resource audit escrow, the resource payout gate states, and
+  // the staged grid-split completion (the instant cascade's journal stamp).
+  // ---------------------------------------------------------------------------
+
+  async upsertResourceAuditEscrowPolicy(
+    row: Omit<ResourceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourceAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.resourceAuditEscrowPolicies.get(row.scope_key);
+    const record: ResourceAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.resourceAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getResourceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ResourceAuditEscrowPolicyRecord | undefined> {
+    const found = this.resourceAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertResourceAuditEscrowDrawdown(
+    row: Omit<ResourceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.resourceAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('energy_resource_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.resourceAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('energy_resource_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: ResourceAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.resourceAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listResourceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.resourceAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertResourceAuditEscrowReconciliation(
+    row: Omit<ResourceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.resourceAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('energy_resource_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: ResourceAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.resourceAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getResourceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowReconciliationRecord | undefined> {
+    const found = this.resourceAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleResourceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'resource_audit_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertResourcePayoutGateState(
+    row: Omit<ResourcePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourcePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, parcel_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.parcel_id}`;
+    const existing = this.resourcePayoutGateStates.get(key);
+    const record: ResourcePayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.resourcePayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getResourcePayoutGateState(
+    payeeId: string,
+    parcelId: string,
+  ): Promise<ResourcePayoutGateStateRecord | undefined> {
+    const found = this.resourcePayoutGateStates.get(`${payeeId}|${parcelId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async setEnergyComputeGridSplitJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    // The CAS: the journal stamps only while the staged application's
+    // journal_id is still null (PR 48 stages the split, PR 49's instant
+    // cascade completes it); the caller that lost the race (or replayed)
+    // reads undefined.
+    const row = this.energyComputeGridSplitApplications.find(
+      (record) =>
+        record.source_event_id === sourceEventId && record.journal_id === null,
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.journal_id = journalId;
+    return { ...row };
   }
 }
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */

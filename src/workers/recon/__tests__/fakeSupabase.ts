@@ -56,6 +56,17 @@ export const UNIQUE_COLUMNS: Record<string, string[][]> = {
   ai_payout_gate_states: [["payee_id"]],
   ai_dataset_deprecations: [["ai_model_id", "dataset_version"]],
   ai_dataset_allocation_archives: [["deprecation_id", "ledger_transaction_id"]],
+  // Resource audit escrow + resource payout gate states (migration 0053):
+  // one policy per scope, position-locked drawdowns (replay guard AND
+  // spend position), one reconciliation per escrow bucket, and one gate
+  // state per (owner payee, parcel).
+  energy_resource_audit_escrow_policies: [["scope_key"]],
+  energy_resource_audit_escrow_drawdowns: [
+    ["reserve_ledger_id", "source_event_id"],
+    ["reserve_ledger_id", "drawn_before_cents"],
+  ],
+  energy_resource_audit_escrow_reconciliations: [["reserve_ledger_id"]],
+  energy_resource_payout_gate_states: [["payee_id", "parcel_id"]],
 };
 
 export class FakeTable {
@@ -223,6 +234,17 @@ class FakeQueryBuilder {
   }
 
   eq(column: string, value: unknown): this {
+    this.filters.push([column, value]);
+    return this;
+  }
+
+  /**
+   * PostgREST's null/boolean filter — the store's journal-stamp CAS
+   * (`.is('journal_id', null)`) rides it. The equality matcher below
+   * already treats a null filter as strict row[column] === null, which
+   * is exactly the `.is(column, null)` semantics.
+   */
+  is(column: string, value: unknown): this {
     this.filters.push([column, value]);
     return this;
   }

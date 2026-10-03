@@ -486,6 +486,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // deny-all RLS, and service_role grants; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0052_scada_grid_fractional_resource_division_orders.sql',
+      '0053_resource_audit_escrow_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

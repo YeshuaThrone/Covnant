@@ -158,8 +158,15 @@ async function energyProjection(store: Store) {
     "USD",
   );
 
-  // The grid splits of record — the cascade trigger's staged legs.
-  const gridSplits: Array<{ revenue: number; total: number; legs: unknown }> = [];
+  // The grid splits of record — the cascade trigger's staged legs, with
+  // the instant cascade's journal stamp state (PR 49: the walk posts the
+  // split immediately, so every staged row of record is journal-stamped).
+  const gridSplits: Array<{
+    revenue: number;
+    total: number;
+    legs: unknown;
+    journalStamped: boolean;
+  }> = [];
   for (const senderRowId of ["GPUU-2026-03-0001", "GPUU-2026-03-0002"]) {
     const row = await store.getEnergyComputeGridSplitApplication(
       energyRowEventId("grid_split", senderRowId, "2026-03:USD"),
@@ -169,6 +176,7 @@ async function energyProjection(store: Store) {
         revenue: row.compute_revenue_cents,
         total: row.allocated_total_cents,
         legs: JSON.parse(row.split_legs),
+        journalStamped: row.journal_id !== null,
       });
     }
   }
@@ -258,6 +266,10 @@ describe("the energy lane's three-backend parity", () => {
     expect(first.energy_statutory_interest_accruals_committed).toBe(2);
     expect(first.energy_gpu_yields_committed).toBe(2);
     expect(first.energy_grid_splits_committed).toBe(2);
+    // THE INSTANT CASCADE (PR 49): both staged splits posted immediately —
+    // every staged application of record journal-stamped in the same pass.
+    expect(first.energy_grid_split_postings_posted).toBe(2);
+    expect(first.energy_grid_split_postings_refused ?? 0).toBe(0);
     expect(first.energy_carbon_payouts_committed).toBe(1);
     // The fail-closed skips: no royalty policy (the TRACT-HELD and
     // TRACT-NOPO meter rows), no interests (TRACT-BARE), no yield
@@ -351,6 +363,7 @@ describe("the energy lane's three-backend parity", () => {
     expect(projection.gridSplits[0]).toEqual({
       revenue: 50_000,
       total: 50_000,
+      journalStamped: true,
       legs: [
         { payee_id: "colocation-facility-delta", participant_class: "colocation_manager", effective_weight_micros: 250_000_000_000_000, allocated_cents: 4_545 },
         { payee_id: "power-provider-meridian", participant_class: "power_plant_operator", effective_weight_micros: 1_000_000_000_000_000, allocated_cents: 18_182 },
@@ -360,6 +373,7 @@ describe("the energy lane's three-backend parity", () => {
     expect(projection.gridSplits[1]).toEqual({
       revenue: 100_000,
       total: 100_000,
+      journalStamped: true,
       legs: [
         { payee_id: "colocation-facility-delta", participant_class: "colocation_manager", effective_weight_micros: 250_000_000_000_000, allocated_cents: 4_761 },
         { payee_id: "power-provider-meridian", participant_class: "power_plant_operator", effective_weight_micros: 2_000_000_000_000_000, allocated_cents: 38_096 },

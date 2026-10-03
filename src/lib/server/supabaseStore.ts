@@ -330,6 +330,10 @@ import type {
   EnergyParcelRoyaltyPositionRecord,
   EnergyPipelineDeductionPostRecord,
   EnergyStatutoryInterestApplicationRecord,
+  ResourceAuditEscrowDrawdownRecord,
+  ResourceAuditEscrowPolicyRecord,
+  ResourceAuditEscrowReconciliationRecord,
+  ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
 import type {
   MatchQueueRecord,
@@ -758,6 +762,10 @@ const TABLES = {
   energyComputeGridSplitApplications: 'energy_compute_grid_split_applications',
   energyStatutoryInterestApplications: 'energy_statutory_interest_applications',
   energyCarbonOffsetPayoutApplications: 'energy_carbon_offset_payout_applications',
+  resourceAuditEscrowPolicies: 'energy_resource_audit_escrow_policies',
+  resourceAuditEscrowDrawdowns: 'energy_resource_audit_escrow_drawdowns',
+  resourceAuditEscrowReconciliations: 'energy_resource_audit_escrow_reconciliations',
+  resourcePayoutGateStates: 'energy_resource_payout_gate_states',
 } as const;
 
 /**
@@ -10796,5 +10804,175 @@ export class SupabaseStore implements Store {
         .maybeSingle(),
       'getEnergyCarbonOffsetPayoutApplication',
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 49 — the resource audit escrow, the resource payout gate states, and
+  // the staged grid-split completion (the instant cascade's journal stamp).
+  // ---------------------------------------------------------------------------
+
+  async upsertResourceAuditEscrowPolicy(
+    row: Omit<ResourceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourceAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the newest
+    // rate governs the next routing). HARDENED UPSERT: no id in the
+    // payload (the id rotates on conflict).
+    return this.oneStrict<ResourceAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.resourceAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertResourceAuditEscrowPolicy',
+    );
+  }
+
+  async getResourceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ResourceAuditEscrowPolicyRecord | undefined> {
+    return this.one<ResourceAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.resourceAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getResourceAuditEscrowPolicy',
+    );
+  }
+
+  async insertResourceAuditEscrowDrawdown(
+    row: Omit<ResourceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<ResourceAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.resourceAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertResourceAuditEscrowDrawdown',
+    );
+  }
+
+  async listResourceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // patent escrow's drawdown list runs.
+    const { data, error } = await this.client
+      .from(TABLES.resourceAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listResourceAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as ResourceAuditEscrowDrawdownRecord[];
+  }
+
+  async insertResourceAuditEscrowReconciliation(
+    row: Omit<ResourceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<ResourceAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.resourceAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertResourceAuditEscrowReconciliation',
+    );
+  }
+
+  async getResourceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowReconciliationRecord | undefined> {
+    return this.one<ResourceAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.resourceAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getResourceAuditEscrowReconciliation',
+    );
+  }
+
+  async settleResourceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'resource_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleResourceAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertResourcePayoutGateState(
+    row: Omit<ResourcePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourcePayoutGateStateRecord> {
+    // UNIQUE per (payee_id, parcel_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<ResourcePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.resourcePayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,parcel_id' })
+        .select()
+        .maybeSingle(),
+      'upsertResourcePayoutGateState',
+    );
+  }
+
+  async getResourcePayoutGateState(
+    payeeId: string,
+    parcelId: string,
+  ): Promise<ResourcePayoutGateStateRecord | undefined> {
+    return this.one<ResourcePayoutGateStateRecord>(
+      this.client
+        .from(TABLES.resourcePayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('parcel_id', parcelId)
+        .maybeSingle(),
+      'getResourcePayoutGateState',
+    );
+  }
+
+  async setEnergyComputeGridSplitJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined> {
+    // The conditional update is the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 48 stages
+    // the split, PR 49's instant cascade completes it); a lost race (or
+    // a replay) updates zero rows and returns undefined. The null check
+    // rides `.is()` — PostgREST's null filter.
+    const { data, error } = await this.client
+      .from(TABLES.energyComputeGridSplitApplications)
+      .update({ journal_id: journalId })
+      .eq('source_event_id', sourceEventId)
+      .is('journal_id', null)
+      .select();
+    if (error) {
+      throw new Error(`setEnergyComputeGridSplitJournal failed: ${error.message}`);
+    }
+    return (data?.[0] as EnergyComputeGridSplitApplicationRecord | undefined) ?? undefined;
   }
 }

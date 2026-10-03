@@ -308,6 +308,10 @@ import type {
   EnergyParcelRoyaltyPositionRecord,
   EnergyPipelineDeductionPostRecord,
   EnergyStatutoryInterestApplicationRecord,
+  ResourceAuditEscrowDrawdownRecord,
+  ResourceAuditEscrowPolicyRecord,
+  ResourceAuditEscrowReconciliationRecord,
+  ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
 import type {
   MatchQueueRecord,
@@ -4111,6 +4115,98 @@ export interface Store {
     payeeId: string,
     sepPoolCode: string,
   ): Promise<HardwarePayoutGateStateRecord | undefined>;
+
+  /**
+   * Upserts the resource audit escrow's policy of record for one scope
+   * (migration 0053) — UNIQUE per scope_key: an upsert converges (the
+   * newest rate governs the next routing). NEVER carries the id in the
+   * conflict payload (the id rotates on conflict).
+   */
+  upsertResourceAuditEscrowPolicy(
+    row: Omit<ResourceAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourceAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getResourceAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<ResourceAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0053) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertResourceAuditEscrowDrawdown(
+    row: Omit<ResourceAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listResourceAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0053) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertResourceAuditEscrowReconciliation(
+    row: Omit<ResourceAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<ResourceAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getResourceAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<ResourceAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `resource_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleResourceAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the resource payout gate's states of record for one owner
+   * payee on one parcel (migration 0053) — UNIQUE per (payee_id,
+   * parcel_id): an upsert converges (a verification heals 'unknown';
+   * states never regress through this table). NEVER carries the id in
+   * the conflict payload (the id rotates on conflict).
+   */
+  upsertResourcePayoutGateState(
+    row: Omit<ResourcePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<ResourcePayoutGateStateRecord>;
+
+  /**
+   * One payee × parcel's gate states of record; undefined when
+   * none — the resource payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getResourcePayoutGateState(
+    payeeId: string,
+    parcelId: string,
+  ): Promise<ResourcePayoutGateStateRecord | undefined>;
+
+  /**
+   * Completes one staged energy compute grid split application with its
+   * instant posting's journal of record (migration 0053) — the CAS: the
+   * journal stamps only while the application's journal_id is still
+   * null (PR 48 stages the split; the PR 49 cascade completes it); the
+   * caller that lost the race (or replayed) reads undefined.
+   */
+  setEnergyComputeGridSplitJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<EnergyComputeGridSplitApplicationRecord | undefined>;
 
   /**
    * Appends one executed cross-license net dispatch (migration 0051) —

@@ -10,6 +10,9 @@ import type { CulinaryPayoutGateStateRecord } from "@/modules/culinary/records";
 import type { ServicesPayoutGateStateRecord } from "@/modules/service/records";
 import type { SoftwarePayoutGateStateRecord } from "@/modules/software/records";
 import type { HardwarePayoutGateStateRecord } from "@/modules/hardware/records";
+import type {
+  ResourcePayoutGateStateRecord,
+} from "@/modules/energy/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -641,6 +644,33 @@ export async function resolveHardwareVerticalComplianceState(
     vertical: "hardware",
     frand_rate_court_determination_cleared: record.frand_determination_state === "cleared",
     sep_essentiality_audit_verified: record.essentiality_audit_state === "verified",
+  };
+}
+
+/**
+ * Resolves the resource vertical's compliance state from the durable gate
+ * states of record (migration 0053) — the two facts the resource payout
+ * gate reads: the parcel's environmental regulatory compliance and the
+ * owner's title ownership verification. An ABSENT record resolves null
+ * (the gate refuses with vertical_state_unknown) and an 'unknown' state
+ * resolves false (the gate refuses the specific condition) — fail-closed,
+ * the hardware resolver's exact shape over the energy lane's (owner,
+ * parcel) identity.
+ */
+export async function resolveResourceVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  parcelId: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "resource" }> | null> {
+  const record: ResourcePayoutGateStateRecord | undefined =
+    await store.getResourcePayoutGateState(payeeId, parcelId);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "resource",
+    environmental_compliance_cleared: record.environmental_compliance_state === "cleared",
+    title_ownership_verification_passed: record.title_ownership_state === "verified",
   };
 }
 
