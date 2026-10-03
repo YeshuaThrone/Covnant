@@ -65,7 +65,7 @@ create table if not exists public.sports_event_cancellation_escrow_policies (
   unique (scope_key),
   constraint ck_sports_event_cancellation_escrow_policies_scope_present
     check (char_length(scope_key) > 0),
-  constraint ck_sports_event_cancellation_escrow_policies_rate_in_founder_band
+  constraint ck_sports_event_cancellation_escrow_policies_founder_band
     check (reserve_rate_bps >= 1500 AND reserve_rate_bps <= 2000)
 );
 
@@ -97,9 +97,9 @@ create table if not exists public.sports_event_cancellation_escrow_drawdowns (
     check (char_length(source_event_id) > 0),
   constraint ck_sports_event_cancellation_escrow_drawdowns_amount_positive
     check (drawn_cents > 0),
-  constraint ck_sports_event_cancellation_escrow_drawdowns_before_non_negative
+  constraint ck_sports_event_cancellation_escrow_drawdowns_before_nonneg
     check (drawn_before_cents >= 0),
-  constraint ck_sports_event_cancellation_escrow_drawdowns_position_conserves
+  constraint ck_sports_event_cancellation_escrow_drawdowns_conserve
     check (remaining_cents = drawn_before_cents - drawn_cents AND remaining_cents >= 0)
 );
 create index if not exists idx_sports_event_cancellation_escrow_drawdowns_reserve
@@ -136,7 +136,7 @@ create table if not exists public.sports_payout_gate_states (
     check (promoter_insurance_state IN ('unknown', 'cleared')),
   constraint ck_sports_payout_gate_states_nil_audit_state_vocabulary
     check (nil_compliance_audit_state IN ('unknown', 'cleared')),
-  constraint ck_sports_payout_gate_states_telemetry_verified_carries_timestamp
+  constraint ck_sports_payout_gate_states_telemetry_carries_timestamp
     check (
       (event_completion_telemetry_state = 'verified' AND event_completed_at IS NOT NULL)
       OR (event_completion_telemetry_state = 'unknown' AND event_completed_at IS NULL)
