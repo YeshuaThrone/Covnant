@@ -51,6 +51,24 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
 }
 
+/**
+ * The email rule for the confirmation-resend flow — the SAME pattern and
+ * trim+lowercase normalization the full payload validator applies, exported
+ * pure so the resend route never forks its own copy of the rule.
+ */
+export function validateSignupEmail(
+  value: unknown,
+): { ok: true; email: string } | { ok: false } {
+  if (typeof value !== 'string') {
+    return { ok: false };
+  }
+  const email = value.trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) {
+    return { ok: false };
+  }
+  return { ok: true, email };
+}
+
 export function normalizeOptionalE164(
   value: unknown,
 ): { ok: true; phone: string | null } | { ok: false } {

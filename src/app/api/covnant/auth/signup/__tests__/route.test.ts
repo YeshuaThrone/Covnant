@@ -9,7 +9,7 @@ import { REGISTER_RATE_LIMIT, resetRateLimits } from "@/lib/server/rateLimit";
  *
  * Against the authoritative live schema: the creator payload is validated
  * (the nine named codes), the Supabase auth core is mocked at the client
- * boundary, and the registry is checked BEFORE createUser (ordering invariant):
+ * boundary, and the registry is checked BEFORE signUp (ordering invariant):
  * a legacy holder (registry hit, no auth) claims with a status-only 200 and
  * NO second UCT; an existing account gets 409 duplicate_email; a fresh
  * email runs the full 201 flow. The holder is registered in a designated
@@ -24,7 +24,7 @@ import { REGISTER_RATE_LIMIT, resetRateLimits } from "@/lib/server/rateLimit";
 
 const supabaseMock = vi.hoisted(() => ({
   readSupabaseEnv: vi.fn(),
-  createUser: vi.fn(),
+  signUp: vi.fn(),
   deleteUser: vi.fn(),
   profileInsertSingle: vi.fn(),
   profileDeleteEq: vi.fn(),
@@ -32,11 +32,10 @@ const supabaseMock = vi.hoisted(() => ({
 
 vi.mock("@/lib/server/supabase", () => ({
   readSupabaseEnv: supabaseMock.readSupabaseEnv,
-  createAuthClient: () => ({ auth: {} }),
+  createAuthClient: () => ({ auth: { signUp: supabaseMock.signUp } }),
   createAdminClient: () => ({
     auth: {
       admin: {
-        createUser: supabaseMock.createUser,
         deleteUser: supabaseMock.deleteUser,
       },
     },
@@ -263,7 +262,7 @@ function signupRequest(body: unknown): Request {
 
 beforeEach(() => {
   supabaseMock.readSupabaseEnv.mockReturnValue(SUPABASE_ENV);
-  supabaseMock.createUser.mockResolvedValue(createUserOk(AUTH_USER));
+  supabaseMock.signUp.mockResolvedValue(createUserOk(AUTH_USER));
   supabaseMock.profileInsertSingle.mockResolvedValue({
     data: creatorProfileRow(),
     error: null,
@@ -323,7 +322,7 @@ describe("POST /api/covnant/auth/signup", () => {
         expect(res.status).toBe(422);
         const bodyJson = (await res.json()) as { ok: boolean; reason?: string };
         expect(bodyJson).toMatchObject({ ok: false, reason: code });
-        expect(supabaseMock.createUser).not.toHaveBeenCalled(); // validation precedes auth
+        expect(supabaseMock.signUp).not.toHaveBeenCalled(); // validation precedes auth
         expect(getRegistry()).toBeNull(); // zero state
       },
     );
@@ -367,7 +366,7 @@ describe("POST /api/covnant/auth/signup", () => {
         ok: false,
         reason: "supabase_not_configured",
       });
-      expect(supabaseMock.createUser).not.toHaveBeenCalled();
+      expect(supabaseMock.signUp).not.toHaveBeenCalled();
       expect(getRegistry()).toBeNull();
     });
 
@@ -377,7 +376,7 @@ describe("POST /api/covnant/auth/signup", () => {
       expect(res.status).toBe(503);
       const bodyJson = (await res.json()) as { ok: boolean; reason?: string };
       expect(bodyJson.ok).toBe(false);
-      expect(supabaseMock.createUser).not.toHaveBeenCalled();
+      expect(supabaseMock.signUp).not.toHaveBeenCalled();
     });
 
     it("registers the creator and returns the 201 union with PENDING when INCREASE_API_KEY is unconfigured", async () => {
@@ -524,8 +523,8 @@ describe("POST /api/covnant/auth/signup", () => {
       expect(allSql).not.toContain("disbursements");
     });
 
-    it("returns a sessionless 201 — the admin API mints no session", async () => {
-      supabaseMock.createUser.mockResolvedValue(createUserOk(AUTH_USER));
+    it("returns a sessionless 201 — signUp dispatches the confirmation email and mints no session", async () => {
+      supabaseMock.signUp.mockResolvedValue(createUserOk(AUTH_USER));
       vi.stubEnv("INCREASE_API_KEY", "");
       const { db } = fakeDb();
       mockGetDb.mockReturnValue(db as never);
@@ -540,15 +539,15 @@ describe("POST /api/covnant/auth/signup", () => {
     });
   });
 
-  describe("ordering invariant — registry before createUser", () => {
-    it("peeks the registry (read-only) before calling createUser", async () => {
+  describe("ordering invariant — registry before signUp", () => {
+    it("peeks the registry (read-only) before calling signUp", async () => {
       const { db, dbQuery } = fakeDb();
       mockGetDb.mockReturnValue(db as never);
       await POST(signupRequest(fullPayload()));
       expect(dbQuery).toHaveBeenCalled();
-      expect(supabaseMock.createUser).toHaveBeenCalled();
+      expect(supabaseMock.signUp).toHaveBeenCalled();
       expect(dbQuery.mock.invocationCallOrder[0]).toBeLessThan(
-        supabaseMock.createUser.mock.invocationCallOrder[0],
+        supabaseMock.signUp.mock.invocationCallOrder[0],
       );
       // The peek takes no row lock — the FOR UPDATE discipline stays inside
       // the registry transaction.
@@ -593,7 +592,7 @@ describe("POST /api/covnant/auth/signup", () => {
         expect(key in bodyJson).toBe(false);
       }
       // Account + profile created this call.
-      expect(supabaseMock.createUser).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.signUp).toHaveBeenCalledTimes(1);
       expect(supabaseMock.profileInsertSingle).toHaveBeenCalledTimes(1);
       // NO second UCT: the registry is untouched — no mint, no rewrite.
       expect(getRegistry()?.rights_holders).toHaveLength(1);
@@ -668,7 +667,7 @@ describe("POST /api/covnant/auth/signup", () => {
       };
       const { db, getRegistry } = fakeDb({ registry });
       mockGetDb.mockReturnValue(db as never);
-      supabaseMock.createUser.mockResolvedValue(createUserOk(DUPLICATE_USER));
+      supabaseMock.signUp.mockResolvedValue(createUserOk(DUPLICATE_USER));
       const res = await POST(signupRequest(fullPayload()));
       expect(res.status).toBe(409);
       const bodyJson = (await res.json()) as { ok: boolean; reason?: string };
@@ -681,14 +680,14 @@ describe("POST /api/covnant/auth/signup", () => {
       expectNoAccountNumbers(bodyJson);
     });
 
-    it("returns 409 when createUser reports the duplicate in its error message", async () => {
+    it("returns 409 when signUp reports the duplicate in its error message", async () => {
       const registry = {
         id: REGISTRY_ASSET_ID,
         rights_holders: [signupHolderEntry()],
       };
       const { db } = fakeDb({ registry });
       mockGetDb.mockReturnValue(db as never);
-      supabaseMock.createUser.mockResolvedValue({
+      supabaseMock.signUp.mockResolvedValue({
         data: { user: null },
         error: { message: "User already registered" },
       });
@@ -801,7 +800,7 @@ describe("POST /api/covnant/auth/signup", () => {
       };
       expect(bodyJson).toMatchObject({ ok: false, reason: "rate_limited" });
       // The 429 fired after validation but before auth — no account attempted.
-      expect(supabaseMock.createUser).toHaveBeenCalledTimes(
+      expect(supabaseMock.signUp).toHaveBeenCalledTimes(
         REGISTER_RATE_LIMIT.limit,
       );
       expect(getRegistry()?.rights_holders).toHaveLength(
