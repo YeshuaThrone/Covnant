@@ -2,6 +2,11 @@
   "name": "covnant",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "bullmq": {
+      "redis": "$redis"
+    }
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
