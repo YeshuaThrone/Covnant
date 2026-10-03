@@ -188,7 +188,7 @@ create table if not exists public.art_split_accruals (
   id              uuid primary key default gen_random_uuid(),
   schedule_id     uuid not null,
   scope_key       text not null,
-  scope           text not null check (scope in ('print_edition', 'sculpture_fabrication')),
+  scope           text not null,
   source_event_id text not null,
   basis_cents     integer not null,
   allocations     jsonb not null,
