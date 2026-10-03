@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ingestionCounter, logger } from '@/lib/observability/ingestionMetrics';
+import { authenticateJWT, requireRole } from '@/lib/server/identifierAuth';
 import {
   IDENTIFIER_INGEST_RATE_LIMIT,
   redisSlidingWindowRateLimiter,
@@ -20,9 +21,15 @@ vi.mock('@/lib/server/redisRateLimit', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/server/identifierAuth', () => ({
+  authenticateJWT: vi.fn(),
+  requireRole: vi.fn(),
+  ENGINE_INGEST_ROLES: ['SUPER_ADMIN', 'TENANT_ADMIN', 'OPERATOR'],
+}));
+
 vi.mock('@/lib/observability/ingestionMetrics', () => ({
   ingestionCounter: { labels: vi.fn(() => ({ inc: vi.fn() })) },
-  logger: { info: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
 const pgState = vi.hoisted(() => ({
@@ -44,6 +51,8 @@ vi.mock('pg', () => {
 import { POST } from '../route';
 
 const mockLimiter = vi.mocked(redisSlidingWindowRateLimiter);
+const mockAuthenticate = vi.mocked(authenticateJWT);
+const mockRequireRole = vi.mocked(requireRole);
 const mockLabels = vi.mocked(ingestionCounter.labels);
 
 const postBatch = async (body: unknown, tenant?: string): Promise<Response> => {
@@ -68,6 +77,15 @@ const validRecord = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockLimiter.mockResolvedValue({ ok: true, requestCount: 1 });
+  mockAuthenticate.mockReturnValue({
+    ok: true,
+    user: {
+      userId: '11111111-2222-4333-8444-555555555555',
+      tenantId: 'tenant-alpha',
+      roles: ['TENANT_ADMIN'],
+    },
+  });
+  mockRequireRole.mockReturnValue({ ok: true });
 });
 
 describe('strict structural validation (canon v22 refinement 3)', () => {
@@ -189,8 +207,8 @@ describe('successful batch ingestion (v13 contract, mocked pool)', () => {
       status: 'SUCCESS',
     });
     expect(logger.info).toHaveBeenCalledWith(
-      { tenantId: 'tenant-alpha', count: 2 },
-      'Successfully queued batch ingestion',
+      { tenantId: 'tenant-alpha', count: 2, eventJobId: null },
+      'Successfully ingested batch',
     );
   });
 
@@ -228,5 +246,59 @@ describe('successful batch ingestion (v13 contract, mocked pool)', () => {
     const queries = client!.query.mock.calls.map((call) => String(call[0]));
     expect(queries[0]).toBe('BEGIN');
     expect(queries).toContain('COMMIT');
+  });
+});
+
+describe('canon v24 authentication chain', () => {
+  it('returns 401 with the founder body when the Authorization header is missing', async () => {
+    mockAuthenticate.mockReturnValue({
+      ok: false,
+      response: Response.json(
+        { error: 'Missing or malformed Authorization header.' },
+        { status: 401 },
+      ),
+    });
+    const res = await postBatch({ tenantId: 'tenant-alpha', records: [validRecord] });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Missing or malformed Authorization header.');
+  });
+
+  it('does not reach the limiter when authentication fails (chain order)', async () => {
+    mockAuthenticate.mockReturnValue({
+      ok: false,
+      response: Response.json(
+        { error: 'Invalid or expired authentication token.' },
+        { status: 403 },
+      ),
+    });
+    const res = await postBatch({ tenantId: 'tenant-alpha', records: [validRecord] });
+    expect(res.status).toBe(403);
+    expect(mockLimiter).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 with requiredRoles and userRoles on a role miss', async () => {
+    mockRequireRole.mockReturnValue({
+      ok: false,
+      response: Response.json(
+        {
+          error:
+            'Forbidden: Insufficient role privileges to execute this operation.',
+          requiredRoles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'OPERATOR'],
+          userRoles: ['VIEWER'],
+        },
+        { status: 403 },
+      ),
+    });
+    const res = await postBatch({ tenantId: 'tenant-alpha', records: [validRecord] });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as {
+      error: string;
+      requiredRoles: string[];
+      userRoles: string[];
+    };
+    expect(body.error).toContain('Insufficient role privileges');
+    expect(body.userRoles).toEqual(['VIEWER']);
+    expect(mockLimiter).not.toHaveBeenCalled();
   });
 });

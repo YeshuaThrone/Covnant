@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS global_identifier_cross_ref (
     verified_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_cross_reference UNIQUE (map_id, linked_code_type, linked_code_value)
 );
+-- Bare-database envelope for the post-commit event seam (canon v13): the
+-- exact column surface emitIngestionEvent writes. NO-OP once 0011 is
+-- applied — in full deployments the canonical 0011 table stands.
+CREATE TABLE IF NOT EXISTS royalty_recon_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status TEXT NOT NULL DEFAULT 'pending',
+    source TEXT NOT NULL,
+    result JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 async function applyMigration(pool: Pool, file: string): Promise<void> {
@@ -281,6 +291,136 @@ describeIntegration('batch-ingest against real PostgreSQL (canon v22 suite)', ()
           [randomUUID()],
         ),
       ).rejects.toThrow(/unique_code_per_type/);
+    });
+  });
+
+  describe('canon v13 delta — event emission, rollback, idempotency', () => {
+    it('emits the post-commit event through the royalty_recon_jobs seam (the diagram is law)', async () => {
+      const res = await request(app)
+        .post('/api/v1/identifiers/batch-ingest')
+        .set('content-type', 'application/json')
+        .send({
+          tenantId: 'tenant-event-alpha',
+          records: [
+            {
+              entityId: 'a1b2c3d4-e5f6-4a1b-8c9d-0123456789ab',
+              verticalCategory: 'PRO_SPORTS',
+              primaryCodeType: 'FIFA_CONNECT_ID',
+              primaryCodeValue: '190DEF777777',
+              crossReferences: [
+                {
+                  linkedCodeType: 'OPTA_PERSON_ID',
+                  linkedCodeValue: 'p888888',
+                  verificationSource: 'Stats Perform',
+                },
+              ],
+            },
+          ],
+        });
+      expect(res.status).toBe(200);
+
+      const { rows } = await pool.query(
+        `SELECT result FROM royalty_recon_jobs
+          WHERE source = 'identifier_ingest'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+      );
+      const event = rows[0]?.result as Record<string, unknown>;
+      expect(event.event).toBe('identifier.batch_ingested');
+      expect(event.tenantId).toBe('tenant-event-alpha');
+      expect(event.processedRecords).toBe(1);
+    });
+
+    it('returns 500 DATABASE_ERROR and rolls the whole batch back on a mid-batch DB failure', async () => {
+      // Induce a hard failure that passes the in-memory gate: hide a column
+      // the Phase-2 upsert needs. Restored in finally — the suite stays
+      // green for later cases either way.
+      await pool.query(
+        'ALTER TABLE universal_identity_map RENAME COLUMN vertical_category TO vertical_category_backup',
+      );
+      try {
+        const res = await request(app)
+          .post('/api/v1/identifiers/batch-ingest')
+          .set('content-type', 'application/json')
+          .send({
+            tenantId: 'tenant-rollback-alpha',
+            records: [
+              {
+                entityId: 'a1b2c3d4-e5f6-4a1b-8c9d-0123456789ab',
+                verticalCategory: 'PRO_SPORTS',
+                primaryCodeType: 'FIFA_CONNECT_ID',
+                primaryCodeValue: '190GGG333333',
+                crossReferences: [
+                  {
+                    linkedCodeType: 'OPTA_PERSON_ID',
+                    linkedCodeValue: 'p777777',
+                    verificationSource: 'Stats Perform',
+                  },
+                ],
+              },
+            ],
+          });
+        expect(res.status).toBe(500);
+        expect(res.body.status).toBe('DATABASE_ERROR');
+      } finally {
+        await pool.query(
+          'ALTER TABLE universal_identity_map RENAME COLUMN vertical_category_backup TO vertical_category',
+        );
+      }
+
+      const { rows } = await pool.query(
+        "SELECT 1 FROM universal_identity_map WHERE primary_code_value = '190GGG333333'",
+      );
+      expect(rows).toHaveLength(0);
+    });
+
+    it('is idempotent: re-ingesting the same batch creates no duplicate rows (ON CONFLICT upsert)', async () => {
+      const payload = {
+        tenantId: 'tenant-idem-alpha',
+        records: [
+          {
+            entityId: 'a1b2c3d4-e5f6-4a1b-8c9d-0123456789ab',
+            verticalCategory: 'PRO_SPORTS',
+            primaryCodeType: 'FIFA_CONNECT_ID',
+            primaryCodeValue: '190IDEM00001',
+            crossReferences: [
+              {
+                linkedCodeType: 'OPTA_PERSON_ID',
+                linkedCodeValue: 'p000001',
+                verificationSource: 'Stats Perform',
+              },
+            ],
+          },
+        ],
+      };
+
+      const first = await request(app)
+        .post('/api/v1/identifiers/batch-ingest')
+        .set('content-type', 'application/json')
+        .send(payload);
+      expect(first.status).toBe(200);
+
+      const second = await request(app)
+        .post('/api/v1/identifiers/batch-ingest')
+        .set('content-type', 'application/json')
+        .send(payload);
+      expect(second.status).toBe(200);
+      expect(second.body.processedRecords).toBe(1);
+
+      const map = await pool.query(
+        `SELECT map_id FROM universal_identity_map
+          WHERE primary_code_type = 'FIFA_CONNECT_ID'
+            AND primary_code_value = '190IDEM00001'`,
+      );
+      expect(map.rows).toHaveLength(1);
+
+      const xref = await pool.query(
+        `SELECT 1 FROM global_identifier_cross_ref x
+          JOIN universal_identity_map m ON m.map_id = x.map_id
+         WHERE m.primary_code_value = '190IDEM00001'
+           AND x.linked_code_value = 'p000001'`,
+      );
+      expect(xref.rows).toHaveLength(1);
     });
   });
 });
