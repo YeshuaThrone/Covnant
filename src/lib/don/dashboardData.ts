@@ -236,6 +236,11 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   resource_audit_escrow_drawdown: 'Resource audit escrow drawn down',
   resource_audit_escrow_release: 'Resource audit escrow released',
   gpu_cascade_settlement_post: 'Instant GPU cascade settlement posted',
+  event_cancellation_escrow_route: 'Event cancellation escrow locked',
+  event_cancellation_escrow_drawdown: 'Event cancellation escrow drawn down',
+  event_cancellation_escrow_release: 'Event cancellation escrow released',
+  sports_biometric_payout_post: 'Real-time biometric royalty posted',
+  sports_resale_royalty_post: 'Real-time resale royalty posted',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

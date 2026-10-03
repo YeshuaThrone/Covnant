@@ -13,6 +13,7 @@ import {
   esportsPoolEscrowGlAccount,
   fitnessAuditEscrowGlAccount,
   culinaryAuditEscrowGlAccount,
+  eventCancellationEscrowGlAccount,
   serviceAuditEscrowGlAccount,
   softwareAuditEscrowGlAccount,
   patentLitigationEscrowGlAccount,
@@ -608,6 +609,34 @@ export function resourceAuditEscrowDebit(scopeKey: string, amountCents: number):
 export function resourceAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
   return {
     account: resourceAuditEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Event cancellation escrow legs (PR 51): the sports escrow family's
+// signed movement legs over the promoter×event scope account. Routing
+// locks (debit) the locked share into the scope's escrow account against
+// the payout (credit); drawdowns charge the exposure out of the escrow
+// account to the exposure's payee; the timed release credits the
+// remainder back out to the promoter's vault.
+export function eventCancellationEscrowDebit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: eventCancellationEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function eventCancellationEscrowCredit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: eventCancellationEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

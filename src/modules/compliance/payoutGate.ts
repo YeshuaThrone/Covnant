@@ -13,6 +13,7 @@ import type { HardwarePayoutGateStateRecord } from "@/modules/hardware/records";
 import type {
   ResourcePayoutGateStateRecord,
 } from "@/modules/energy/records";
+import type { SportsPayoutGateStateRecord } from "@/modules/sports/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -674,10 +675,53 @@ export async function resolveResourceVerticalComplianceState(
   };
 }
 
+/**
+ * Resolves the sports vertical's compliance state from the durable gate
+ * states of record (migration 0055) — the facts the sports payout gate
+ * reads: the event's completion telemetry verification, the promoter's
+ * insurance clearance, and (for collegiate NIL waterfall disbursements)
+ * the NIL compliance audit — the gender equity compliance and university
+ * athletic association disclosure holdbacks. An ABSENT record resolves
+ * null (the gate refuses with vertical_state_unknown) and an 'unknown'
+ * state resolves false (the gate refuses the specific condition) —
+ * fail-closed, the resource resolver's exact shape over the sports
+ * lane's (payee, event) identity.
+ */
+export async function resolveSportsVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  eventRef: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "sports" }> | null> {
+  const record: SportsPayoutGateStateRecord | undefined =
+    await store.getSportsPayoutGateState(payeeId, eventRef);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "sports",
+    event_completion_telemetry_verified:
+      record.event_completion_telemetry_state === "verified",
+    promoter_insurance_clearance: record.promoter_insurance_state === "cleared",
+    is_collegiate_nil_waterfall: record.is_collegiate_nil_waterfall,
+    // Only consulted when is_collegiate_nil_waterfall is true — the gate
+    // skips the audit condition for non-NIL sports payouts.
+    nil_compliance_audit_cleared: record.nil_compliance_audit_state === "cleared",
+  };
+}
+
 export type PayoutComplianceInput = {
   operatorSettlementApproved: boolean;
   kycStatus: KycStatus | null;
   verticalState: VerticalComplianceState | null;
+  /** Which sports gate this verdict serves. The event-cancellation
+   * escrow's LOCK routes pre-event — completion telemetry cannot be
+   * verified for an event that has not happened yet (the lock itself is
+   * the protection) — so it skips the telemetry condition while still
+   * enforcing insurance and the collegiate NIL audit. The final payout
+   * DISPATCH (the escrow's release, and every other sports payout)
+   * defaults to the strict post-event gate that reads all three
+   * conditions. */
+  sportsGatePhase?: "pre_event_lock" | "post_event_dispatch";
 };
 
 export type PayoutComplianceVerdict =
@@ -1103,7 +1147,15 @@ export function evaluatePayoutCompliance(
       return { ok: true };
     }
     case "sports": {
-      if (state.event_completion_telemetry_verified !== true) {
+      // The pre-event LOCK skips the telemetry condition — an event that
+      // has not completed cannot have verified telemetry, and demanding
+      // it would make the escrow unfillable. Insurance and the NIL audit
+      // still refuse fail-closed. The post-event DISPATCH (default)
+      // reads all three.
+      if (
+        input.sportsGatePhase !== "pre_event_lock" &&
+        state.event_completion_telemetry_verified !== true
+      ) {
         return {
           ok: false,
           code: "sports_telemetry_unverified",

@@ -252,6 +252,7 @@ import type {
   SportsLeagueTeamRegistrationRecord,
   SportsNetVenueRealizationRecord,
   SportsNilDealReconciliationRecord,
+  SportsPayoutGateStateRecord,
   SportsResaleRoyaltyApplicationRecord,
   SportsResaleRoyaltyPolicyRecord,
   SportsResaleSalePostRecord,
@@ -371,6 +372,10 @@ import type {
   ResourceAuditEscrowReconciliationRecord,
   ResourcePayoutGateStateRecord,
 } from '@/modules/energy/records';
+import type {
+  EventCancellationEscrowDrawdownRecord,
+  EventCancellationEscrowPolicyRecord,
+} from '@/modules/sports/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -790,6 +795,15 @@ export class InMemoryStore implements Store {
     ResourceAuditEscrowReconciliationRecord
   >();
   private resourcePayoutGateStates = new Map<string, ResourcePayoutGateStateRecord>();
+  // PR 51 — the event cancellation escrow's policies of record, the
+  // append-only drawdown truth, and the sports payout gate states (the
+  // fail-closed release/resolver inputs).
+  private eventCancellationEscrowPolicies = new Map<
+    string,
+    EventCancellationEscrowPolicyRecord
+  >();
+  private eventCancellationEscrowDrawdowns: EventCancellationEscrowDrawdownRecord[] = [];
+  private sportsPayoutGateStates = new Map<string, SportsPayoutGateStateRecord>();
   // PR 50 — the sports lane's state: the registries of record (athlete
   // profiles and the policies/team owners), the replay-guard posts, and
   // the recompute-in-place positions (reconciliations, realizations,
@@ -10608,6 +10622,169 @@ export class InMemoryStore implements Store {
       (record) => record.source_event_id === sourceEventId,
     );
     return found === undefined ? undefined : { ...found };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 51 — the event cancellation escrow, the sports payout gate states, and
+  // the staged sports applications' instant-posting journal stamps.
+  // ---------------------------------------------------------------------------
+
+  async upsertEventCancellationEscrowPolicy(
+    row: Omit<EventCancellationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EventCancellationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.eventCancellationEscrowPolicies.get(row.scope_key);
+    const record: EventCancellationEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.eventCancellationEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getEventCancellationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<EventCancellationEscrowPolicyRecord | undefined> {
+    const found = this.eventCancellationEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertEventCancellationEscrowDrawdown(
+    row: Omit<EventCancellationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<EventCancellationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.eventCancellationEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('sports_event_cancellation_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.eventCancellationEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('sports_event_cancellation_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: EventCancellationEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.eventCancellationEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listEventCancellationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<EventCancellationEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.eventCancellationEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async settleEventCancellationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'event_cancellation_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertSportsPayoutGateState(
+    row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, event_ref) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.event_ref}`;
+    const existing = this.sportsPayoutGateStates.get(key);
+    const record: SportsPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.sportsPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getSportsPayoutGateState(
+    payeeId: string,
+    eventRef: string,
+  ): Promise<SportsPayoutGateStateRecord | undefined> {
+    const found = this.sportsPayoutGateStates.get(`${payeeId}|${eventRef}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async setSportsResaleRoyaltyJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    // The CAS: the journal stamps only while the staged application's
+    // journal_id is still null (PR 50 stages the application, PR 51's
+    // instant posting completes it); the caller that lost the race (or
+    // replayed) reads undefined.
+    const row = this.sportsResaleRoyaltyApplications.find(
+      (record) =>
+        record.source_event_id === sourceEventId && record.journal_id === null,
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.journal_id = journalId;
+    return { ...row };
+  }
+
+  async setSportsBiometricMicroPayoutJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    // The CAS: the journal stamps only while the staged application's
+    // journal_id is still null (PR 50 stages the application, PR 51's
+    // instant posting completes it); the caller that lost the race (or
+    // replayed) reads undefined.
+    const row = this.sportsBiometricMicroPayoutApplications.find(
+      (record) =>
+        record.source_event_id === sourceEventId && record.journal_id === null,
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.journal_id = journalId;
+    return { ...row };
   }
 }
 /** Deterministic tier-credit order: created_at ASC, transaction_id ASC (code-unit compare, matching the SQL backends' BINARY collation). */

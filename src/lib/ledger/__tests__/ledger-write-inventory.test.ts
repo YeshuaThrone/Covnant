@@ -488,6 +488,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       '0052_scada_grid_fractional_resource_division_orders.sql',
       '0053_resource_audit_escrow_gate_states.sql',
       '0054_sports_ticketing_turnstile_league_pools_biometric_royalties.sql',
+      '0055_event_cancellation_escrow_sports_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

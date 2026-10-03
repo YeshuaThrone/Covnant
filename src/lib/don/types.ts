@@ -315,6 +315,16 @@ export const LEDGER_STATUSES = [
   // ledger_transactions.status is free text, the same extension-in-place
   // discipline as every escrow state above.
   "resource_audit_escrow",
+  // Event cancellation escrow (PR 51, the founder sports directive): the
+  // 15–20% of a scope's net gate receipts auto-locked at payout while the
+  // event's cancellation exposure runs — drawn down by weather delays,
+  // athlete withdrawals, and mandatory ticket refund calls
+  // position-locked; released only after the event's completion
+  // telemetry verifies AND 48 hours elapse post-event. Kind marks WHAT
+  // the row is for its whole life, the same division every escrow state
+  // above uses. No migration: ledger_transactions.status is free text,
+  // the same extension-in-place discipline as every escrow state above.
+  "event_cancellation_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -494,6 +504,17 @@ export const LEDGER_KINDS = [
   // settles it (status → 'settled'). Kind marks WHAT the row is for its
   // whole life, the same division every escrow kind above uses.
   "resource_audit_escrow",
+  // Event cancellation escrow (PR 51, the founder sports directive): the
+  // 15–20% of a scope's net gate receipts locked per (promoter payee,
+  // event) scope — while the event's cancellation exposure runs. Weather
+  // delays, athlete withdrawals, and mandatory ticket refund calls draw
+  // it down position-locked; the release opens only after the event's
+  // completion telemetry verifies AND 48 hours elapse post-event
+  // (fail-closed: no verified telemetry of record, no release; the clock
+  // not yet elapsed, no release), and the released remainder settles it
+  // (status → 'settled'). Kind marks WHAT the row is for its whole life,
+  // the same division every escrow kind above uses.
+  "event_cancellation_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the

@@ -129,9 +129,11 @@ async function sportsProjection(store: Store) {
   });
 }
 
-/** Strips the three non-deterministic fields — random row ids and the
- * wall-clock stamps — from every record so the three backends compare
- * on money, verdicts, and event ids alone. */
+/** Strips the four non-deterministic fields — random row ids, the
+ * wall-clock stamps, and the PR 51 instant postings' random per-backend
+ * journal ids (their non-nullness is pinned by the queue's posted
+ * counters, not by cross-backend value equality) — from every record so
+ * the three backends compare on money, verdicts, and event ids alone. */
 function normalizeVolatile<T extends Record<string, unknown>>(projection: T): T {
   const stripped = JSON.parse(
     JSON.stringify(projection, (_key, value) =>
@@ -140,7 +142,7 @@ function normalizeVolatile<T extends Record<string, unknown>>(projection: T): T 
   ) as T;
   for (const record of Object.values(stripped)) {
     if (record !== null && typeof record === "object") {
-      for (const volatile of ["id", "created_at", "updated_at"]) {
+      for (const volatile of ["id", "created_at", "updated_at", "journal_id"]) {
         delete (record as Record<string, unknown>)[volatile];
       }
     }

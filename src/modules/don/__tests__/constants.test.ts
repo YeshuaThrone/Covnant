@@ -178,6 +178,17 @@ describe('don constants', () => {
       'resource_audit_escrow_drawdown',
       'resource_audit_escrow_release',
       'gpu_cascade_settlement_post',
+      // PR 51 (the founder sports directive): the event-cancellation
+      // escrow journals — the 15–20% net-gate-receipts lock's automatic
+      // routing, the weather/withdrawal/refund-call drawdown, and the
+      // verified-telemetry + 48-hour release — alongside the instant
+      // posting journals for the biometric micro-payouts and the
+      // secondary resale royalty cuts.
+      'event_cancellation_escrow_route',
+      'event_cancellation_escrow_drawdown',
+      'event_cancellation_escrow_release',
+      'sports_biometric_payout_post',
+      'sports_resale_royalty_post',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

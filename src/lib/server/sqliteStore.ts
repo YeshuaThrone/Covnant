@@ -245,12 +245,17 @@ import type {
   SportsLeagueTeamRegistrationRecord,
   SportsNetVenueRealizationRecord,
   SportsNilDealReconciliationRecord,
+  SportsPayoutGateStateRecord,
   SportsResaleRoyaltyApplicationRecord,
   SportsResaleRoyaltyPolicyRecord,
   SportsResaleSalePostRecord,
   SportsStudentAthleteProfileRecord,
   SportsTicketSalePostRecord,
   SportsTurnstileScanPostRecord,
+} from '@/modules/sports/records';
+import type {
+  EventCancellationEscrowDrawdownRecord,
+  EventCancellationEscrowPolicyRecord,
 } from '@/modules/sports/records';
 import type {
   FoodCobrandSplitApplicationRecord,
@@ -5095,6 +5100,7 @@ CREATE TABLE IF NOT EXISTS sports_resale_royalty_applications (
   promoter_leg_cents INTEGER NOT NULL CHECK (promoter_leg_cents >= 0),
   venue_leg_cents INTEGER NOT NULL CHECK (venue_leg_cents >= 0),
   league_leg_cents INTEGER NOT NULL CHECK (league_leg_cents >= 0),
+  journal_id TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (source_event_id),
   -- THE PERPETUAL ROYALTY, pinned: the three legs conserve the pot.
@@ -5187,11 +5193,63 @@ CREATE TABLE IF NOT EXISTS sports_biometric_micro_payout_applications (
   athlete_leg_cents INTEGER NOT NULL CHECK (athlete_leg_cents >= 0),
   league_data_payee_id TEXT NOT NULL CHECK (length(league_data_payee_id) > 0),
   league_leg_cents INTEGER NOT NULL CHECK (league_leg_cents >= 0),
+  journal_id TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (source_event_id),
   -- THE MICRO-PAYOUT, pinned: the athlete leg plus the league data leg
   -- conserve the payout pot.
   CHECK (athlete_leg_cents + league_leg_cents = payout_pot_cents)
+);
+
+-- PR 51 — the event cancellation escrow and the sports payout gate
+-- states. The SQLite mirror keeps the Postgres wall types as TEXT; the
+-- CHECK vocabulary pins the same facts migration 0055 pins
+-- (byte-identical token lists).
+
+CREATE TABLE IF NOT EXISTS sports_event_cancellation_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL CHECK (length(scope_key) > 0),
+  -- The founder band: 15–20% of the scope's net gate receipts.
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 1500 AND reserve_rate_bps <= 2000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key)
+);
+
+CREATE TABLE IF NOT EXISTS sports_event_cancellation_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL CHECK (length(scope_key) > 0),
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('weather_delay', 'athlete_withdrawal', 'ticket_refund_call')),
+  source_event_id TEXT NOT NULL CHECK (length(source_event_id) > 0),
+  drawn_before_cents INTEGER NOT NULL CHECK (drawn_before_cents >= 0),
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents = drawn_before_cents - drawn_cents AND remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents)
+);
+CREATE INDEX IF NOT EXISTS idx_sports_event_cancellation_escrow_drawdowns_reserve
+  ON sports_event_cancellation_escrow_drawdowns (reserve_ledger_id);
+
+CREATE TABLE IF NOT EXISTS sports_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL CHECK (length(payee_id) > 0),
+  event_ref TEXT NOT NULL CHECK (length(event_ref) > 0),
+  event_completion_telemetry_state TEXT NOT NULL CHECK (event_completion_telemetry_state IN ('unknown', 'verified')),
+  promoter_insurance_state TEXT NOT NULL CHECK (promoter_insurance_state IN ('unknown', 'cleared')),
+  is_collegiate_nil_waterfall INTEGER NOT NULL CHECK (is_collegiate_nil_waterfall IN (0, 1)),
+  nil_compliance_audit_state TEXT NOT NULL CHECK (nil_compliance_audit_state IN ('unknown', 'cleared')),
+  event_completed_at TEXT,
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, event_ref),
+  CHECK (
+    (event_completion_telemetry_state = 'verified' AND event_completed_at IS NOT NULL)
+    OR (event_completion_telemetry_state = 'unknown' AND event_completed_at IS NULL)
+  )
 );
 `;
 
@@ -22085,8 +22143,8 @@ export class SqliteStore implements Store {
             league_rights_code, resale_gross_cents, resale_royalty_bps,
             promoter_share_bps, venue_share_bps, league_share_bps,
             royalty_pot_cents, promoter_leg_cents, venue_leg_cents,
-            league_leg_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            league_leg_cents, journal_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -22103,6 +22161,7 @@ export class SqliteStore implements Store {
         record.promoter_leg_cents,
         record.venue_leg_cents,
         record.league_leg_cents,
+        record.journal_id,
         record.created_at,
       );
     return record;
@@ -22134,6 +22193,7 @@ export class SqliteStore implements Store {
       promoter_leg_cents: row.promoter_leg_cents as number,
       venue_leg_cents: row.venue_leg_cents as number,
       league_leg_cents: row.league_leg_cents as number,
+      journal_id: (row.journal_id as string | null) ?? null,
       created_at: row.created_at as string,
     };
   }
@@ -22404,8 +22464,8 @@ export class SqliteStore implements Store {
             league_rights_code, tracking_modality, licensee_class,
             licensed_quantity_micros, micros_per_unit, athlete_share_bps,
             payout_pot_cents, athlete_wallet_payee_id, athlete_leg_cents,
-            league_data_payee_id, league_leg_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            league_data_payee_id, league_leg_cents, journal_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -22423,6 +22483,7 @@ export class SqliteStore implements Store {
         record.athlete_leg_cents,
         record.league_data_payee_id,
         record.league_leg_cents,
+        record.journal_id,
         record.created_at,
       );
     return record;
@@ -22456,7 +22517,308 @@ export class SqliteStore implements Store {
       athlete_leg_cents: row.athlete_leg_cents as number,
       league_data_payee_id: row.league_data_payee_id as string,
       league_leg_cents: row.league_leg_cents as number,
+      journal_id: (row.journal_id as string | null) ?? null,
       created_at: row.created_at as string,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PR 51 — the event cancellation escrow, the sports payout gate states, and
+  // the staged sports applications' instant-posting journal stamps.
+  // ---------------------------------------------------------------------------
+
+  async upsertEventCancellationEscrowPolicy(
+    row: Omit<EventCancellationEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EventCancellationEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_event_cancellation_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getEventCancellationEscrowPolicy(
+      record.scope_key,
+    ) as Promise<EventCancellationEscrowPolicyRecord>;
+  }
+
+  async getEventCancellationEscrowPolicy(
+    scopeKey: string,
+  ): Promise<EventCancellationEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_event_cancellation_escrow_policies WHERE scope_key = ?`,
+      )
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertEventCancellationEscrowDrawdown(
+    row: Omit<EventCancellationEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<EventCancellationEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — SQLite's constraint throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_event_cancellation_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listEventCancellationEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<EventCancellationEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM sports_event_cancellation_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class:
+        row.drawdown_class as EventCancellationEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async settleEventCancellationEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the resource escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'event_cancellation_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertSportsPayoutGateState(
+    row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SportsPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, event_ref) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sports_payout_gate_states
+           (id, payee_id, event_ref, event_completion_telemetry_state,
+            promoter_insurance_state, is_collegiate_nil_waterfall,
+            nil_compliance_audit_state, event_completed_at, evidence_ref,
+            verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, event_ref) DO UPDATE SET
+           event_completion_telemetry_state = excluded.event_completion_telemetry_state,
+           promoter_insurance_state = excluded.promoter_insurance_state,
+           is_collegiate_nil_waterfall = excluded.is_collegiate_nil_waterfall,
+           nil_compliance_audit_state = excluded.nil_compliance_audit_state,
+           event_completed_at = excluded.event_completed_at,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.event_ref,
+        record.event_completion_telemetry_state,
+        record.promoter_insurance_state,
+        record.is_collegiate_nil_waterfall ? 1 : 0,
+        record.nil_compliance_audit_state,
+        record.event_completed_at,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getSportsPayoutGateState(
+      record.payee_id,
+      record.event_ref,
+    ) as Promise<SportsPayoutGateStateRecord>;
+  }
+
+  async getSportsPayoutGateState(
+    payeeId: string,
+    eventRef: string,
+  ): Promise<SportsPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sports_payout_gate_states WHERE payee_id = ? AND event_ref = ?`,
+      )
+      .get(payeeId, eventRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      event_ref: row.event_ref as string,
+      event_completion_telemetry_state:
+        row.event_completion_telemetry_state as SportsPayoutGateStateRecord['event_completion_telemetry_state'],
+      promoter_insurance_state:
+        row.promoter_insurance_state as SportsPayoutGateStateRecord['promoter_insurance_state'],
+      is_collegiate_nil_waterfall: row.is_collegiate_nil_waterfall === 1,
+      nil_compliance_audit_state:
+        row.nil_compliance_audit_state as SportsPayoutGateStateRecord['nil_compliance_audit_state'],
+      event_completed_at: (row.event_completed_at as string | null) ?? null,
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async setSportsResaleRoyaltyJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsResaleRoyaltyApplicationRecord | undefined> {
+    // The conditional UPDATE IS the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 50 stages
+    // the application, PR 51's instant posting completes it); the caller
+    // that lost the race (or replayed) reads undefined.
+    const result = this.db
+      .prepare(
+        `UPDATE sports_resale_royalty_applications
+         SET journal_id = ?
+         WHERE source_event_id = ? AND journal_id IS NULL
+         RETURNING *`,
+      )
+      .get(journalId, sourceEventId) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return {
+      id: result.id as string,
+      source_event_id: result.source_event_id as string,
+      resale_sale_event_id: result.resale_sale_event_id as string,
+      venue_gln: result.venue_gln as string,
+      league_rights_code: result.league_rights_code as string,
+      resale_gross_cents: result.resale_gross_cents as number,
+      resale_royalty_bps: result.resale_royalty_bps as number,
+      promoter_share_bps: result.promoter_share_bps as number,
+      venue_share_bps: result.venue_share_bps as number,
+      league_share_bps: result.league_share_bps as number,
+      royalty_pot_cents: result.royalty_pot_cents as number,
+      promoter_leg_cents: result.promoter_leg_cents as number,
+      venue_leg_cents: result.venue_leg_cents as number,
+      league_leg_cents: result.league_leg_cents as number,
+      journal_id: (result.journal_id as string | null) ?? null,
+      created_at: result.created_at as string,
+    };
+  }
+
+  async setSportsBiometricMicroPayoutJournal(
+    sourceEventId: string,
+    journalId: string,
+  ): Promise<SportsBiometricMicroPayoutApplicationRecord | undefined> {
+    // The conditional UPDATE IS the CAS: the journal stamps only while
+    // the staged application's journal_id is still null (PR 50 stages
+    // the application, PR 51's instant posting completes it); the caller
+    // that lost the race (or replayed) reads undefined.
+    const result = this.db
+      .prepare(
+        `UPDATE sports_biometric_micro_payout_applications
+         SET journal_id = ?
+         WHERE source_event_id = ? AND journal_id IS NULL
+         RETURNING *`,
+      )
+      .get(journalId, sourceEventId) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return {
+      id: result.id as string,
+      source_event_id: result.source_event_id as string,
+      biometric_post_event_id: result.biometric_post_event_id as string,
+      athlete_glan: result.athlete_glan as string,
+      league_rights_code: result.league_rights_code as string,
+      tracking_modality:
+        result.tracking_modality as SportsBiometricMicroPayoutApplicationRecord['tracking_modality'],
+      licensee_class:
+        result.licensee_class as SportsBiometricMicroPayoutApplicationRecord['licensee_class'],
+      licensed_quantity_micros: result.licensed_quantity_micros as number,
+      micros_per_unit: result.micros_per_unit as number,
+      athlete_share_bps: result.athlete_share_bps as number,
+      payout_pot_cents: result.payout_pot_cents as number,
+      athlete_wallet_payee_id: result.athlete_wallet_payee_id as string,
+      athlete_leg_cents: result.athlete_leg_cents as number,
+      league_data_payee_id: result.league_data_payee_id as string,
+      league_leg_cents: result.league_leg_cents as number,
+      journal_id: (result.journal_id as string | null) ?? null,
+      created_at: result.created_at as string,
     };
   }
 }
