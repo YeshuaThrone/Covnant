@@ -1046,6 +1046,20 @@ jobs:
           REDIS_URL: redis://localhost:6379
         run: npx vitest run src/app/api/v1/identifiers/batch-ingest/__tests__/route.integration.test.ts
 
+      - name: Identifier engine unit + acceptance suites
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/universal_registry_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          npx vitest run \
+            src/lib/identifiers/__tests__/globalIdentifiers.test.ts \
+            src/lib/identifiers/__tests__/ingestRecords.test.ts \
+            src/lib/identifiers/__tests__/resolveGlobalIdentifier.test.ts \
+            src/lib/server/__tests__/identifierAuth.test.ts \
+            src/lib/admin/__tests__/registryDashboard.test.ts \
+            src/app/api/v1/identifiers/batch-ingest/__tests__/route.test.ts \
+            src/app/api/v1/webhooks/telemetry-stream/__tests__/route.test.ts
+
   e2e:
     runs-on: ubuntu-latest
     steps:

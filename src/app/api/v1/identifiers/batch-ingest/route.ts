@@ -1,30 +1,49 @@
 /**
  * POST /api/v1/identifiers/batch-ingest — Universal Registry Identity Batch
- * Ingestion (founder v13 contract, canon v22/v27 extensions).
+ * Ingestion (founder v13 contract, canon v22/v24/v27 extensions).
  *
- * Pipeline per request:
- *   1. Redis sliding-window rate limit (canon v22) — fail-open.
- *   2. Strict structural validation — empty batches are 400 (canon v22
- *      refinement 3: {tenantId, records:[]} is invalid structure).
- *   3. Per-record syntax validation against the live registry (v11/v15/v25) —
- *      any failure rejects the WHOLE batch (422, no partial ingestion).
- *   4. Transactional upserts — uniqueness binds (primary_code_type,
- *      primary_code_value) as a pair (canon v23 Ruling 2, migration 0012).
- *   5. Observability — pino structured log + per-outcome counter (v27).
+ * ENGINE MIDDLEWARE CHAIN (canon v24 order):
+ *   1. authenticateJWT — Bearer JWT against JWT_SECRET (fail-closed in
+ *      production when unset);
+ *   2. requireRole — the ingestion role budget (VIEWER is read-only);
+ *   3. Redis sliding-window rate limit (canon v22) — fail-open;
+ *   4. Strict structural validation — empty batches are 400 (canon v22
+ *      refinement 3: {tenantId, records:[]} is invalid structure);
+ *   5. Per-record syntax validation against the live registry (v11/v15/v25)
+ *      — any failure rejects the WHOLE batch (422, no partial ingestion);
+ *   6. Transactional upserts (Phase 2, shared with the telemetry worker) —
+ *      uniqueness binds (primary_code_type, primary_code_value) as a pair
+ *      (canon v23 Ruling 2, migration 0012); post-commit the batch emits
+ *      its event via the royalty_recon_jobs enqueue seam (v13 diagram, gap
+ *      correction) and invalidates the resolution cache (v16 correction).
+ *   7. Observability — pino structured log + per-outcome counter (v27).
+ *
+ * The core handler minus the auth and rate-limit layers is exported as
+ * `ingestBatch` — the v22 integration suite binds it (canon v22 flag 4:
+ * "auth + rate-limit layers out of suite scope") while still exercising
+ * the production Phase-2 code path.
  */
 
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
+
 import {
   validateIdentifier,
   type IdentityIngestionPayload,
 } from '@/lib/identifiers/globalIdentifiers';
+import { detectIdentifierHolds } from '@/lib/identifiers/identifierHolds';
+import { applyIngestionBatch } from '@/lib/identifiers/ingestRecords';
+import { ingestionCounter, logger } from '@/lib/observability/ingestionMetrics';
+import {
+  authenticateJWT,
+  requireRole,
+  ENGINE_INGEST_ROLES,
+} from '@/lib/server/identifierAuth';
 import {
   IDENTIFIER_INGEST_RATE_LIMIT,
   RATE_LIMIT_EXCEEDED_BODY,
   redisSlidingWindowRateLimiter,
 } from '@/lib/server/redisRateLimit';
-import { ingestionCounter, logger } from '@/lib/observability/ingestionMetrics';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,30 +84,14 @@ function rateHeaders(
   };
 }
 
-export async function POST(request: Request): Promise<NextResponse> {
-  // ── 1 · Redis sliding-window rate limit (canon v22) ────────────────────
-  const limit = await redisSlidingWindowRateLimiter(
-    request,
-    IDENTIFIER_INGEST_RATE_LIMIT,
-  );
-  if (!limit.ok) {
-    ingestionCounter
-      .labels({ vertical: 'unknown', status: 'RATE_LIMITED' })
-      .inc(1);
-    return NextResponse.json(
-      { ...RATE_LIMIT_EXCEEDED_BODY, retryAfterSeconds: limit.retryAfterSeconds },
-      {
-        status: 429,
-        headers: rateHeaders(IDENTIFIER_INGEST_RATE_LIMIT.maxRequests, 0),
-      },
-    );
-  }
-  const okHeaders = rateHeaders(
-    IDENTIFIER_INGEST_RATE_LIMIT.maxRequests,
-    IDENTIFIER_INGEST_RATE_LIMIT.maxRequests - limit.requestCount,
-  );
-
-  // ── 2 · Strict structural validation (canon v22 refinement 3) ─────────
+/**
+ * The core ingestion handler — strict structural validation, the registry
+ * syntax gate, and the Phase-2 transactional upsert with its post-commit
+ * seam. No auth, no rate limiting (v22 canon flag 4): the composed POST
+ * below adds those layers in the canon v24 order.
+ */
+export async function ingestBatch(request: Request): Promise<NextResponse> {
+  // ── 1 · Strict structural validation (canon v22 refinement 3) ─────────
   let body: IngestionBatchRequest;
   try {
     body = (await request.json()) as IngestionBatchRequest;
@@ -102,11 +105,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       .inc(1);
     return NextResponse.json(
       { error: 'Invalid payload structure or empty records list.' },
-      { status: 400, headers: okHeaders },
+      { status: 400 },
     );
   }
 
-  // ── 3 · Per-record syntax validation (registry v11/v15/v25) ───────────
+  // ── 2 · Per-record syntax validation (registry v11/v15/v25) ───────────
   const validationErrors: Array<{ index: number; error: string }> = [];
   records.forEach((record: IdentityIngestionPayload, index: number) => {
     try {
@@ -142,48 +145,33 @@ export async function POST(request: Request): Promise<NextResponse> {
         message: 'Payload contained syntax validation errors.',
         errors: validationErrors,
       },
-      { status: 422, headers: okHeaders },
+      { status: 422 },
     );
   }
 
-  // ── 4 · Transactional upserts (all-or-nothing) ────────────────────────
-  const client = await getDbPool().connect();
+  // ── 3 · Hold-trigger detection (UNCLAIMED_IDENTIFIER_HOLD) ────────────
+  // Records with no cross-links still ingest (syntax-valid) but route to
+  // the hold — the detection rides the post-commit event payload for the
+  // PR 53 escrow/registry-ping flow.
+  const holds = detectIdentifierHolds(records);
+  if (holds.length > 0) {
+    logger.warn(
+      { tenantId, holds: holds.length },
+      'batch contains UNCLAIMED_IDENTIFIER_HOLD records',
+    );
+  }
+
+  // ── 4 · Phase-2 transactional upserts (all-or-nothing) + post-commit ──
   try {
-    await client.query('BEGIN');
-    for (const record of records) {
-      await client.query(
-        `INSERT INTO universal_identity_map
-             (entity_id, vertical_category, primary_code_type, primary_code_value)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (primary_code_type, primary_code_value)
-         DO UPDATE SET vertical_category = EXCLUDED.vertical_category`,
-        [
-          record.entityId,
-          record.verticalCategory,
-          record.primaryCodeType,
-          record.primaryCodeValue,
-        ],
+    const result = await applyIngestionBatch(getDbPool(), tenantId, records, {
+      holds,
+    });
+    if (result.eventJobId === null) {
+      logger.warn(
+        { tenantId },
+        'post-commit event emission did not fire (no database or emission failure) — committed batch stands',
       );
-      for (const xref of record.crossReferences ?? []) {
-        await client.query(
-          `INSERT INTO global_identifier_cross_ref
-               (map_id, linked_code_type, linked_code_value, verification_source)
-           SELECT map_id, $3, $4, $5
-             FROM universal_identity_map
-            WHERE primary_code_type = $1 AND primary_code_value = $2
-           ON CONFLICT (map_id, linked_code_type, linked_code_value)
-           DO UPDATE SET verification_source = EXCLUDED.verification_source`,
-          [
-            record.primaryCodeType,
-            record.primaryCodeValue,
-            xref.linkedCodeType,
-            xref.linkedCodeValue,
-            xref.verificationSource,
-          ],
-        );
-      }
     }
-    await client.query('COMMIT');
 
     // ── 5 · Observability (canon v27) ────────────────────────────────────
     // Mixed verticals count per record under its own vertical label; a
@@ -201,21 +189,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
     logger.info(
-      { tenantId, count: records.length },
-      'Successfully queued batch ingestion',
+      { tenantId, count: records.length, eventJobId: result.eventJobId },
+      'Successfully ingested batch',
     );
 
-    return NextResponse.json(
-      { status: 'SUCCESS', processedRecords: records.length, tenantId },
-      { status: 200, headers: okHeaders },
-    );
+    return NextResponse.json({
+      status: 'SUCCESS',
+      processedRecords: result.processedRecords,
+      tenantId,
+    });
   } catch (dbError) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (rollbackError) {
-      // Surface without masking the original database error.
-      console.error('ROLLBACK failed after ingestion error:', rollbackError);
-    }
     ingestionCounter
       .labels({ vertical: 'unknown', status: 'DATABASE_ERROR' })
       .inc(records.length);
@@ -225,9 +208,62 @@ export async function POST(request: Request): Promise<NextResponse> {
         message: 'Failed to complete transactional bulk insert.',
         details: dbError instanceof Error ? dbError.message : String(dbError),
       },
-      { status: 500, headers: okHeaders },
+      { status: 500 },
     );
-  } finally {
-    client.release();
   }
+}
+
+/**
+ * The composed production handler — the canon v24 chain in order:
+ * authenticateJWT → requireRole → sliding-window limiter → core.
+ */
+export async function POST(request: Request): Promise<NextResponse> {
+  // ── 1 · authenticateJWT (canon v24) ─────────────────────────────────────
+  const auth = authenticateJWT(request);
+  if (!auth.ok) {
+    return NextResponse.json(await auth.response.json(), {
+      status: auth.response.status,
+    });
+  }
+
+  // ── 2 · requireRole (canon v24) ─────────────────────────────────────────
+  const role = requireRole(auth.user, ENGINE_INGEST_ROLES);
+  if (!role.ok) {
+    return NextResponse.json(await role.response.json(), {
+      status: role.response.status,
+    });
+  }
+
+  // ── 3 · Redis sliding-window rate limit (canon v22) ─────────────────────
+  const limit = await redisSlidingWindowRateLimiter(
+    request,
+    IDENTIFIER_INGEST_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    ingestionCounter
+      .labels({ vertical: 'unknown', status: 'RATE_LIMITED' })
+      .inc(1);
+    return NextResponse.json(
+      { ...RATE_LIMIT_EXCEEDED_BODY, retryAfterSeconds: limit.retryAfterSeconds },
+      {
+        status: 429,
+        headers: rateHeaders(IDENTIFIER_INGEST_RATE_LIMIT.maxRequests, 0),
+      },
+    );
+  }
+  const okHeaders = rateHeaders(
+    IDENTIFIER_INGEST_RATE_LIMIT.maxRequests,
+    IDENTIFIER_INGEST_RATE_LIMIT.maxRequests - limit.requestCount,
+  );
+
+  // ── 4+ · The core (structural + syntax gates, Phase 2, post-commit) ─────
+  const response = await ingestBatch(request);
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(okHeaders)) {
+    headers.set(key, value);
+  }
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers,
+  });
 }
