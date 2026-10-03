@@ -113,6 +113,14 @@ describe('don constants', () => {
       'licensing_audit_reserve_drawdown',
       'licensing_audit_reserve_release',
       'licensing_mg_shortfall_invoice',
+      // The NIL audit escrow + transfer portal clawback (PR 35, the founder
+      // NIL-enforcement directive): the 5-10% athletic-department escrow
+      // routing/drawdown/release journals and the pro-rated unearned
+      // advance's debit hold.
+      'nil_audit_escrow_route',
+      'nil_audit_escrow_drawdown',
+      'nil_audit_escrow_release',
+      'nil_unearned_clawback_hold',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

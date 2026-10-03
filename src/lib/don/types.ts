@@ -196,6 +196,28 @@ export const LEDGER_STATUSES = [
   // migration: ledger_transactions.status is free text, the same
   // extension-in-place discipline as every escrow state above.
   "mg_shortfall_due",
+  // NIL_AUDIT_ESCROW (PR 35, the founder NIL directive): the 5–10%
+  // (founder-banded, per-scope policy of record) of an athletic department
+  // distribution that locks here — keyed per (payee, school) scope by the
+  // escrow row's 'nil_audit_escrow:{scopeKey}' sentinel payee — while the
+  // athlete's compliance exposure runs. Mid-season NCAA Transfer Portal
+  // reconciliations and tax withholdings draw it down position-locked; the
+  // verified reconciliation of record opens the release (fail-closed: no
+  // reconciliation of record, no release), and the released remainder
+  // settles it (status → 'settled'). Kind marks WHAT the row is for its
+  // whole life. No migration: ledger_transactions.status is free text, the
+  // same extension-in-place discipline as every escrow state above.
+  "nil_audit_escrow",
+  // NIL_UNEARNED_CLAWBACK (PR 35, the founder NIL directive): an athlete
+  // entering the transfer portal prior to contract completion — the
+  // pro-rated unearned NIL advance balance debits here as the hold of
+  // record AGAINST the athlete (payee = the athlete, the contract id
+  // stamped in line_item_id). The row is the receivable's face on the Don
+  // ledger: visible, priced, and never a guessed amount (the balance
+  // derives from the advance schedule of record — floor-only integer
+  // arithmetic, exact to the cent). Kind marks WHAT the row is for its
+  // whole life. No migration: the same extension-in-place discipline.
+  "nil_unearned_clawback",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -281,6 +303,22 @@ export const LEDGER_KINDS = [
   // recoupment truth, never guessed. Kind marks WHAT the row is for its
   // whole life, the same division every kind above uses.
   "mg_shortfall_due",
+  // NIL audit escrow (PR 35): the founder-banded 5–10% of an athletic
+  // department distribution held per (payee, school) scope for the
+  // athlete's compliance exposure — drawn down by mid-season NCAA
+  // Transfer Portal reconciliations and tax withholdings, released with a
+  // verified reconciliation of record. Kind marks WHAT the row is for its
+  // whole life (a released or fully-drawn escrow stays kind
+  // 'nil_audit_escrow' with status 'settled'), the same division every
+  // escrow kind above uses.
+  "nil_audit_escrow",
+  // Unearned NIL advance clawback (PR 35): an athlete's pro-rated
+  // unearned advance balance, debited as the hold of record on transfer
+  // portal entry prior to contract completion — the receivable's face on
+  // the Don ledger, priced from the advance schedule of record, never
+  // guessed. Kind marks WHAT the row is for its whole life, the same
+  // division every kind above uses.
+  "nil_unearned_clawback",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

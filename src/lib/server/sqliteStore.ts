@@ -174,12 +174,18 @@ import type {
   NilDealComplianceAuditRecord,
   NilGroupSplitRecord,
   NilPayoutApplicationRecord,
+  NilAuditEscrowDrawdownRecord,
+  NilAuditEscrowPolicyRecord,
+  NilAuditEscrowReconciliationRecord,
+  NilAdvanceScheduleRecord,
   NilPayoutGateStateRecord,
   NilPoolApplicationRecord,
   NilRevenueShareProgramRecord,
   NilRosterWaterfallRecord,
   NilSchoolCapRecord,
   NilStateRuleRecord,
+  NilTransferPortalEntryRecord,
+  NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
   MatchQueueRecord,
@@ -1854,6 +1860,88 @@ CREATE TABLE IF NOT EXISTS nil_payout_gate_states (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (payee_id, school_id)
+);
+
+-- NIL audit escrow + transfer portal clawback (PR 35, migration 0039). The
+-- founder-banded escrow rate of record per (payee, school) scope, the
+-- position-locked escrow drawdowns (mid-season NCAA Transfer Portal
+-- reconciliations and tax withholdings), the verified reconciliations of
+-- record (the release gate's key), the NIL advance of record per contract
+-- (the pro-ration's terms), the portal entries of record per (contract,
+-- athlete), and the pro-rated clawbacks of record per portal entry.
+CREATE TABLE IF NOT EXISTS nil_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (scope_key)
+);
+
+CREATE TABLE IF NOT EXISTS nil_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('transfer_portal_reconciliation', 'tax_withholding')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL,
+  remaining_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id, source_event_id),
+  UNIQUE (reserve_ledger_id, drawn_before_cents)
+);
+
+CREATE TABLE IF NOT EXISTS nil_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (reserve_ledger_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_advance_schedules (
+  id TEXT PRIMARY KEY,
+  nil_contract_id TEXT NOT NULL,
+  athlete_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  advance_cents INTEGER NOT NULL CHECK (advance_cents > 0),
+  term_start_date TEXT NOT NULL,
+  term_end_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (nil_contract_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_transfer_portal_entries (
+  id TEXT PRIMARY KEY,
+  nil_contract_id TEXT NOT NULL,
+  athlete_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  contract_completion_date TEXT,
+  entered_prior_to_completion INTEGER NOT NULL CHECK (entered_prior_to_completion IN (0, 1)),
+  created_at TEXT NOT NULL,
+  UNIQUE (nil_contract_id, athlete_id)
+);
+
+CREATE TABLE IF NOT EXISTS nil_unearned_clawbacks (
+  id TEXT PRIMARY KEY,
+  nil_contract_id TEXT NOT NULL,
+  athlete_id TEXT NOT NULL,
+  school_id TEXT NOT NULL,
+  portal_entry_id TEXT NOT NULL,
+  advance_cents INTEGER NOT NULL,
+  term_start_date TEXT NOT NULL,
+  term_end_date TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  total_term_days INTEGER NOT NULL,
+  served_days INTEGER NOT NULL,
+  unearned_cents INTEGER NOT NULL,
+  clawback_ledger_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (portal_entry_id)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -6846,6 +6934,335 @@ export class SqliteStore implements Store {
       verified_by: (row.verified_by as string | null) ?? null,
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
+    });
+  }
+
+  // --- NIL audit escrow + transfer portal clawback (PR 35, migration 0039) ---
+
+  async upsertNilAuditEscrowPolicy(
+    row: Omit<NilAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registration converges (the newest rate
+    // governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record.id, record.scope_key, record.reserve_rate_bps, record.created_at, record.updated_at);
+    return this.getNilAuditEscrowPolicy(record.scope_key) as Promise<NilAuditEscrowPolicyRecord>;
+  }
+
+  async getNilAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<NilAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_audit_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: Number(row.reserve_rate_bps),
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async insertNilAuditEscrowDrawdown(
+    row: Omit<NilAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+    // UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+    // lock — a replayed event or a lost race throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO nil_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listNilAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowDrawdownRecord[]> {
+    return Promise.resolve(
+      (
+        this.db
+          .prepare(
+            `SELECT * FROM nil_audit_escrow_drawdowns
+             WHERE reserve_ledger_id = ? ORDER BY created_at ASC, rowid ASC`,
+          )
+          .all(reserveLedgerId) as Record<string, unknown>[]
+      ).map((row) => ({
+        id: row.id as string,
+        reserve_ledger_id: row.reserve_ledger_id as string,
+        scope_key: row.scope_key as string,
+        drawdown_class: row.drawdown_class as NilAuditEscrowDrawdownRecord['drawdown_class'],
+        source_event_id: row.source_event_id as string,
+        drawn_before_cents: Number(row.drawn_before_cents),
+        drawn_cents: Number(row.drawn_cents),
+        remaining_cents: Number(row.remaining_cents),
+        created_at: row.created_at as string,
+      })),
+    );
+  }
+
+  async insertNilAuditEscrowReconciliation(
+    row: Omit<NilAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<NilAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO nil_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.reserve_ledger_id, record.evidence_ref, record.reconciled_by, record.created_at);
+    return record;
+  }
+
+  async getNilAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<NilAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`)
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async settleNilAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the licensing reserve settle rides: only the caller
+    // whose WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'nil_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertNilAdvanceSchedule(
+    row: Omit<NilAdvanceScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<NilAdvanceScheduleRecord> {
+    // UNIQUE per nil_contract_id — a re-registration converges (the newest
+    // terms govern the next pro-rated clawback calculation).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO nil_advance_schedules
+           (id, nil_contract_id, athlete_id, school_id, advance_cents,
+            term_start_date, term_end_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (nil_contract_id) DO UPDATE SET
+           athlete_id = excluded.athlete_id,
+           school_id = excluded.school_id,
+           advance_cents = excluded.advance_cents,
+           term_start_date = excluded.term_start_date,
+           term_end_date = excluded.term_end_date,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.nil_contract_id,
+        record.athlete_id,
+        record.school_id,
+        record.advance_cents,
+        record.term_start_date,
+        record.term_end_date,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getNilAdvanceSchedule(record.nil_contract_id) as Promise<NilAdvanceScheduleRecord>;
+  }
+
+  async getNilAdvanceSchedule(
+    nilContractId: string,
+  ): Promise<NilAdvanceScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_advance_schedules WHERE nil_contract_id = ?`)
+      .get(nilContractId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      advance_cents: Number(row.advance_cents),
+      term_start_date: row.term_start_date as string,
+      term_end_date: row.term_end_date as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    });
+  }
+
+  async insertNilTransferPortalEntry(
+    row: Omit<NilTransferPortalEntryRecord, 'id' | 'created_at'>,
+  ): Promise<NilTransferPortalEntryRecord> {
+    // Insert-as-lock — UNIQUE per (nil_contract_id, athlete_id): the FIRST
+    // portal entry of record wins; a re-shipped sheet or a lost race
+    // throws here (the caller reads the winner through the getter). The
+    // boolean mirror: true = 1, false = 0.
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO nil_transfer_portal_entries
+           (id, nil_contract_id, athlete_id, school_id, entry_date,
+            contract_completion_date, entered_prior_to_completion, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.nil_contract_id,
+        record.athlete_id,
+        record.school_id,
+        record.entry_date,
+        record.contract_completion_date,
+        record.entered_prior_to_completion ? 1 : 0,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilTransferPortalEntry(
+    nilContractId: string,
+    athleteId: string,
+  ): Promise<NilTransferPortalEntryRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM nil_transfer_portal_entries WHERE nil_contract_id = ? AND athlete_id = ?`,
+      )
+      .get(nilContractId, athleteId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      entry_date: row.entry_date as string,
+      contract_completion_date: (row.contract_completion_date as string | null) ?? null,
+      entered_prior_to_completion: row.entered_prior_to_completion === 1,
+      created_at: row.created_at as string,
+    });
+  }
+
+  async insertNilUnearnedClawback(
+    row: Omit<NilUnearnedClawbackRecord, 'id' | 'created_at'>,
+  ): Promise<NilUnearnedClawbackRecord> {
+    // UNIQUE per portal_entry_id — the calculation and its
+    // nil_unearned_clawback debit hold land once; a concurrent second
+    // insert throws here (the caller reads the winner through the
+    // getter).
+    const record = { ...row, id: randomUUID(), created_at: new Date().toISOString() };
+    this.db
+      .prepare(
+        `INSERT INTO nil_unearned_clawbacks
+           (id, nil_contract_id, athlete_id, school_id, portal_entry_id,
+            advance_cents, term_start_date, term_end_date, entry_date,
+            total_term_days, served_days, unearned_cents, clawback_ledger_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.nil_contract_id,
+        record.athlete_id,
+        record.school_id,
+        record.portal_entry_id,
+        record.advance_cents,
+        record.term_start_date,
+        record.term_end_date,
+        record.entry_date,
+        record.total_term_days,
+        record.served_days,
+        record.unearned_cents,
+        record.clawback_ledger_id,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getNilUnearnedClawback(
+    portalEntryId: string,
+  ): Promise<NilUnearnedClawbackRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM nil_unearned_clawbacks WHERE portal_entry_id = ?`)
+      .get(portalEntryId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return Promise.resolve({
+      id: row.id as string,
+      nil_contract_id: row.nil_contract_id as string,
+      athlete_id: row.athlete_id as string,
+      school_id: row.school_id as string,
+      portal_entry_id: row.portal_entry_id as string,
+      advance_cents: Number(row.advance_cents),
+      term_start_date: row.term_start_date as string,
+      term_end_date: row.term_end_date as string,
+      entry_date: row.entry_date as string,
+      total_term_days: Number(row.total_term_days),
+      served_days: Number(row.served_days),
+      unearned_cents: Number(row.unearned_cents),
+      clawback_ledger_id: row.clawback_ledger_id as string,
+      created_at: row.created_at as string,
     });
   }
 

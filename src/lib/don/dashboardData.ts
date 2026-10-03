@@ -186,6 +186,15 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   licensing_audit_reserve_drawdown: 'Licensing audit reserve drawn down',
   licensing_audit_reserve_release: 'Licensing audit reserve released',
   licensing_mg_shortfall_invoice: 'Licensing MG shortfall invoiced',
+  // NIL audit escrow + transfer portal clawback (PR 35, the founder NIL
+  // directive): routing locks the distribution's escrow bucket, drawdowns
+  // spend it on portal reconciliations and withholdings, the verified
+  // release pays the remainder, and the portal clawback posts the
+  // pro-rated unearned-advance hold.
+  nil_audit_escrow_route: 'NIL audit escrow locked',
+  nil_audit_escrow_drawdown: 'NIL audit escrow drawn down',
+  nil_audit_escrow_release: 'NIL audit escrow released',
+  nil_unearned_clawback_hold: 'NIL unearned advance clawback hold',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {

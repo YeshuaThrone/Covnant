@@ -375,6 +375,17 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // states; still no DDL on universal_royalty_ledger — the applications
       // ride their own NIL tables, and the referencing pin below holds.
       '0038_nil_compliance_parser_roster_waterfall.sql',
+      // NIL audit escrow + transfer portal clawback (PR 35, the founder
+      // escrow directive): six durable tables — the escrow policies
+      // (the founder-banded 5–10% rate), the position-locked escrow
+      // drawdowns, the verified reconciliations (the release gate's
+      // key), the advance schedules (the pro-ration's terms), the
+      // transfer portal entries (the clawback's trigger), and the
+      // pro-rated unearned-advance clawbacks with the pro-ration
+      // identity pinned in a CHECK; still no DDL on
+      // universal_royalty_ledger — the buckets and journals ride the
+      // existing ledger vocabulary, and the referencing pin below holds.
+      '0039_nil_audit_escrow_transfer_portal_clawback.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
