@@ -492,6 +492,49 @@ export interface ReconJobResult {
   fitness_cobrand_distributor_cents?: number;
   fitness_algorithm_royalty_cents?: number;
   fitness_cocreation_allocated_cents?: number;
+  /** Food lane (PR 40): the Net Recipe Realization walk — the founder's
+   * exact identity and the Net Culinary IP Pool of record. */
+  food_realization_applications_committed?: number;
+  food_realization_applications_replayed?: number;
+  food_realization_held_negative_net?: number;
+  /** Food lane: the tiered recipe royalty walk — the per-dish micro-payout
+   * band walk and the percentage split on the location's cumulative
+   * monthly units (4% scaling to 7% strictly POST the threshold). */
+  food_royalty_applications_committed?: number;
+  food_royalty_applications_replayed?: number;
+  food_royalty_skipped_no_schedule?: number;
+  food_royalty_held_negative_net?: number;
+  /** Food lane: the weighted co-branded menu split — the recipe royalty
+   * pot routed per the ingredient and brand weightings of record. */
+  food_cobrand_splits_committed?: number;
+  food_cobrand_splits_replayed?: number;
+  food_cobrand_skipped_no_weightings?: number;
+  /** Food lane: the host kitchen operator split — the margin routes
+   * directly to the local operator while the brand licensor's percentage
+   * cut holds back. */
+  food_host_operator_splits_committed?: number;
+  food_host_operator_splits_replayed?: number;
+  food_host_operator_skipped_no_policy?: number;
+  /** Food lane: the cook-cycle micro-royalty ledger — per-execution
+   * micro-fees at the policy of record. */
+  food_cook_cycle_royalties_committed?: number;
+  food_cook_cycle_royalties_replayed?: number;
+  food_cook_cycle_skipped_no_policy?: number;
+  /** Food lane: the supplier rebate routing — the volume kickback passed
+   * proportionally back to the virtual franchise operators. */
+  food_supplier_rebates_committed?: number;
+  food_supplier_rebates_replayed?: number;
+  food_supplier_rebates_skipped_no_waterfall?: number;
+  /** Food lane: the committed money, integer cents — the realized pool
+   * and every leg the walks priced. */
+  food_net_culinary_ip_pool_cents?: number;
+  food_unit_payout_cents?: number;
+  food_percentage_split_cents?: number;
+  food_cobrand_allocated_cents?: number;
+  food_host_operator_cents?: number;
+  food_brand_licensor_holdback_cents?: number;
+  food_cook_cycle_royalty_cents?: number;
+  food_supplier_rebate_routed_cents?: number;
 }
 
 /** Input for Store.createReconJob — the enqueue route's one store call. */

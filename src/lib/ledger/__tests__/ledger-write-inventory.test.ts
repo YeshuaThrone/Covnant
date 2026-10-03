@@ -418,6 +418,7 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // applications of record; still no DDL on universal_royalty_ledger —
       // the referencing pin below holds.
       '0043_fitness_audit_escrow_payout_gates_live_bonuses.sql',
+      '0044_food_recipe_royalties_supplier_rebates.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

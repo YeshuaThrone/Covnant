@@ -239,6 +239,20 @@ import type {
   FitnessTrainerRoyaltyApplicationRecord,
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
+import type {
+  FoodCobrandSplitApplicationRecord,
+  FoodCobrandWeightingRecord,
+  FoodCookCyclePolicyRecord,
+  FoodCookCycleRoyaltyRecord,
+  FoodHostOperatorPolicyRecord,
+  FoodHostOperatorSplitApplicationRecord,
+  FoodLocationUnitMonthRecord,
+  FoodOperatorWaterfallRecord,
+  FoodRealizationApplicationRecord,
+  FoodRecipeRoyaltyApplicationRecord,
+  FoodRecipeRoyaltyScheduleRecord,
+  FoodSupplierRebateApplicationRecord,
+} from '@/modules/food/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   isSdkSettlementTransactionType,
@@ -487,6 +501,22 @@ export class InMemoryStore implements Store {
   private fitnessPayoutGateStates = new Map<string, FitnessPayoutGateStateRecord>();
   private fitnessLiveEventBonusPolicies = new Map<string, FitnessLiveEventBonusPolicyRecord>();
   private fitnessLiveEventBonuses: FitnessLiveEventBonusRecord[] = [];
+  // Migration 0044 — the food lane (the founder food directive).
+  private foodRecipeRoyaltySchedules = new Map<
+    string,
+    FoodRecipeRoyaltyScheduleRecord
+  >();
+  private foodLocationUnitMonths = new Map<string, FoodLocationUnitMonthRecord>();
+  private foodHostOperatorPolicies = new Map<string, FoodHostOperatorPolicyRecord>();
+  private foodCookCyclePolicies = new Map<string, FoodCookCyclePolicyRecord>();
+  private foodCobrandWeightings: FoodCobrandWeightingRecord[] = [];
+  private foodOperatorWaterfalls: FoodOperatorWaterfallRecord[] = [];
+  private foodRealizationApplications: FoodRealizationApplicationRecord[] = [];
+  private foodRecipeRoyaltyApplications: FoodRecipeRoyaltyApplicationRecord[] = [];
+  private foodCobrandSplitApplications: FoodCobrandSplitApplicationRecord[] = [];
+  private foodHostOperatorSplitApplications: FoodHostOperatorSplitApplicationRecord[] = [];
+  private foodCookCycleRoyalties: FoodCookCycleRoyaltyRecord[] = [];
+  private foodSupplierRebateApplications: FoodSupplierRebateApplicationRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -6399,6 +6429,366 @@ export class InMemoryStore implements Store {
     sourceEventId: string,
   ): Promise<FitnessLiveEventBonusRecord | undefined> {
     const found = this.fitnessLiveEventBonuses.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // --- PR 40, migration 0044 — the food lane (the founder food directive) ---
+
+  async upsertFoodRecipeRoyaltySchedule(
+    row: Omit<FoodRecipeRoyaltyScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered schedule replaces
+    // the row atomically.
+    const now = new Date().toISOString();
+    const key = `${row.chef_id}|${row.recipe_id}`;
+    const existing = this.foodRecipeRoyaltySchedules.get(key);
+    const record: FoodRecipeRoyaltyScheduleRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.foodRecipeRoyaltySchedules.set(key, record);
+    return { ...record };
+  }
+
+  async getFoodRecipeRoyaltySchedule(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord | undefined> {
+    const found = this.foodRecipeRoyaltySchedules.get(`${chefId}|${recipeId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async advanceFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<FoodLocationUnitMonthRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, month) — the tracker
+    // converges (an upsert adds).
+    const now = new Date().toISOString();
+    const key = `${ghostKitchenLocationId}|${month}`;
+    const existing = this.foodLocationUnitMonths.get(key);
+    const record: FoodLocationUnitMonthRecord = {
+      ghost_kitchen_location_id: ghostKitchenLocationId,
+      month,
+      cumulative_units: (existing?.cumulative_units ?? 0) + unitsAdded,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.foodLocationUnitMonths.set(key, record);
+    return { ...record };
+  }
+
+  async getFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+  ): Promise<FoodLocationUnitMonthRecord | undefined> {
+    const found = this.foodLocationUnitMonths.get(`${ghostKitchenLocationId}|${month}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFoodHostOperatorPolicy(
+    row: Omit<FoodHostOperatorPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodHostOperatorPolicyRecord> {
+    // UNIQUE per ghost_kitchen_location_id — a re-registered policy
+    // replaces the row atomically.
+    const now = new Date().toISOString();
+    const existing = this.foodHostOperatorPolicies.get(row.ghost_kitchen_location_id);
+    const record: FoodHostOperatorPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.foodHostOperatorPolicies.set(row.ghost_kitchen_location_id, record);
+    return { ...record };
+  }
+
+  async getFoodHostOperatorPolicy(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodHostOperatorPolicyRecord | undefined> {
+    const found = this.foodHostOperatorPolicies.get(ghostKitchenLocationId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFoodCookCyclePolicy(
+    row: Omit<FoodCookCyclePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCookCyclePolicyRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered policy replaces
+    // the row atomically.
+    const now = new Date().toISOString();
+    const key = `${row.chef_id}|${row.recipe_id}`;
+    const existing = this.foodCookCyclePolicies.get(key);
+    const record: FoodCookCyclePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.foodCookCyclePolicies.set(key, record);
+    return { ...record };
+  }
+
+  async getFoodCookCyclePolicy(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodCookCyclePolicyRecord | undefined> {
+    const found = this.foodCookCyclePolicies.get(`${chefId}|${recipeId}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFoodCobrandWeighting(
+    row: Omit<FoodCobrandWeightingRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCobrandWeightingRecord> {
+    // UNIQUE per (recipe_id, leg_id) — a re-registered leg converges.
+    const now = new Date().toISOString();
+    const index = this.foodCobrandWeightings.findIndex(
+      (leg) => leg.recipe_id === row.recipe_id && leg.leg_id === row.leg_id,
+    );
+    if (index >= 0) {
+      const existing = this.foodCobrandWeightings[index] as FoodCobrandWeightingRecord;
+      const record: FoodCobrandWeightingRecord = {
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: now,
+      };
+      this.foodCobrandWeightings[index] = record;
+      return { ...record };
+    }
+    const record: FoodCobrandWeightingRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.foodCobrandWeightings.push(record);
+    return { ...record };
+  }
+
+  async listFoodCobrandWeightings(recipeId: string): Promise<FoodCobrandWeightingRecord[]> {
+    // Registration order (the insertion order the split walk reads).
+    return this.foodCobrandWeightings
+      .filter((leg) => leg.recipe_id === recipeId)
+      .map((leg) => ({ ...leg }));
+  }
+
+  async upsertFoodOperatorWaterfallLeg(
+    row: Omit<FoodOperatorWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodOperatorWaterfallRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, operator_id) — a
+    // re-registered leg converges.
+    const now = new Date().toISOString();
+    const index = this.foodOperatorWaterfalls.findIndex(
+      (leg) =>
+        leg.ghost_kitchen_location_id === row.ghost_kitchen_location_id &&
+        leg.operator_id === row.operator_id,
+    );
+    if (index >= 0) {
+      const existing = this.foodOperatorWaterfalls[index] as FoodOperatorWaterfallRecord;
+      const record: FoodOperatorWaterfallRecord = {
+        ...row,
+        id: existing.id,
+        created_at: existing.created_at,
+        updated_at: now,
+      };
+      this.foodOperatorWaterfalls[index] = record;
+      return { ...record };
+    }
+    const record: FoodOperatorWaterfallRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: now,
+      updated_at: now,
+    };
+    this.foodOperatorWaterfalls.push(record);
+    return { ...record };
+  }
+
+  async listFoodOperatorWaterfallLegs(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodOperatorWaterfallRecord[]> {
+    // Registration order (the insertion order the rebate walk reads).
+    return this.foodOperatorWaterfalls
+      .filter((leg) => leg.ghost_kitchen_location_id === ghostKitchenLocationId)
+      .map((leg) => ({ ...leg }));
+  }
+
+  async insertFoodRealizationApplication(
+    row: Omit<FoodRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-walked order
+    // throws here, never a double application.
+    if (
+      this.foodRealizationApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_realization_applications.source_event_id');
+    }
+    const record: FoodRealizationApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodRealizationApplications.push(record);
+    return { ...record };
+  }
+
+  async getFoodRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FoodRealizationApplicationRecord | undefined> {
+    const found = this.foodRealizationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFoodRecipeRoyaltyApplication(
+    row: Omit<FoodRecipeRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.foodRecipeRoyaltyApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_recipe_royalty_applications.source_event_id');
+    }
+    const record: FoodRecipeRoyaltyApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodRecipeRoyaltyApplications.push(record);
+    return { ...record };
+  }
+
+  async getFoodRecipeRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord | undefined> {
+    const found = this.foodRecipeRoyaltyApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFoodCobrandSplitApplication(
+    row: Omit<FoodCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCobrandSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.foodCobrandSplitApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_cobrand_split_applications.source_event_id');
+    }
+    const record: FoodCobrandSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodCobrandSplitApplications.push(record);
+    return { ...record };
+  }
+
+  async getFoodCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodCobrandSplitApplicationRecord | undefined> {
+    const found = this.foodCobrandSplitApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFoodHostOperatorSplitApplication(
+    row: Omit<FoodHostOperatorSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodHostOperatorSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.foodHostOperatorSplitApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_host_operator_split_applications.source_event_id');
+    }
+    const record: FoodHostOperatorSplitApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodHostOperatorSplitApplications.push(record);
+    return { ...record };
+  }
+
+  async getFoodHostOperatorSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodHostOperatorSplitApplicationRecord | undefined> {
+    const found = this.foodHostOperatorSplitApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFoodCookCycleRoyalty(
+    row: Omit<FoodCookCycleRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCookCycleRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.foodCookCycleRoyalties.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_cook_cycle_royalties.source_event_id');
+    }
+    const record: FoodCookCycleRoyaltyRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodCookCycleRoyalties.push(record);
+    return { ...record };
+  }
+
+  async getFoodCookCycleRoyalty(
+    sourceEventId: string,
+  ): Promise<FoodCookCycleRoyaltyRecord | undefined> {
+    const found = this.foodCookCycleRoyalties.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFoodSupplierRebateApplication(
+    row: Omit<FoodSupplierRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodSupplierRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    if (
+      this.foodSupplierRebateApplications.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('food_supplier_rebate_applications.source_event_id');
+    }
+    const record: FoodSupplierRebateApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.foodSupplierRebateApplications.push(record);
+    return { ...record };
+  }
+
+  async getFoodSupplierRebateApplication(
+    sourceEventId: string,
+  ): Promise<FoodSupplierRebateApplicationRecord | undefined> {
+    const found = this.foodSupplierRebateApplications.find(
       (record) => record.source_event_id === sourceEventId,
     );
     return found === undefined ? undefined : { ...found };

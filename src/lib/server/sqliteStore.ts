@@ -233,6 +233,20 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  FoodCobrandSplitApplicationRecord,
+  FoodCobrandWeightingRecord,
+  FoodCookCyclePolicyRecord,
+  FoodCookCycleRoyaltyRecord,
+  FoodHostOperatorPolicyRecord,
+  FoodHostOperatorSplitApplicationRecord,
+  FoodLocationUnitMonthRecord,
+  FoodOperatorWaterfallRecord,
+  FoodRealizationApplicationRecord,
+  FoodRecipeRoyaltyApplicationRecord,
+  FoodRecipeRoyaltyScheduleRecord,
+  FoodSupplierRebateApplicationRecord,
+} from '@/modules/food/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2659,6 +2673,225 @@ CREATE TABLE IF NOT EXISTS fitness_live_event_bonuses (
   UNIQUE (source_event_id),
   -- The pinned pricing arithmetic (integer cents, floor).
   CHECK (bonus_cents = (live_event_revenue_cents * bonus_bps) / 10000)
+);
+
+-- The food lane (migration 0044, PR 40) — the founder food directive's
+-- durable facts of record: the royalty schedules, the cumulative
+-- location-month unit trackers, the host operator and cook-cycle
+-- policies, the co-brand weightings and operator waterfalls, and the six
+-- append-only application ledgers.
+CREATE TABLE IF NOT EXISTS food_recipe_royalty_schedules (
+  id TEXT PRIMARY KEY,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  unit_micros_bands TEXT NOT NULL,
+  royalty_bps_bands TEXT NOT NULL,
+  cpg_royalty_bps INTEGER NOT NULL CHECK (cpg_royalty_bps >= 0 AND cpg_royalty_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (chef_id, recipe_id)
+);
+
+CREATE TABLE IF NOT EXISTS food_location_unit_months (
+  id TEXT PRIMARY KEY,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  month TEXT NOT NULL,
+  cumulative_units INTEGER NOT NULL CHECK (cumulative_units >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (ghost_kitchen_location_id, month)
+);
+
+CREATE TABLE IF NOT EXISTS food_host_operator_policies (
+  id TEXT PRIMARY KEY,
+  ghost_kitchen_location_id TEXT NOT NULL UNIQUE,
+  brand_licensor_id TEXT NOT NULL,
+  brand_licensor_holdback_bps INTEGER NOT NULL CHECK (brand_licensor_holdback_bps >= 0 AND brand_licensor_holdback_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS food_cook_cycle_policies (
+  id TEXT PRIMARY KEY,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  micros_per_cook_cycle INTEGER NOT NULL CHECK (micros_per_cook_cycle >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (chef_id, recipe_id)
+);
+
+CREATE TABLE IF NOT EXISTS food_cobrand_weightings (
+  id TEXT PRIMARY KEY,
+  recipe_id TEXT NOT NULL,
+  leg_id TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  payee_role TEXT NOT NULL CHECK (payee_role IN ('chef', 'brand', 'operator', 'supplier_partner')),
+  weight_bps INTEGER NOT NULL CHECK (weight_bps > 0 AND weight_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (recipe_id, leg_id)
+);
+CREATE INDEX IF NOT EXISTS idx_food_cobrand_weightings_recipe
+  ON food_cobrand_weightings (recipe_id);
+
+CREATE TABLE IF NOT EXISTS food_operator_waterfalls (
+  id TEXT PRIMARY KEY,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  operator_id TEXT NOT NULL,
+  weight_bps INTEGER NOT NULL CHECK (weight_bps > 0 AND weight_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (ghost_kitchen_location_id, operator_id)
+);
+CREATE INDEX IF NOT EXISTS idx_food_operator_waterfalls_location
+  ON food_operator_waterfalls (ghost_kitchen_location_id);
+
+CREATE TABLE IF NOT EXISTS food_realization_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  gross_menu_item_sales_cents INTEGER NOT NULL CHECK (gross_menu_item_sales_cents >= 0),
+  approved_ingredient_cogs_cents INTEGER NOT NULL CHECK (approved_ingredient_cogs_cents >= 0),
+  delivery_platform_engine_cut_cents INTEGER NOT NULL CHECK (delivery_platform_engine_cut_cents >= 0),
+  local_food_service_taxes_cents INTEGER NOT NULL CHECK (local_food_service_taxes_cents >= 0),
+  net_culinary_ip_pool_cents INTEGER NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid', 'held_negative_net')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- THE NET RECIPE REALIZATION identity, pinned: the four legs conserve
+  -- the gross menu item sales exactly.
+  CHECK (
+    approved_ingredient_cogs_cents
+    + delivery_platform_engine_cut_cents
+    + local_food_service_taxes_cents
+    + net_culinary_ip_pool_cents
+    = gross_menu_item_sales_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS food_recipe_royalty_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  units_sold INTEGER NOT NULL CHECK (units_sold > 0),
+  net_basis_cents INTEGER NOT NULL CHECK (net_basis_cents >= 0),
+  schedule_ref TEXT NOT NULL,
+  unit_walk_legs TEXT NOT NULL,
+  unit_payout_micros INTEGER NOT NULL CHECK (unit_payout_micros >= 0),
+  unit_payout_cents INTEGER NOT NULL CHECK (unit_payout_cents >= 0),
+  royalty_bps INTEGER NOT NULL CHECK (royalty_bps >= 0 AND royalty_bps <= 10000),
+  percentage_split_cents INTEGER NOT NULL CHECK (percentage_split_cents >= 0),
+  units_before INTEGER NOT NULL CHECK (units_before >= 0),
+  units_after INTEGER NOT NULL CHECK (units_after >= 0),
+  verdict TEXT NOT NULL CHECK (verdict IN ('paid')),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The pinned band arithmetic: the payout cents floor the micros; the
+  -- percentage split prices the row's net basis at the row's band rate.
+  CHECK (
+    unit_payout_cents = unit_payout_micros / 10000
+    AND percentage_split_cents = (net_basis_cents * royalty_bps) / 10000
+    AND units_after = units_before + units_sold
+  )
+);
+
+CREATE TABLE IF NOT EXISTS food_cobrand_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  royalty_pot_cents INTEGER NOT NULL CHECK (royalty_pot_cents > 0),
+  weighting_legs TEXT NOT NULL,
+  allocated_total_cents INTEGER NOT NULL CHECK (allocated_total_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The pot conserves exactly: the legs' allocated shares sum to the pot.
+  CHECK (allocated_total_cents = royalty_pot_cents)
+);
+
+CREATE TABLE IF NOT EXISTS food_host_operator_split_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  tickets INTEGER NOT NULL CHECK (tickets > 0),
+  physical_preparation_margin_cents INTEGER NOT NULL CHECK (physical_preparation_margin_cents >= 0),
+  brand_licensor_id TEXT NOT NULL,
+  brand_licensor_holdback_bps INTEGER NOT NULL CHECK (brand_licensor_holdback_bps >= 0 AND brand_licensor_holdback_bps <= 10000),
+  brand_licensor_holdback_cents INTEGER NOT NULL CHECK (brand_licensor_holdback_cents >= 0),
+  host_operator_cents INTEGER NOT NULL CHECK (host_operator_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The margin routes DIRECTLY to the local operator first; the
+  -- licensor's cut holds back — the two legs conserve the margin exactly.
+  CHECK (
+    host_operator_cents
+    = physical_preparation_margin_cents - brand_licensor_holdback_cents
+  )
+);
+
+CREATE TABLE IF NOT EXISTS food_cook_cycle_royalties (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  chef_id TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  meal_kits_produced INTEGER NOT NULL CHECK (meal_kits_produced >= 0),
+  cook_cycles_executed INTEGER NOT NULL CHECK (cook_cycles_executed > 0),
+  payee_id TEXT NOT NULL,
+  micros_per_cook_cycle INTEGER NOT NULL CHECK (micros_per_cook_cycle >= 0),
+  royalty_micros INTEGER NOT NULL CHECK (royalty_micros >= 0),
+  royalty_cents INTEGER NOT NULL CHECK (royalty_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The pinned per-execution arithmetic (integer cents, floor).
+  CHECK (royalty_micros = cook_cycles_executed * micros_per_cook_cycle
+    AND royalty_cents = royalty_micros / 10000)
+);
+
+CREATE TABLE IF NOT EXISTS food_supplier_rebate_applications (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  supplier TEXT NOT NULL CHECK (supplier IN ('sysco', 'us_foods')),
+  ghost_kitchen_location_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  rebate_basis_cents INTEGER NOT NULL CHECK (rebate_basis_cents >= 0),
+  volume_rebate_cents INTEGER NOT NULL CHECK (volume_rebate_cents >= 0),
+  routing_legs TEXT NOT NULL,
+  routed_total_cents INTEGER NOT NULL CHECK (routed_total_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The rebate conserves exactly: the legs' routed shares sum to the
+  -- volume kickback.
+  CHECK (routed_total_cents = volume_rebate_cents)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -12978,6 +13211,742 @@ export class SqliteStore implements Store {
       live_event_revenue_cents: row.live_event_revenue_cents as number,
       bonus_bps: row.bonus_bps as number,
       bonus_cents: row.bonus_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  // --- PR 40, migration 0044 — the food lane (the founder food directive) ---
+
+  async upsertFoodRecipeRoyaltySchedule(
+    row: Omit<FoodRecipeRoyaltyScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered schedule replaces
+    // the row atomically (the newest schedule governs the next walk).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_recipe_royalty_schedules
+           (id, chef_id, recipe_id, unit_micros_bands, royalty_bps_bands,
+            cpg_royalty_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (chef_id, recipe_id) DO UPDATE SET
+           unit_micros_bands = excluded.unit_micros_bands,
+           royalty_bps_bands = excluded.royalty_bps_bands,
+           cpg_royalty_bps = excluded.cpg_royalty_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.chef_id,
+        record.recipe_id,
+        record.unit_micros_bands,
+        record.royalty_bps_bands,
+        record.cpg_royalty_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFoodRecipeRoyaltySchedule(record.chef_id, record.recipe_id) as Promise<
+      FoodRecipeRoyaltyScheduleRecord
+    >;
+  }
+
+  async getFoodRecipeRoyaltySchedule(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM food_recipe_royalty_schedules WHERE chef_id = ? AND recipe_id = ?`,
+      )
+      .get(chefId, recipeId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      unit_micros_bands: row.unit_micros_bands as string,
+      royalty_bps_bands: row.royalty_bps_bands as string,
+      cpg_royalty_bps: row.cpg_royalty_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async advanceFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<FoodLocationUnitMonthRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, month) — the tracker
+    // converges (the upsert ADDS the row's units to the cumulative
+    // position).
+    const record = {
+      id: randomUUID(),
+      ghost_kitchen_location_id: ghostKitchenLocationId,
+      month,
+      cumulative_units: unitsAdded,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_location_unit_months
+           (id, ghost_kitchen_location_id, month, cumulative_units, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (ghost_kitchen_location_id, month) DO UPDATE SET
+           cumulative_units = food_location_unit_months.cumulative_units
+             + excluded.cumulative_units,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.ghost_kitchen_location_id,
+        record.month,
+        record.cumulative_units,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFoodLocationUnitMonth(ghostKitchenLocationId, month) as Promise<
+      FoodLocationUnitMonthRecord
+    >;
+  }
+
+  async getFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+  ): Promise<FoodLocationUnitMonthRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM food_location_unit_months
+           WHERE ghost_kitchen_location_id = ? AND month = ?`,
+      )
+      .get(ghostKitchenLocationId, month) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      month: row.month as string,
+      cumulative_units: row.cumulative_units as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFoodHostOperatorPolicy(
+    row: Omit<FoodHostOperatorPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodHostOperatorPolicyRecord> {
+    // UNIQUE per ghost_kitchen_location_id — a re-registered policy
+    // replaces the row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_host_operator_policies
+           (id, ghost_kitchen_location_id, brand_licensor_id,
+            brand_licensor_holdback_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (ghost_kitchen_location_id) DO UPDATE SET
+           brand_licensor_id = excluded.brand_licensor_id,
+           brand_licensor_holdback_bps = excluded.brand_licensor_holdback_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.ghost_kitchen_location_id,
+        record.brand_licensor_id,
+        record.brand_licensor_holdback_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFoodHostOperatorPolicy(record.ghost_kitchen_location_id) as Promise<
+      FoodHostOperatorPolicyRecord
+    >;
+  }
+
+  async getFoodHostOperatorPolicy(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodHostOperatorPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM food_host_operator_policies WHERE ghost_kitchen_location_id = ?`,
+      )
+      .get(ghostKitchenLocationId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      brand_licensor_id: row.brand_licensor_id as string,
+      brand_licensor_holdback_bps: row.brand_licensor_holdback_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFoodCookCyclePolicy(
+    row: Omit<FoodCookCyclePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCookCyclePolicyRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered policy replaces
+    // the row atomically.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_cook_cycle_policies
+           (id, chef_id, recipe_id, payee_id, micros_per_cook_cycle, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (chef_id, recipe_id) DO UPDATE SET
+           payee_id = excluded.payee_id,
+           micros_per_cook_cycle = excluded.micros_per_cook_cycle,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.chef_id,
+        record.recipe_id,
+        record.payee_id,
+        record.micros_per_cook_cycle,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFoodCookCyclePolicy(record.chef_id, record.recipe_id) as Promise<
+      FoodCookCyclePolicyRecord
+    >;
+  }
+
+  async getFoodCookCyclePolicy(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodCookCyclePolicyRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM food_cook_cycle_policies WHERE chef_id = ? AND recipe_id = ?`,
+      )
+      .get(chefId, recipeId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      payee_id: row.payee_id as string,
+      micros_per_cook_cycle: row.micros_per_cook_cycle as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFoodCobrandWeighting(
+    row: Omit<FoodCobrandWeightingRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCobrandWeightingRecord> {
+    // UNIQUE per (recipe_id, leg_id) — a re-registered leg converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_cobrand_weightings
+           (id, recipe_id, leg_id, payee_id, payee_role, weight_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (recipe_id, leg_id) DO UPDATE SET
+           payee_id = excluded.payee_id,
+           payee_role = excluded.payee_role,
+           weight_bps = excluded.weight_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.recipe_id,
+        record.leg_id,
+        record.payee_id,
+        record.payee_role,
+        record.weight_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async listFoodCobrandWeightings(recipeId: string): Promise<FoodCobrandWeightingRecord[]> {
+    // Registration order (created_at ASC, id ASC is this backend's
+    // insertion_order).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM food_cobrand_weightings
+           WHERE recipe_id = ?
+           ORDER BY created_at ASC, id ASC`,
+      )
+      .all(recipeId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      recipe_id: row.recipe_id as string,
+      leg_id: row.leg_id as string,
+      payee_id: row.payee_id as string,
+      payee_role: row.payee_role as FoodCobrandWeightingRecord['payee_role'],
+      weight_bps: row.weight_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async upsertFoodOperatorWaterfallLeg(
+    row: Omit<FoodOperatorWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodOperatorWaterfallRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, operator_id) — a
+    // re-registered leg converges.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_operator_waterfalls
+           (id, ghost_kitchen_location_id, operator_id, weight_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (ghost_kitchen_location_id, operator_id) DO UPDATE SET
+           weight_bps = excluded.weight_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.ghost_kitchen_location_id,
+        record.operator_id,
+        record.weight_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async listFoodOperatorWaterfallLegs(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodOperatorWaterfallRecord[]> {
+    // Registration order (created_at ASC, id ASC is this backend's
+    // insertion_order).
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM food_operator_waterfalls
+           WHERE ghost_kitchen_location_id = ?
+           ORDER BY created_at ASC, id ASC`,
+      )
+      .all(ghostKitchenLocationId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      operator_id: row.operator_id as string,
+      weight_bps: row.weight_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    }));
+  }
+
+  async insertFoodRealizationApplication(
+    row: Omit<FoodRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-walked order
+    // throws here, never a double application.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_realization_applications
+           (id, source_event_id, chef_id, recipe_id, ghost_kitchen_location_id, period,
+            currency, gross_menu_item_sales_cents, approved_ingredient_cogs_cents,
+            delivery_platform_engine_cut_cents, local_food_service_taxes_cents,
+            net_culinary_ip_pool_cents, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.chef_id,
+        record.recipe_id,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.gross_menu_item_sales_cents,
+        record.approved_ingredient_cogs_cents,
+        record.delivery_platform_engine_cut_cents,
+        record.local_food_service_taxes_cents,
+        record.net_culinary_ip_pool_cents,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FoodRealizationApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM food_realization_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      gross_menu_item_sales_cents: row.gross_menu_item_sales_cents as number,
+      approved_ingredient_cogs_cents: row.approved_ingredient_cogs_cents as number,
+      delivery_platform_engine_cut_cents: row.delivery_platform_engine_cut_cents as number,
+      local_food_service_taxes_cents: row.local_food_service_taxes_cents as number,
+      net_culinary_ip_pool_cents: row.net_culinary_ip_pool_cents as number,
+      verdict: row.verdict as FoodRealizationApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFoodRecipeRoyaltyApplication(
+    row: Omit<FoodRecipeRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_recipe_royalty_applications
+           (id, source_event_id, sender, chef_id, recipe_id, ghost_kitchen_location_id,
+            period, currency, platform, units_sold, net_basis_cents, schedule_ref,
+            unit_walk_legs, unit_payout_micros, unit_payout_cents, royalty_bps,
+            percentage_split_cents, units_before, units_after, verdict, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.sender,
+        record.chef_id,
+        record.recipe_id,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.platform,
+        record.units_sold,
+        record.net_basis_cents,
+        record.schedule_ref,
+        record.unit_walk_legs,
+        record.unit_payout_micros,
+        record.unit_payout_cents,
+        record.royalty_bps,
+        record.percentage_split_cents,
+        record.units_before,
+        record.units_after,
+        record.verdict,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodRecipeRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM food_recipe_royalty_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      sender: row.sender as FoodRecipeRoyaltyApplicationRecord['sender'],
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      platform: row.platform as FoodRecipeRoyaltyApplicationRecord['platform'],
+      units_sold: row.units_sold as number,
+      net_basis_cents: row.net_basis_cents as number,
+      schedule_ref: row.schedule_ref as string,
+      unit_walk_legs: row.unit_walk_legs as string,
+      unit_payout_micros: row.unit_payout_micros as number,
+      unit_payout_cents: row.unit_payout_cents as number,
+      royalty_bps: row.royalty_bps as number,
+      percentage_split_cents: row.percentage_split_cents as number,
+      units_before: row.units_before as number,
+      units_after: row.units_after as number,
+      verdict: row.verdict as FoodRecipeRoyaltyApplicationRecord['verdict'],
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFoodCobrandSplitApplication(
+    row: Omit<FoodCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCobrandSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_cobrand_split_applications
+           (id, source_event_id, chef_id, recipe_id, ghost_kitchen_location_id, period,
+            currency, royalty_pot_cents, weighting_legs, allocated_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.chef_id,
+        record.recipe_id,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.royalty_pot_cents,
+        record.weighting_legs,
+        record.allocated_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodCobrandSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM food_cobrand_split_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      royalty_pot_cents: row.royalty_pot_cents as number,
+      weighting_legs: row.weighting_legs as string,
+      allocated_total_cents: row.allocated_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFoodHostOperatorSplitApplication(
+    row: Omit<FoodHostOperatorSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodHostOperatorSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_host_operator_split_applications
+           (id, source_event_id, chef_id, recipe_id, ghost_kitchen_location_id, period,
+            currency, platform, tickets, physical_preparation_margin_cents,
+            brand_licensor_id, brand_licensor_holdback_bps,
+            brand_licensor_holdback_cents, host_operator_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.chef_id,
+        record.recipe_id,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.platform,
+        record.tickets,
+        record.physical_preparation_margin_cents,
+        record.brand_licensor_id,
+        record.brand_licensor_holdback_bps,
+        record.brand_licensor_holdback_cents,
+        record.host_operator_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodHostOperatorSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodHostOperatorSplitApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM food_host_operator_split_applications WHERE source_event_id = ?`,
+      )
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      platform: row.platform as FoodHostOperatorSplitApplicationRecord['platform'],
+      tickets: row.tickets as number,
+      physical_preparation_margin_cents: row.physical_preparation_margin_cents as number,
+      brand_licensor_id: row.brand_licensor_id as string,
+      brand_licensor_holdback_bps: row.brand_licensor_holdback_bps as number,
+      brand_licensor_holdback_cents: row.brand_licensor_holdback_cents as number,
+      host_operator_cents: row.host_operator_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFoodCookCycleRoyalty(
+    row: Omit<FoodCookCycleRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCookCycleRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_cook_cycle_royalties
+           (id, source_event_id, chef_id, recipe_id, ghost_kitchen_location_id, period,
+            currency, meal_kits_produced, cook_cycles_executed, payee_id,
+            micros_per_cook_cycle, royalty_micros, royalty_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.chef_id,
+        record.recipe_id,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.meal_kits_produced,
+        record.cook_cycles_executed,
+        record.payee_id,
+        record.micros_per_cook_cycle,
+        record.royalty_micros,
+        record.royalty_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodCookCycleRoyalty(
+    sourceEventId: string,
+  ): Promise<FoodCookCycleRoyaltyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM food_cook_cycle_royalties WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      chef_id: row.chef_id as string,
+      recipe_id: row.recipe_id as string,
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      meal_kits_produced: row.meal_kits_produced as number,
+      cook_cycles_executed: row.cook_cycles_executed as number,
+      payee_id: row.payee_id as string,
+      micros_per_cook_cycle: row.micros_per_cook_cycle as number,
+      royalty_micros: row.royalty_micros as number,
+      royalty_cents: row.royalty_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async insertFoodSupplierRebateApplication(
+    row: Omit<FoodSupplierRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodSupplierRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO food_supplier_rebate_applications
+           (id, source_event_id, supplier, ghost_kitchen_location_id, period, currency,
+            rebate_basis_cents, volume_rebate_cents, routing_legs, routed_total_cents,
+            created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.supplier,
+        record.ghost_kitchen_location_id,
+        record.period,
+        record.currency,
+        record.rebate_basis_cents,
+        record.volume_rebate_cents,
+        record.routing_legs,
+        record.routed_total_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFoodSupplierRebateApplication(
+    sourceEventId: string,
+  ): Promise<FoodSupplierRebateApplicationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM food_supplier_rebate_applications WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      supplier: row.supplier as FoodSupplierRebateApplicationRecord['supplier'],
+      ghost_kitchen_location_id: row.ghost_kitchen_location_id as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      rebate_basis_cents: row.rebate_basis_cents as number,
+      volume_rebate_cents: row.volume_rebate_cents as number,
+      routing_legs: row.routing_legs as string,
+      routed_total_cents: row.routed_total_cents as number,
       created_at: row.created_at as string,
     };
   }

@@ -57,10 +57,12 @@ import { isLicensingProfileKind } from "./licensingProfiles";
 import { isNilProfileKind } from "./nilProfiles";
 import { isSpatialProfileKind } from "./spatialProfiles";
 import { isFitnessProfileKind } from "./fitnessProfiles";
+import { isFoodProfileKind } from "./foodProfiles";
 import { writeLicensingLinesToMatchQueue } from "./licensingQueue";
 import { writeNilRowsToStore } from "./nilQueue";
 import { writeSpatialRowsToStore } from "./spatialQueue";
 import { writeFitnessRowsToStore } from "./fitnessQueue";
+import { writeFoodRowsToStore } from "./foodQueue";
 import { postLicensingNetsToHolding } from "./licensingPosting";
 import { runLicensingRoyaltyCascadePass } from "@/lib/server/licensingRoyaltyCascade";
 import { runTheatricalWaterfallPass } from "@/lib/server/theatricalBoxOfficeCascade";
@@ -306,6 +308,21 @@ async function processJobBody(
     // record; match_queue never sees a fitness row.
     if (isFitnessProfileKind(matchedProfile.kind)) {
       return await parseFitness(deps, matchedProfile, content);
+    }
+    // The food lane branches the same way (PR 40, the founder food
+    // directive): its rows are the five strict senders' delivery-order /
+    // POS-ticket / meal-kit-production / grocery-scan / supplier-rebate
+    // lines whose money runs the Net Recipe Realization identity (gross
+    // menu item sales − approved ingredient COGS − delivery platform
+    // engine cut − local food service taxes = the Net Culinary IP Pool),
+    // the cumulative location-month unit-tier walk, the weighted co-brand
+    // splits, the host operator splits with the brand holdback, the
+    // cook-cycle micro-royalties, and the supplier rebate waterfalls —
+    // never the music queue's split math, the fitness walks, or any other
+    // lane's machinery. The store applications ARE the lane's money of
+    // record; match_queue never sees a food row.
+    if (isFoodProfileKind(matchedProfile.kind)) {
+      return await parseFood(deps, matchedProfile, content);
     }
     return await parseDeterministic(deps, job.ingest_id, matchedProfile, content);
   }
@@ -1028,6 +1045,72 @@ async function parseFitness(
     fitness_cobrand_distributor_cents: counts.cobrandDistributorCents,
     fitness_algorithm_royalty_cents: counts.algorithmRoyaltyCents,
     fitness_cocreation_allocated_cents: counts.cocreationAllocatedCents,
+  };
+}
+
+/**
+ * The food lane (PR 40, the founder food directive): the five strict
+ * senders' rows run the six store walks and the store's food applications
+ * ARE the lane's money of record — the Net Recipe Realization
+ * applications (gross menu item sales − approved ingredient COGS −
+ * delivery platform engine cut − local food service taxes = the Net
+ * Culinary IP Pool), the tiered recipe royalty applications (the
+ * per-dish unit-band walk plus the percentage split on the realized pool
+ * at the band holding the row's CLOSING cumulative monthly position),
+ * the weighted co-brand splits, the host operator splits (the margin
+ * routes to the local operator; the licensor's cut holds back), the
+ * cook-cycle micro-royalties, and the supplier rebate waterfalls. No
+ * match_queue row, no holding post: replay guards and the fail-closed
+ * policies of record govern everything. The result's food_* block is
+ * absent on every other lane — its presence is the discriminator.
+ */
+async function parseFood(
+  deps: ReconWorkerDeps,
+  profile: StatementProfile,
+  content: string,
+): Promise<ReconWorkerResult> {
+  const lines = profile.parse(content);
+  const counts = await writeFoodRowsToStore(deps.store, lines);
+  return {
+    events_written:
+      counts.realizationApplicationsWritten +
+      counts.royaltyApplicationsWritten +
+      counts.cobrandSplitsWritten +
+      counts.hostOperatorSplitsWritten +
+      counts.cookCycleRoyaltiesWritten +
+      counts.supplierRebatesWritten,
+    matched: 0, // no vault matching on this lane — the food tables are the ledger
+    unmatched: 0,
+    engine_used: null,
+    holding_posted: 0,
+    holding_replayed: 0,
+    food_realization_applications_committed: counts.realizationApplicationsWritten,
+    food_realization_applications_replayed: counts.realizationApplicationsReplayed,
+    food_realization_held_negative_net: counts.realizationHeldNegativeNet,
+    food_royalty_applications_committed: counts.royaltyApplicationsWritten,
+    food_royalty_applications_replayed: counts.royaltyApplicationsReplayed,
+    food_royalty_skipped_no_schedule: counts.royaltySkippedNoSchedule,
+    food_royalty_held_negative_net: counts.royaltyHeldNegativeNet,
+    food_cobrand_splits_committed: counts.cobrandSplitsWritten,
+    food_cobrand_splits_replayed: counts.cobrandSplitsReplayed,
+    food_cobrand_skipped_no_weightings: counts.cobrandSkippedNoWeightings,
+    food_host_operator_splits_committed: counts.hostOperatorSplitsWritten,
+    food_host_operator_splits_replayed: counts.hostOperatorSplitsReplayed,
+    food_host_operator_skipped_no_policy: counts.hostOperatorSkippedNoPolicy,
+    food_cook_cycle_royalties_committed: counts.cookCycleRoyaltiesWritten,
+    food_cook_cycle_royalties_replayed: counts.cookCycleRoyaltiesReplayed,
+    food_cook_cycle_skipped_no_policy: counts.cookCycleSkippedNoPolicy,
+    food_supplier_rebates_committed: counts.supplierRebatesWritten,
+    food_supplier_rebates_replayed: counts.supplierRebatesReplayed,
+    food_supplier_rebates_skipped_no_waterfall: counts.supplierRebatesSkippedNoWaterfall,
+    food_net_culinary_ip_pool_cents: counts.netCulinaryIpPoolCents,
+    food_unit_payout_cents: counts.unitPayoutCents,
+    food_percentage_split_cents: counts.percentageSplitCents,
+    food_cobrand_allocated_cents: counts.cobrandAllocatedCents,
+    food_host_operator_cents: counts.hostOperatorCents,
+    food_brand_licensor_holdback_cents: counts.brandLicensorHoldbackCents,
+    food_cook_cycle_royalty_cents: counts.cookCycleRoyaltyCents,
+    food_supplier_rebate_routed_cents: counts.supplierRebateRoutedCents,
   };
 }
 

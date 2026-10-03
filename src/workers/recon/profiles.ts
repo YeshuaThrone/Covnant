@@ -32,6 +32,7 @@ import { LICENSING_PROFILES } from "./licensingProfiles";
 import { NIL_PROFILES } from "./nilProfiles";
 import { SPATIAL_PROFILES } from "./spatialProfiles";
 import { FITNESS_PROFILES } from "./fitnessProfiles";
+import { FOOD_PROFILES } from "./foodProfiles";
 import { ART_PROFILES } from "./artProfiles";
 import {
   optionalCell,
@@ -591,6 +592,14 @@ export const STATEMENT_PROFILES: readonly StatementProfile[] = [
   // module-weighted co-creation waterfalls are fitness-only, and fitness
   // rows never touch the music split machinery).
   ...FITNESS_PROFILES,
+  // The food lane (PR 40) — same dispatch opinion; the worker branches on
+  // the profile kind before the music machinery (the Net Recipe
+  // Realization calculator, the cumulative location-month unit-tier walk,
+  // the weighted co-brand splits, the host operator splits with the brand
+  // holdback, the cook-cycle micro-royalties, and the supplier rebate
+  // waterfalls are food-only, and food rows never touch the music split
+  // machinery).
+  ...FOOD_PROFILES,
 ];
 
 /**

@@ -226,6 +226,20 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  FoodCobrandSplitApplicationRecord,
+  FoodCobrandWeightingRecord,
+  FoodCookCyclePolicyRecord,
+  FoodCookCycleRoyaltyRecord,
+  FoodHostOperatorPolicyRecord,
+  FoodHostOperatorSplitApplicationRecord,
+  FoodLocationUnitMonthRecord,
+  FoodOperatorWaterfallRecord,
+  FoodRealizationApplicationRecord,
+  FoodRecipeRoyaltyApplicationRecord,
+  FoodRecipeRoyaltyScheduleRecord,
+  FoodSupplierRebateApplicationRecord,
+} from '@/modules/food/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -539,6 +553,19 @@ const TABLES = {
   fitnessPayoutGateStates: 'fitness_payout_gate_states',
   fitnessLiveEventBonusPolicies: 'fitness_live_event_bonus_policies',
   fitnessLiveEventBonuses: 'fitness_live_event_bonuses',
+  // Migration 0044 — the food lane (the founder food directive).
+  foodRecipeRoyaltySchedules: 'food_recipe_royalty_schedules',
+  foodLocationUnitMonths: 'food_location_unit_months',
+  foodHostOperatorPolicies: 'food_host_operator_policies',
+  foodCookCyclePolicies: 'food_cook_cycle_policies',
+  foodCobrandWeightings: 'food_cobrand_weightings',
+  foodOperatorWaterfalls: 'food_operator_waterfalls',
+  foodRealizationApplications: 'food_realization_applications',
+  foodRecipeRoyaltyApplications: 'food_recipe_royalty_applications',
+  foodCobrandSplitApplications: 'food_cobrand_split_applications',
+  foodHostOperatorSplitApplications: 'food_host_operator_split_applications',
+  foodCookCycleRoyalties: 'food_cook_cycle_royalties',
+  foodSupplierRebateApplications: 'food_supplier_rebate_applications',
 } as const;
 
 /**
@@ -5682,6 +5709,364 @@ export class SupabaseStore implements Store {
         .eq('source_event_id', sourceEventId)
         .maybeSingle(),
       'getFitnessLiveEventBonus',
+    );
+  }
+
+  // --- PR 40, migration 0044 — the food lane (the founder food directive) ---
+
+  async upsertFoodRecipeRoyaltySchedule(
+    row: Omit<FoodRecipeRoyaltyScheduleRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered schedule replaces
+    // the row atomically (the newest schedule governs the next walk).
+    // HARDENED UPSERT: no id in the payload (the id rotates on conflict).
+    return this.oneStrict<FoodRecipeRoyaltyScheduleRecord>(
+      this.client
+        .from(TABLES.foodRecipeRoyaltySchedules)
+        .upsert(row, { onConflict: 'chef_id,recipe_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFoodRecipeRoyaltySchedule',
+    );
+  }
+
+  async getFoodRecipeRoyaltySchedule(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodRecipeRoyaltyScheduleRecord | undefined> {
+    return this.one<FoodRecipeRoyaltyScheduleRecord>(
+      this.client
+        .from(TABLES.foodRecipeRoyaltySchedules)
+        .select()
+        .eq('chef_id', chefId)
+        .eq('recipe_id', recipeId)
+        .maybeSingle(),
+      'getFoodRecipeRoyaltySchedule',
+    );
+  }
+
+  async advanceFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+    unitsAdded: number,
+  ): Promise<FoodLocationUnitMonthRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, month) — the tracker
+    // converges. Same read-modify-upsert as the fitness completion
+    // tracker: the cumulative walk is serialized per location-month by
+    // the recon lane, so a read-modify-upsert carries the same position
+    // arithmetic the SQLite backend expresses additively in its ON
+    // CONFLICT arm. No id in the payload.
+    const existing = await this.getFoodLocationUnitMonth(ghostKitchenLocationId, month);
+    return this.oneStrict<FoodLocationUnitMonthRecord>(
+      this.client
+        .from(TABLES.foodLocationUnitMonths)
+        .upsert(
+          {
+            ghost_kitchen_location_id: ghostKitchenLocationId,
+            month,
+            cumulative_units: (existing?.cumulative_units ?? 0) + unitsAdded,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'ghost_kitchen_location_id,month' },
+        )
+        .select()
+        .maybeSingle(),
+      'advanceFoodLocationUnitMonth',
+    );
+  }
+
+  async getFoodLocationUnitMonth(
+    ghostKitchenLocationId: string,
+    month: string,
+  ): Promise<FoodLocationUnitMonthRecord | undefined> {
+    return this.one<FoodLocationUnitMonthRecord>(
+      this.client
+        .from(TABLES.foodLocationUnitMonths)
+        .select()
+        .eq('ghost_kitchen_location_id', ghostKitchenLocationId)
+        .eq('month', month)
+        .maybeSingle(),
+      'getFoodLocationUnitMonth',
+    );
+  }
+
+  async upsertFoodHostOperatorPolicy(
+    row: Omit<FoodHostOperatorPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodHostOperatorPolicyRecord> {
+    // UNIQUE per ghost_kitchen_location_id — a re-registered policy
+    // replaces the row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FoodHostOperatorPolicyRecord>(
+      this.client
+        .from(TABLES.foodHostOperatorPolicies)
+        .upsert(row, { onConflict: 'ghost_kitchen_location_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFoodHostOperatorPolicy',
+    );
+  }
+
+  async getFoodHostOperatorPolicy(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodHostOperatorPolicyRecord | undefined> {
+    return this.one<FoodHostOperatorPolicyRecord>(
+      this.client
+        .from(TABLES.foodHostOperatorPolicies)
+        .select()
+        .eq('ghost_kitchen_location_id', ghostKitchenLocationId)
+        .maybeSingle(),
+      'getFoodHostOperatorPolicy',
+    );
+  }
+
+  async upsertFoodCookCyclePolicy(
+    row: Omit<FoodCookCyclePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCookCyclePolicyRecord> {
+    // UNIQUE per (chef_id, recipe_id) — a re-registered policy replaces
+    // the row atomically. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FoodCookCyclePolicyRecord>(
+      this.client
+        .from(TABLES.foodCookCyclePolicies)
+        .upsert(row, { onConflict: 'chef_id,recipe_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFoodCookCyclePolicy',
+    );
+  }
+
+  async getFoodCookCyclePolicy(
+    chefId: string,
+    recipeId: string,
+  ): Promise<FoodCookCyclePolicyRecord | undefined> {
+    return this.one<FoodCookCyclePolicyRecord>(
+      this.client
+        .from(TABLES.foodCookCyclePolicies)
+        .select()
+        .eq('chef_id', chefId)
+        .eq('recipe_id', recipeId)
+        .maybeSingle(),
+      'getFoodCookCyclePolicy',
+    );
+  }
+
+  async upsertFoodCobrandWeighting(
+    row: Omit<FoodCobrandWeightingRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodCobrandWeightingRecord> {
+    // UNIQUE per (recipe_id, leg_id) — a re-registered leg converges.
+    // HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FoodCobrandWeightingRecord>(
+      this.client
+        .from(TABLES.foodCobrandWeightings)
+        .upsert(row, { onConflict: 'recipe_id,leg_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFoodCobrandWeighting',
+    );
+  }
+
+  async listFoodCobrandWeightings(recipeId: string): Promise<FoodCobrandWeightingRecord[]> {
+    // Registration order (the insertion order the split walk reads).
+    const { data, error } = await this.client
+      .from(TABLES.foodCobrandWeightings)
+      .select()
+      .eq('recipe_id', recipeId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listFoodCobrandWeightings failed: ${error.message}`);
+    }
+    return (data ?? []) as FoodCobrandWeightingRecord[];
+  }
+
+  async upsertFoodOperatorWaterfallLeg(
+    row: Omit<FoodOperatorWaterfallRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FoodOperatorWaterfallRecord> {
+    // UNIQUE per (ghost_kitchen_location_id, operator_id) — a
+    // re-registered leg converges. HARDENED UPSERT: no id in the payload.
+    return this.oneStrict<FoodOperatorWaterfallRecord>(
+      this.client
+        .from(TABLES.foodOperatorWaterfalls)
+        .upsert(row, { onConflict: 'ghost_kitchen_location_id,operator_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFoodOperatorWaterfallLeg',
+    );
+  }
+
+  async listFoodOperatorWaterfallLegs(
+    ghostKitchenLocationId: string,
+  ): Promise<FoodOperatorWaterfallRecord[]> {
+    // Registration order (the insertion order the rebate walk reads).
+    const { data, error } = await this.client
+      .from(TABLES.foodOperatorWaterfalls)
+      .select()
+      .eq('ghost_kitchen_location_id', ghostKitchenLocationId)
+      .order('created_at');
+    if (error) {
+      throw new Error(`listFoodOperatorWaterfallLegs failed: ${error.message}`);
+    }
+    return (data ?? []) as FoodOperatorWaterfallRecord[];
+  }
+
+  async insertFoodRealizationApplication(
+    row: Omit<FoodRealizationApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRealizationApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard: a re-walked order
+    // throws here, never a double application; the caller re-derives
+    // from the application of record.
+    return this.oneStrict<FoodRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.foodRealizationApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodRealizationApplication',
+    );
+  }
+
+  async getFoodRealizationApplication(
+    sourceEventId: string,
+  ): Promise<FoodRealizationApplicationRecord | undefined> {
+    return this.one<FoodRealizationApplicationRecord>(
+      this.client
+        .from(TABLES.foodRealizationApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodRealizationApplication',
+    );
+  }
+
+  async insertFoodRecipeRoyaltyApplication(
+    row: Omit<FoodRecipeRoyaltyApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<FoodRecipeRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.foodRecipeRoyaltyApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodRecipeRoyaltyApplication',
+    );
+  }
+
+  async getFoodRecipeRoyaltyApplication(
+    sourceEventId: string,
+  ): Promise<FoodRecipeRoyaltyApplicationRecord | undefined> {
+    return this.one<FoodRecipeRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.foodRecipeRoyaltyApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodRecipeRoyaltyApplication',
+    );
+  }
+
+  async insertFoodCobrandSplitApplication(
+    row: Omit<FoodCobrandSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCobrandSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<FoodCobrandSplitApplicationRecord>(
+      this.client
+        .from(TABLES.foodCobrandSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodCobrandSplitApplication',
+    );
+  }
+
+  async getFoodCobrandSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodCobrandSplitApplicationRecord | undefined> {
+    return this.one<FoodCobrandSplitApplicationRecord>(
+      this.client
+        .from(TABLES.foodCobrandSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodCobrandSplitApplication',
+    );
+  }
+
+  async insertFoodHostOperatorSplitApplication(
+    row: Omit<FoodHostOperatorSplitApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodHostOperatorSplitApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<FoodHostOperatorSplitApplicationRecord>(
+      this.client
+        .from(TABLES.foodHostOperatorSplitApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodHostOperatorSplitApplication',
+    );
+  }
+
+  async getFoodHostOperatorSplitApplication(
+    sourceEventId: string,
+  ): Promise<FoodHostOperatorSplitApplicationRecord | undefined> {
+    return this.one<FoodHostOperatorSplitApplicationRecord>(
+      this.client
+        .from(TABLES.foodHostOperatorSplitApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodHostOperatorSplitApplication',
+    );
+  }
+
+  async insertFoodCookCycleRoyalty(
+    row: Omit<FoodCookCycleRoyaltyRecord, 'id' | 'created_at'>,
+  ): Promise<FoodCookCycleRoyaltyRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<FoodCookCycleRoyaltyRecord>(
+      this.client
+        .from(TABLES.foodCookCycleRoyalties)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodCookCycleRoyalty',
+    );
+  }
+
+  async getFoodCookCycleRoyalty(
+    sourceEventId: string,
+  ): Promise<FoodCookCycleRoyaltyRecord | undefined> {
+    return this.one<FoodCookCycleRoyaltyRecord>(
+      this.client
+        .from(TABLES.foodCookCycleRoyalties)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodCookCycleRoyalty',
+    );
+  }
+
+  async insertFoodSupplierRebateApplication(
+    row: Omit<FoodSupplierRebateApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<FoodSupplierRebateApplicationRecord> {
+    // UNIQUE per source_event_id — the replay guard.
+    return this.oneStrict<FoodSupplierRebateApplicationRecord>(
+      this.client
+        .from(TABLES.foodSupplierRebateApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFoodSupplierRebateApplication',
+    );
+  }
+
+  async getFoodSupplierRebateApplication(
+    sourceEventId: string,
+  ): Promise<FoodSupplierRebateApplicationRecord | undefined> {
+    return this.one<FoodSupplierRebateApplicationRecord>(
+      this.client
+        .from(TABLES.foodSupplierRebateApplications)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFoodSupplierRebateApplication',
     );
   }
 
