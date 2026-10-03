@@ -218,6 +218,9 @@ import type {
 import type {
   FitnessAlgorithmPolicyRecord,
   FitnessAlgorithmRoyaltyRecord,
+  FitnessAuditEscrowDrawdownRecord,
+  FitnessAuditEscrowPolicyRecord,
+  FitnessAuditEscrowReconciliationRecord,
   FitnessCoBrandPartnershipRecord,
   FitnessCocreationModuleRecord,
   FitnessCocreationApplicationRecord,
@@ -226,8 +229,11 @@ import type {
   FitnessFranchiseClassMonthRecord,
   FitnessFranchisePolicyRecord,
   FitnessCobrandSplitApplicationRecord,
+  FitnessLiveEventBonusPolicyRecord,
+  FitnessLiveEventBonusRecord,
   FitnessLiveLoadPolicyRecord,
   FitnessLiveResidualApplicationRecord,
+  FitnessPayoutGateStateRecord,
   FitnessRealizationApplicationRecord,
   FitnessSyncMusicPolicyRecord,
   FitnessTrainerRoyaltyApplicationRecord,
@@ -470,6 +476,17 @@ export class InMemoryStore implements Store {
   private fitnessCobrandSplitApplications: FitnessCobrandSplitApplicationRecord[] = [];
   private fitnessAlgorithmRoyaltyLedger: FitnessAlgorithmRoyaltyRecord[] = [];
   private fitnessCocreationApplications: FitnessCocreationApplicationRecord[] = [];
+  // Migration 0043 — the fitness audit escrow + payout gate states + the
+  // instant live-event bonus ledger.
+  private fitnessAuditEscrowPolicies = new Map<string, FitnessAuditEscrowPolicyRecord>();
+  private fitnessAuditEscrowDrawdowns: FitnessAuditEscrowDrawdownRecord[] = [];
+  private fitnessAuditEscrowReconciliations = new Map<
+    string,
+    FitnessAuditEscrowReconciliationRecord
+  >();
+  private fitnessPayoutGateStates = new Map<string, FitnessPayoutGateStateRecord>();
+  private fitnessLiveEventBonusPolicies = new Map<string, FitnessLiveEventBonusPolicyRecord>();
+  private fitnessLiveEventBonuses: FitnessLiveEventBonusRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -6179,6 +6196,209 @@ export class InMemoryStore implements Store {
     sourceEventId: string,
   ): Promise<FitnessCocreationApplicationRecord | undefined> {
     const found = this.fitnessCocreationApplications.find(
+      (record) => record.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // --- The fitness audit escrow + gate states + live-event bonuses (PR 39,
+  // migration 0043) — the 0041 spatial twins' in-memory shape. ---
+
+  async upsertFitnessAuditEscrowPolicy(
+    row: Omit<FitnessAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.fitnessAuditEscrowPolicies.get(row.scope_key);
+    const record: FitnessAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getFitnessAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<FitnessAuditEscrowPolicyRecord | undefined> {
+    const found = this.fitnessAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessAuditEscrowDrawdown(
+    row: Omit<FitnessAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.fitnessAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('fitness_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.fitnessAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('fitness_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: FitnessAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listFitnessAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.fitnessAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertFitnessAuditEscrowReconciliation(
+    row: Omit<FitnessAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.fitnessAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('fitness_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: FitnessAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getFitnessAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowReconciliationRecord | undefined> {
+    const found = this.fitnessAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleFitnessAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'fitness_audit_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertFitnessPayoutGateState(
+    row: Omit<FitnessPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, studio_franchise_code) — an upsert converges
+    // (a verification heals 'unknown'; states never regress through this
+    // table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.studio_franchise_code}`;
+    const existing = this.fitnessPayoutGateStates.get(key);
+    const record: FitnessPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getFitnessPayoutGateState(
+    payeeId: string,
+    studioFranchiseCode: string,
+  ): Promise<FitnessPayoutGateStateRecord | undefined> {
+    const found = this.fitnessPayoutGateStates.get(`${payeeId}|${studioFranchiseCode}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertFitnessLiveEventBonusPolicy(
+    row: Omit<FitnessLiveEventBonusPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveEventBonusPolicyRecord> {
+    // UNIQUE per program_id — a re-registered policy converges (the
+    // newest rate governs the next concluded event's posting).
+    const now = new Date().toISOString();
+    const existing = this.fitnessLiveEventBonusPolicies.get(row.program_id);
+    const record: FitnessLiveEventBonusPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.fitnessLiveEventBonusPolicies.set(row.program_id, record);
+    return { ...record };
+  }
+
+  async getFitnessLiveEventBonusPolicy(
+    programId: string,
+  ): Promise<FitnessLiveEventBonusPolicyRecord | undefined> {
+    const found = this.fitnessLiveEventBonusPolicies.get(programId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertFitnessLiveEventBonus(
+    row: Omit<FitnessLiveEventBonusRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveEventBonusRecord> {
+    // UNIQUE per source_event_id — the replay guard: a replayed event
+    // row throws here, never a double bonus; the caller re-derives from
+    // the ledger of record.
+    if (
+      this.fitnessLiveEventBonuses.some(
+        (existing) => existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('fitness_live_event_bonuses.source_event_id');
+    }
+    const record: FitnessLiveEventBonusRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.fitnessLiveEventBonuses.push(record);
+    return { ...record };
+  }
+
+  async getFitnessLiveEventBonus(
+    sourceEventId: string,
+  ): Promise<FitnessLiveEventBonusRecord | undefined> {
+    const found = this.fitnessLiveEventBonuses.find(
       (record) => record.source_event_id === sourceEventId,
     );
     return found === undefined ? undefined : { ...found };

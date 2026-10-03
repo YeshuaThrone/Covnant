@@ -5,6 +5,7 @@ import type {
   EstatePayoutGateStateRecord,
   TheatricalPayoutGateStateRecord,
 } from "@/modules/don/records";
+import type { FitnessPayoutGateStateRecord } from "@/modules/fitness/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -511,6 +512,25 @@ export async function resolveSpatialVerticalComplianceState(
     vertical: "spatial",
     territorial_zoning_cleared: record.territorial_zoning_state === "cleared",
     spatial_audit_verified: record.spatial_audit_state === "verified",
+  };
+}
+
+export async function resolveFitnessVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  studioFranchiseCode: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "fitness" }> | null> {
+  const record: FitnessPayoutGateStateRecord | undefined = await store.getFitnessPayoutGateState(
+    payeeId,
+    studioFranchiseCode,
+  );
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "fitness",
+    hipaa_gdpr_privacy_cleared: record.hipaa_gdpr_privacy_state === "cleared",
+    territorial_studio_exclusivity_verified: record.territorial_exclusivity_state === "verified",
   };
 }
 

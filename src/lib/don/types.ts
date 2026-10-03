@@ -233,6 +233,19 @@ export const LEDGER_STATUSES = [
   // migration: ledger_transactions.status is free text, the same
   // extension-in-place discipline as every escrow state above.
   "spatial_audit_escrow",
+  // FITNESS_AUDIT_ESCROW (PR 39, the founder fitness directive): the
+  // 5–10% (founder-banded, per-scope policy of record) of a fitness IP
+  // payout that locks here — keyed per (trainer, studio franchise) scope
+  // by the escrow row's 'fitness_audit_escrow:{scopeKey}' sentinel payee
+  // — while the trainer's compliance exposure runs. Member chargeback
+  // reserves, class return allowances, and quarterly sync music licensing
+  // audits draw it down position-locked; the verified reconciliation of
+  // record opens the release (fail-closed: no reconciliation of record,
+  // no release), and the released remainder settles it (status →
+  // 'settled'). Kind marks WHAT the row is for its whole life. No
+  // migration: ledger_transactions.status is free text, the same
+  // extension-in-place discipline as every escrow state above.
+  "fitness_audit_escrow",
   // MSG_SHORTFALL_DUE (PR 37, the founder spatial directive): a regional
   // licensee's or pop-up park operator's quarterly Minimum Spatial
   // Guarantee shortfall — the quarter's spatial royalty earnings of
@@ -357,6 +370,15 @@ export const LEDGER_KINDS = [
   // 'spatial_audit_escrow' with status 'settled'), the same division
   // every escrow kind above uses.
   "spatial_audit_escrow",
+  // Fitness audit escrow (PR 39): the founder-banded 5–10% of a fitness
+  // IP payout held per (trainer, studio franchise) scope for the
+  // trainer's compliance exposure — drawn down by member chargeback
+  // reserves, class return allowances, and quarterly sync music licensing
+  // audits, released with a verified reconciliation of record. Kind marks
+  // WHAT the row is for its whole life (a released or fully-drawn escrow
+  // stays kind 'fitness_audit_escrow' with status 'settled'), the same
+  // division every escrow kind above uses.
+  "fitness_audit_escrow",
   // Minimum Spatial Guarantee shortfall due (PR 37): a regional licensee
   // or pop-up park operator's quarterly MSG shortfall debited as the
   // invoice of record at quarter close — the receivable's face on the

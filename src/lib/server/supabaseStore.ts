@@ -204,6 +204,9 @@ import type {
 import type {
   FitnessAlgorithmPolicyRecord,
   FitnessAlgorithmRoyaltyRecord,
+  FitnessAuditEscrowDrawdownRecord,
+  FitnessAuditEscrowPolicyRecord,
+  FitnessAuditEscrowReconciliationRecord,
   FitnessCoBrandPartnershipRecord,
   FitnessCocreationModuleRecord,
   FitnessCocreationApplicationRecord,
@@ -212,8 +215,11 @@ import type {
   FitnessFranchiseClassMonthRecord,
   FitnessFranchisePolicyRecord,
   FitnessCobrandSplitApplicationRecord,
+  FitnessLiveEventBonusPolicyRecord,
+  FitnessLiveEventBonusRecord,
   FitnessLiveLoadPolicyRecord,
   FitnessLiveResidualApplicationRecord,
+  FitnessPayoutGateStateRecord,
   FitnessRealizationApplicationRecord,
   FitnessSyncMusicPolicyRecord,
   FitnessTrainerRoyaltyApplicationRecord,
@@ -525,6 +531,14 @@ const TABLES = {
   fitnessCobrandSplitApplications: 'fitness_cobrand_split_applications',
   fitnessAlgorithmRoyaltyLedger: 'fitness_algorithm_royalty_ledger',
   fitnessCocreationApplications: 'fitness_cocreation_applications',
+  // Migration 0043 — the fitness audit escrow + payout gate states + the
+  // instant live-event bonus ledger.
+  fitnessAuditEscrowPolicies: 'fitness_audit_escrow_policies',
+  fitnessAuditEscrowDrawdowns: 'fitness_audit_escrow_drawdowns',
+  fitnessAuditEscrowReconciliations: 'fitness_audit_escrow_reconciliations',
+  fitnessPayoutGateStates: 'fitness_payout_gate_states',
+  fitnessLiveEventBonusPolicies: 'fitness_live_event_bonus_policies',
+  fitnessLiveEventBonuses: 'fitness_live_event_bonuses',
 } as const;
 
 /**
@@ -5462,6 +5476,212 @@ export class SupabaseStore implements Store {
         .eq('source_event_id', sourceEventId)
         .maybeSingle(),
       'getFitnessCocreationApplication',
+    );
+  }
+
+  // --- The fitness audit escrow + gate states + live-event bonuses (PR 39,
+  // migration 0043) — the 0041 spatial twins' PostgREST shape. ---
+
+  async upsertFitnessAuditEscrowPolicy(
+    row: Omit<FitnessAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<FitnessAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessAuditEscrowPolicy',
+    );
+  }
+
+  async getFitnessAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<FitnessAuditEscrowPolicyRecord | undefined> {
+    return this.one<FitnessAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getFitnessAuditEscrowPolicy',
+    );
+  }
+
+  async insertFitnessAuditEscrowDrawdown(
+    row: Omit<FitnessAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<FitnessAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.fitnessAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessAuditEscrowDrawdown',
+    );
+  }
+
+  async listFitnessAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const { data, error } = await this.client
+      .from(TABLES.fitnessAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listFitnessAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as FitnessAuditEscrowDrawdownRecord[];
+  }
+
+  async insertFitnessAuditEscrowReconciliation(
+    row: Omit<FitnessAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<FitnessAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.fitnessAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessAuditEscrowReconciliation',
+    );
+  }
+
+  async getFitnessAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowReconciliationRecord | undefined> {
+    return this.one<FitnessAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.fitnessAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getFitnessAuditEscrowReconciliation',
+    );
+  }
+
+  async settleFitnessAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'fitness_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleFitnessAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertFitnessPayoutGateState(
+    row: Omit<FitnessPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, studio_franchise_code) — an upsert converges
+    // (a verification heals 'unknown'; states never regress through this
+    // table). HARDENED UPSERT: no id in the payload (the id rotates on
+    // conflict).
+    return this.oneStrict<FitnessPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.fitnessPayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,studio_franchise_code' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessPayoutGateState',
+    );
+  }
+
+  async getFitnessPayoutGateState(
+    payeeId: string,
+    studioFranchiseCode: string,
+  ): Promise<FitnessPayoutGateStateRecord | undefined> {
+    return this.one<FitnessPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.fitnessPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('studio_franchise_code', studioFranchiseCode)
+        .maybeSingle(),
+      'getFitnessPayoutGateState',
+    );
+  }
+
+  async upsertFitnessLiveEventBonusPolicy(
+    row: Omit<FitnessLiveEventBonusPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveEventBonusPolicyRecord> {
+    // UNIQUE per program_id — a re-registered policy converges (the
+    // newest rate governs the next concluded event's posting).
+    // HARDENED UPSERT: no id in the payload (the id rotates on conflict).
+    return this.oneStrict<FitnessLiveEventBonusPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessLiveEventBonusPolicies)
+        .upsert(row, { onConflict: 'program_id' })
+        .select()
+        .maybeSingle(),
+      'upsertFitnessLiveEventBonusPolicy',
+    );
+  }
+
+  async getFitnessLiveEventBonusPolicy(
+    programId: string,
+  ): Promise<FitnessLiveEventBonusPolicyRecord | undefined> {
+    return this.one<FitnessLiveEventBonusPolicyRecord>(
+      this.client
+        .from(TABLES.fitnessLiveEventBonusPolicies)
+        .select()
+        .eq('program_id', programId)
+        .maybeSingle(),
+      'getFitnessLiveEventBonusPolicy',
+    );
+  }
+
+  async insertFitnessLiveEventBonus(
+    row: Omit<FitnessLiveEventBonusRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveEventBonusRecord> {
+    // UNIQUE per source_event_id — the replay guard: a replayed event
+    // row throws here, never a double bonus; the caller re-derives from
+    // the ledger of record.
+    return this.oneStrict<FitnessLiveEventBonusRecord>(
+      this.client
+        .from(TABLES.fitnessLiveEventBonuses)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertFitnessLiveEventBonus',
+    );
+  }
+
+  async getFitnessLiveEventBonus(
+    sourceEventId: string,
+  ): Promise<FitnessLiveEventBonusRecord | undefined> {
+    return this.one<FitnessLiveEventBonusRecord>(
+      this.client
+        .from(TABLES.fitnessLiveEventBonuses)
+        .select()
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getFitnessLiveEventBonus',
     );
   }
 

@@ -646,3 +646,155 @@ export function validateFitnessCoBrandShares(
   }
   return { ok: true };
 }
+
+// --------------------------------------------------------------------------
+// FITNESS_AUDIT_ESCROW (PR 39, the founder fitness directive) — the
+// fitness-side audit escrow's records: the founder-banded policy of record
+// per (trainer, studio franchise) scope, the position-locked drawdowns the
+// three exposure classes drive (member chargeback reserves, class return
+// allowances, quarterly sync music licensing audits), and the verified
+// reconciliation of record the release reads. The tables are the 0041
+// spatial escrow's twins; the shape tracks them 1:1.
+// --------------------------------------------------------------------------
+
+/** The escrow's three drawdown classes of record — exactly the exposures
+ * the founder directive names. Anything else refuses. */
+export const FITNESS_AUDIT_ESCROW_DRAWDOWN_CLASSES = [
+  "chargeback_reserve",
+  "class_return_allowance",
+  "sync_music_licensing_audit",
+] as const;
+export type FitnessAuditEscrowDrawdownClass =
+  (typeof FITNESS_AUDIT_ESCROW_DRAWDOWN_CLASSES)[number];
+
+/** One scope's escrow rate of record (migration 0043) — a founder-banded
+ * 500–1000 bps share of the scope's fitness IP payouts that locks into the
+ * FITNESS_AUDIT_ESCROW bucket at routing. */
+export interface FitnessAuditEscrowPolicyRecord {
+  readonly id: string;
+  /** `trainer:{trainerId}:studio:{studioFranchiseCode}` — the scope key
+   * the escrow's sentinel payee and GL account cite. */
+  readonly scope_key: string;
+  /** The founder band: 500–1000 bps, checked at registration and again
+   * at use (a hostile policy out-of-band refuses). */
+  readonly reserve_rate_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One position-locked escrow drawdown (migration 0043) — append-only.
+ * UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+ * UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position lock
+ * the balance is derived from. */
+export interface FitnessAuditEscrowDrawdownRecord {
+  readonly id: string;
+  /** The escrow bucket's ledger_transactions row of record. */
+  readonly reserve_ledger_id: string;
+  readonly scope_key: string;
+  readonly drawdown_class: FitnessAuditEscrowDrawdownClass;
+  /** The drawing event's identity of record — the replay guard. */
+  readonly source_event_id: string;
+  /** The bucket balance this draw was taken against (the spend position). */
+  readonly drawn_before_cents: number;
+  /** The drawn amount: 0 < drawn_cents <= drawn_before_cents. */
+  readonly drawn_cents: number;
+  /** drawn_before_cents - drawn_cents, pinned in a CHECK. */
+  readonly remaining_cents: number;
+  readonly created_at: string;
+}
+
+/** The verified reconciliation of record for one escrow bucket (migration
+ * 0043) — insert-as-lock, one per bucket: the release refuses fail-closed
+ * until this row exists. */
+export interface FitnessAuditEscrowReconciliationRecord {
+  readonly id: string;
+  readonly reserve_ledger_id: string;
+  /** The reconciliation evidence of record (report ref, export hash). */
+  readonly evidence_ref: string;
+  /** Who verified the reconciliation of record. */
+  readonly reconciled_by: string;
+  readonly created_at: string;
+}
+
+/**
+ * The fitness payout gate's states of record for one payee in one studio
+ * franchise (migration 0043) — the two states the payout gate's fitness
+ * case reads, fail-closed: `hipaa_gdpr_privacy_cleared` is true only when
+ * the privacy state is 'cleared', `territorial_studio_exclusivity_verified`
+ * is true only when the exclusivity state is 'verified'; an absent record
+ * resolves null and 'unknown' resolves false.
+ */
+export interface FitnessPayoutGateStateRecord {
+  readonly id: string;
+  /** The payout's beneficiary of record (the trainer). */
+  readonly payee_id: string;
+  /** The studio franchise whose exclusivity terms govern the payout. */
+  readonly studio_franchise_code: string;
+  /** HIPAA/GDPR privacy clearance over the workout telemetry. */
+  readonly hipaa_gdpr_privacy_state: "unknown" | "cleared";
+  /** Territorial studio exclusivity verification. */
+  readonly territorial_exclusivity_state: "unknown" | "verified";
+  /** The verification evidence of record. */
+  readonly evidence_ref: string;
+  /** Who verified the states of record. */
+  readonly verified_by: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+// --------------------------------------------------------------------------
+// Instant live-event performance bonuses (PR 39, the founder fitness
+// directive): a synchronous live workout event's concluded row of record
+// (the stream_start row carrying the peak simultaneous viewers and the
+// live event revenue) posts an instant performance bonus to the lead
+// trainer's ledger at event conclusion — priced from the program's bonus
+// policy of record, never guessed.
+// --------------------------------------------------------------------------
+
+/** One program's instant live-event bonus rate of record (migration
+ * 0043) — the bonus bps share of the live event revenue that posts to the
+ * lead trainer at event conclusion. A program without a policy is a
+ * counted skip: the walk never guesses a rate. */
+export interface FitnessLiveEventBonusPolicyRecord {
+  readonly id: string;
+  readonly program_id: string;
+  /** The bonus share of the live event revenue, in bps (1–10000). */
+  readonly bonus_bps: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/** One concluded live event's instant performance bonus (migration 0043)
+ * — append-only, UNIQUE per source_event_id (the replay guard), the lead
+ * trainer's ledger entry of record for the event. */
+export interface FitnessLiveEventBonusRecord {
+  readonly id: string;
+  /** The concluded broadcast row's event id of record — the replay
+   * guard. */
+  readonly source_event_id: string;
+  /** The event's lead trainer of record — the bonus's beneficiary. */
+  readonly trainer_id: string;
+  readonly program_id: string;
+  readonly studio_franchise_code: string;
+  readonly period: string;
+  readonly currency: string;
+  /** The concluded event's peak simultaneous viewers of record. */
+  readonly peak_simultaneous_viewers: number;
+  /** The concluded event's revenue of record (integer cents). */
+  readonly live_event_revenue_cents: number;
+  /** The policy rate of record priced for this event. */
+  readonly bonus_bps: number;
+  /** floor(revenue × bps / 10000), pinned in a CHECK — integer cents. */
+  readonly bonus_cents: number;
+  readonly created_at: string;
+}
+
+/** The fitness audit escrow's scope key — injective in the (trainer,
+ * studio franchise) pair, the same identifier space the 0042 lane keys
+ * on. The sentinel payee id, GL account, and policy row all cite it. */
+export function fitnessAuditEscrowScopeKey(
+  trainerId: string,
+  studioFranchiseCode: string,
+): string {
+  return `trainer:${trainerId}:studio:${studioFranchiseCode}`;
+}

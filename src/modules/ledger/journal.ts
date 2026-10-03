@@ -11,6 +11,7 @@ import {
   auditReserveEscrowGlAccount,
   comedyAudioRightsGlAccount,
   esportsPoolEscrowGlAccount,
+  fitnessAuditEscrowGlAccount,
   filmEscrowGlAccount,
   gamingCashoutGlAccount,
   licensingMgReceivableGlAccount,
@@ -468,6 +469,30 @@ export function spatialMsgShortfallIncomeCredit(
 ): GlLegInput {
   return {
     account: spatialMsgShortfallIncomeGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Fitness audit escrow legs (PR 39): the per-scope FITNESS_AUDIT_ESCROW
+// obligation account — the escrow legs' mirror at (trainer, studio
+// franchise) scope. A routed fitness IP payout's reserve locks here
+// against the holding account's debit; member chargeback reserves, class
+// return allowances, and quarterly sync music licensing audits debit it
+// back to FBO cash; the verified release debits it into the trainer's
+// payout legs — never the dust payee's account, never the unclaimed
+// holding account, never any other escrow's account.
+export function fitnessAuditEscrowDebit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: fitnessAuditEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function fitnessAuditEscrowCredit(scopeKey: string, amountCents: number): GlLegInput {
+  return {
+    account: fitnessAuditEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

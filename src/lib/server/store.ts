@@ -199,6 +199,9 @@ import type {
 import type {
   FitnessAlgorithmPolicyRecord,
   FitnessAlgorithmRoyaltyRecord,
+  FitnessAuditEscrowDrawdownRecord,
+  FitnessAuditEscrowPolicyRecord,
+  FitnessAuditEscrowReconciliationRecord,
   FitnessCoBrandPartnershipRecord,
   FitnessCocreationModuleRecord,
   FitnessCocreationApplicationRecord,
@@ -207,8 +210,11 @@ import type {
   FitnessFranchiseClassMonthRecord,
   FitnessFranchisePolicyRecord,
   FitnessCobrandSplitApplicationRecord,
+  FitnessLiveEventBonusPolicyRecord,
+  FitnessLiveEventBonusRecord,
   FitnessLiveLoadPolicyRecord,
   FitnessLiveResidualApplicationRecord,
+  FitnessPayoutGateStateRecord,
   FitnessRealizationApplicationRecord,
   FitnessSyncMusicPolicyRecord,
   FitnessTrainerRoyaltyApplicationRecord,
@@ -3567,7 +3573,117 @@ export interface Store {
   getFitnessCocreationApplication(
     sourceEventId: string,
   ): Promise<FitnessCocreationApplicationRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the FITNESS_AUDIT_ESCROW's founder-banded
+   * rate of record for one scope (migration 0043) — upsert converges:
+   * the newest rate governs the next routing.
+   */
+  upsertFitnessAuditEscrowPolicy(
+    row: Omit<FitnessAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getFitnessAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<FitnessAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0043) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertFitnessAuditEscrowDrawdown(
+    row: Omit<FitnessAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listFitnessAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0043) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertFitnessAuditEscrowReconciliation(
+    row: Omit<FitnessAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getFitnessAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `fitness_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleFitnessAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the fitness payout gate's states of record for one payee in
+   * one studio franchise (migration 0043) — UNIQUE per
+   * (payee_id, studio_franchise_code): an upsert converges (a
+   * verification heals 'unknown'; states never regress through this
+   * table).
+   */
+  upsertFitnessPayoutGateState(
+    row: Omit<FitnessPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessPayoutGateStateRecord>;
+
+  /**
+   * One payee × studio franchise's gate states of record; undefined when
+   * none — the fitness payout gate resolves fail-closed through this
+   * (absent → null → the gate refuses).
+   */
+  getFitnessPayoutGateState(
+    payeeId: string,
+    studioFranchiseCode: string,
+  ): Promise<FitnessPayoutGateStateRecord | undefined>;
+
+  /**
+   * Registers (or replaces) one program's instant live-event bonus rate
+   * of record (migration 0043) — upsert converges: the newest rate
+   * governs the next concluded event's posting.
+   */
+  upsertFitnessLiveEventBonusPolicy(
+    row: Omit<FitnessLiveEventBonusPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveEventBonusPolicyRecord>;
+
+  /** One program's live-event bonus rate of record; undefined when none
+   * — the walk counts a fail-closed skip (never a guessed rate). */
+  getFitnessLiveEventBonusPolicy(
+    programId: string,
+  ): Promise<FitnessLiveEventBonusPolicyRecord | undefined>;
+
+  /**
+   * Appends one concluded live event's instant performance bonus to the
+   * lead trainer's ledger (migration 0043) — UNIQUE per source_event_id
+   * is the replay guard: a replayed event row throws here, never a
+   * double bonus.
+   */
+  insertFitnessLiveEventBonus(
+    row: Omit<FitnessLiveEventBonusRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveEventBonusRecord>;
+
+  /** One concluded event's bonus of record by its source event id;
+   * undefined when none — the replay check's read. */
+  getFitnessLiveEventBonus(sourceEventId: string): Promise<FitnessLiveEventBonusRecord | undefined>;
 }
+
+
 
 // Re-export the record vocabulary engines import from the seam.
 export type {

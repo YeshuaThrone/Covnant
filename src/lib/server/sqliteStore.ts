@@ -211,6 +211,9 @@ import type {
 import type {
   FitnessAlgorithmPolicyRecord,
   FitnessAlgorithmRoyaltyRecord,
+  FitnessAuditEscrowDrawdownRecord,
+  FitnessAuditEscrowPolicyRecord,
+  FitnessAuditEscrowReconciliationRecord,
   FitnessCoBrandPartnershipRecord,
   FitnessCocreationModuleRecord,
   FitnessCocreationApplicationRecord,
@@ -219,8 +222,11 @@ import type {
   FitnessFranchiseClassMonthRecord,
   FitnessFranchisePolicyRecord,
   FitnessCobrandSplitApplicationRecord,
+  FitnessLiveEventBonusPolicyRecord,
+  FitnessLiveEventBonusRecord,
   FitnessLiveLoadPolicyRecord,
   FitnessLiveResidualApplicationRecord,
+  FitnessPayoutGateStateRecord,
   FitnessRealizationApplicationRecord,
   FitnessSyncMusicPolicyRecord,
   FitnessTrainerRoyaltyApplicationRecord,
@@ -2569,6 +2575,90 @@ CREATE TABLE IF NOT EXISTS fitness_cocreation_applications (
   UNIQUE (source_event_id),
   -- The waterfall conserves its basis exactly (largest-remainder exact).
   CHECK (allocated_total_cents = enrollment_revenue_cents)
+);
+
+-- The fitness audit escrow + gate states + instant live-event bonuses
+-- (migration 0043, PR 39). The founder fitness directive's compliance
+-- money: the founder-banded escrow policy of record per (trainer, studio
+-- franchise) scope, the position-locked drawdowns the three exposure
+-- classes drive, the reconciliation of record the release reads, the two
+-- fail-closed gate states the fitness payout gate reads, the instant
+-- live-event bonus policy of record per program, and the append-only
+-- bonus ledger. No foreign keys by design — the tables key on content-
+-- derived event ids, the sender's trainer/program/franchise identifiers,
+-- and the escrow's ledger row id (the 0036–0042 discipline).
+CREATE TABLE IF NOT EXISTS fitness_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fitness_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('chargeback_reserve', 'class_return_allowance', 'sync_music_licensing_audit')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard.
+  UNIQUE (reserve_ledger_id, source_event_id),
+  -- UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+  -- lock the balance derives from.
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fitness_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  hipaa_gdpr_privacy_state TEXT NOT NULL CHECK (hipaa_gdpr_privacy_state IN ('unknown', 'cleared')),
+  territorial_exclusivity_state TEXT NOT NULL CHECK (territorial_exclusivity_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, studio_franchise_code)
+);
+
+CREATE TABLE IF NOT EXISTS fitness_live_event_bonus_policies (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL UNIQUE,
+  bonus_bps INTEGER NOT NULL CHECK (bonus_bps > 0 AND bonus_bps <= 10000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fitness_live_event_bonuses (
+  id TEXT PRIMARY KEY,
+  source_event_id TEXT NOT NULL,
+  trainer_id TEXT NOT NULL,
+  program_id TEXT NOT NULL,
+  studio_franchise_code TEXT NOT NULL,
+  period TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  peak_simultaneous_viewers INTEGER NOT NULL CHECK (peak_simultaneous_viewers >= 0),
+  live_event_revenue_cents INTEGER NOT NULL CHECK (live_event_revenue_cents >= 0),
+  bonus_bps INTEGER NOT NULL CHECK (bonus_bps > 0 AND bonus_bps <= 10000),
+  bonus_cents INTEGER NOT NULL CHECK (bonus_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per source_event_id is the replay guard.
+  UNIQUE (source_event_id),
+  -- The pinned pricing arithmetic (integer cents, floor).
+  CHECK (bonus_cents = (live_event_revenue_cents * bonus_bps) / 10000)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -12535,6 +12625,359 @@ export class SqliteStore implements Store {
       enrollment_revenue_cents: row.enrollment_revenue_cents as number,
       waterfall_legs: row.waterfall_legs as string,
       allocated_total_cents: row.allocated_total_cents as number,
+      created_at: row.created_at as string,
+    };
+  }
+
+  // --- The fitness audit escrow + gate states + live-event bonuses (PR 39,
+  // migration 0043) — the 0041 spatial twins' sqlite shape. ---
+
+  async upsertFitnessAuditEscrowPolicy(
+    row: Omit<FitnessAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessAuditEscrowPolicy(record.scope_key) as Promise<
+      FitnessAuditEscrowPolicyRecord
+    >;
+  }
+
+  async getFitnessAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<FitnessAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_audit_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertFitnessAuditEscrowDrawdown(
+    row: Omit<FitnessAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listFitnessAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM fitness_audit_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class: row.drawdown_class as FitnessAuditEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertFitnessAuditEscrowReconciliation(
+    row: Omit<FitnessAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.evidence_ref,
+        record.reconciled_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<FitnessAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`)
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settleFitnessAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the spatial escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'fitness_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertFitnessPayoutGateState(
+    row: Omit<FitnessPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, studio_franchise_code) — an upsert converges
+    // (a verification heals 'unknown'; states never regress through this
+    // table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_payout_gate_states
+           (id, payee_id, studio_franchise_code, hipaa_gdpr_privacy_state,
+            territorial_exclusivity_state, evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, studio_franchise_code) DO UPDATE SET
+           hipaa_gdpr_privacy_state = excluded.hipaa_gdpr_privacy_state,
+           territorial_exclusivity_state = excluded.territorial_exclusivity_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.studio_franchise_code,
+        record.hipaa_gdpr_privacy_state,
+        record.territorial_exclusivity_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getFitnessPayoutGateState(
+      record.payee_id,
+      record.studio_franchise_code,
+    ) as Promise<FitnessPayoutGateStateRecord>;
+  }
+
+  async getFitnessPayoutGateState(
+    payeeId: string,
+    studioFranchiseCode: string,
+  ): Promise<FitnessPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM fitness_payout_gate_states WHERE payee_id = ? AND studio_franchise_code = ?`,
+      )
+      .get(payeeId, studioFranchiseCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      hipaa_gdpr_privacy_state:
+        row.hipaa_gdpr_privacy_state as FitnessPayoutGateStateRecord['hipaa_gdpr_privacy_state'],
+      territorial_exclusivity_state:
+        row.territorial_exclusivity_state as FitnessPayoutGateStateRecord['territorial_exclusivity_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async upsertFitnessLiveEventBonusPolicy(
+    row: Omit<FitnessLiveEventBonusPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<FitnessLiveEventBonusPolicyRecord> {
+    // UNIQUE per program_id — a re-registered policy converges (the
+    // newest rate governs the next concluded event's posting).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_live_event_bonus_policies
+           (id, program_id, bonus_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (program_id) DO UPDATE SET
+           bonus_bps = excluded.bonus_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(record.id, record.program_id, record.bonus_bps, record.created_at, record.updated_at);
+    return this.getFitnessLiveEventBonusPolicy(record.program_id) as Promise<
+      FitnessLiveEventBonusPolicyRecord
+    >;
+  }
+
+  async getFitnessLiveEventBonusPolicy(
+    programId: string,
+  ): Promise<FitnessLiveEventBonusPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_live_event_bonus_policies WHERE program_id = ?`)
+      .get(programId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      program_id: row.program_id as string,
+      bonus_bps: row.bonus_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertFitnessLiveEventBonus(
+    row: Omit<FitnessLiveEventBonusRecord, 'id' | 'created_at'>,
+  ): Promise<FitnessLiveEventBonusRecord> {
+    // UNIQUE per source_event_id — the replay guard: a replayed event
+    // row throws here, never a double bonus; the caller re-derives from
+    // the ledger of record.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO fitness_live_event_bonuses
+           (id, source_event_id, trainer_id, program_id, studio_franchise_code, period,
+            currency, peak_simultaneous_viewers, live_event_revenue_cents, bonus_bps,
+            bonus_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.source_event_id,
+        record.trainer_id,
+        record.program_id,
+        record.studio_franchise_code,
+        record.period,
+        record.currency,
+        record.peak_simultaneous_viewers,
+        record.live_event_revenue_cents,
+        record.bonus_bps,
+        record.bonus_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getFitnessLiveEventBonus(
+    sourceEventId: string,
+  ): Promise<FitnessLiveEventBonusRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM fitness_live_event_bonuses WHERE source_event_id = ?`)
+      .get(sourceEventId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      source_event_id: row.source_event_id as string,
+      trainer_id: row.trainer_id as string,
+      program_id: row.program_id as string,
+      studio_franchise_code: row.studio_franchise_code as string,
+      period: row.period as string,
+      currency: row.currency as string,
+      peak_simultaneous_viewers: row.peak_simultaneous_viewers as number,
+      live_event_revenue_cents: row.live_event_revenue_cents as number,
+      bonus_bps: row.bonus_bps as number,
+      bonus_cents: row.bonus_cents as number,
       created_at: row.created_at as string,
     };
   }

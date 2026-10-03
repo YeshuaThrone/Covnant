@@ -331,6 +331,32 @@ export function serverLoadDeductionCents(input: {
 }
 
 /**
+ * THE INSTANT LIVE-EVENT PERFORMANCE BONUS (PR 39, the founder fitness
+ * directive) — a concluded synchronous live workout event (a 50,000-user
+ * weekend broadcast) prices its lead trainer's instant bonus as the
+ * program's bonus policy share of the event's revenue of record,
+ * floored to whole cents. The policy's bps of record is pinned on the
+ * application row alongside the priced amount; a rate outside the
+ * policy-upsert's 1–10000 bps envelope never reaches this pricer.
+ */
+export function liveEventBonusCents(input: {
+  liveEventRevenueCents: number;
+  bonusBps: number;
+}): { bonusBps: number; bonusCents: number } {
+  const { liveEventRevenueCents, bonusBps } = input;
+  if (!Number.isInteger(liveEventRevenueCents) || liveEventRevenueCents < 0) {
+    throw new Error(`fitness_live_bonus_invalid_revenue:${liveEventRevenueCents}`);
+  }
+  if (!Number.isInteger(bonusBps) || bonusBps < 1 || bonusBps > 10_000) {
+    throw new Error(`fitness_live_bonus_invalid_rate:${bonusBps}`);
+  }
+  return {
+    bonusBps,
+    bonusCents: fitnessBpsShareCents(liveEventRevenueCents, bonusBps),
+  };
+}
+
+/**
  * THE STUDIO FRANCHISE CLASS OVERRIDE — the physical franchise location's
  * certified content legs (workout choreographies and audio tracks) price at
  * the franchise license override bps (per leg, floored per leg), the studio

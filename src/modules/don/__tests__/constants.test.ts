@@ -128,6 +128,13 @@ describe('don constants', () => {
       'spatial_audit_escrow_drawdown',
       'spatial_audit_escrow_release',
       'spatial_msg_shortfall_invoice',
+      // PR 39 (the founder fitness directive): the FITNESS_AUDIT_ESCROW
+      // journals — the 5–10% fitness IP payout's automatic escrow routing,
+      // the chargeback/return-allowance/sync-audit drawdown, and the
+      // verified-reconciliation release.
+      'fitness_audit_escrow_route',
+      'fitness_audit_escrow_drawdown',
+      'fitness_audit_escrow_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

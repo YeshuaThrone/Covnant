@@ -77,6 +77,7 @@ import {
   fitnessRowEventId,
   franchiseClassOverrideCents,
   retentionBonusMicros,
+  liveEventBonusCents,
   serverLoadDeductionCents,
   syncMusicDeductionMicros,
   trainerTierWalk,
@@ -103,6 +104,11 @@ export interface FitnessWriteCounts {
   liveResidualsWritten: number;
   liveResidualsReplayed: number;
   liveSkippedNoLoadPolicy: number;
+  /** Instant live-event bonuses committed / counted replay no-ops /
+   * fail-closed skips (no bonus policy of record for the program). */
+  liveEventBonusesWritten: number;
+  liveEventBonusesReplayed: number;
+  liveSkippedNoBonusPolicy: number;
   /** Franchise applications committed / counted replay no-ops / fail-closed
    * skips (no franchise policy of record for the code). */
   franchiseApplicationsWritten: number;
@@ -132,6 +138,7 @@ export interface FitnessWriteCounts {
   retentionBonusCents: number;
   syncMusicDeductionCents: number;
   serverLoadDeductionCents: number;
+  liveEventBonusCents: number;
   franchiseOverrideCents: number;
   networkFeeCents: number;
   instructorDisbursementCents: number;
@@ -164,6 +171,9 @@ export async function writeFitnessRowsToStore(
     liveResidualsWritten: 0,
     liveResidualsReplayed: 0,
     liveSkippedNoLoadPolicy: 0,
+    liveEventBonusesWritten: 0,
+    liveEventBonusesReplayed: 0,
+    liveSkippedNoBonusPolicy: 0,
     franchiseApplicationsWritten: 0,
     franchiseApplicationsReplayed: 0,
     franchiseSkippedNoPolicy: 0,
@@ -182,6 +192,7 @@ export async function writeFitnessRowsToStore(
     retentionBonusCents: 0,
     syncMusicDeductionCents: 0,
     serverLoadDeductionCents: 0,
+    liveEventBonusCents: 0,
     franchiseOverrideCents: 0,
     networkFeeCents: 0,
     instructorDisbursementCents: 0,
@@ -442,6 +453,13 @@ async function walkLiveResidual(
   }
   const sourceEventId = fitnessRowEventId("live", detail);
 
+  // The instant performance bonus lane runs BEFORE the residual's replay
+  // guard returns — its own replay guard (same source event id) keeps a
+  // re-shipped broadcast a counted no-op, and a row first walked before
+  // its program had a bonus policy of record can still post the bonus on
+  // a later re-ship.
+  await walkLiveEventBonus(store, detail, sourceEventId, counts);
+
   const existing = await store.getFitnessLiveResidualApplication(sourceEventId);
   if (existing !== undefined) {
     counts.liveResidualsReplayed += 1;
@@ -482,6 +500,59 @@ async function walkLiveResidual(
   });
   counts.liveResidualsWritten += 1;
   counts.serverLoadDeductionCents += residual.serverLoadDeductionCents;
+}
+
+// ---------------------------------------------------------------------------
+// Sender 1 — the instant live-event performance bonus: a concluded
+// synchronous broadcast posts its lead trainer's instant bonus (the
+// program's bonus policy of record priced at the event's revenue) at
+// event conclusion — the walk of the concluded broadcast row IS the
+// event's conclusion trigger, and the row's trainer_id is the lead
+// trainer of record.
+// ---------------------------------------------------------------------------
+
+async function walkLiveEventBonus(
+  store: Store,
+  detail: Extract<FitnessLineDetail, { sender: "stream_start" }>,
+  sourceEventId: string,
+  counts: FitnessWriteCounts,
+): Promise<void> {
+  // The replay guard's read — a re-shipped broadcast is a counted no-op
+  // (the UNIQUE constraint is the concurrent backstop behind this read):
+  // never a second bonus for one concluded event.
+  const existing = await store.getFitnessLiveEventBonus(sourceEventId);
+  if (existing !== undefined) {
+    counts.liveEventBonusesReplayed += 1;
+    return;
+  }
+
+  // The bonus policy of record — no policy, no bonus (the walk never
+  // guesses a rate; the counted skip is the operator's explicit state).
+  const policy = await store.getFitnessLiveEventBonusPolicy(detail.programId);
+  if (policy === undefined) {
+    counts.liveSkippedNoBonusPolicy += 1;
+    return;
+  }
+
+  const bonus = liveEventBonusCents({
+    liveEventRevenueCents: detail.liveEventRevenueCents,
+    bonusBps: policy.bonus_bps,
+  });
+
+  await store.insertFitnessLiveEventBonus({
+    source_event_id: sourceEventId,
+    trainer_id: detail.trainerId,
+    program_id: detail.programId,
+    studio_franchise_code: detail.studioFranchiseCode,
+    period: detail.period,
+    currency: detail.currency,
+    peak_simultaneous_viewers: detail.peakSimultaneousViewers,
+    live_event_revenue_cents: detail.liveEventRevenueCents,
+    bonus_bps: policy.bonus_bps,
+    bonus_cents: bonus.bonusCents,
+  });
+  counts.liveEventBonusesWritten += 1;
+  counts.liveEventBonusCents += bonus.bonusCents;
 }
 
 // ---------------------------------------------------------------------------
