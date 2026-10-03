@@ -40,6 +40,7 @@
  */
 
 import type { Store } from "@/lib/server/store";
+import { recoupLicensingRoyaltyEvent } from "@/lib/server/licensingMgLedger";
 import { isUniqueViolation } from "@/lib/server/uniqueViolation";
 import type { LicensingLineOutcome } from "@/workers/recon/licensingQueue";
 import {
@@ -98,6 +99,9 @@ export interface LicensingCascadeCounts {
   withheldCents: number;
   /** Licensor payout legs HELD (null withheld legs) — fail-closed. */
   payoutLegsHeld: number;
+  /** MG recoupment applications committed this pass (PR 33) — the
+   * post-agency earned royalty offsetting registered advances. */
+  mgRecoupmentApplications: number;
 }
 
 export function emptyLicensingCascadeCounts(): LicensingCascadeCounts {
@@ -116,6 +120,7 @@ export function emptyLicensingCascadeCounts(): LicensingCascadeCounts {
     agencyCommissionCents: 0,
     withheldCents: 0,
     payoutLegsHeld: 0,
+    mgRecoupmentApplications: 0,
   };
 }
 
@@ -276,6 +281,26 @@ async function cascadeTierWalk(
       cumulative_net_sales_cents: walk.cumulativeAfterCents,
       cumulative_royalty_cents: deal.cumulative_royalty_cents + walk.royaltyCents,
     });
+
+    // THE MG RECOUPMENT PASS (PR 33) — the committed application's
+    // post-agency earned royalty offsets the scope's registered advances
+    // per the founder's collateralization routing (matching
+    // category-isolated first, then cross-collateralized). A scope with
+    // no registered commitments is a fast counted no-op; a lane failure
+    // surfaces (never swallowed) — the earnings of record are already
+    // committed, and the recoupment ledger must never drift from them.
+    const recoupment = await recoupLicensingRoyaltyEvent(store, {
+      deal_id: deal.id,
+      source_event_id: outcome.eventId,
+      category_code: outcome.detail.categoryCode,
+    });
+    if (recoupment.ok) {
+      counts.mgRecoupmentApplications += recoupment.value.applications.length;
+    } else {
+      throw new Error(
+        `licensing_mg_recoupment_failed:${outcome.eventId}:${recoupment.code}:${recoupment.message}`,
+      );
+    }
     return;
   }
 

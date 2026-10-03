@@ -5,6 +5,7 @@ import type {
   EstatePayoutGateStateRecord,
   TheatricalPayoutGateStateRecord,
 } from "@/modules/don/records";
+import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -405,6 +406,39 @@ export async function resolveTheatricalVerticalComplianceState(
     vertical: "theater",
     grand_rights_cleared: record.grand_rights_state === "cleared",
     venue_settlement_reconciled: record.venue_settlement_state === "reconciled",
+  };
+}
+
+/**
+ * The licensing vertical's compliance state, resolved from the licensing
+ * payout-gate state of record (migration 0037) — the store-backed reader
+ * the licensing payout path uses for the 'licensing' vertical (the
+ * theatrical resolver's pattern, scoped per payee × license scope).
+ * FAIL-CLOSED on both failure modes the directive names: an ABSENT record
+ * returns null (the gate refuses with vertical_state_unknown), and an
+ * 'unknown' stored state maps to false (the gate refuses the specific
+ * condition — licensing_territory_not_cleared /
+ * licensing_category_exclusivity_unverified). The booleans are true ONLY
+ * on the territory_cleared / category_exclusivity_verified states of
+ * record — nothing defaults to allowing.
+ */
+export async function resolveLicensingVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  scopeKey: string,
+): Promise<
+  Extract<VerticalComplianceState, { vertical: "licensing" }> | null
+> {
+  const record: LicensingPayoutGateStateRecord | undefined =
+    await store.getLicensingPayoutGateState(payeeId, scopeKey);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "licensing",
+    territory_cleared: record.territory_state === "cleared",
+    category_exclusivity_verified:
+      record.category_exclusivity_state === "verified",
   };
 }
 

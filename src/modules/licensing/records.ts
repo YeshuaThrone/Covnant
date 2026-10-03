@@ -272,3 +272,215 @@ export function validateLicensingCountryCode(code: string): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// PR 33 — the advance / minimum-guarantee recoupment ledger, the automatic
+// shortfall penalty, the audit reserve escrow, and the payout gate states.
+// ---------------------------------------------------------------------------
+
+/** The MG commitment's collateralization modes — the founder directive's
+ * per-contract choice: recoup across every category of the license scope,
+ * or hold each category's advance to its own category's royalties. */
+export const LICENSING_MG_COLLATERALIZATION_MODES = [
+  "cross_collateralized",
+  "category_isolated",
+] as const;
+export type LicensingMgCollateralizationMode =
+  (typeof LICENSING_MG_COLLATERALIZATION_MODES)[number];
+
+export function isLicensingMgCollateralizationMode(
+  value: string,
+): value is LicensingMgCollateralizationMode {
+  return (LICENSING_MG_COLLATERALIZATION_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * The advance / minimum guarantee of record per (scope_key, commitment_ref)
+ * — the money the licensee was paid UPFRONT against future earned
+ * royalties. A category_isolated commitment recoups ONLY from its own
+ * category's royalties (the directive's example: a $250,000 upfront MG for
+ * footwear versus a separate apparel MG — neither touches the other's
+ * earnings); a cross_collateralized commitment recoups across every
+ * category of the license scope.
+ */
+export type LicensingMgCommitmentRecord = {
+  id: string;
+  /** The license scope (`license:<license_id>`) the advance funds. */
+  scope_key: string;
+  /** The contract's own advance reference — UNIQUE per scope. */
+  commitment_ref: string;
+  /** The category of record — the recoupment scope on an isolated
+   * commitment; still recorded on a cross-collateralized one (the
+   * advance's own category is provenance, never a limit). */
+  category_code: string;
+  collateralization: LicensingMgCollateralizationMode;
+  /** The upfront advance / MG, whole cents (e.g. 25_000_000 = $250,000). */
+  mg_amount_cents: number;
+  currency: string;
+  /** The paying party of record — the shortfall invoice debits them. */
+  licensee_id: string;
+  licensee_name: string;
+  /** Bookkeeping counter — the append-only recoupment applications are
+   * the truth; a re-derivation from them heals any drift. */
+  recouped_cents: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * One append-only recoupment application — an event's earned royalty
+ * (post-agency) offsetting an advance. UNIQUE per (commitment_id,
+ * source_event_id) is the replay guard; UNIQUE per (commitment_id,
+ * recouped_before_cents) is the POSITION LOCK — a concurrent recoupment of
+ * the same advance throws the unique violation, never a double
+ * application; the caller retries at the advanced position (the 0036
+ * application discipline at commitment scope).
+ */
+export type LicensingMgRecoupmentApplicationRecord = {
+  id: string;
+  commitment_id: string;
+  scope_key: string;
+  category_code: string;
+  /** The royalty event whose earnings recouped — the once-only key. */
+  source_event_id: string;
+  /** The event's post-agency earned royalty — the recoupment basis. */
+  earned_royalty_cents: number;
+  recouped_before_cents: number;
+  /** What THIS event applied to THIS commitment. */
+  recouped_cents: number;
+  recouped_after_cents: number;
+  created_at: string;
+};
+
+/** The annual term of record's shape (YYYY) — the directive's annual MG
+ * threshold closes per contract year. */
+export function isLicensingMgTerm(value: string): boolean {
+  return /^\d{4}$/.test(value);
+}
+
+/**
+ * The contract term close of record per (commitment_id, term) — the
+ * once-only close that prices the automatic shortfall penalty. The
+ * recouped position derives from the append-only recoupment truth at the
+ * close; the shortfall is max(0, mg − recouped); a positive shortfall
+ * debits the invoice of record (the ledger row id lands in
+ * invoice_ledger_id). A zero shortfall records the fully-recouped close —
+ * no invoice.
+ */
+export type LicensingMgTermCloseRecord = {
+  id: string;
+  commitment_id: string;
+  scope_key: string;
+  /** The annual term of record (YYYY). */
+  term: string;
+  /** The advance's face at close — the MG threshold of record. */
+  mg_due_cents: number;
+  recouped_at_close_cents: number;
+  /** max(0, mg_due − recouped) — the invoice's exact price. */
+  shortfall_cents: number;
+  /** The mg_shortfall_due ledger row when the shortfall priced positive. */
+  invoice_ledger_id: string | null;
+  closed_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The audit reserve escrow's policy of record per license scope — the
+ * founder-banded 5–10% share of licensing royalty credits that locks into
+ * the scope's AUDIT_RESERVE_ESCROW while the contract's retail-audit
+ * exposure runs. Absent policy = the contract names no audit-reserve term:
+ * nothing routes (a counted skip, never a guessed rate).
+ */
+export type LicensingAuditReservePolicyRecord = {
+  id: string;
+  /** UNIQUE — the license scope the reserve protects. */
+  scope_key: string;
+  /** The founder-banded share, 500–1000 bps (5–10%). */
+  reserve_rate_bps: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The verified reconciliation of record per reserve — the release gate's
+ * key. Insert-as-lock (UNIQUE per reserve_ledger_id): the reconciliation
+ * of record exists ONCE per reserve, carries mandatory evidence
+ * (evidence_ref, reconciled_by), and the release reads it FAIL-CLOSED —
+ * no reconciliation of record, no release.
+ */
+export type LicensingAuditReserveReconciliationRecord = {
+  id: string;
+  /** UNIQUE — the escrow ledger row this reconciliation verifies. */
+  reserve_ledger_id: string;
+  evidence_ref: string;
+  reconciled_by: string;
+  created_at: string;
+};
+
+/** The audit reserve's drawdown classes — the two spends the directive
+ * names: the quarterly retail audit reconciliation and the inventory
+ * write-off. Anything else refuses. */
+export const LICENSING_AUDIT_RESERVE_DRAWDOWN_CLASSES = [
+  "quarterly_audit_reconciliation",
+  "inventory_write_off",
+] as const;
+export type LicensingAuditReserveDrawdownClass =
+  (typeof LICENSING_AUDIT_RESERVE_DRAWDOWN_CLASSES)[number];
+
+/**
+ * One position-locked reserve drawdown — a quarterly audit reconciliation
+ * or inventory write-off spending the escrow's balance. UNIQUE per
+ * (reserve_ledger_id, source_event_id) is the replay guard; UNIQUE per
+ * (reserve_ledger_id, drawn_before_cents) is the position lock (the 0036
+ * application discipline at reserve scope).
+ */
+export type LicensingAuditReserveDrawdownRecord = {
+  id: string;
+  reserve_ledger_id: string;
+  scope_key: string;
+  drawdown_class: LicensingAuditReserveDrawdownClass;
+  source_event_id: string;
+  drawn_before_cents: number;
+  drawn_cents: number;
+  remaining_cents: number;
+  created_at: string;
+};
+
+/** The licensing payout gate's states of record — fail-closed like the
+ * theatrical gate (0035): 'unknown' maps to false (the specific condition
+ * refuses), an ABSENT record maps to null (the gate refuses with
+ * vertical_state_unknown), and only 'cleared'/'verified' map to true. */
+export const LICENSING_TERRITORY_GATE_STATES = ["unknown", "cleared"] as const;
+export type LicensingTerritoryGateState =
+  (typeof LICENSING_TERRITORY_GATE_STATES)[number];
+
+export const LICENSING_CATEGORY_EXCLUSIVITY_GATE_STATES = [
+  "unknown",
+  "verified",
+] as const;
+export type LicensingCategoryExclusivityGateState =
+  (typeof LICENSING_CATEGORY_EXCLUSIVITY_GATE_STATES)[number];
+
+/**
+ * The licensing payout gate's states of record per (payee_id, scope_key) —
+ * the territory clearance and category exclusivity verification the payout
+ * gate reads (the theatrical gate states' pattern, scoped to the license
+ * contract). A re-registration converges (the newest states govern the
+ * next dispatch).
+ */
+export type LicensingPayoutGateStateRecord = {
+  id: string;
+  /** The receiving payee whose licensing payouts this gates. */
+  payee_id: string;
+  /** The license scope the states were recorded against. */
+  scope_key: string;
+  territory_state: LicensingTerritoryGateState;
+  category_exclusivity_state: LicensingCategoryExclusivityGateState;
+  /** The verified evidence references backing each state, when present. */
+  territory_evidence_ref: string | null;
+  category_exclusivity_evidence_ref: string | null;
+  verified_by: string | null;
+  created_at: string;
+  updated_at: string;
+};

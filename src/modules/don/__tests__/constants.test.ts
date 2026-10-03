@@ -104,6 +104,15 @@ describe('don constants', () => {
       'promoter_settlement_post',
       'promoter_settlement_release',
       'comedy_audio_rights_post',
+      // The brand licensing MG recoupment + audit reserve (PR 33, the
+      // founder licensing-enforcement directive): the held royalty's
+      // automatic audit-reserve routing, the quarterly-audit/write-off
+      // drawdown journal, the verified-reconciliation release journal, and
+      // the annual term-close shortfall invoice debit.
+      'licensing_audit_reserve_route',
+      'licensing_audit_reserve_drawdown',
+      'licensing_audit_reserve_release',
+      'licensing_mg_shortfall_invoice',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

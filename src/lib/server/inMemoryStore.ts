@@ -153,6 +153,13 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingAuditReserveDrawdownRecord,
+  LicensingAuditReservePolicyRecord,
+  LicensingAuditReserveReconciliationRecord,
+  LicensingMgCommitmentRecord,
+  LicensingMgRecoupmentApplicationRecord,
+  LicensingMgTermCloseRecord,
+  LicensingPayoutGateStateRecord,
   LicensingRoyaltyDealRecord,
   LicensingRoyaltyApplicationRecord,
   LicensingTreatyRateRecord,
@@ -313,6 +320,16 @@ export class InMemoryStore implements Store {
   private licensingTreatyRates = new Map<string, LicensingTreatyRateRecord>();
   private licensingSubLicensees = new Map<string, LicensingSubLicenseeRecord>();
   private licensingSubLicenseReports = new Map<string, LicensingSubLicenseReportRecord>();
+  private licensingMgCommitments = new Map<string, LicensingMgCommitmentRecord>();
+  private licensingMgRecoupmentApplications: LicensingMgRecoupmentApplicationRecord[] = [];
+  private licensingMgTermCloses = new Map<string, LicensingMgTermCloseRecord>();
+  private licensingAuditReservePolicies = new Map<string, LicensingAuditReservePolicyRecord>();
+  private licensingAuditReserveReconciliations = new Map<
+    string,
+    LicensingAuditReserveReconciliationRecord
+  >();
+  private licensingAuditReserveDrawdowns: LicensingAuditReserveDrawdownRecord[] = [];
+  private licensingPayoutGateStates = new Map<string, LicensingPayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -2793,6 +2810,268 @@ export class InMemoryStore implements Store {
       return { ...reconciled };
     }
     return undefined;
+  }
+
+  // --- Advance / MG recoupment, shortfall invoices, audit reserve escrow,
+  // --- and payout gate states (PR 33, migration 0037) ---
+
+  async upsertLicensingMgCommitment(
+    row: Omit<LicensingMgCommitmentRecord, 'id' | 'created_at' | 'updated_at' | 'recouped_cents'> & {
+      recouped_cents?: number;
+    },
+  ): Promise<LicensingMgCommitmentRecord> {
+    // UNIQUE per (scope_key, commitment_ref) — a re-registration replaces
+    // the row atomically (the option-agreement discipline). The recouped
+    // counter is bookkeeping; the append-only applications are the truth.
+    const key = `${row.scope_key}:${row.commitment_ref}`;
+    const now = new Date().toISOString();
+    const existing = this.licensingMgCommitments.get(key);
+    const record: LicensingMgCommitmentRecord = {
+      ...row,
+      recouped_cents: row.recouped_cents ?? existing?.recouped_cents ?? 0,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingMgCommitments.set(key, record);
+    return { ...record };
+  }
+
+  async getLicensingMgCommitment(
+    scopeKey: string,
+    commitmentRef: string,
+  ): Promise<LicensingMgCommitmentRecord | undefined> {
+    const found = this.licensingMgCommitments.get(`${scopeKey}:${commitmentRef}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listLicensingMgCommitments(scopeKey: string): Promise<LicensingMgCommitmentRecord[]> {
+    return [...this.licensingMgCommitments.values()]
+      .filter((row) => row.scope_key === scopeKey)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async insertLicensingMgRecoupmentApplication(
+    row: Omit<LicensingMgRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingMgRecoupmentApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard;
+    // UNIQUE per (commitment_id, recouped_before_cents) is the position
+    // lock — a replayed event or a lost position race throws here, never a
+    // double application; the caller retries at the advanced position.
+    if (
+      this.licensingMgRecoupmentApplications.some(
+        (existing) =>
+          existing.commitment_id === row.commitment_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('licensing_mg_recoupment_applications.commitment_id,source_event_id');
+    }
+    if (
+      this.licensingMgRecoupmentApplications.some(
+        (existing) =>
+          existing.commitment_id === row.commitment_id &&
+          existing.recouped_before_cents === row.recouped_before_cents,
+      )
+    ) {
+      uniqueViolation('licensing_mg_recoupment_applications.commitment_id,recouped_before_cents');
+    }
+    const record: LicensingMgRecoupmentApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.licensingMgRecoupmentApplications.push(record);
+    return { ...record };
+  }
+
+  async listLicensingMgRecoupmentApplications(
+    commitmentId: string,
+  ): Promise<LicensingMgRecoupmentApplicationRecord[]> {
+    // created_at ASC — the append-only truth in application order.
+    return this.licensingMgRecoupmentApplications
+      .filter((row) => row.commitment_id === commitmentId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertLicensingMgTermClose(
+    row: Omit<LicensingMgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingMgTermCloseRecord> {
+    // UNIQUE per (commitment_id, term) — the once-only close; a replay
+    // converges on the recorded shortfall and invoice of record.
+    const key = `${row.commitment_id}:${row.term}`;
+    const now = new Date().toISOString();
+    const existing = this.licensingMgTermCloses.get(key);
+    const record: LicensingMgTermCloseRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingMgTermCloses.set(key, record);
+    return { ...record };
+  }
+
+  async getLicensingMgTermClose(
+    commitmentId: string,
+    term: string,
+  ): Promise<LicensingMgTermCloseRecord | undefined> {
+    const found = this.licensingMgTermCloses.get(`${commitmentId}:${term}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listLicensingMgTermCloses(scopeKey: string): Promise<LicensingMgTermCloseRecord[]> {
+    return [...this.licensingMgTermCloses.values()]
+      .filter((row) => row.scope_key === scopeKey)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertLicensingAuditReservePolicy(
+    row: Omit<LicensingAuditReservePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingAuditReservePolicyRecord> {
+    // UNIQUE per scope_key — a re-registration converges (the newest rate
+    // governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.licensingAuditReservePolicies.get(row.scope_key);
+    const record: LicensingAuditReservePolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingAuditReservePolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getLicensingAuditReservePolicy(
+    scopeKey: string,
+  ): Promise<LicensingAuditReservePolicyRecord | undefined> {
+    const found = this.licensingAuditReservePolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertLicensingAuditReserveReconciliation(
+    row: Omit<LicensingAuditReserveReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.licensingAuditReserveReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('licensing_audit_reserve_reconciliations.reserve_ledger_id');
+    }
+    const record: LicensingAuditReserveReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.licensingAuditReserveReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getLicensingAuditReserveReconciliation(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveReconciliationRecord | undefined> {
+    const found = this.licensingAuditReserveReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertLicensingAuditReserveDrawdown(
+    row: Omit<LicensingAuditReserveDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+    // UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+    // lock — a replayed event or a lost race throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    if (
+      this.licensingAuditReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('licensing_audit_reserve_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.licensingAuditReserveDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('licensing_audit_reserve_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: LicensingAuditReserveDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.licensingAuditReserveDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listLicensingAuditReserveDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveDrawdownRecord[]> {
+    // created_at ASC — the append-only truth in spend order.
+    return this.licensingAuditReserveDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertLicensingPayoutGateState(
+    row: Omit<LicensingPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, scope_key) — an upsert converges (the newest
+    // states govern the next dispatch).
+    const key = `${row.payee_id}:${row.scope_key}`;
+    const now = new Date().toISOString();
+    const existing = this.licensingPayoutGateStates.get(key);
+    const record: LicensingPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.licensingPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getLicensingPayoutGateState(
+    payeeId: string,
+    scopeKey: string,
+  ): Promise<LicensingPayoutGateStateRecord | undefined> {
+    const found = this.licensingPayoutGateStates.get(`${payeeId}:${scopeKey}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleLicensingAuditReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS: the in-memory backend is single-threaded
+    // by construction, so check-then-set is atomic here the way the conditional
+    // UPDATE is on SQLite/Supabase.
+    if (row === undefined || row.status !== 'audit_reserve_escrow') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async getLicensingRoyaltyApplication(
+    dealId: string,
+    sourceEventId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord | undefined> {
+    const found = this.licensingRoyaltyApplications.find(
+      (row) => row.deal_id === dealId && row.source_event_id === sourceEventId,
+    );
+    return found === undefined ? undefined : { ...found };
   }
 
   async listTranslationLocalizationEscrowCredits(

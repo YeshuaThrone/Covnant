@@ -240,6 +240,43 @@ export function isComedyAudioSenderCode(value: string): value is ComedyAudioSend
   return (COMEDY_AUDIO_SENDERS as readonly string[]).includes(value);
 }
 
+// --- The audit reserve escrow (PR 33, the founder licensing-audit directive) ---
+//
+// 5–10% of a licensing royalty credit holds in an AUDIT_RESERVE_ESCROW per
+// license scope while the contract's retail-audit exposure runs: quarterly
+// retail audit reconciliations and inventory write-offs draw it down, and
+// the verified reconciliation of record opens the release. Sentinel payee +
+// GL account per scope key — the merch/book reserve no-fold discipline; the
+// reserve is its own escrow-shaped money, never folded into platform dust,
+// unclaimed holding, or any other escrow state.
+export const AUDIT_RESERVE_ESCROW_PAYEE_PREFIX = "audit_reserve_escrow";
+export function auditReserveEscrowPayeeId(scopeKey: string): string {
+  return `${AUDIT_RESERVE_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function auditReserveEscrowPayeeName(scopeKey: string): string {
+  return `Audit Reserve Escrow — ${scopeKey}`;
+}
+export function auditReserveEscrowGlAccount(scopeKey: string): string {
+  return `audit_reserve_escrow:${scopeKey}`;
+}
+// The founder's band, enforced at registration AND at use: a 5–10% reserve
+// rate of the licensing royalty credit. Anything outside the band is a
+// hostile contract, refused.
+export const LICENSING_AUDIT_RESERVE_MIN_RATE_BPS = 500;
+export const LICENSING_AUDIT_RESERVE_MAX_RATE_BPS = 1_000;
+
+// The minimum-guarantee shortfall invoice (PR 33): the licensee's annual MG
+// shortfall debits as the receivable of record at contract term close. The
+// GL pair per scope — the receivable asset rises (debit) and the shortfall
+// penalty income of record rises (credit); balanced legs, no cash movement
+// until the invoice settles.
+export function licensingMgReceivableGlAccount(scopeKey: string): string {
+  return `licensing_mg_receivable:${scopeKey}`;
+}
+export function licensingMgShortfallIncomeGlAccount(scopeKey: string): string {
+  return `licensing_mg_shortfall_income:${scopeKey}`;
+}
+
 // The studio role-group vocabulary — the three bands' keys. A schedule role
 // outside the vocabulary is a hostile registration.
 export const WEBTOON_STUDIO_ROLE_GROUPS = [
@@ -451,6 +488,22 @@ export const JOURNAL_KINDS = [
   // money is licensed-recording money and never ticket-sales money.
   // Additive only.
   "comedy_audio_rights_post",
+  // Audit reserve escrow (PR 33): a licensing royalty credit's release
+  // splits the held settlement — the 5–10% reserve locks into the
+  // per-scope audit reserve (post), quarterly retail audit reconciliations
+  // and inventory write-offs draw it down (drawdown), and the verified
+  // reconciliation of record opens the release that pays the remaining
+  // reserve to the licensor of record through the taxed cascade
+  // (release). Additive only.
+  "licensing_audit_reserve_route",
+  "licensing_audit_reserve_drawdown",
+  "licensing_audit_reserve_release",
+  // Minimum-guarantee shortfall invoice (PR 33): a licensee's annual MG
+  // shortfall at contract term close debits as the invoice of record —
+  // the receivable asset rises and the shortfall penalty income of record
+  // rises, balanced legs priced from the append-only recoupment truth.
+  // Additive only.
+  "licensing_mg_shortfall_invoice",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

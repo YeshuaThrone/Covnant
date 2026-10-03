@@ -149,6 +149,13 @@ import type {
   AiDatasetAllocationArchiveRecord,
 } from '@/modules/don/records';
 import type {
+  LicensingAuditReserveDrawdownRecord,
+  LicensingAuditReservePolicyRecord,
+  LicensingAuditReserveReconciliationRecord,
+  LicensingMgCommitmentRecord,
+  LicensingMgRecoupmentApplicationRecord,
+  LicensingMgTermCloseRecord,
+  LicensingPayoutGateStateRecord,
   LicensingRoyaltyDealRecord,
   LicensingRoyaltyApplicationRecord,
   LicensingTreatyRateRecord,
@@ -398,6 +405,17 @@ const TABLES = {
   licensingTreatyRates: 'licensing_treaty_rates',
   licensingSubLicensees: 'licensing_sub_licensees',
   licensingSubLicenseReports: 'licensing_sub_license_reports',
+  // Migration 0037 — the advance/MG recoupment ledger, the automatic
+  // shortfall invoice of record, the founder-banded audit reserve escrow's
+  // policy/reconciliation/drawdown state, and the fail-closed licensing
+  // payout gate states per (payee, scope).
+  licensingMgCommitments: 'licensing_mg_commitments',
+  licensingMgRecoupmentApplications: 'licensing_mg_recoupment_applications',
+  licensingMgTermCloses: 'licensing_mg_term_closes',
+  licensingAuditReservePolicies: 'licensing_audit_reserve_policies',
+  licensingAuditReserveReconciliations: 'licensing_audit_reserve_reconciliations',
+  licensingAuditReserveDrawdowns: 'licensing_audit_reserve_drawdowns',
+  licensingPayoutGateStates: 'licensing_payout_gate_states',
 } as const;
 
 /**
@@ -3361,6 +3379,305 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'reconcileLicensingSubLicenseReport',
+    );
+  }
+
+  // --- Advance / MG recoupment, shortfall invoices, audit reserve escrow,
+  // --- and payout gate states (PR 33, migration 0037) ---
+
+  async upsertLicensingMgCommitment(
+    row: Omit<LicensingMgCommitmentRecord, 'id' | 'created_at' | 'updated_at' | 'recouped_cents'> & {
+      recouped_cents?: number;
+    },
+  ): Promise<LicensingMgCommitmentRecord> {
+    // UNIQUE per (scope_key, commitment_ref) — a re-registration replaces
+    // the row atomically (the option-agreement discipline).
+    return this.oneStrict<LicensingMgCommitmentRecord>(
+      this.client
+        .from(TABLES.licensingMgCommitments)
+        .upsert(
+          {
+            ...row,
+            recouped_cents: row.recouped_cents ?? 0,
+            // No id in the payload: on conflict, PostgREST updates only the
+            // transmitted columns, so the row's identity (and created_at)
+            // survive a re-registration — applications and term closes keyed
+            // to this commitment keep their references. A fresh insert gets
+            // the table's gen_random_uuid() default.
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'scope_key,commitment_ref' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingMgCommitment',
+    );
+  }
+
+  async getLicensingMgCommitment(
+    scopeKey: string,
+    commitmentRef: string,
+  ): Promise<LicensingMgCommitmentRecord | undefined> {
+    return this.one<LicensingMgCommitmentRecord>(
+      this.client
+        .from(TABLES.licensingMgCommitments)
+        .select()
+        .eq('scope_key', scopeKey)
+        .eq('commitment_ref', commitmentRef)
+        .maybeSingle(),
+      'getLicensingMgCommitment',
+    );
+  }
+
+  async listLicensingMgCommitments(scopeKey: string): Promise<LicensingMgCommitmentRecord[]> {
+    // created_at ASC — the recoupment pass's routing candidates in order.
+    return this.many<LicensingMgCommitmentRecord>(
+      this.client
+        .from(TABLES.licensingMgCommitments)
+        .select()
+        .eq('scope_key', scopeKey)
+        .order('created_at', { ascending: true }),
+      'listLicensingMgCommitments',
+    );
+  }
+
+  async insertLicensingMgRecoupmentApplication(
+    row: Omit<LicensingMgRecoupmentApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingMgRecoupmentApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard;
+    // UNIQUE per (commitment_id, recouped_before_cents) is the position
+    // lock — a replayed event or a lost position race throws here, never a
+    // double application; the caller retries at the advanced position.
+    return this.oneStrict<LicensingMgRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.licensingMgRecoupmentApplications)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertLicensingMgRecoupmentApplication',
+    );
+  }
+
+  async listLicensingMgRecoupmentApplications(
+    commitmentId: string,
+  ): Promise<LicensingMgRecoupmentApplicationRecord[]> {
+    // created_at ASC — the append-only truth in application order.
+    return this.many<LicensingMgRecoupmentApplicationRecord>(
+      this.client
+        .from(TABLES.licensingMgRecoupmentApplications)
+        .select()
+        .eq('commitment_id', commitmentId)
+        .order('created_at', { ascending: true }),
+      'listLicensingMgRecoupmentApplications',
+    );
+  }
+
+  async upsertLicensingMgTermClose(
+    row: Omit<LicensingMgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingMgTermCloseRecord> {
+    // UNIQUE per (commitment_id, term) — the once-only close; a replay
+    // converges on the recorded shortfall and invoice of record.
+    return this.oneStrict<LicensingMgTermCloseRecord>(
+      this.client
+        .from(TABLES.licensingMgTermCloses)
+        .upsert(
+          // No id in the payload — the once-only close converges on the
+          // recorded identity; the commitment reference never rotates.
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'commitment_id,term' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingMgTermClose',
+    );
+  }
+
+  async getLicensingMgTermClose(
+    commitmentId: string,
+    term: string,
+  ): Promise<LicensingMgTermCloseRecord | undefined> {
+    return this.one<LicensingMgTermCloseRecord>(
+      this.client
+        .from(TABLES.licensingMgTermCloses)
+        .select()
+        .eq('commitment_id', commitmentId)
+        .eq('term', term)
+        .maybeSingle(),
+      'getLicensingMgTermClose',
+    );
+  }
+
+  async listLicensingMgTermCloses(scopeKey: string): Promise<LicensingMgTermCloseRecord[]> {
+    // created_at ASC — the audit trail of the guarantee's enforcement.
+    return this.many<LicensingMgTermCloseRecord>(
+      this.client
+        .from(TABLES.licensingMgTermCloses)
+        .select()
+        .eq('scope_key', scopeKey)
+        .order('created_at', { ascending: true }),
+      'listLicensingMgTermCloses',
+    );
+  }
+
+  async upsertLicensingAuditReservePolicy(
+    row: Omit<LicensingAuditReservePolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingAuditReservePolicyRecord> {
+    // UNIQUE per scope_key — a re-registration converges (the newest rate
+    // governs the next routing).
+    return this.oneStrict<LicensingAuditReservePolicyRecord>(
+      this.client
+        .from(TABLES.licensingAuditReservePolicies)
+        .upsert(
+          // No id in the payload — a re-registration converges on the same
+          // policy row, never a new identity.
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'scope_key' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingAuditReservePolicy',
+    );
+  }
+
+  async getLicensingAuditReservePolicy(
+    scopeKey: string,
+  ): Promise<LicensingAuditReservePolicyRecord | undefined> {
+    return this.one<LicensingAuditReservePolicyRecord>(
+      this.client
+        .from(TABLES.licensingAuditReservePolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getLicensingAuditReservePolicy',
+    );
+  }
+
+  async insertLicensingAuditReserveReconciliation(
+    row: Omit<LicensingAuditReserveReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<LicensingAuditReserveReconciliationRecord>(
+      this.client
+        .from(TABLES.licensingAuditReserveReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertLicensingAuditReserveReconciliation',
+    );
+  }
+
+  async getLicensingAuditReserveReconciliation(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveReconciliationRecord | undefined> {
+    return this.one<LicensingAuditReserveReconciliationRecord>(
+      this.client
+        .from(TABLES.licensingAuditReserveReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getLicensingAuditReserveReconciliation',
+    );
+  }
+
+  async insertLicensingAuditReserveDrawdown(
+    row: Omit<LicensingAuditReserveDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<LicensingAuditReserveDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard;
+    // UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+    // lock — a replayed event or a lost race throws here, never a double
+    // drawdown; the caller re-derives from the append-only truth.
+    return this.oneStrict<LicensingAuditReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.licensingAuditReserveDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertLicensingAuditReserveDrawdown',
+    );
+  }
+
+  async listLicensingAuditReserveDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<LicensingAuditReserveDrawdownRecord[]> {
+    // created_at ASC — the append-only truth in spend order.
+    return this.many<LicensingAuditReserveDrawdownRecord>(
+      this.client
+        .from(TABLES.licensingAuditReserveDrawdowns)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .order('created_at', { ascending: true }),
+      'listLicensingAuditReserveDrawdowns',
+    );
+  }
+
+  async upsertLicensingPayoutGateState(
+    row: Omit<LicensingPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<LicensingPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, scope_key) — an upsert converges (the newest
+    // states govern the next dispatch).
+    return this.oneStrict<LicensingPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.licensingPayoutGateStates)
+        .upsert(
+          // No id in the payload — a verification heals the states on the
+          // same row, never a new identity.
+          { ...row, updated_at: new Date().toISOString() },
+          { onConflict: 'payee_id,scope_key' },
+        )
+        .select()
+        .maybeSingle(),
+      'upsertLicensingPayoutGateState',
+    );
+  }
+
+  async getLicensingPayoutGateState(
+    payeeId: string,
+    scopeKey: string,
+  ): Promise<LicensingPayoutGateStateRecord | undefined> {
+    return this.one<LicensingPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.licensingPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getLicensingPayoutGateState',
+    );
+  }
+
+  async settleLicensingAuditReserve(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update IS the CAS — a single statement that only
+    // flips the row while it is still the held escrow state; the caller
+    // that lost the race (or replayed) reads undefined.
+    return this.one<LedgerTransactionRecord>(
+      this.client
+        .from(TABLES.ledgerTransactions)
+        .update({ status: 'settled', settled_at: settledAt })
+        .eq('id', id)
+        .eq('status', 'audit_reserve_escrow')
+        .select()
+        .maybeSingle(),
+      'settleLicensingAuditReserve',
+    );
+  }
+
+  async getLicensingRoyaltyApplication(
+    dealId: string,
+    sourceEventId: string,
+  ): Promise<LicensingRoyaltyApplicationRecord | undefined> {
+    return this.one<LicensingRoyaltyApplicationRecord>(
+      this.client
+        .from(TABLES.licensingRoyaltyApplications)
+        .select()
+        .eq('deal_id', dealId)
+        .eq('source_event_id', sourceEventId)
+        .maybeSingle(),
+      'getLicensingRoyaltyApplication',
     );
   }
 
