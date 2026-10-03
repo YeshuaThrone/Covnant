@@ -195,10 +195,21 @@ import type {
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 import type {
+  SpatialAuditEscrowDrawdownRecord,
+  SpatialAuditEscrowPolicyRecord,
+  SpatialAuditEscrowReconciliationRecord,
+  SpatialCapexApplicationRecord,
+  SpatialCapexCommitmentRecord,
   SpatialMicroPolicyRecord,
   SpatialMicroRoyaltyRecord,
+  SpatialMsgCommitmentRecord,
+  SpatialMsgTermCloseRecord,
   SpatialOccupancyTierScheduleRecord,
   SpatialOverheadPolicyRecord,
+  SpatialPopupExperienceRecord,
+  SpatialPopupRestorationReserveRecord,
+  SpatialPopupWriteoffRecord,
+  SpatialPayoutGateStateRecord,
   SpatialRoyaltyApplicationRecord,
   SpatialThroughputYearRecord,
   SpatialZoneAllocationRecord,
@@ -401,6 +412,20 @@ export class InMemoryStore implements Store {
   private spatialRoyaltyApplications = new Map<string, SpatialRoyaltyApplicationRecord>();
   private spatialZoneAllocations = new Map<string, SpatialZoneAllocationRecord>();
   private spatialMicroRoyalties = new Map<string, SpatialMicroRoyaltyRecord>();
+  private spatialCapexCommitments = new Map<string, SpatialCapexCommitmentRecord>();
+  private spatialCapexApplications: SpatialCapexApplicationRecord[] = [];
+  private spatialMsgCommitments = new Map<string, SpatialMsgCommitmentRecord>();
+  private spatialMsgTermCloses = new Map<string, SpatialMsgTermCloseRecord>();
+  private spatialPopupExperiences = new Map<string, SpatialPopupExperienceRecord>();
+  private spatialPopupWriteoffs: SpatialPopupWriteoffRecord[] = [];
+  private spatialPopupRestorationReserves = new Map<string, SpatialPopupRestorationReserveRecord>();
+  private spatialAuditEscrowPolicies = new Map<string, SpatialAuditEscrowPolicyRecord>();
+  private spatialAuditEscrowDrawdowns: SpatialAuditEscrowDrawdownRecord[] = [];
+  private spatialAuditEscrowReconciliations = new Map<
+    string,
+    SpatialAuditEscrowReconciliationRecord
+  >();
+  private spatialPayoutGateStates = new Map<string, SpatialPayoutGateStateRecord>();
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -5270,6 +5295,391 @@ export class InMemoryStore implements Store {
     sourceEventId: string,
   ): Promise<SpatialMicroRoyaltyRecord | undefined> {
     const found = this.spatialMicroRoyalties.get(sourceEventId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  // -----------------------------------------------------------------
+  // PR 37 — spatial commitments (migration 0041).
+  // -----------------------------------------------------------------
+
+  async upsertSpatialCapexCommitment(
+    row: Omit<SpatialCapexCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialCapexCommitmentRecord> {
+    // UNIQUE per (scope_key, capex_ref) — a re-registered commitment
+    // converges (the newest registered cost governs the next walk).
+    const key = `${row.scope_key}\u0000${row.capex_ref}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialCapexCommitments.get(key);
+    const record: SpatialCapexCommitmentRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialCapexCommitments.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialCapexCommitment(
+    scopeKey: string,
+    capexRef: string,
+  ): Promise<SpatialCapexCommitmentRecord | undefined> {
+    const found = this.spatialCapexCommitments.get(`${scopeKey}\u0000${capexRef}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listSpatialCapexCommitments(
+    scopeKey: string,
+  ): Promise<SpatialCapexCommitmentRecord[]> {
+    // created_at ASC — the offset walk's OLDEST-FIRST input.
+    return [...this.spatialCapexCommitments.values()]
+      .filter((row) => row.scope_key === scopeKey)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async insertSpatialCapexApplication(
+    row: Omit<SpatialCapexApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialCapexApplicationRecord> {
+    // UNIQUE per (commitment_id, source_event_id) is the replay guard;
+    // UNIQUE per (commitment_id, offset_before_cents) is the position
+    // lock — a replayed royalty or a lost race throws here, never a
+    // double offset; the caller re-derives from the append-only truth.
+    if (
+      this.spatialCapexApplications.some(
+        (existing) =>
+          existing.commitment_id === row.commitment_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('spatial_capex_applications.commitment_id,source_event_id');
+    }
+    if (
+      this.spatialCapexApplications.some(
+        (existing) =>
+          existing.commitment_id === row.commitment_id &&
+          existing.offset_before_cents === row.offset_before_cents,
+      )
+    ) {
+      uniqueViolation('spatial_capex_applications.commitment_id,offset_before_cents');
+    }
+    const record: SpatialCapexApplicationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialCapexApplications.push(record);
+    return { ...record };
+  }
+
+  async listSpatialCapexApplications(
+    commitmentId: string,
+  ): Promise<SpatialCapexApplicationRecord[]> {
+    // created_at ASC — the amortization schedule of record.
+    return this.spatialCapexApplications
+      .filter((row) => row.commitment_id === commitmentId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async upsertSpatialMsgCommitment(
+    row: Omit<SpatialMsgCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgCommitmentRecord> {
+    // UNIQUE per scope_key — a re-registered guarantee converges (the
+    // newest priced terms govern the next close).
+    const now = new Date().toISOString();
+    const existing = this.spatialMsgCommitments.get(row.scope_key);
+    const record: SpatialMsgCommitmentRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialMsgCommitments.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getSpatialMsgCommitment(
+    scopeKey: string,
+  ): Promise<SpatialMsgCommitmentRecord | undefined> {
+    const found = this.spatialMsgCommitments.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSpatialMsgTermClose(
+    row: Omit<SpatialMsgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgTermCloseRecord> {
+    // UNIQUE per (commitment_id, quarter) — the once-only close; a
+    // replay converges on the recorded shortfall and invoice of record.
+    const key = `${row.commitment_id}\u0000${row.quarter}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialMsgTermCloses.get(key);
+    const record: SpatialMsgTermCloseRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialMsgTermCloses.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialMsgTermClose(
+    commitmentId: string,
+    quarter: string,
+  ): Promise<SpatialMsgTermCloseRecord | undefined> {
+    const found = this.spatialMsgTermCloses.get(`${commitmentId}\u0000${quarter}`);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async listSpatialRoyaltyApplicationsByVenue(
+    venueId: string,
+  ): Promise<SpatialRoyaltyApplicationRecord[]> {
+    // created_at ASC — the append-only royalty truth the MSG close sums.
+    return [...this.spatialRoyaltyApplications.values()]
+      .filter((row) => row.venue_id === venueId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async listSpatialZoneAllocationsByVenue(
+    venueId: string,
+  ): Promise<SpatialZoneAllocationRecord[]> {
+    return [...this.spatialZoneAllocations.values()]
+      .filter((row) => row.venue_id === venueId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async listSpatialMicroRoyaltiesByVenue(venueId: string): Promise<SpatialMicroRoyaltyRecord[]> {
+    return [...this.spatialMicroRoyalties.values()]
+      .filter((row) => row.venue_id === venueId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async insertSpatialPopupExperience(
+    row: Omit<SpatialPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here (the caller
+    // reads the winner through the getter).
+    if (this.spatialPopupExperiences.has(row.popup_ref)) {
+      uniqueViolation('spatial_popup_experiences.popup_ref');
+    }
+    const record: SpatialPopupExperienceRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.spatialPopupExperiences.set(row.popup_ref, record);
+    return { ...record };
+  }
+
+  async getSpatialPopupExperience(
+    popupRef: string,
+  ): Promise<SpatialPopupExperienceRecord | undefined> {
+    const found = this.spatialPopupExperiences.get(popupRef);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSpatialPopupWriteoff(
+    row: Omit<SpatialPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    if (
+      this.spatialPopupWriteoffs.some(
+        (existing) =>
+          existing.popup_experience_id === row.popup_experience_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('spatial_popup_writeoffs.popup_experience_id,source_event_id');
+    }
+    const record: SpatialPopupWriteoffRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialPopupWriteoffs.push(record);
+    return { ...record };
+  }
+
+  async listSpatialPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupWriteoffRecord[]> {
+    return this.spatialPopupWriteoffs
+      .filter((row) => row.popup_experience_id === popupExperienceId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
+  }
+
+  async insertSpatialPopupRestorationReserve(
+    row: Omit<SpatialPopupRestorationReserveRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupRestorationReserveRecord> {
+    // Insert-as-lock — UNIQUE per popup_experience_id: the FIRST reserve
+    // wins; a concurrent second insert throws here.
+    if (this.spatialPopupRestorationReserves.has(row.popup_experience_id)) {
+      uniqueViolation('spatial_popup_restoration_reserves.popup_experience_id');
+    }
+    const record: SpatialPopupRestorationReserveRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialPopupRestorationReserves.set(row.popup_experience_id, record);
+    return { ...record };
+  }
+
+  async getSpatialPopupRestorationReserve(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupRestorationReserveRecord | undefined> {
+    const found = this.spatialPopupRestorationReserves.get(popupExperienceId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertSpatialAuditEscrowPolicy(
+    row: Omit<SpatialAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.spatialAuditEscrowPolicies.get(row.scope_key);
+    const record: SpatialAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getSpatialAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<SpatialAuditEscrowPolicyRecord | undefined> {
+    const found = this.spatialAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertSpatialAuditEscrowDrawdown(
+    row: Omit<SpatialAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.spatialAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('spatial_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.spatialAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('spatial_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: SpatialAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listSpatialAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique position column orders same-millisecond rows honestly.
+    return this.spatialAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertSpatialAuditEscrowReconciliation(
+    row: Omit<SpatialAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.spatialAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('spatial_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: SpatialAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.spatialAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getSpatialAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowReconciliationRecord | undefined> {
+    const found = this.spatialAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleSpatialAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    const row = this.ledgerTransactions.find((candidate) => candidate.id === id);
+    // The conditional read IS the CAS — the row flips only while it is
+    // still the held escrow state; the caller that lost the race (or
+    // replayed) reads undefined.
+    if (row === undefined || row.status !== 'spatial_audit_escrow') {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return row;
+  }
+
+  async upsertSpatialPayoutGateState(
+    row: Omit<SpatialPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, venue_id) — an upsert converges (a
+    // verification heals 'unknown'; states never regress through this
+    // table).
+    const key = `${row.payee_id}\u0000${row.venue_id}`;
+    const now = new Date().toISOString();
+    const existing = this.spatialPayoutGateStates.get(key);
+    const record: SpatialPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.spatialPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getSpatialPayoutGateState(
+    payeeId: string,
+    venueId: string,
+  ): Promise<SpatialPayoutGateStateRecord | undefined> {
+    const found = this.spatialPayoutGateStates.get(`${payeeId}\u0000${venueId}`);
     return found === undefined ? undefined : { ...found };
   }
 }

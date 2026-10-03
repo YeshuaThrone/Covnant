@@ -176,10 +176,21 @@ import type {
   NilUnearnedClawbackRecord,
 } from '@/modules/nil/records';
 import type {
+  SpatialAuditEscrowDrawdownRecord,
+  SpatialAuditEscrowPolicyRecord,
+  SpatialAuditEscrowReconciliationRecord,
+  SpatialCapexApplicationRecord,
+  SpatialCapexCommitmentRecord,
   SpatialMicroPolicyRecord,
   SpatialMicroRoyaltyRecord,
+  SpatialMsgCommitmentRecord,
+  SpatialMsgTermCloseRecord,
   SpatialOccupancyTierScheduleRecord,
   SpatialOverheadPolicyRecord,
+  SpatialPopupExperienceRecord,
+  SpatialPopupRestorationReserveRecord,
+  SpatialPopupWriteoffRecord,
+  SpatialPayoutGateStateRecord,
   SpatialRoyaltyApplicationRecord,
   SpatialThroughputYearRecord,
   SpatialZoneAllocationRecord,
@@ -3081,6 +3092,202 @@ export interface Store {
   getSpatialMicroRoyalty(
     sourceEventId: string,
   ): Promise<SpatialMicroRoyaltyRecord | undefined>;
+
+  // -----------------------------------------------------------------
+  // PR 37 — spatial commitments (migration 0041): the CapEx recoupment
+  // offset ledger, the quarterly Minimum Spatial Guarantee, the
+  // temporary pop-up decommissioning audit, the SPATIAL_AUDIT_ESCROW,
+  // and the durable spatial payout-gate states.
+  // -----------------------------------------------------------------
+
+  /**
+   * Registers (or replaces) the allowable CapEx commitment of record for
+   * one (scope, capex_ref) (migration 0041) — upsert converges: the
+   * newest registered cost governs the next offset walk.
+   */
+  upsertSpatialCapexCommitment(
+    row: Omit<SpatialCapexCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialCapexCommitmentRecord>;
+
+  /** One CapEx commitment of record; undefined when none — the offset
+   * walk's scope read. */
+  getSpatialCapexCommitment(
+    scopeKey: string,
+    capexRef: string,
+  ): Promise<SpatialCapexCommitmentRecord | undefined>;
+
+  /** One scope's CapEx commitments in registration order — the offset
+   * walk's OLDEST-FIRST input. */
+  listSpatialCapexCommitments(scopeKey: string): Promise<SpatialCapexCommitmentRecord[]>;
+
+  /**
+   * Appends one position-locked CapEx offset application (migration
+   * 0041) — UNIQUE per (commitment_id, source_event_id) is the replay
+   * guard, UNIQUE per (commitment_id, offset_before_cents) is the
+   * position lock: a replayed royalty or a lost race throws here, never
+   * a double offset.
+   */
+  insertSpatialCapexApplication(
+    row: Omit<SpatialCapexApplicationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialCapexApplicationRecord>;
+
+  /** One commitment's offset applications in append order — the
+   * amortization schedule of record. */
+  listSpatialCapexApplications(commitmentId: string): Promise<SpatialCapexApplicationRecord[]>;
+
+  /**
+   * Registers (or replaces) the quarterly Minimum Spatial Guarantee of
+   * record for one operator × venue (migration 0041) — upsert
+   * converges: the newest priced terms govern the next close.
+   */
+  upsertSpatialMsgCommitment(
+    row: Omit<SpatialMsgCommitmentRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgCommitmentRecord>;
+
+  /** One operator × venue guarantee of record; undefined when none —
+   * the close lane refuses fail-closed without it. */
+  getSpatialMsgCommitment(scopeKey: string): Promise<SpatialMsgCommitmentRecord | undefined>;
+
+  /**
+   * Records the quarter's MSG close of record (migration 0041) — UNIQUE
+   * per (commitment_id, quarter): the once-only close; a replay
+   * converges on the recorded shortfall and invoice of record.
+   */
+  upsertSpatialMsgTermClose(
+    row: Omit<SpatialMsgTermCloseRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialMsgTermCloseRecord>;
+
+  /** One (commitment, quarter)'s close of record; undefined when the
+   * quarter is not yet closed. */
+  getSpatialMsgTermClose(
+    commitmentId: string,
+    quarter: string,
+  ): Promise<SpatialMsgTermCloseRecord | undefined>;
+
+  /** One venue's occupancy royalty applications — the MSG close's
+   * earnings reads (period-filtered in the lane). */
+  listSpatialRoyaltyApplicationsByVenue(venueId: string): Promise<SpatialRoyaltyApplicationRecord[]>;
+
+  /** One venue's zone allocations — the MSG close's earnings reads. */
+  listSpatialZoneAllocationsByVenue(venueId: string): Promise<SpatialZoneAllocationRecord[]>;
+
+  /** One venue's micro-royalties — the MSG close's earnings reads. */
+  listSpatialMicroRoyaltiesByVenue(venueId: string): Promise<SpatialMicroRoyaltyRecord[]>;
+
+  /**
+   * Records the temporary pop-up experience of record (migration 0041)
+   * — insert-as-lock, UNIQUE per popup_ref: the FIRST registration
+   * wins; a re-shipped sheet or a lost race throws (the caller reads
+   * the winner through the getter).
+   */
+  insertSpatialPopupExperience(
+    row: Omit<SpatialPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPopupExperienceRecord>;
+
+  /** One pop-up experience of record; undefined when none — the
+   * decommissioning gate's fail-closed read. */
+  getSpatialPopupExperience(popupRef: string): Promise<SpatialPopupExperienceRecord | undefined>;
+
+  /**
+   * Records one post-event inventory write-off calculation of record
+   * (migration 0041) — UNIQUE per (popup_experience_id,
+   * source_event_id): a replayed calculation throws, never a
+   * double-priced write-off.
+   */
+  insertSpatialPopupWriteoff(
+    row: Omit<SpatialPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupWriteoffRecord>;
+
+  /** One pop-up's write-off calculations in append order — the
+   * decommissioning gate's enforcement read. */
+  listSpatialPopupWriteoffs(popupExperienceId: string): Promise<SpatialPopupWriteoffRecord[]>;
+
+  /**
+   * Records the site restoration reserve of record for one pop-up
+   * experience (migration 0041) — insert-as-lock, UNIQUE per
+   * popup_experience_id: the FIRST reserve wins; a concurrent second
+   * insert throws.
+   */
+  insertSpatialPopupRestorationReserve(
+    row: Omit<SpatialPopupRestorationReserveRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialPopupRestorationReserveRecord>;
+
+  /** One pop-up's restoration reserve of record; undefined when none —
+   * the decommissioning gate's fail-closed read. */
+  getSpatialPopupRestorationReserve(
+    popupExperienceId: string,
+  ): Promise<SpatialPopupRestorationReserveRecord | undefined>;
+
+  /**
+   * Registers (or replaces) the SPATIAL_AUDIT_ESCROW's founder-banded
+   * rate of record for one scope (migration 0041) — upsert converges:
+   * the newest rate governs the next routing.
+   */
+  upsertSpatialAuditEscrowPolicy(
+    row: Omit<SpatialAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialAuditEscrowPolicyRecord>;
+
+  /** One scope's escrow rate of record; undefined when none — the
+   * routing lane refuses fail-closed (no policy, no routing). */
+  getSpatialAuditEscrowPolicy(scopeKey: string): Promise<SpatialAuditEscrowPolicyRecord | undefined>;
+
+  /**
+   * Appends one position-locked escrow drawdown (migration 0041) —
+   * UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+   * guard, UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+   * position lock: a replayed draw or a lost race throws here, never a
+   * double drawdown.
+   */
+  insertSpatialAuditEscrowDrawdown(
+    row: Omit<SpatialAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowDrawdownRecord>;
+
+  /** One escrow bucket's drawdowns in spend order — the append-only
+   * truth the balance derives from. */
+  listSpatialAuditEscrowDrawdowns(reserveLedgerId: string): Promise<SpatialAuditEscrowDrawdownRecord[]>;
+
+  /**
+   * Records the verified reconciliation of record for one escrow bucket
+   * (migration 0041) — insert-as-lock, UNIQUE per reserve_ledger_id:
+   * the FIRST reconciliation of record wins; a concurrent second insert
+   * throws (the caller reads the winner through the getter).
+   */
+  insertSpatialAuditEscrowReconciliation(
+    row: Omit<SpatialAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<SpatialAuditEscrowReconciliationRecord>;
+
+  /** One escrow bucket's reconciliation of record; undefined when none —
+   * the release gate reads fail-closed through this. */
+  getSpatialAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<SpatialAuditEscrowReconciliationRecord | undefined>;
+
+  /**
+   * Settles one held `spatial_audit_escrow` bucket row — the
+   * single-statement CAS: the row flips only while it is still held;
+   * the caller that lost the race (or replayed) reads undefined.
+   */
+  settleSpatialAuditEscrow(id: string, settledAt: string): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
+   * Upserts the spatial payout gate's states of record for one payee in
+   * one venue (migration 0041) — UNIQUE per (payee_id, venue_id): an
+   * upsert converges (a verification heals 'unknown'; states never
+   * regress through this table).
+   */
+  upsertSpatialPayoutGateState(
+    row: Omit<SpatialPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<SpatialPayoutGateStateRecord>;
+
+  /**
+   * One payee × venue's gate states of record; undefined when none —
+   * the spatial payout gate resolves fail-closed through this (absent →
+   * null → the gate refuses).
+   */
+  getSpatialPayoutGateState(
+    payeeId: string,
+    venueId: string,
+  ): Promise<SpatialPayoutGateStateRecord | undefined>;
 }
 
 // Re-export the record vocabulary engines import from the seam.
