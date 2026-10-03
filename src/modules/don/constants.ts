@@ -617,6 +617,11 @@ export const JOURNAL_KINDS = [
   "software_audit_escrow_drawdown",
   "software_audit_escrow_release",
   "developer_toolcall_settlement_post",
+  // PR 46, the founder hardware directive: the instant OTA feature-unlock
+  // settlement post — the per-unlock pot split between the sensor patent
+  // licensor's vault (through the taxed cascade) and the platform the
+  // moment the activation feed detects the purchase.
+  "hardware_ota_unlock_settlement_post",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 

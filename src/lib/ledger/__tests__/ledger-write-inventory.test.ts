@@ -461,6 +461,16 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // and service_role grants; still no DDL on universal_royalty_ledger
       // — the referencing pin below holds.
       '0049_software_audit_escrow_gate_states.sql',
+      // PR 46 (the founder hardware directive): the fifteen hardware
+      // tables — patent pools + holder weightings, SEP royalty policies,
+      // automotive pool assignments, clean-tech and OTA unlock policies,
+      // cross-license agreements, the cumulative SEP unit-month tracker,
+      // and the seven application ledgers (realization, SEP royalty, pool
+      // routing, pool waterfall, telemetry royalty, OTA unlock split,
+      // cross-license net settlements) — with named table-level ck_
+      // constraints, deny-all RLS, and service_role grants; still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0050_hardware_serial_parser_frand_cross_licensing_patent_pools.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

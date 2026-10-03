@@ -159,6 +159,11 @@ describe('don constants', () => {
       'software_audit_escrow_drawdown',
       'software_audit_escrow_release',
       'developer_toolcall_settlement_post',
+      // PR 46 (the founder hardware directive): the OTA feature-unlock
+      // micro-settlement's instant post — priced per unlock, split by the
+      // policy of record, and posted to the sensor licensor + platform
+      // variance the moment the walk reaches the row.
+      'hardware_ota_unlock_settlement_post',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

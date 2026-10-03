@@ -208,6 +208,11 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   software_audit_escrow_release: 'Software audit escrow released',
   developer_toolcall_settlement_post: 'Instant tool-call settlement posted',
   nil_unearned_clawback_hold: 'NIL unearned advance clawback hold',
+  // PR 46 — the hardware patent lane (the founder hardware directive):
+  // OTA feature-unlock micro-royalty splits post instantly through the
+  // taxed payout cascade — the sensor licensor's share and the platform
+  // residual land as one journal pair per unlock.
+  hardware_ota_unlock_settlement_post: 'Instant OTA unlock settlement posted',
   // PR 37 — the spatial commitments lane (the founder spatial directive):
   // park-earnings routing locks the founder-banded audit escrow, drawdowns
   // spend it on local taxes, safety holdbacks, and concession

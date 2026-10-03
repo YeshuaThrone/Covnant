@@ -1,0 +1,5 @@
+Log Event ID,Device MAC,Licensee ID,Patent Family ID,SEP Pool Code,Connected Units,Royalty Basis,Currency,Reporting Period
+MAC-2026-03-0001,AA:BB:CC:DD:EE:01,company-a,fam-5g-modem,POOL-5G-VEHICLE,600,200.00,USD,2026-03
+MAC-2026-03-0002,AA:BB:CC:DD:EE:02,company-a,fam-5g-modem,POOL-5G-VEHICLE,700,200.00,USD,2026-03
+MAC-2026-03-0003,DE:AD:BE:EF:00:03,company-a,fam-bluetooth-le,POOL-5G-VEHICLE,50,90.00,USD,2026-03
+MAC-2026-03-0004,CA:FE:00:07:11:04,company-b,fam-wifi7-module,POOL-WIFI7,10,300.00,USD,2026-03
