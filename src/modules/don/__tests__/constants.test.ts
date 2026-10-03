@@ -135,6 +135,13 @@ describe('don constants', () => {
       'fitness_audit_escrow_route',
       'fitness_audit_escrow_drawdown',
       'fitness_audit_escrow_release',
+      // PR 41 (the founder culinary directive): the CULINARY_AUDIT_ESCROW
+      // journals — the 5–10% culinary IP payout's automatic escrow
+      // routing, the refund-allowance/spoilage-chargeback/supplier-audit
+      // drawdown, and the verified-reconciliation release.
+      'culinary_audit_escrow_route',
+      'culinary_audit_escrow_drawdown',
+      'culinary_audit_escrow_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

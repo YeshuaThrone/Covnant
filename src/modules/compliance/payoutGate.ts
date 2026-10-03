@@ -6,6 +6,7 @@ import type {
   TheatricalPayoutGateStateRecord,
 } from "@/modules/don/records";
 import type { FitnessPayoutGateStateRecord } from "@/modules/fitness/records";
+import type { CulinaryPayoutGateStateRecord } from "@/modules/culinary/records";
 import type { LicensingPayoutGateStateRecord } from "@/modules/licensing/records";
 import type { NilPayoutGateStateRecord } from "@/modules/nil/records";
 import type { SpatialPayoutGateStateRecord } from "@/modules/spatial/records";
@@ -531,6 +532,25 @@ export async function resolveFitnessVerticalComplianceState(
     vertical: "fitness",
     hipaa_gdpr_privacy_cleared: record.hipaa_gdpr_privacy_state === "cleared",
     territorial_studio_exclusivity_verified: record.territorial_exclusivity_state === "verified",
+  };
+}
+
+export async function resolveCulinaryVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+  ghostKitchenLocationCode: string,
+): Promise<Extract<VerticalComplianceState, { vertical: "culinary" }> | null> {
+  const record: CulinaryPayoutGateStateRecord | undefined = await store.getCulinaryPayoutGateState(
+    payeeId,
+    ghostKitchenLocationCode,
+  );
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "culinary",
+    health_inspection_cleared: record.health_inspection_state === "cleared",
+    territorial_kitchen_exclusivity_verified: record.territorial_exclusivity_state === "verified",
   };
 }
 

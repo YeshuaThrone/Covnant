@@ -247,6 +247,14 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  CulinaryAuditEscrowDrawdownRecord,
+  CulinaryAuditEscrowPolicyRecord,
+  CulinaryAuditEscrowReconciliationRecord,
+  CulinaryPayoutGateStateRecord,
+  CulinaryPopupExperienceRecord,
+  CulinaryPopupWriteoffRecord,
+} from '@/modules/culinary/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -2894,6 +2902,89 @@ CREATE TABLE IF NOT EXISTS food_supplier_rebate_applications (
   -- The rebate conserves exactly: the legs' routed shares sum to the
   -- volume kickback.
   CHECK (routed_total_cents = volume_rebate_cents)
+);
+
+-- The culinary audit escrow (migration 0045, PR 41) — the founder
+-- culinary directive's escrow bucket, payout-gate states, and viral-menu
+-- pop-up decommissioning facts. The drawdown-class and gate-state vocab
+-- here is byte-identical to the TS arrays and the Supabase CHECKs (the
+-- PR 129 lesson).
+CREATE TABLE IF NOT EXISTS culinary_audit_escrow_policies (
+  id TEXT PRIMARY KEY,
+  scope_key TEXT NOT NULL UNIQUE,
+  reserve_rate_bps INTEGER NOT NULL CHECK (reserve_rate_bps >= 500 AND reserve_rate_bps <= 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS culinary_audit_escrow_drawdowns (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  drawdown_class TEXT NOT NULL CHECK (drawdown_class IN ('refund_allowance', 'spoilage_chargeback', 'supplier_quality_audit')),
+  source_event_id TEXT NOT NULL,
+  drawn_before_cents INTEGER NOT NULL,
+  drawn_cents INTEGER NOT NULL CHECK (drawn_cents > 0),
+  remaining_cents INTEGER NOT NULL CHECK (remaining_cents >= 0),
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard.
+  UNIQUE (reserve_ledger_id, source_event_id),
+  -- UNIQUE per (reserve_ledger_id, drawn_before_cents) is the position
+  -- lock the balance derives from.
+  UNIQUE (reserve_ledger_id, drawn_before_cents),
+  CHECK (remaining_cents = drawn_before_cents - drawn_cents)
+);
+
+CREATE TABLE IF NOT EXISTS culinary_audit_escrow_reconciliations (
+  id TEXT PRIMARY KEY,
+  reserve_ledger_id TEXT NOT NULL UNIQUE,
+  evidence_ref TEXT NOT NULL,
+  reconciled_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS culinary_payout_gate_states (
+  id TEXT PRIMARY KEY,
+  payee_id TEXT NOT NULL,
+  ghost_kitchen_location_code TEXT NOT NULL,
+  health_inspection_state TEXT NOT NULL CHECK (health_inspection_state IN ('unknown', 'cleared')),
+  territorial_exclusivity_state TEXT NOT NULL CHECK (territorial_exclusivity_state IN ('unknown', 'verified')),
+  evidence_ref TEXT NOT NULL,
+  verified_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (payee_id, ghost_kitchen_location_code)
+);
+
+CREATE TABLE IF NOT EXISTS culinary_popup_experiences (
+  id TEXT PRIMARY KEY,
+  popup_ref TEXT NOT NULL UNIQUE,
+  chef_id TEXT NOT NULL,
+  ghost_kitchen_location_code TEXT NOT NULL,
+  menu_theme TEXT NOT NULL,
+  window_start_date TEXT NOT NULL,
+  window_end_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  -- The campaign window of record runs forward.
+  CHECK (window_end_date >= window_start_date)
+);
+
+CREATE TABLE IF NOT EXISTS culinary_popup_writeoffs (
+  id TEXT PRIMARY KEY,
+  popup_experience_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL,
+  unsold_packages INTEGER NOT NULL CHECK (unsold_packages >= 0),
+  unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+  writeoff_cents INTEGER NOT NULL CHECK (writeoff_cents >= 0),
+  evidence_ref TEXT NOT NULL,
+  calculated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  -- UNIQUE per (popup_experience_id, source_event_id) is the replay
+  -- guard.
+  UNIQUE (popup_experience_id, source_event_id),
+  -- The pinned write-off arithmetic (integer cents).
+  CHECK (writeoff_cents = unsold_packages * unit_cost_cents)
 );
 
 -- IP adaptation optioning (migration 0025, PR 21). The option agreement of
@@ -13110,6 +13201,360 @@ export class SqliteStore implements Store {
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
     };
+  }
+
+  async upsertCulinaryAuditEscrowPolicy(
+    row: Omit<CulinaryAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_audit_escrow_policies
+           (id, scope_key, reserve_rate_bps, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (scope_key) DO UPDATE SET
+           reserve_rate_bps = excluded.reserve_rate_bps,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.scope_key,
+        record.reserve_rate_bps,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getCulinaryAuditEscrowPolicy(record.scope_key) as Promise<
+      CulinaryAuditEscrowPolicyRecord
+    >;
+  }
+
+  async getCulinaryAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<CulinaryAuditEscrowPolicyRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM culinary_audit_escrow_policies WHERE scope_key = ?`)
+      .get(scopeKey) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      scope_key: row.scope_key as string,
+      reserve_rate_bps: row.reserve_rate_bps as number,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertCulinaryAuditEscrowDrawdown(
+    row: Omit<CulinaryAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_audit_escrow_drawdowns
+           (id, reserve_ledger_id, scope_key, drawdown_class, source_event_id,
+            drawn_before_cents, drawn_cents, remaining_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.scope_key,
+        record.drawdown_class,
+        record.source_event_id,
+        record.drawn_before_cents,
+        record.drawn_cents,
+        record.remaining_cents,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listCulinaryAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM culinary_audit_escrow_drawdowns
+         WHERE reserve_ledger_id = ?
+         ORDER BY created_at ASC, drawn_before_cents DESC`,
+      )
+      .all(reserveLedgerId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      scope_key: row.scope_key as string,
+      drawdown_class: row.drawdown_class as CulinaryAuditEscrowDrawdownRecord['drawdown_class'],
+      source_event_id: row.source_event_id as string,
+      drawn_before_cents: row.drawn_before_cents as number,
+      drawn_cents: row.drawn_cents as number,
+      remaining_cents: row.remaining_cents as number,
+      created_at: row.created_at as string,
+    }));
+  }
+
+  async insertCulinaryAuditEscrowReconciliation(
+    row: Omit<CulinaryAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_audit_escrow_reconciliations
+           (id, reserve_ledger_id, evidence_ref, reconciled_by, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.reserve_ledger_id,
+        record.evidence_ref,
+        record.reconciled_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async getCulinaryAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM culinary_audit_escrow_reconciliations WHERE reserve_ledger_id = ?`)
+      .get(reserveLedgerId) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      reserve_ledger_id: row.reserve_ledger_id as string,
+      evidence_ref: row.evidence_ref as string,
+      reconciled_by: row.reconciled_by as string,
+      created_at: row.created_at as string,
+    };
+  }
+
+  async settleCulinaryAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the fitness escrow settle rides: only the caller whose
+    // WHERE matched (the escrow was still held) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'culinary_audit_escrow'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
+  async upsertCulinaryPayoutGateState(
+    row: Omit<CulinaryPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, ghost_kitchen_location_code) — an upsert
+    // converges (a verification heals 'unknown'; states never regress
+    // through this table).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_payout_gate_states
+           (id, payee_id, ghost_kitchen_location_code, health_inspection_state,
+            territorial_exclusivity_state, evidence_ref, verified_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (payee_id, ghost_kitchen_location_code) DO UPDATE SET
+           health_inspection_state = excluded.health_inspection_state,
+           territorial_exclusivity_state = excluded.territorial_exclusivity_state,
+           evidence_ref = excluded.evidence_ref,
+           verified_by = excluded.verified_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.payee_id,
+        record.ghost_kitchen_location_code,
+        record.health_inspection_state,
+        record.territorial_exclusivity_state,
+        record.evidence_ref,
+        record.verified_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getCulinaryPayoutGateState(
+      record.payee_id,
+      record.ghost_kitchen_location_code,
+    ) as Promise<CulinaryPayoutGateStateRecord>;
+  }
+
+  async getCulinaryPayoutGateState(
+    payeeId: string,
+    ghostKitchenLocationCode: string,
+  ): Promise<CulinaryPayoutGateStateRecord | undefined> {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM culinary_payout_gate_states WHERE payee_id = ? AND ghost_kitchen_location_code = ?`,
+      )
+      .get(payeeId, ghostKitchenLocationCode) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      payee_id: row.payee_id as string,
+      ghost_kitchen_location_code: row.ghost_kitchen_location_code as string,
+      health_inspection_state:
+        row.health_inspection_state as CulinaryPayoutGateStateRecord['health_inspection_state'],
+      territorial_exclusivity_state:
+        row.territorial_exclusivity_state as CulinaryPayoutGateStateRecord['territorial_exclusivity_state'],
+      evidence_ref: row.evidence_ref as string,
+      verified_by: row.verified_by as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertCulinaryPopupExperience(
+    row: Omit<CulinaryPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here (the caller
+    // reads the winner through the getter).
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_popup_experiences
+           (id, popup_ref, chef_id, ghost_kitchen_location_code, menu_theme,
+            window_start_date, window_end_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.popup_ref,
+        record.chef_id,
+        record.ghost_kitchen_location_code,
+        record.menu_theme,
+        record.window_start_date,
+        record.window_end_date,
+        record.created_at,
+        record.updated_at,
+      );
+    return record;
+  }
+
+  async getCulinaryPopupExperience(
+    popupRef: string,
+  ): Promise<CulinaryPopupExperienceRecord | undefined> {
+    const row = this.db
+      .prepare(`SELECT * FROM culinary_popup_experiences WHERE popup_ref = ?`)
+      .get(popupRef) as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      id: row.id as string,
+      popup_ref: row.popup_ref as string,
+      chef_id: row.chef_id as string,
+      ghost_kitchen_location_code: row.ghost_kitchen_location_code as string,
+      menu_theme: row.menu_theme as string,
+      window_start_date: row.window_start_date as string,
+      window_end_date: row.window_end_date as string,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  async insertCulinaryPopupWriteoff(
+    row: Omit<CulinaryPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    const record = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO culinary_popup_writeoffs
+           (id, popup_experience_id, source_event_id, unsold_packages,
+            unit_cost_cents, writeoff_cents, evidence_ref, calculated_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.popup_experience_id,
+        record.source_event_id,
+        record.unsold_packages,
+        record.unit_cost_cents,
+        record.writeoff_cents,
+        record.evidence_ref,
+        record.calculated_by,
+        record.created_at,
+      );
+    return record;
+  }
+
+  async listCulinaryPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<CulinaryPopupWriteoffRecord[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM culinary_popup_writeoffs
+         WHERE popup_experience_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(popupExperienceId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row.id as string,
+      popup_experience_id: row.popup_experience_id as string,
+      source_event_id: row.source_event_id as string,
+      unsold_packages: row.unsold_packages as number,
+      unit_cost_cents: row.unit_cost_cents as number,
+      writeoff_cents: row.writeoff_cents as number,
+      evidence_ref: row.evidence_ref as string,
+      calculated_by: row.calculated_by as string,
+      created_at: row.created_at as string,
+    }));
   }
 
   async upsertFitnessLiveEventBonusPolicy(

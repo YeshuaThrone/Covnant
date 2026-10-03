@@ -240,6 +240,14 @@ import type {
   FoodSupplierRebateApplicationRecord,
 } from '@/modules/food/records';
 import type {
+  CulinaryAuditEscrowDrawdownRecord,
+  CulinaryAuditEscrowPolicyRecord,
+  CulinaryAuditEscrowReconciliationRecord,
+  CulinaryPayoutGateStateRecord,
+  CulinaryPopupExperienceRecord,
+  CulinaryPopupWriteoffRecord,
+} from '@/modules/culinary/records';
+import type {
   MatchQueueRecord,
   MatchQueueResolution,
   MulClearanceRecord,
@@ -566,6 +574,14 @@ const TABLES = {
   foodHostOperatorSplitApplications: 'food_host_operator_split_applications',
   foodCookCycleRoyalties: 'food_cook_cycle_royalties',
   foodSupplierRebateApplications: 'food_supplier_rebate_applications',
+  // Migration 0045 — the culinary audit escrow, the payout gate states,
+  // and the viral-menu pop-up decommissioning facts.
+  culinaryAuditEscrowPolicies: 'culinary_audit_escrow_policies',
+  culinaryAuditEscrowDrawdowns: 'culinary_audit_escrow_drawdowns',
+  culinaryAuditEscrowReconciliations: 'culinary_audit_escrow_reconciliations',
+  culinaryPayoutGateStates: 'culinary_payout_gate_states',
+  culinaryPopupExperiences: 'culinary_popup_experiences',
+  culinaryPopupWriteoffs: 'culinary_popup_writeoffs',
 } as const;
 
 /**
@@ -7946,5 +7962,215 @@ export class SupabaseStore implements Store {
         .limit(limit),
       'listAdminActions',
     );
+  }
+
+  // --- The culinary audit escrow + gate states + pop-up decommissioning
+  // (PR 41, migration 0045) — the 0043 fitness twins' PostgREST shape. ---
+
+  async upsertCulinaryAuditEscrowPolicy(
+    row: Omit<CulinaryAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing). HARDENED UPSERT: no id in
+    // the payload (the id rotates on conflict).
+    return this.oneStrict<CulinaryAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.culinaryAuditEscrowPolicies)
+        .upsert(row, { onConflict: 'scope_key' })
+        .select()
+        .maybeSingle(),
+      'upsertCulinaryAuditEscrowPolicy',
+    );
+  }
+
+  async getCulinaryAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<CulinaryAuditEscrowPolicyRecord | undefined> {
+    return this.one<CulinaryAuditEscrowPolicyRecord>(
+      this.client
+        .from(TABLES.culinaryAuditEscrowPolicies)
+        .select()
+        .eq('scope_key', scopeKey)
+        .maybeSingle(),
+      'getCulinaryAuditEscrowPolicy',
+    );
+  }
+
+  async insertCulinaryAuditEscrowDrawdown(
+    row: Omit<CulinaryAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay guard
+    // and UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here, never
+    // a double drawdown; the caller re-derives from the append-only
+    // truth.
+    return this.oneStrict<CulinaryAuditEscrowDrawdownRecord>(
+      this.client
+        .from(TABLES.culinaryAuditEscrowDrawdowns)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertCulinaryAuditEscrowDrawdown',
+    );
+  }
+
+  async listCulinaryAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order — the same ordering discipline the
+    // fitness and spatial drawdown lists run.
+    const { data, error } = await this.client
+      .from(TABLES.culinaryAuditEscrowDrawdowns)
+      .select()
+      .eq('reserve_ledger_id', reserveLedgerId)
+      .order('created_at', { ascending: true })
+      .order('drawn_before_cents', { ascending: false });
+    if (error) {
+      throw new Error(`listCulinaryAuditEscrowDrawdowns failed: ${error.message}`);
+    }
+    return (data ?? []) as CulinaryAuditEscrowDrawdownRecord[];
+  }
+
+  async insertCulinaryAuditEscrowReconciliation(
+    row: Omit<CulinaryAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    return this.oneStrict<CulinaryAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.culinaryAuditEscrowReconciliations)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertCulinaryAuditEscrowReconciliation',
+    );
+  }
+
+  async getCulinaryAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord | undefined> {
+    return this.one<CulinaryAuditEscrowReconciliationRecord>(
+      this.client
+        .from(TABLES.culinaryAuditEscrowReconciliations)
+        .select()
+        .eq('reserve_ledger_id', reserveLedgerId)
+        .maybeSingle(),
+      'getCulinaryAuditEscrowReconciliation',
+    );
+  }
+
+  async settleCulinaryAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the escrow was still held) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'culinary_audit_escrow')
+      .select();
+    if (error) {
+      throw new Error(`settleCulinaryAuditEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
+  async upsertCulinaryPayoutGateState(
+    row: Omit<CulinaryPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, ghost_kitchen_location_code) — an upsert
+    // converges (a verification heals 'unknown'; states never regress
+    // through this table). HARDENED UPSERT: no id in the payload (the
+    // id rotates on conflict).
+    return this.oneStrict<CulinaryPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.culinaryPayoutGateStates)
+        .upsert(row, { onConflict: 'payee_id,ghost_kitchen_location_code' })
+        .select()
+        .maybeSingle(),
+      'upsertCulinaryPayoutGateState',
+    );
+  }
+
+  async getCulinaryPayoutGateState(
+    payeeId: string,
+    ghostKitchenLocationCode: string,
+  ): Promise<CulinaryPayoutGateStateRecord | undefined> {
+    return this.one<CulinaryPayoutGateStateRecord>(
+      this.client
+        .from(TABLES.culinaryPayoutGateStates)
+        .select()
+        .eq('payee_id', payeeId)
+        .eq('ghost_kitchen_location_code', ghostKitchenLocationCode)
+        .maybeSingle(),
+      'getCulinaryPayoutGateState',
+    );
+  }
+
+  async insertCulinaryPopupExperience(
+    row: Omit<CulinaryPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here (the caller
+    // reads the winner through the getter).
+    return this.oneStrict<CulinaryPopupExperienceRecord>(
+      this.client
+        .from(TABLES.culinaryPopupExperiences)
+        .insert({
+          ...row,
+          id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .maybeSingle(),
+      'insertCulinaryPopupExperience',
+    );
+  }
+
+  async getCulinaryPopupExperience(
+    popupRef: string,
+  ): Promise<CulinaryPopupExperienceRecord | undefined> {
+    return this.one<CulinaryPopupExperienceRecord>(
+      this.client
+        .from(TABLES.culinaryPopupExperiences)
+        .select()
+        .eq('popup_ref', popupRef)
+        .maybeSingle(),
+      'getCulinaryPopupExperience',
+    );
+  }
+
+  async insertCulinaryPopupWriteoff(
+    row: Omit<CulinaryPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    return this.oneStrict<CulinaryPopupWriteoffRecord>(
+      this.client
+        .from(TABLES.culinaryPopupWriteoffs)
+        .insert({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() })
+        .select()
+        .maybeSingle(),
+      'insertCulinaryPopupWriteoff',
+    );
+  }
+
+  async listCulinaryPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<CulinaryPopupWriteoffRecord[]> {
+    const { data, error } = await this.client
+      .from(TABLES.culinaryPopupWriteoffs)
+      .select()
+      .eq('popup_experience_id', popupExperienceId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      throw new Error(`listCulinaryPopupWriteoffs failed: ${error.message}`);
+    }
+    return (data ?? []) as CulinaryPopupWriteoffRecord[];
   }
 }

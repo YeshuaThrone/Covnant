@@ -419,6 +419,17 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // the referencing pin below holds.
       '0043_fitness_audit_escrow_payout_gates_live_bonuses.sql',
       '0044_food_recipe_royalties_supplier_rebates.sql',
+      // PR 41 (the founder culinary directive): six additive tables for
+      // the CULINARY_AUDIT_ESCROW bucket (the founder-banded 5–10% rate),
+      // the position-locked drawdowns (refund allowances, spoilage
+      // chargebacks, supplier quality audits), the verified
+      // reconciliations (the release gate's key), the
+      // health_inspection_cleared + territorial_kitchen_exclusivity_verified
+      // payout gate states, and the pop-up decommissioning facts (the
+      // campaign window of record and the post-campaign packaging
+      // write-off of record); still no DDL on universal_royalty_ledger —
+      // the referencing pin below holds.
+      '0045_culinary_audit_escrow_gate_states.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

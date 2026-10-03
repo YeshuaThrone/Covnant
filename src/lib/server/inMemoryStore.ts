@@ -240,6 +240,14 @@ import type {
   FitnessTrainerTierScheduleRecord,
 } from '@/modules/fitness/records';
 import type {
+  CulinaryAuditEscrowDrawdownRecord,
+  CulinaryAuditEscrowPolicyRecord,
+  CulinaryAuditEscrowReconciliationRecord,
+  CulinaryPayoutGateStateRecord,
+  CulinaryPopupExperienceRecord,
+  CulinaryPopupWriteoffRecord,
+} from '@/modules/culinary/records';
+import type {
   FoodCobrandSplitApplicationRecord,
   FoodCobrandWeightingRecord,
   FoodCookCyclePolicyRecord,
@@ -517,6 +525,17 @@ export class InMemoryStore implements Store {
   private foodHostOperatorSplitApplications: FoodHostOperatorSplitApplicationRecord[] = [];
   private foodCookCycleRoyalties: FoodCookCycleRoyaltyRecord[] = [];
   private foodSupplierRebateApplications: FoodSupplierRebateApplicationRecord[] = [];
+  // Migration 0045 — the culinary audit escrow, the payout gate states,
+  // and the viral-menu pop-up decommissioning facts.
+  private culinaryAuditEscrowPolicies = new Map<string, CulinaryAuditEscrowPolicyRecord>();
+  private culinaryAuditEscrowDrawdowns: CulinaryAuditEscrowDrawdownRecord[] = [];
+  private culinaryAuditEscrowReconciliations = new Map<
+    string,
+    CulinaryAuditEscrowReconciliationRecord
+  >();
+  private culinaryPayoutGateStates = new Map<string, CulinaryPayoutGateStateRecord>();
+  private culinaryPopupExperiences = new Map<string, CulinaryPopupExperienceRecord>();
+  private culinaryPopupWriteoffs: CulinaryPopupWriteoffRecord[] = [];
   // Migration 0025 — the IP option contract + author-first cascade state.
   private ipOptionAgreements: IpOptionAgreementRecord[] = [];
   private ipOptionAuthorAllocations: IpOptionAuthorAllocationRecord[] = [];
@@ -6377,6 +6396,211 @@ export class InMemoryStore implements Store {
   ): Promise<FitnessPayoutGateStateRecord | undefined> {
     const found = this.fitnessPayoutGateStates.get(`${payeeId}|${studioFranchiseCode}`);
     return found === undefined ? undefined : { ...found };
+  }
+
+  async upsertCulinaryAuditEscrowPolicy(
+    row: Omit<CulinaryAuditEscrowPolicyRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryAuditEscrowPolicyRecord> {
+    // UNIQUE per scope_key — a re-registered policy converges (the
+    // newest rate governs the next routing).
+    const now = new Date().toISOString();
+    const existing = this.culinaryAuditEscrowPolicies.get(row.scope_key);
+    const record: CulinaryAuditEscrowPolicyRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.culinaryAuditEscrowPolicies.set(row.scope_key, record);
+    return { ...record };
+  }
+
+  async getCulinaryAuditEscrowPolicy(
+    scopeKey: string,
+  ): Promise<CulinaryAuditEscrowPolicyRecord | undefined> {
+    const found = this.culinaryAuditEscrowPolicies.get(scopeKey);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertCulinaryAuditEscrowDrawdown(
+    row: Omit<CulinaryAuditEscrowDrawdownRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord> {
+    // UNIQUE per (reserve_ledger_id, source_event_id) is the replay
+    // guard; UNIQUE per (reserve_ledger_id, drawn_before_cents) is the
+    // position lock — a replayed event or a lost race throws here,
+    // never a double drawdown; the caller re-derives from the
+    // append-only truth.
+    if (
+      this.culinaryAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('culinary_audit_escrow_drawdowns.reserve_ledger_id,source_event_id');
+    }
+    if (
+      this.culinaryAuditEscrowDrawdowns.some(
+        (existing) =>
+          existing.reserve_ledger_id === row.reserve_ledger_id &&
+          existing.drawn_before_cents === row.drawn_before_cents,
+      )
+    ) {
+      uniqueViolation('culinary_audit_escrow_drawdowns.reserve_ledger_id,drawn_before_cents');
+    }
+    const record: CulinaryAuditEscrowDrawdownRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.culinaryAuditEscrowDrawdowns.push(record);
+    return { ...record };
+  }
+
+  async listCulinaryAuditEscrowDrawdowns(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowDrawdownRecord[]> {
+    // Chronological spend order: created_at ASC with drawn_before_cents
+    // DESC as the tiebreak — balances strictly decrease as draws land, so
+    // the unique balance-before column orders same-millisecond rows honestly.
+    return this.culinaryAuditEscrowDrawdowns
+      .filter((row) => row.reserve_ledger_id === reserveLedgerId)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          b.drawn_before_cents - a.drawn_before_cents,
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async insertCulinaryAuditEscrowReconciliation(
+    row: Omit<CulinaryAuditEscrowReconciliationRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord> {
+    // Insert-as-lock — UNIQUE per reserve_ledger_id: the FIRST
+    // reconciliation of record wins; a concurrent second insert throws
+    // here (the caller reads the winner through the getter).
+    if (this.culinaryAuditEscrowReconciliations.has(row.reserve_ledger_id)) {
+      uniqueViolation('culinary_audit_escrow_reconciliations.reserve_ledger_id');
+    }
+    const record: CulinaryAuditEscrowReconciliationRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.culinaryAuditEscrowReconciliations.set(row.reserve_ledger_id, record);
+    return { ...record };
+  }
+
+  async getCulinaryAuditEscrowReconciliation(
+    reserveLedgerId: string,
+  ): Promise<CulinaryAuditEscrowReconciliationRecord | undefined> {
+    const found = this.culinaryAuditEscrowReconciliations.get(reserveLedgerId);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async settleCulinaryAuditEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still held —
+    // the in-memory shape of the single-statement conditional UPDATE the
+    // SQL backends run; the caller that lost the race reads undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'culinary_audit_escrow',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
+  async upsertCulinaryPayoutGateState(
+    row: Omit<CulinaryPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPayoutGateStateRecord> {
+    // UNIQUE per (payee_id, ghost_kitchen_location_code) — an upsert
+    // converges (a verification heals 'unknown'; states never regress
+    // through this table).
+    const now = new Date().toISOString();
+    const key = `${row.payee_id}|${row.ghost_kitchen_location_code}`;
+    const existing = this.culinaryPayoutGateStates.get(key);
+    const record: CulinaryPayoutGateStateRecord = {
+      ...row,
+      id: existing?.id ?? randomUUID(),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.culinaryPayoutGateStates.set(key, record);
+    return { ...record };
+  }
+
+  async getCulinaryPayoutGateState(
+    payeeId: string,
+    ghostKitchenLocationCode: string,
+  ): Promise<CulinaryPayoutGateStateRecord | undefined> {
+    const found = this.culinaryPayoutGateStates.get(
+      `${payeeId}|${ghostKitchenLocationCode}`,
+    );
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertCulinaryPopupExperience(
+    row: Omit<CulinaryPopupExperienceRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<CulinaryPopupExperienceRecord> {
+    // Insert-as-lock — UNIQUE per popup_ref: the FIRST registration
+    // wins; a re-shipped sheet or a lost race throws here (the caller
+    // reads the winner through the getter).
+    if (this.culinaryPopupExperiences.has(row.popup_ref)) {
+      uniqueViolation('culinary_popup_experiences.popup_ref');
+    }
+    const record: CulinaryPopupExperienceRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    this.culinaryPopupExperiences.set(row.popup_ref, record);
+    return { ...record };
+  }
+
+  async getCulinaryPopupExperience(
+    popupRef: string,
+  ): Promise<CulinaryPopupExperienceRecord | undefined> {
+    const found = this.culinaryPopupExperiences.get(popupRef);
+    return found === undefined ? undefined : { ...found };
+  }
+
+  async insertCulinaryPopupWriteoff(
+    row: Omit<CulinaryPopupWriteoffRecord, 'id' | 'created_at'>,
+  ): Promise<CulinaryPopupWriteoffRecord> {
+    // UNIQUE per (popup_experience_id, source_event_id) — a replayed
+    // calculation throws, never a double-priced write-off.
+    if (
+      this.culinaryPopupWriteoffs.some(
+        (existing) =>
+          existing.popup_experience_id === row.popup_experience_id &&
+          existing.source_event_id === row.source_event_id,
+      )
+    ) {
+      uniqueViolation('culinary_popup_writeoffs.popup_experience_id,source_event_id');
+    }
+    const record: CulinaryPopupWriteoffRecord = {
+      ...row,
+      id: randomUUID(),
+      created_at: new Date().toISOString(),
+    };
+    this.culinaryPopupWriteoffs.push(record);
+    return { ...record };
+  }
+
+  async listCulinaryPopupWriteoffs(
+    popupExperienceId: string,
+  ): Promise<CulinaryPopupWriteoffRecord[]> {
+    return this.culinaryPopupWriteoffs
+      .filter((row) => row.popup_experience_id === popupExperienceId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((row) => ({ ...row }));
   }
 
   async upsertFitnessLiveEventBonusPolicy(
