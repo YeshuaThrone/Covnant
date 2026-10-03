@@ -338,6 +338,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // still no DDL on universal_royalty_ledger — the referencing pin
       // below holds.
       '0032_art_market_waterfalls.sql',
+      // Estate succession + multi-heir splitting (PR 29, the founder
+      // estate directive): the probate certificates of record, the
+      // versioned heir schedules, the append-only receiving-entity
+      // transitions, the per-artwork split accruals with provenance
+      // hashes, and the estate payout-gate states; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0033_estate_succession_multi_heir_splitting.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

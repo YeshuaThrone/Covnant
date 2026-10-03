@@ -1,6 +1,6 @@
 import type { Store } from "@/lib/server/store";
 import type { KycStatus } from "@/lib/don/types";
-import type { AiPayoutGateStateRecord } from "@/modules/don/records";
+import type { AiPayoutGateStateRecord, EstatePayoutGateStateRecord } from "@/modules/don/records";
 
 /**
  * Payout compliance gate — the fail-closed v1 gate for every Lithic ACH
@@ -339,6 +339,35 @@ export async function resolveAiVerticalComplianceState(
       record.ai_training_consent_state === "verified",
     synthetic_voice_likeness_released:
       record.synthetic_voice_likeness_state === "released",
+  };
+}
+
+/**
+ * The art vertical's compliance state, resolved from the estate payout-gate
+ * state of record (migration 0033) — the store-backed reader the holding
+ * release path falls back to for the 'art' vertical (the AI resolver's
+ * pattern). FAIL-CLOSED on both failure modes the directive names: an
+ * ABSENT record returns null (the gate refuses with
+ * vertical_state_unknown), and an 'unknown' stored state maps to false
+ * (the gate refuses the specific estate condition —
+ * art_estate_succession_unverified). The boolean is true ONLY on the
+ * verified state of record — nothing defaults to allowing.
+ */
+export async function resolveArtVerticalComplianceState(
+  store: Store,
+  payeeId: string,
+): Promise<Extract<
+  VerticalComplianceState,
+  { vertical: "art" }
+> | null> {
+  const record: EstatePayoutGateStateRecord | undefined =
+    await store.getEstatePayoutGateState(payeeId);
+  if (record === undefined) {
+    return null;
+  }
+  return {
+    vertical: "art",
+    estate_succession_verified: record.estate_succession_state === "verified",
   };
 }
 

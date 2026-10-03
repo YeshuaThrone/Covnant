@@ -100,6 +100,11 @@ import type {
   ArtSplitScheduleRecord,
   ArtSplitAccrualRecord,
   ArtLicensingAgencyPolicyRecord,
+  EstateSuccessionCertificateRecord,
+  EstateHeirScheduleRecord,
+  EstateSuccessionTransitionRecord,
+  EstateSplitAccrualRecord,
+  EstatePayoutGateStateRecord,
   IpOptionAgreementRecord,
   IpOptionAuthorAllocationRecord,
   PublishingIpRightsVerificationRecord,
@@ -1345,6 +1350,98 @@ export interface Store {
   getArtLicensingAgencyPolicy(
     agencyCode: ArtLicensingAgencyPolicyRecord['agency_code'],
   ): Promise<ArtLicensingAgencyPolicyRecord | undefined>;
+
+  // --- Estate succession + multi-heir splitting (PR 29, migration 0033) ---
+
+  /**
+   * Upserts the estate succession certificate of record (migration 0033) —
+   * UNIQUE per (artist_payee_id, certificate_ref): a re-validation
+   * converges on the row (the newest validation state governs the
+   * transition gate).
+   */
+  upsertEstateSuccessionCertificate(
+    row: Omit<EstateSuccessionCertificateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstateSuccessionCertificateRecord>;
+
+  /**
+   * One certificate of record per (artist, certificate_ref); undefined
+   * when the artist has none — the fail-closed absent state.
+   */
+  getEstateSuccessionCertificate(
+    artistPayeeId: string,
+    certificateRef: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined>;
+
+  /**
+   * The artist's newest VERIFIED certificate of record; undefined when no
+   * verified certificate exists — the receiving-entity transition's gate
+   * (absent refuses, fail-closed).
+   */
+  getVerifiedEstateSuccessionCertificate(
+    artistPayeeId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined>;
+
+  /** One certificate of record by id — the schedule registration's anchor. */
+  getEstateSuccessionCertificateById(
+    certificateId: string,
+  ): Promise<EstateSuccessionCertificateRecord | undefined>;
+
+  /**
+   * The multi-heir split schedule of record per certificate (migration
+   * 0033) — upsert on the key: a re-registration (a probate amendment)
+   * keeps the row's identity and increments its version (the art schedule
+   * upsert discipline; the engine builds the row from the existing
+   * record).
+   */
+  upsertEstateHeirSchedule(row: EstateHeirScheduleRecord): Promise<EstateHeirScheduleRecord>;
+
+  /** One schedule of record — the accrual's verified probate percentages. */
+  getEstateHeirSchedule(
+    certificateId: string,
+  ): Promise<EstateHeirScheduleRecord | undefined>;
+
+  /**
+   * Append one receiving-entity transition. UNIQUE per (certificate_id,
+   * source_event_id): a replayed transition throws the unique violation,
+   * never a double handoff. Append-only — nothing ever updates or deletes
+   * a transition row.
+   */
+  insertEstateSuccessionTransition(
+    row: Omit<EstateSuccessionTransitionRecord, 'id'>,
+  ): Promise<EstateSuccessionTransitionRecord>;
+
+  /** One certificate's transition history, created_at ASC — the audit trail. */
+  listEstateSuccessionTransitions(
+    certificateId: string,
+  ): Promise<EstateSuccessionTransitionRecord[]>;
+
+  /**
+   * Append one executed estate split. UNIQUE per (certificate_id,
+   * artwork_id, source_event_id): a replayed accrual throws the unique
+   * violation, never a double designation — the provenance triple IS the
+   * once-only key.
+   */
+  insertEstateSplitAccrual(
+    row: Omit<EstateSplitAccrualRecord, 'id'>,
+  ): Promise<EstateSplitAccrualRecord>;
+
+  /** One certificate's executed splits, created_at ASC — the accrual ledger. */
+  listEstateSplitAccruals(certificateId: string): Promise<EstateSplitAccrualRecord[]>;
+
+  /**
+   * Upserts one payee's estate payout-gate state (migration 0033) —
+   * UNIQUE per payee_id; a re-recording converges (the newest state
+   * governs the next dispatch).
+   */
+  upsertEstatePayoutGateState(
+    row: Omit<EstatePayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
+  ): Promise<EstatePayoutGateStateRecord>;
+
+  /**
+   * One payee's estate payout-gate state of record; undefined when the
+   * payee has none — the fail-closed absent state (the gate refuses).
+   */
+  getEstatePayoutGateState(payeeId: string): Promise<EstatePayoutGateStateRecord | undefined>;
 
   /**
    * The locked translation-localization escrow receipts (kind AND status
