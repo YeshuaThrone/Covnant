@@ -21,7 +21,7 @@ import { resetRateLimits } from "@/lib/server/rateLimit";
 
 const supabaseMock = vi.hoisted(() => ({
   readSupabaseEnv: vi.fn(),
-  createUser: vi.fn(),
+  signUp: vi.fn(),
   deleteUser: vi.fn(),
   profileInsertSingle: vi.fn(),
   profileDeleteEq: vi.fn(),
@@ -29,11 +29,10 @@ const supabaseMock = vi.hoisted(() => ({
 
 vi.mock("@/lib/server/supabase", () => ({
   readSupabaseEnv: supabaseMock.readSupabaseEnv,
-  createAuthClient: () => ({ auth: {} }),
+  createAuthClient: () => ({ auth: { signUp: supabaseMock.signUp } }),
   createAdminClient: () => ({
     auth: {
       admin: {
-        createUser: supabaseMock.createUser,
         deleteUser: supabaseMock.deleteUser,
       },
     },
@@ -209,7 +208,7 @@ function signupRequest(body: unknown): Request {
 
 beforeEach(() => {
   supabaseMock.readSupabaseEnv.mockReturnValue(SUPABASE_ENV);
-  supabaseMock.createUser.mockResolvedValue({
+  supabaseMock.signUp.mockResolvedValue({
     data: { user: AUTH_USER },
     error: null,
   });

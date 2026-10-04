@@ -79,28 +79,82 @@ function profileRow(
   };
 }
 
+/**
+ * SignUp failure classification (pure). The documented GoTrue hazard
+ * (2026-09-27 production canon, retained): an exhausted built-in SMTP quota
+ * surfaces as a misleading 400 "Email address ... is invalid". The payload's
+ * email was already format-validated (signupValidation.ts), so that message
+ * at this point is the masked mailer failure — a fail-closed, clean-retry
+ * 503, never the line a visitor would read as "my email is wrong". An
+ * explicit rate-limit message maps to the 429; anything else stays the
+ * sanitized 400 auth_signup_failed. Per the founder's directive, quota
+ * exhaustion is REPORTED (the retry + resend path) — never papered over by
+ * wiring a third-party SMTP service (external email needs founder approval).
+ */
+export function signupAuthError(
+  rawMessage: string | undefined,
+): CovnantSignupFailure {
+  const message = (rawMessage ?? "").toLowerCase();
+  if (message.includes("email address") && message.includes("invalid")) {
+    return {
+      ok: false,
+      status: 503,
+      code: "email_send_failed",
+      message:
+        "We could not send the confirmation email right now — submit again in a minute.",
+    };
+  }
+  if (
+    message.includes("rate limit") ||
+    message.includes("once every") ||
+    message.includes("too many requests")
+  ) {
+    return {
+      ok: false,
+      status: 429,
+      code: "email_send_rate_limited",
+      message:
+        "A confirmation email was requested too soon — wait a minute and submit again.",
+    };
+  }
+  return {
+    ok: false,
+    status: 400,
+    code: "auth_signup_failed",
+    message: rawMessage || "Unable to create credentials.",
+  };
+}
+
 export async function registerCovnantCreator(
   payload: CovnantSignupInput,
   clients: CovnantAuthClients,
   now: () => Date = () => new Date(),
 ): Promise<CovnantSignupResult> {
-  // Provision through the SERVICE-ROLE admin API, not the public signUp:
-  // public signUp forces a confirmation-email send per registration, and the
-  // project's built-in SMTP quota (a few sends/hour) throttles both signup
-  // AND magic-link logins to a standstill. Admin creation mints the user
-  // directly (no email send, no shared-quota dependency); the email is
-  // marked confirmed at birth and verification happens at login time via
-  // the magic-link flow the app already uses.
-  const { data, error } = await clients.admin.auth.admin.createUser({
+  // Sign up through the PUBLIC anon-key auth API so Supabase dispatches the
+  // confirmation email — the founder's active verification path (directive
+  // 2026-10-02: a signup is verified by EMAIL; Textbee/SMS is parked). With
+  // Confirm-email enabled the user is born UNCONFIRMED and data.session is
+  // null: the only session path is the confirmation link completing at
+  // /auth/callback (the route that owns session establishment).
+  //
+  // This SUPERSEDES the 2026-09-27 admin.createUser(email_confirm: true)
+  // decision, which minted confirmed-at-birth users and sent no email. Its
+  // retired rationale — the built-in SMTP quota (a few sends/hour) throttling
+  // signup and magic-link logins to a standstill — is accepted anew under
+  // the founder's directive: if the quota blocks a real send, that is
+  // reported (signupAuthError's fail-closed 503/429 + the resend endpoint),
+  // never worked around with external SMTP infrastructure.
+  const { data, error } = await clients.auth.auth.signUp({
     email: payload.email,
     password: payload.password,
-    email_confirm: true,
-    user_metadata: {
-      stage_name: payload.stage_name,
-      legal_name: payload.legal_name,
-      core_industry: payload.core_industry,
-      title: payload.title,
-      phone: payload.phone,
+    options: {
+      data: {
+        stage_name: payload.stage_name,
+        legal_name: payload.legal_name,
+        core_industry: payload.core_industry,
+        title: payload.title,
+        phone: payload.phone,
+      },
     },
   });
 
@@ -116,12 +170,7 @@ export async function registerCovnantCreator(
   }
 
   if (error) {
-    return {
-      ok: false,
-      status: 400,
-      code: "auth_signup_failed",
-      message: error.message || "Unable to create credentials.",
-    };
+    return signupAuthError(error.message);
   }
 
   if (user === null) {
@@ -163,9 +212,11 @@ export async function registerCovnantCreator(
   return {
     ok: true,
     value: {
-      // Admin creation returns no session — the 201 envelope is sessionless
-      // by contract (the seal renders sessionless: true) and the creator
-      // establishes their session through the email-link login flow.
+      // The 201 envelope is sessionless by contract (the seal renders
+      // sessionless: true): with Confirm-email on, signUp returns no session,
+      // and even where Supabase would autoconfirm, the envelope stays null —
+      // the creator establishes their session through the confirmation link
+      // completing at /auth/callback, never through the signup response.
       session: null,
       user: toAuthUser(user),
       profile: {

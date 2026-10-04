@@ -80,6 +80,25 @@ export const PHONE_OTP_VERIFY_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs
  */
 export const CONNECTIONS_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
 
+/**
+ * POST /api/covnant/auth/confirmation/resend — per-IP window. Tight for the
+ * same reason the phone windows are: every allowed call can spend built-in
+ * SMTP quota (the founder's active signup verification path).
+ */
+export const EMAIL_CONFIRMATION_RESEND_RATE_LIMIT: RateLimitConfig = {
+  limit: 3,
+  windowMs: 60_000,
+};
+/**
+ * The per-email resend cooldown — one confirmation email per address per
+ * minute, server-enforced (the client countdown is cosmetic; the limiter
+ * re-rejects early asks regardless of what it renders).
+ */
+export const EMAIL_CONFIRMATION_COOLDOWN: RateLimitConfig = {
+  limit: 1,
+  windowMs: 60_000,
+};
+
 type Bucket = { count: number; windowStart: number };
 
 const buckets = new Map<string, Bucket>();
