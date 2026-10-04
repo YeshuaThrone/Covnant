@@ -337,6 +337,26 @@ export const LEDGER_STATUSES = [
   // the row is for its whole life. No migration: the same
   // extension-in-place discipline.
   "msg_shortfall_due",
+  // UNCLAIMED_IDENTIFIER_HOLD (PR 53, the founder universal-identifier
+  // directive): a recon line item flagged by the unmatched-code fallback
+  // detector (PR 52) — its primary identifier carries NO verified
+  // cross-links — routes here AUTOMATICALLY: the whole line locks in the
+  // per-identifier escrow (sentinel payee 'identifier_hold_escrow:{scope}',
+  // the scope stamped in the payee and the quarantined event id in
+  // line_item_id) until the external registry ping verifies the
+  // identifier. Fail-closed before that: any ping error, timeout, or
+  // unverified verdict leaves the money locked, and the ONLY exit is the
+  // deterministic release step keyed on the verified cross-link evidence
+  // of record (global_identifier_cross_ref's verification_source and
+  // verified_at — migration 0012): a registry-attested verified cross-link
+  // row releases the held amount back into the NORMAL matching path (a
+  // fresh unclaimed_holding credit through PR 7's recovery machinery —
+  // never a direct payee payout). Kind marks WHAT the row is for its whole
+  // life (a released hold stays kind 'unclaimed_identifier_hold' with
+  // status 'settled'), the same division every escrow state above uses.
+  // No migration: ledger_transactions.status is free text (0006 has no
+  // check constraint), the same extension-in-place discipline.
+  "unclaimed_identifier_hold",
 ] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
@@ -523,6 +543,19 @@ export const LEDGER_KINDS = [
   // marks WHAT the row is for its whole life, the same division every
   // kind above uses.
   "msg_shortfall_due",
+  // Unclaimed identifier hold (PR 53, the founder universal-identifier
+  // directive): a recon line item's gross locked per primary-identifier
+  // scope while the identifier's claim verification runs — the
+  // unmatched-code fallback detector's held money. The external registry
+  // ping must verify the identifier and the verified cross-link evidence
+  // of record (migration 0012's verification_source + verified_at) must
+  // exist BEFORE the deterministic release re-parks the amount as a
+  // fresh unclaimed_holding credit in the normal matching path.
+  // Fail-closed: an unverified, errored, or timed-out ping never
+  // releases. Kind marks WHAT the row is for its whole life (a released
+  // hold stays kind 'unclaimed_identifier_hold' with status 'settled'),
+  // the same division every kind above uses.
+  "unclaimed_identifier_hold",
 ] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 

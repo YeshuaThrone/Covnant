@@ -67,6 +67,13 @@ export interface ReconJobResult {
   /** Matched lines whose post hit the per-source replay guard (409) —
    * counted no-ops, never double posts. */
   holding_replayed?: number;
+  /** Unmatched MUSIC lines locked into the UNCLAIMED_IDENTIFIER_HOLD
+   * escrow this pass (PR 53, the founder universal-identifier directive
+   * — the unmatched-code fallback detector's money rule). */
+  identifier_hold_posted?: number;
+  /** Unmatched lines whose hold post hit the per-source replay guard
+   * (409) — counted no-ops, never double locks. */
+  identifier_hold_replayed?: number;
   /** Podcast lane (PR 10): qualified impressions written as countable
    * `podcast:imp:` rows (plus Channel C subscription rows). */
   podcast_written?: number;

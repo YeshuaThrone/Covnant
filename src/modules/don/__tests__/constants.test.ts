@@ -189,6 +189,8 @@ describe('don constants', () => {
       'event_cancellation_escrow_release',
       'sports_biometric_payout_post',
       'sports_resale_royalty_post',
+      'unclaimed_identifier_hold_post',
+      'unclaimed_identifier_hold_release',
     ]);
     expect([...VAULT_BUCKETS]).toEqual(['available', 'pending', 'reserve']);
   });

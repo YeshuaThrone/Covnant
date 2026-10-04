@@ -22660,6 +22660,27 @@ export class SqliteStore implements Store {
     return Promise.resolve(result as unknown as LedgerTransactionRecord);
   }
 
+  async settleIdentifierHoldEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional UPDATE IS the CAS — the same single-statement
+    // transition the other escrow settles ride: only the caller whose
+    // WHERE matched (the hold was still locked) reads the row.
+    const result = this.db
+      .prepare(
+        `UPDATE ledger_transactions
+         SET status = 'settled', settled_at = ?
+         WHERE id = ? AND status = 'unclaimed_identifier_hold'
+         RETURNING *`,
+      )
+      .get(settledAt, id) as Record<string, unknown> | undefined;
+    if (result === undefined) {
+      return undefined;
+    }
+    return Promise.resolve(result as unknown as LedgerTransactionRecord);
+  }
+
   async upsertSportsPayoutGateState(
     row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
   ): Promise<SportsPayoutGateStateRecord> {

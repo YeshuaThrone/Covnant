@@ -140,6 +140,8 @@ const EXPECTED: ScenarioOutcome = {
     engine_used: null,
     holding_posted: 2,
     holding_replayed: 0,
+    identifier_hold_posted: 0,
+    identifier_hold_replayed: 0,
   },
   replayCounts: {
     events_written: 0,
@@ -148,6 +150,8 @@ const EXPECTED: ScenarioOutcome = {
     engine_used: null,
     holding_posted: 0,
     holding_replayed: 2,
+    identifier_hold_posted: 0,
+    identifier_hold_replayed: 0,
   },
   held: [
     {

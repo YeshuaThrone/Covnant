@@ -26,9 +26,9 @@ import { setVerticalComplianceStateSource } from "@/modules/compliance/payoutGat
 import { UNCLAIMED_HOLDING_PAYEE_ID, UNCLAIMED_HOLDING_PAYEE_NAME } from "@/modules/don/constants";
 import type { VaultAssetRecord } from "@/lib/covnant/vault";
 import type { ParsedStatementLine } from "../records";
-import { microsToWholeCents, isPostableLine } from "../posting";
+import { microsToWholeCents, isPostableLine, postUnmatchedLinesToIdentifierHold, isIdentifierHoldCandidate, primaryIdentifierForLine } from "../posting";
 import { runOnce } from "../worker";
-import type { VaultLookup } from "../matchQueue";
+import type { VaultLookup, LineWriteOutcome } from "../matchQueue";
 
 import { loadFixture } from "./fixtures";
 
@@ -169,6 +169,8 @@ describe.each(BACKENDS)("$name — canonical posting seam", ({ make }) => {
       engine_used: null,
       holding_posted: 2,
       holding_replayed: 0,
+      identifier_hold_posted: 0,
+      identifier_hold_replayed: 0,
     });
 
     // The held credits: one per matched line, sentinel payee, exact cents.
@@ -225,6 +227,8 @@ describe.each(BACKENDS)("$name — canonical posting seam", ({ make }) => {
       engine_used: null,
       holding_posted: 0,
       holding_replayed: 2, // both posts read PR 7's 409 journal-ref guard
+      identifier_hold_posted: 0,
+      identifier_hold_replayed: 0,
     });
 
     const creditsAfter = await store.listUnclaimedHoldingCredits(100);
@@ -277,6 +281,8 @@ describe.each(BACKENDS)("$name — canonical posting seam", ({ make }) => {
       engine_used: null,
       holding_posted: 1,
       holding_replayed: 1,
+      identifier_hold_posted: 0,
+      identifier_hold_replayed: 0,
     });
     const credits = await store.listUnclaimedHoldingCredits(100);
     expect(credits).toHaveLength(2); // exactly one credit per line — no double post
@@ -473,5 +479,136 @@ describe("the activated seam vs the standing payout gates", () => {
       expect(Number.isSafeInteger(p.gross_cents)).toBe(true);
       expect(Number.isSafeInteger(p.net_cents)).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The identifier-hold routing pass — the fallback detector's money rule.
+// PR 52's detector FLAGS the line-item (queue marker only); this pass is
+// the MONEY: unmatched postable lines WITH a primary identifier lock their
+// gross into the UNCLAIMED_IDENTIFIER_HOLD escrow. Idempotent per line —
+// a replayed ingest re-routes, the per-source guard counts it, and the
+// pass completes.
+// ---------------------------------------------------------------------------
+
+describe("postUnmatchedLinesToIdentifierHold — the fallback detector's money rule", () => {
+  const T0 = new Date("2026-10-04T12:00:00Z");
+  const holdLine = (
+    overrides: Partial<ParsedStatementLine> = {},
+  ): ParsedStatementLine => ({
+    lineNumber: 1,
+    profile: "distrokid_csv",
+    rightsType: "master",
+    statementSourceType: null,
+    tierLevel: null,
+    rightsPipeline: "master_digital_performance",
+    period: "2026-08",
+    currency: "USD",
+    grossMicros: 431_000_000n,
+    isAdjustment: false,
+    identifiers: { ISRC: "US-XYT-26-00001" },
+    workTitle: "Neon Skyline",
+    territory: "US",
+    platform: "Spotify",
+    usageNote: "",
+    raw: ["raw"],
+    guildResidual: null,
+    merchDetail: null,
+    podcastDetail: null,
+    gamingDetail: null,
+    livestreamDetail: null,
+    webtoonDetail: null,
+    aiDetail: null,
+    ...overrides,
+  });
+  const outcomeFor = (
+    line: ParsedStatementLine,
+    eventId: string,
+    matchedCbtCode: string | null,
+  ): LineWriteOutcome => ({ line, eventId, matchedCbtCode, written: true });
+
+  it("routes an unmatched line with a primary identifier into the hold, exactly once", async () => {
+    const store = new InMemoryStore();
+    const outcomes = [
+      outcomeFor(holdLine(), "recon:ing-1:line:1", null),
+    ];
+    const first = await postUnmatchedLinesToIdentifierHold(store, outcomes, T0);
+    expect(first).toEqual({ heldPosted: 1, heldReplayed: 0 });
+
+    // The replayed ingest re-routes the same line: the per-source replay
+    // guard counts it, the pass completes, no second escrow posts.
+    const replay = await postUnmatchedLinesToIdentifierHold(store, outcomes, T0);
+    expect(replay).toEqual({ heldPosted: 0, heldReplayed: 1 });
+  });
+
+  it("routes ONLY the fallback detector's condition: unmatched + primary identifier", () => {
+    // Unmatched + ISRC — the condition.
+    expect(isIdentifierHoldCandidate(holdLine(), null)).toBe(true);
+    // Matched lines never enter (the escrow lock is exclusively the
+    // fallback's money rule — matched money follows the normal path).
+    expect(isIdentifierHoldCandidate(holdLine(), "cbt_master")).toBe(false);
+    // A line with NO identifiers has no scope to hold under.
+    expect(isIdentifierHoldCandidate(holdLine({ identifiers: {} }), null)).toBe(false);
+    // Rights_type 'unknown' lines keep their own ledger machinery.
+    expect(
+      isIdentifierHoldCandidate(holdLine({ rightsType: "unknown" }), null),
+    ).toBe(false);
+    // Adjustments never post as money.
+    expect(
+      isIdentifierHoldCandidate(holdLine({ isAdjustment: true }), null),
+    ).toBe(false);
+    // Zero / negative gross has no money to protect.
+    expect(
+      isIdentifierHoldCandidate(holdLine({ grossMicros: 0n }), null),
+    ).toBe(false);
+  });
+
+  it("derives the primary identifier by the fixed priority, then first-key determinism", () => {
+    expect(
+      primaryIdentifierForLine(
+        holdLine({ identifiers: { ISRC: "US-XYT-26-00001", UPC: "012345678905" } }),
+      ),
+    ).toEqual({ primaryCodeType: "ISRC", primaryCodeValue: "US-XYT-26-00001" });
+    expect(
+      primaryIdentifierForLine(holdLine({ identifiers: { UPC: "012345678905" } })),
+    ).toEqual({ primaryCodeType: "UPC", primaryCodeValue: "012345678905" });
+    // Priority kinds are trimmed — a padded value locks under the clean one.
+    expect(
+      primaryIdentifierForLine(
+        holdLine({ identifiers: { ISRC: "  US-XYT-26-00001  " } }),
+      ),
+    ).toEqual({ primaryCodeType: "ISRC", primaryCodeValue: "US-XYT-26-00001" });
+    expect(primaryIdentifierForLine(holdLine({ identifiers: {} }))).toBeNull();
+  });
+
+  it("mixed outcomes route only the candidates — matched and identifier-less lines stay out", async () => {
+    const store = new InMemoryStore();
+    const counts = await postUnmatchedLinesToIdentifierHold(
+      store,
+      [
+        outcomeFor(holdLine(), "recon:ing-2:line:1", null), // candidate
+        outcomeFor(holdLine(), "recon:ing-2:line:2", "cbt_master"), // matched
+        outcomeFor(holdLine({ identifiers: {} }), "recon:ing-2:line:3", null), // no scope
+        outcomeFor(holdLine(), "recon:ing-2:line:1", null), // duplicate of line 1
+      ],
+      T0,
+    );
+    // Exactly one new hold (the duplicate hits the replay guard) — the
+    // honest per-source idempotency the chain locks.
+    expect(counts).toEqual({ heldPosted: 1, heldReplayed: 1 });
+  });
+
+  it("a hold-post store failure throws — the caller's failReconJob owns the retry", async () => {
+    const store: Store = new InMemoryStore();
+    vi.spyOn(store, "insertLedgerTransaction").mockRejectedValueOnce(
+      new Error("connection reset"),
+    );
+    await expect(
+      postUnmatchedLinesToIdentifierHold(
+        store,
+        [outcomeFor(holdLine(), "recon:ing-3:line:1", null)],
+        T0,
+      ),
+    ).rejects.toThrow(/identifier_hold_post_failed/);
   });
 });

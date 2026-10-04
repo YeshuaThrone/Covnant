@@ -4276,6 +4276,18 @@ export interface Store {
   ): Promise<LedgerTransactionRecord | undefined>;
 
   /**
+   * Settles one held `unclaimed_identifier_hold` escrow row — the same
+   * single-statement CAS shape: the row flips only while it is still
+   * held; the caller that lost the race (or replayed) reads undefined.
+   * PR 53: the identifier-hold release's concurrency guard, keyed on the
+   * verified cross-link evidence of record.
+   */
+  settleIdentifierHoldEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined>;
+
+  /**
    * Upserts the sports payout gate's states of record for one promoter
    * payee on one event (migration 0055) — UNIQUE per (payee_id,
    * event_ref): an upsert converges (a verification heals 'unknown';

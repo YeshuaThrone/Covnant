@@ -22,7 +22,7 @@ import type { Store } from "@/lib/server/store";
 import type { ParsedStatementLine } from "./records";
 import { calculateGuildResiduals } from "./guildResiduals";
 import { writeLinesToMatchQueue, type VaultLookup } from "./matchQueue";
-import { postMatchedLinesToHolding } from "./posting";
+import { postMatchedLinesToHolding, postUnmatchedLinesToIdentifierHold } from "./posting";
 import { qualifyImpressionLines } from "./podcast";
 import { postPodcastLinesToHolding } from "./podcastPosting";
 import { writePodcastLinesToMatchQueue } from "./podcastQueue";
@@ -1595,6 +1595,18 @@ async function writeAndPost(
     counts.lineOutcomes,
     (deps.now ?? (() => new Date()))(),
   );
+  // PR 53 — the unmatched-code fallback's automatic escrow: unmatched
+  // postable lines with a primary identifier (the PR 52 detector's
+  // missing-cross-link money condition) lock into the
+  // UNCLAIMED_IDENTIFIER_HOLD after the matched pass — idempotent per
+  // line (replays are counted no-ops through the escrow's journal-ref
+  // guard), and only the registry-verified evidence-gated release moves
+  // the locked money back into the normal matching path.
+  const holdRouting = await postUnmatchedLinesToIdentifierHold(
+    deps.store,
+    counts.lineOutcomes,
+    (deps.now ?? (() => new Date()))(),
+  );
   return {
     events_written: counts.written,
     matched: counts.matched,
@@ -1602,6 +1614,8 @@ async function writeAndPost(
     engine_used: engineUsed,
     holding_posted: posting.posted,
     holding_replayed: posting.alreadyPosted,
+    identifier_hold_posted: holdRouting.heldPosted,
+    identifier_hold_replayed: holdRouting.heldReplayed,
   };
 }
 
@@ -1636,6 +1650,8 @@ export async function runWorkerLoop(
           `written=${r?.events_written ?? 0} matched=${r?.matched ?? 0} ` +
           `unmatched=${r?.unmatched ?? 0} holding_posted=${r?.holding_posted ?? 0} ` +
           `holding_replayed=${r?.holding_replayed ?? 0} ` +
+          `identifier_hold_posted=${r?.identifier_hold_posted ?? 0} ` +
+          `identifier_hold_replayed=${r?.identifier_hold_replayed ?? 0} ` +
           `engine=${r?.engine_used ?? "deterministic"}`,
       );
     } catch (error) {

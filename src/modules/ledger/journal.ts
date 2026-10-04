@@ -14,6 +14,7 @@ import {
   fitnessAuditEscrowGlAccount,
   culinaryAuditEscrowGlAccount,
   eventCancellationEscrowGlAccount,
+  identifierHoldEscrowGlAccount,
   serviceAuditEscrowGlAccount,
   softwareAuditEscrowGlAccount,
   patentLitigationEscrowGlAccount,
@@ -637,6 +638,34 @@ export function eventCancellationEscrowCredit(
 ): GlLegInput {
   return {
     account: eventCancellationEscrowGlAccount(scopeKey),
+    debit_cents: 0,
+    credit_cents: amountCents,
+  };
+}
+
+// Unclaimed identifier hold legs (PR 53): the per-identifier escrow's
+// signed movement legs. Posting charges the hold — FBO cash debits
+// against the identifier scope's escrow account (credit); the
+// evidence-gated release discharges it — the scope's escrow account
+// debits back against the fresh unclaimed_holding credit that re-enters
+// the normal matching path (credit).
+export function identifierHoldEscrowDebit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: identifierHoldEscrowGlAccount(scopeKey),
+    debit_cents: amountCents,
+    credit_cents: 0,
+  };
+}
+
+export function identifierHoldEscrowCredit(
+  scopeKey: string,
+  amountCents: number,
+): GlLegInput {
+  return {
+    account: identifierHoldEscrowGlAccount(scopeKey),
     debit_cents: 0,
     credit_cents: amountCents,
   };

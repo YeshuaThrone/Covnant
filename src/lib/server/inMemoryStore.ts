@@ -10722,6 +10722,25 @@ export class InMemoryStore implements Store {
     return { ...row };
   }
 
+  async settleIdentifierHoldEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The CAS reads the row and settles it only while it is still locked
+    // — the in-memory shape of the single-statement conditional UPDATE
+    // the SQL backends run; the caller that lost the race reads
+    // undefined.
+    const row = this.ledgerTransactions.find(
+      (tx) => tx.id === id && tx.status === 'unclaimed_identifier_hold',
+    );
+    if (row === undefined) {
+      return undefined;
+    }
+    row.status = 'settled';
+    row.settled_at = settledAt;
+    return { ...row };
+  }
+
   async upsertSportsPayoutGateState(
     row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
   ): Promise<SportsPayoutGateStateRecord> {

@@ -104,6 +104,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       engine_used: null,
       holding_posted: 0, // vault: null — nothing matched, nothing posted
       holding_replayed: 0,
+      identifier_hold_posted: 2, // PR 53: the unmatched lines carry ISRCs — locked into the hold
+      identifier_hold_replayed: 0,
     });
 
     expect(processed?.job.status).toBe("completed");
@@ -141,6 +143,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       engine_used: null,
       holding_posted: 0, // film lines are rights 'unknown' — waterfall lane
       holding_replayed: 0,
+      identifier_hold_posted: 0, // rights-'unknown' lines keep the waterfall lane
+      identifier_hold_replayed: 0,
     });
 
     const rows = (await store.listMatchQueueEntries(undefined, 500)).filter((row) =>
@@ -186,6 +190,8 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       engine_used: null,
       holding_posted: 0,
       holding_replayed: 0,
+      identifier_hold_posted: 0,
+      identifier_hold_replayed: 2, // both holds re-read the per-source replay guard
     });
     const rows = (await store.listMatchQueueEntries(undefined, 500)).filter((row) =>
       row.event_id.startsWith(`recon:${ingestId}:`),

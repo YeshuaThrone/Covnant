@@ -241,6 +241,8 @@ const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   event_cancellation_escrow_release: 'Event cancellation escrow released',
   sports_biometric_payout_post: 'Real-time biometric royalty posted',
   sports_resale_royalty_post: 'Real-time resale royalty posted',
+  unclaimed_identifier_hold_post: 'Unclaimed identifier hold locked',
+  unclaimed_identifier_hold_release: 'Unclaimed identifier hold released to matching',
 };
 
 const REF_TYPE_LABELS: Record<string, string> = {
