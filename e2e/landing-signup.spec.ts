@@ -5,8 +5,8 @@ import { expect, test, type Page } from '@playwright/test';
  * double-click seal ritual is retired). REVISED 2026-10-02 (email-verification
  * path): the 201 is SESSION-LESS by contract and the funnel HOLDS at
  * check-your-email — the confirmation email link completing at /auth/callback
- * is the only way a session is ever established. A phone on file keeps the
- * existing OTP step first; its verify and skip exits land on the same hold.
+ * is the only way a session is ever established. A phone on file no longer
+ * diverts the funnel — every 201 holds at check-your-email.
  * Response states of the reconciled contract (art_gOfrFMCA):
  *   - 201 created — hold at check-your-email (session and session-less
  *     envelopes alike; an envelope session is never trusted)
@@ -20,8 +20,6 @@ import { expect, test, type Page } from '@playwright/test';
  * rulers stay untouched throughout.
  */
 const SIGNUP_PATH = '**/api/covnant/auth/signup';
-const OTP_PATH = '**/api/covnant/auth/phone/otp';
-const VERIFY_PATH = '**/api/covnant/auth/phone/verify';
 
 const CREATED_201 = {
   ok: true,
@@ -60,40 +58,11 @@ function responseLine(page: Page, text: string) {
   return page.locator('p.font-mono', { hasText: text });
 }
 
-/** Default OTP stubs: the request route acknowledges the code request and
- * the verify route accepts any six digits. Each test overrides the branch
- * it probes. */
-async function stubOtpRoutes(
-  page: Page,
-  opts: { delivered?: boolean; verifyStatus?: number; verifyBody?: unknown } = {},
-) {
-  await page.route(OTP_PATH, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        delivered: opts.delivered ?? true,
-        deliveredVia: opts.delivered === false ? null : 'none',
-      }),
-    }),
-  );
-  await page.route(VERIFY_PATH, (route) =>
-    route.fulfill({
-      status: opts.verifyStatus ?? 200,
-      contentType: 'application/json',
-      body: JSON.stringify(opts.verifyBody ?? { ok: true, verified: true }),
-    }),
-  );
-}
-
-/** The 201 now holds at the check-your-email state; Skip is the fail-open
- * exit to the same hold with the phone unverified — the confirmation email
+/** The 201 holds at the check-your-email state — the confirmation email
  * link is the only way a session is ever established. */
-async function skipVerification(page: Page) {
-  await expect(page.getByText('Verify your phone')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Skip for now — verify later' }).click();
+async function expectCheckEmailHold(page: Page) {
   await expect(page.getByText('Check your email')).toHaveCount(1);
+  await expect(page).not.toHaveURL(/\/agent/);
 }
 
 test('a single click submits once, shows the loading state, and holds at check-your-email on the 201', async ({
@@ -128,7 +97,6 @@ test('a single click submits once, shows the loading state, and holds at check-y
       );
     });
   });
-  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
@@ -137,13 +105,11 @@ test('a single click submits once, shows the loading state, and holds at check-y
   const submitting = page.getByRole('button', { name: 'Submitting…' });
   await expect(submitting).toBeDisabled();
 
-  // The 201 lands on the verification step — the account exists first; the
-  // step can only enrich it. Skipping holds at check-your-email: even an
-  // envelope-carrying session (a contract violation the route never emits)
-  // is never trusted — the email link is the only way in.
-  await skipVerification(page);
+  // The 201 holds at check-your-email: even an envelope-carrying session (a
+  // contract violation the route never emits) is never trusted — the email
+  // link is the only way in.
+  await expectCheckEmailHold(page);
   await expect(page.getByRole('button', { name: /^(Continue|Submitting…)$/ })).toHaveCount(0);
-  await expect(page).not.toHaveURL(/\/agent/);
   expect(calls).toBe(1);
   expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
 });
@@ -152,12 +118,10 @@ test('the 201 session-less response also holds at check-your-email', async ({ pa
   await page.route(SIGNUP_PATH, (route) =>
     route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
   );
-  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
-  await skipVerification(page);
-  await expect(page).not.toHaveURL(/\/agent/);
+  await expectCheckEmailHold(page);
 });
 
 test('the 200 repeat response advances to /agent too', async ({ page }) => {
@@ -291,10 +255,9 @@ test('the request body carries the six values as captured: combined field unspli
     captured = route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) });
   });
-  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
-  await skipVerification(page);
+  await expectCheckEmailHold(page);
 
   expect(captured).toMatchObject({
     stage_name: 'Nova Reign',
@@ -323,9 +286,9 @@ test('a real-world phone capture rides the wire as canonical E.164', async ({ pa
   // The founder's capture, exactly as typed into a real device.
   await page.getByRole('textbox', { name: 'Phone Number' }).fill('830-358-2306');
   await page.getByRole('button', { name: 'Continue' }).click();
-  // The 201 with a phone lands on the verification step; skip reaches the
-  // check-your-email hold.
-  await skipVerification(page);
+  // The 201 holds at check-your-email — a phone on file does not divert
+  // the funnel.
+  await expectCheckEmailHold(page);
 
   expect(captured).toMatchObject({ phone: '+18303582306' });
 });
@@ -366,7 +329,6 @@ test('a second click during flight cannot double-submit — the request fires ex
       2000,
     ),
   );
-  await stubOtpRoutes(page);
   await page.goto('/');
   await fillAndSubmit(page);
 
@@ -375,72 +337,5 @@ test('a second click during flight cannot double-submit — the request fires ex
   const submitting = page.getByRole('button', { name: 'Submitting…' });
   await expect(submitting).toBeDisabled();
 
-  await skipVerification(page);
-});
-
-test('a correct code advances to the check-your-email hold with the phone verified', async ({ page }) => {
-  let verifyBody: Record<string, unknown> | null = null;
-  await page.route(SIGNUP_PATH, (route) =>
-    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
-  );
-  await stubOtpRoutes(page, {
-    verifyBody: { ok: true, verified: true },
-  });
-  await page.route(VERIFY_PATH, (route) => {
-    verifyBody = route.request().postDataJSON() as Record<string, unknown>;
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ok: true, verified: true }),
-    });
-  });
-  await page.goto('/');
-  await fillAndSubmit(page);
-
-  await page.getByRole('textbox', { name: 'Verification code' }).fill('012345');
-  await page.getByRole('button', { name: 'Verify', exact: true }).click();
-  await expect(page.getByText('Check your email')).toHaveCount(1);
-  await expect(page).not.toHaveURL(/\/agent/);
-
-  expect(verifyBody).toMatchObject({ email: 'artist@example.com', code: '012345' });
-});
-
-test('a wrong code renders the route plain-language copy and stays on the step', async ({ page }) => {
-  await page.route(SIGNUP_PATH, (route) =>
-    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
-  );
-  await stubOtpRoutes(page, {
-    verifyStatus: 400,
-    verifyBody: {
-      ok: false,
-      error: 'invalid_code',
-      message: 'That code is incorrect. Check the six digits and try again.',
-    },
-  });
-  await page.goto('/');
-  await fillAndSubmit(page);
-
-  await page.getByRole('textbox', { name: 'Verification code' }).fill('999999');
-  await page.getByRole('button', { name: 'Verify', exact: true }).click();
-
-  await expect(
-    page.getByText('That code is incorrect. Check the six digits and try again.'),
-  ).toHaveCount(1);
-  expect(page.url()).not.toContain('/agent');
-});
-
-test('an undelivered code renders the fail-open notice, never an error wall', async ({ page }) => {
-  await page.route(SIGNUP_PATH, (route) =>
-    route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(CREATED_201) }),
-  );
-  await stubOtpRoutes(page, { delivered: false });
-  await page.goto('/');
-  await fillAndSubmit(page);
-
-  await expect(page.getByText('We could not reach a phone line just now', { exact: false })).toHaveCount(1);
-  // The funnel is intact: skip still holds at check-your-email with the
-  // phone unverified.
-  await page.getByRole('button', { name: 'Skip for now — verify later' }).click();
-  await expect(page.getByText('Check your email')).toHaveCount(1);
-  await expect(page).not.toHaveURL(/\/agent/);
+  await expectCheckEmailHold(page);
 });

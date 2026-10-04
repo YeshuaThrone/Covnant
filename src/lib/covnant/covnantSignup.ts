@@ -132,7 +132,7 @@ export async function registerCovnantCreator(
 ): Promise<CovnantSignupResult> {
   // Sign up through the PUBLIC anon-key auth API so Supabase dispatches the
   // confirmation email — the founder's active verification path (directive
-  // 2026-10-02: a signup is verified by EMAIL; Textbee/SMS is parked). With
+  // 2026-10-02: a signup is verified by EMAIL). With
   // Confirm-email enabled the user is born UNCONFIRMED and data.session is
   // null: the only session path is the confirmation link completing at
   // /auth/callback (the route that owns session establishment).
