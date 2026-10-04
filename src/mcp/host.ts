@@ -7,11 +7,6 @@ import { CovenantMcpRegistry } from "@/covenant-sdk/mcp-registry";
 import { getCovenantRegistry } from "@/lib/server/covenantRegistry";
 import { getStore } from "@/lib/server/store";
 import { DON_MCP_TOOLS, DonMcpToolHost, isDonMcpTool } from "./don-tools";
-import {
-  isVerifyPhoneMcpTool,
-  VERIFY_PHONE_MCP_TOOLS,
-  VerifyPhoneMcpToolHost,
-} from "./verify-phone-tools";
 import type { Store } from "@/lib/server/store";
 import { type McpToolDescriptor, type McpToolResult, mcpErr } from "./types";
 
@@ -31,7 +26,6 @@ type HostOptions = {
 export class EmeraldValMcpToolHost {
   private readonly options: HostOptions;
   private don: DonMcpToolHost | null = null;
-  private readonly verifyPhone = new VerifyPhoneMcpToolHost();
   private readonly covenant: CovenantMcpToolHost;
 
   constructor(options: HostOptions = {}) {
@@ -53,7 +47,6 @@ export class EmeraldValMcpToolHost {
     return [
       ...DON_MCP_TOOLS,
       ...COVENANT_MCP_TOOLS,
-      ...VERIFY_PHONE_MCP_TOOLS,
     ] as McpToolDescriptor[];
   }
 
@@ -62,9 +55,6 @@ export class EmeraldValMcpToolHost {
     args: Record<string, unknown> | undefined,
   ): Promise<McpToolResult> {
     try {
-      if (isVerifyPhoneMcpTool(name)) {
-        return await this.verifyPhone.callTool(name, args);
-      }
       if (isDonMcpTool(name)) {
         return await this.donHost().callTool(name, args);
       }

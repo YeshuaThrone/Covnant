@@ -11,7 +11,6 @@ import {
   type SealEntryValues,
 } from '@/components/landing/signupRequest';
 import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
-import { PhoneOtpStep } from '@/components/auth/PhoneOtpStep';
 
 /*
  * Entry composition — the six mirrored entry zones and the Universal
@@ -48,11 +47,6 @@ export function EntryZones() {
   // primary button shows a visible loading state and is disabled while the
   // request is in flight, so duplicate submits are impossible.
   const [request, setRequest] = useState<SealRequestState>({ phase: 'idle' });
-  // The verification step: set the moment the signup 201 lands with a phone
-  // on file — the composition SWAPS to the OTP step instead of navigating
-  // (the spec's funnel: the account exists first; this step can only
-  // enrich it). A blank phone skips the step entirely — nothing to verify.
-  const [otpStep, setOtpStep] = useState<{ email: string; phone: string } | null>(null);
   // The email-verification hold: set the moment the account exists but is
   // unconfirmed — the founder's active signup verification path (directive
   // 2026-10-02). The ONLY session path is the confirmation link completing
@@ -68,10 +62,8 @@ export function EntryZones() {
   const coreIndustryTitleRef = useRef<HTMLInputElement>(null);
 
   /* Submit the captured values to POST /api/covnant/auth/signup. A 201
-   * created advances to the verification funnel — the phone OTP step first
-   * when a phone is on file, then check-your-email; check-your-email
-   * directly otherwise. The account is born UNCONFIRMED and the
-   * confirmation link at /auth/callback is the only session path
+   * created holds at check-your-email — the account is born UNCONFIRMED and
+   * the confirmation link at /auth/callback is the only session path
    * (email-verification directive 2026-10-02 — this supersedes the
    * auto-advance-to-/agent ruling for fresh signups). A 200 claim-or-repeat
    * still advances to /agent — that account predates the confirmation gate.
@@ -89,20 +81,14 @@ export function EntryZones() {
       });
       if (response.status === 201) {
         const email = values.email.trim().toLowerCase();
-        const phone = values.phoneNumber.trim();
-        if (phone !== '') {
-          setOtpStep({ email, phone });
-          return; // the submitting guard stays latched — same as navigation
-        }
-        // No phone on file: hold at check-your-email — the confirmation
-        // link at /auth/callback is the only session path (the
-        // confirmation email left with the 201 itself).
+        // Hold at check-your-email — the confirmation link at
+        // /auth/callback is the only session path (the confirmation
+        // email left with the 201 itself).
         setCheckEmail(email);
         return;
       }
       if (response.status === 200) {
-        // A repeat claim: the account already existed — the verify-later
-        // prompt in the workspace covers any unverified phone.
+        // A repeat claim: the account already existed.
         router.push('/agent');
         return;
       }
@@ -138,24 +124,6 @@ export function EntryZones() {
   };
 
   const isSubmitting = request.phase === 'submitting';
-
-  // The verification step replaces the entry composition outright — the
-  // signup has already succeeded (201), so this render is post-account.
-  if (otpStep !== null) {
-    return (
-      <PhoneOtpStep
-        email={otpStep.email}
-        phone={otpStep.phone}
-        onDone={() => {
-          // The phone step can only enrich — the account is still
-          // unconfirmed, so the funnel holds at check-your-email (the
-          // confirmation link at /auth/callback is the only session path).
-          setCheckEmail(otpStep.email);
-          setOtpStep(null);
-        }}
-      />
-    );
-  }
 
   if (checkEmail !== null) {
     return <CheckYourEmail email={checkEmail} />;

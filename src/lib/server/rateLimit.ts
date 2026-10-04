@@ -56,22 +56,6 @@ export type RateLimitVerdict = { ok: true } | { ok: false; retryAfterSeconds: nu
 export const RECON_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
 
 /**
- * Phone OTP request (POST /api/covnant/auth/phone/otp): 3 requests per
- * client address per minute — one of the most rate-limited surfaces in the
- * app because every allowed call can spend a real SMS. The per-phone
- * half of the pair is the server-enforced 60-second resend cooldown
- * (phone_verifications.latest row, the OTP route itself).
- */
-export const PHONE_OTP_REQUEST_RATE_LIMIT: RateLimitConfig = { limit: 3, windowMs: 60_000 };
-
-/**
- * Phone OTP verify (POST /api/covnant/auth/phone/verify): 5 attempts per
- * client address per minute — the second bound on code guessing, on top of
- * the 5-attempt cap that lives on each phone_verifications row.
- */
-export const PHONE_OTP_VERIFY_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs: 60_000 };
-
-/**
  * Credential vault surfaces (POST/GET /api/covnant/connections, DELETE
  * /api/covnant/connections/[id]): 30 requests per client address per minute
  * — the Don surface's window, shared with recon. One allowed connect is one
@@ -81,9 +65,9 @@ export const PHONE_OTP_VERIFY_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs
 export const CONNECTIONS_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
 
 /**
- * POST /api/covnant/auth/confirmation/resend — per-IP window. Tight for the
- * same reason the phone windows are: every allowed call can spend built-in
- * SMTP quota (the founder's active signup verification path).
+ * POST /api/covnant/auth/confirmation/resend — per-IP window. Tight because
+ * every allowed call can spend built-in SMTP quota (the founder's active
+ * signup verification path).
  */
 export const EMAIL_CONFIRMATION_RESEND_RATE_LIMIT: RateLimitConfig = {
   limit: 3,

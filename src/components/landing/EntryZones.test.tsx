@@ -4,9 +4,8 @@
  * EntryZones composition tests — the standard single-click submit flow that
  * replaced the double-click seal ritual. Pins: one signup fetch per submit,
  * the button's isSubmitting state (disabled + loading label while in
- * flight), the 201-with-phone response landing on the verification step
- * (the account exists first; the step can only enrich it), the
- * check-your-email hold on any 201 (the account is born unconfirmed — the
+ * flight), the check-your-email hold on any 201 (with or without a phone
+ * on file — the account is born unconfirmed — the
  * confirmation link at /auth/callback is the only session path),
  * navigation to /agent on a 200 repeat, NO rendered
  * E.164 block for real-world captures (the founder's two formats ride the
@@ -55,8 +54,8 @@ function jsonResponse(status: number, body: unknown) {
   return { status, json: async () => body };
 }
 
-/** A fetch mock routed by URL fragment — the signup call and the mounted
- * OTP step's auto-request each get their scripted response. */
+/** A fetch mock routed by URL fragment — the signup call gets its scripted
+ * response. */
 function routedFetch(handlers: Record<string, { status: number; body: unknown }>) {
   return vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
@@ -68,8 +67,6 @@ function routedFetch(handlers: Record<string, { status: number; body: unknown }>
     return Promise.resolve(jsonResponse(500, { ok: false, error: 'unrouted' }));
   });
 }
-
-const OTP_OK = { status: 200, body: { ok: true, delivered: true, deliveredVia: 'none' } };
 
 function mountEntryZones(): {
   container: HTMLElement;
@@ -139,10 +136,9 @@ describe('EntryZones single-click submit', () => {
     expect(container.textContent).not.toContain('SEALED');
   });
 
-  it('submits exactly once per click and lands on the verification step on the 201', async () => {
+  it('submits exactly once per click and holds at check-your-email on the 201 — phone on file included', async () => {
     const fetchMock = routedFetch({
       'auth/signup': { status: 201, body: CREATED_201 },
-      'auth/phone/otp': OTP_OK,
     });
     vi.stubGlobal('fetch', fetchMock);
     const { container, form } = mountEntryZones();
@@ -154,15 +150,16 @@ describe('EntryZones single-click submit', () => {
       String(input).includes('auth/signup'),
     );
     expect(signupCalls).toHaveLength(1);
-    // The step mounts — the account exists, the funnel pauses on purpose.
-    expect(container.textContent).toContain('Verify your phone');
+    // No navigation — the ONLY session path is the confirmation link
+    // completing at /auth/callback.
     expect(routerPush).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Check your email');
+    expect(container.textContent).not.toContain('Verify your phone');
   });
 
   it('a 201 with a blank phone holds at check-your-email — the confirmation link is the only session path', async () => {
     const fetchMock = routedFetch({
       'auth/signup': { status: 201, body: CREATED_201 },
-      'auth/phone/otp': OTP_OK,
     });
     vi.stubGlobal('fetch', fetchMock);
     const { container, form } = mountEntryZones();
@@ -225,8 +222,8 @@ describe('EntryZones single-click submit', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // The 201-with-phone swaps to the verification step instead of pushing —
-    // the duplicate-submit guard stays latched through the swap.
+    // The 201 holds at check-your-email instead of pushing — the
+    // duplicate-submit guard stays latched through the hold.
     expect(routerPush).not.toHaveBeenCalled();
   });
 
@@ -239,8 +236,8 @@ describe('EntryZones single-click submit', () => {
       submitForm(form);
       await flushSubmit();
 
-      // The step mounts for a phone on file; the wire still carries E.164.
-      expect(container.textContent).toContain('Verify your phone');
+      // The 201 holds at check-your-email; the wire still carries E.164.
+      expect(container.textContent).toContain('Check your email');
       expect(container.textContent).not.toContain('E.164');
       const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
       expect(JSON.parse(String(init.body)).phone).toBe('+18303582306');
@@ -290,7 +287,6 @@ describe('EntryZones single-click submit', () => {
   it('writes no localStorage seal record — the offline receipt ritual is gone', async () => {
     const fetchMock = routedFetch({
       'auth/signup': { status: 201, body: CREATED_201 },
-      'auth/phone/otp': OTP_OK,
     });
     vi.stubGlobal('fetch', fetchMock);
     const { container, form } = mountEntryZones();
@@ -301,34 +297,6 @@ describe('EntryZones single-click submit', () => {
     expect(window.localStorage.getItem('covnant.sealedEntry')).toBeNull();
     expect(window.localStorage.length).toBe(0);
     // The blank-phone 201 holds at check-your-email — no navigation.
-    expect(routerPush).not.toHaveBeenCalled();
-  });
-
-  it('holds at check-your-email after the phone step completes — the funnel ends at the confirmation link', async () => {
-    const fetchMock = routedFetch({
-      'auth/signup': { status: 201, body: CREATED_201 },
-      'auth/phone/otp': OTP_OK,
-      'auth/phone/verify': { status: 200, body: { ok: true } },
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    const { container, form } = mountEntryZones();
-    fillComposition(container, '830-358-2306');
-    submitForm(form);
-    await flushSubmit();
-    expect(container.textContent).toContain('Verify your phone');
-
-    // The skip control fires onDone — the composition holds at
-    // check-your-email instead of navigating (the account is still
-    // unconfirmed; /auth/callback is the only session path).
-    const skip = [...container.querySelectorAll('button')].find(
-      (el) => el.textContent === 'Skip for now — verify later',
-    );
-    expect(skip).toBeDefined();
-    await act(async () => {
-      skip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(container.textContent).toContain('Check your email');
     expect(routerPush).not.toHaveBeenCalled();
   });
 });
