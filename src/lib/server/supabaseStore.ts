@@ -11813,6 +11813,25 @@ export class SupabaseStore implements Store {
     return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
   }
 
+  async settleIdentifierHoldEscrow(
+    id: string,
+    settledAt: string,
+  ): Promise<LedgerTransactionRecord | undefined> {
+    // The conditional update is the CAS — only the caller whose filter
+    // matched (the hold was still locked) reads the settled row; a
+    // concurrent settle updates zero rows and returns undefined.
+    const { data, error } = await this.client
+      .from(TABLES.ledgerTransactions)
+      .update({ status: 'settled', settled_at: settledAt })
+      .eq('id', id)
+      .eq('status', 'unclaimed_identifier_hold')
+      .select();
+    if (error) {
+      throw new Error(`settleIdentifierHoldEscrow failed: ${error.message}`);
+    }
+    return (data?.[0] as LedgerTransactionRecord | undefined) ?? undefined;
+  }
+
   async upsertSportsPayoutGateState(
     row: Omit<SportsPayoutGateStateRecord, 'id' | 'created_at' | 'updated_at'>,
   ): Promise<SportsPayoutGateStateRecord> {

@@ -39,7 +39,14 @@ import {
   type UnclaimedHoldingFailure,
   type UnclaimedHoldingPostSuccess,
 } from "@/lib/server/unclaimedHolding";
-import type { ParsedStatementLine } from "./records";
+import {
+  postIdentifierHoldEscrow,
+  type IdentifierHoldEscrowFailure,
+} from "@/lib/server/identifierHoldEscrow";
+import type {
+  ParsedStatementLine,
+  ReconIdentifierKind,
+} from "./records";
 import type { LineWriteOutcome } from "./matchQueue";
 
 /** A posting failure is a job failure — row-scoped, never silent. */
@@ -174,4 +181,178 @@ function isReplayRefusal(failure: UnclaimedHoldingFailure): boolean {
     failure.status === 409 &&
     failure.code === "unclaimed_holding_already_posted"
   );
+}
+
+// ---------------------------------------------------------------------------
+// The unmatched-code fallback's automatic escrow (PR 53, the founder
+// universal-identifier directive).
+//
+// An UNMATCHED postable line (rights family not 'unknown', not an
+// adjustment, gross > 0) whose primary identifier carries NO verified
+// cross-links — the detector's (PR 52) missing-cross-link condition,
+// evaluated here at posting time against the line's own identifiers —
+// must not sit in FBO cash and must not route anywhere as if it were
+// matched. This pass locks the line's whole gross into the
+// UNCLAIMED_IDENTIFIER_HOLD escrow per identifier scope, from which only
+// the registry-verified evidence-gated release can move it.
+//
+// Boundary, the detector's own: a line with NO identifiers at all stays
+// honestly unmatched in its queue row — the detector flags records that
+// HAVE a primary identifier and no cross-links; an identifier-less line
+// has no scope to hold under and no claim to verify. Rights_type
+// 'unknown' lines (film receipts, guild residuals) keep their own ledger
+// machinery; adjustments never post as money.
+// ---------------------------------------------------------------------------
+
+/** Routing counts for one ingest — the honest completion report's inputs. */
+export interface IdentifierHoldRoutingCounts {
+  /** Unmatched lines locked into the identifier hold this pass. */
+  heldPosted: number;
+  /** Unmatched lines whose hold post hit the per-source replay guard. */
+  heldReplayed: number;
+}
+
+/**
+ * The fixed lookup priority for a line's PRIMARY identifier — the scope
+ * the escrow locks under. First hit wins; a line with none of these has
+ * no primary and stays honestly unmatched.
+ */
+const HOLD_IDENTIFIER_PRIORITY = [
+  "ISRC",
+  "ISWC",
+  "UPC",
+  "EIDR",
+  "DOI",
+  "ISBN",
+] as const;
+
+/**
+ * The line's primary identifier: the first non-empty value in the fixed
+ * priority order, else the record's own first key (deterministic per
+ * line). Null when the line carries no identifiers at all.
+ */
+export function primaryIdentifierForLine(
+  line: ParsedStatementLine,
+): { primaryCodeType: string; primaryCodeValue: string } | null {
+  for (const kind of HOLD_IDENTIFIER_PRIORITY) {
+    const value = line.identifiers[kind];
+    if (typeof value === "string" && value.trim() !== "") {
+      return { primaryCodeType: kind, primaryCodeValue: value.trim() };
+    }
+  }
+  const first = (Object.entries(line.identifiers) as [
+    ReconIdentifierKind,
+    string | undefined,
+  ][]).find(([, v]) => typeof v === "string" && (v ?? "").trim() !== "");
+  if (first !== undefined) {
+    return {
+      primaryCodeType: first[0],
+      primaryCodeValue: (first[1] ?? "").trim(),
+    };
+  }
+  return null;
+}
+
+/**
+ * True when the line is the identifier-hold pass's subject: an UNMATCHED
+ * postable line WITH a primary identifier — the detector's
+ * missing-cross-link money condition at posting time.
+ */
+export function isIdentifierHoldCandidate(
+  line: ParsedStatementLine,
+  matchedCbtCode: string | null,
+): boolean {
+  return (
+    matchedCbtCode === null &&
+    line.rightsType !== "unknown" &&
+    !line.isAdjustment &&
+    line.grossMicros > 0n &&
+    primaryIdentifierForLine(line) !== null
+  );
+}
+
+/**
+ * Routes every unmatched candidate line into the UNCLAIMED_IDENTIFIER_HOLD
+ * escrow. Idempotent per line: a replayed ingest re-enters here, each post
+ * reads the escrow's journal-ref guard (409, counted no-op), and the pass
+ * completes. Any other refusal or store-level exception throws — the
+ * caller's failReconJob records the row-scoped reason and the store's
+ * retry budget re-runs the whole idempotent pass. (This pass runs AFTER
+ * postMatchedLinesToHolding: matched lines never enter it — the escrow
+ * lock is exclusively the fallback detector's money rule.)
+ */
+export async function postUnmatchedLinesToIdentifierHold(
+  store: Store,
+  outcomes: readonly LineWriteOutcome[],
+  now: Date,
+): Promise<IdentifierHoldRoutingCounts> {
+  const counts: IdentifierHoldRoutingCounts = { heldPosted: 0, heldReplayed: 0 };
+  for (const outcome of outcomes) {
+    if (!isIdentifierHoldCandidate(outcome.line, outcome.matchedCbtCode)) {
+      continue;
+    }
+    const primary = primaryIdentifierForLine(outcome.line);
+    if (primary === null) continue;
+
+    let amountCents: number;
+    try {
+      amountCents = microsToWholeCents(outcome.line.grossMicros);
+      // A line worth less than a whole cent cannot exist in the
+      // integer-cent ledger — it stays honestly quarantined in its queue
+      // row (never rounded up into invented money, never dropped).
+      if (amountCents <= 0) continue;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      throw new CanonicalPostingError(
+        outcome.eventId,
+        "ledger_store_error",
+        `identifier_hold_post_failed:${outcome.eventId}:ledger_store_error:${message}`,
+      );
+    }
+
+    let held:
+      | { ok: true; value: { escrow_credit: unknown; journal_id: string } }
+      | IdentifierHoldEscrowFailure;
+    try {
+      held = await postIdentifierHoldEscrow(
+        store,
+        {
+          amount_cents: amountCents,
+          currency: outcome.line.currency,
+          primaryCodeType: primary.primaryCodeType,
+          primaryCodeValue: primary.primaryCodeValue,
+          sourceEventId: outcome.eventId,
+        },
+        now,
+      );
+    } catch (cause) {
+      // A store-level exception THROWS raw past the guard refusals.
+      // Classify it — never swallow, never let it pose as an anonymous
+      // crash: the same row-scoped job-failing reason as a guard refusal,
+      // so the retry budget heals through the same idempotent pass.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      throw new CanonicalPostingError(
+        outcome.eventId,
+        "ledger_store_error",
+        `identifier_hold_post_failed:${outcome.eventId}:ledger_store_error:${message}`,
+      );
+    }
+    if (held.ok) {
+      counts.heldPosted += 1;
+      continue;
+    }
+    if (
+      held.status === 409 &&
+      held.code === "identifier_hold_already_posted"
+    ) {
+      counts.heldReplayed += 1;
+      continue;
+    }
+    throw new CanonicalPostingError(
+      outcome.eventId,
+      held.code,
+      `identifier_hold_post_failed:${outcome.eventId}:${held.code}:${held.message}`,
+    );
+  }
+  return counts;
 }

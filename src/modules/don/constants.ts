@@ -654,6 +654,14 @@ export const JOURNAL_KINDS = [
   "event_cancellation_escrow_release",
   "sports_biometric_payout_post",
   "sports_resale_royalty_post",
+  // PR 53, the founder universal-identifier directive: the
+  // UNCLAIMED_IDENTIFIER_HOLD's post (an unmatched recon line's gross
+  // locks into the per-identifier escrow — FBO debit, escrow credit) and
+  // its release (the registry ping's verified cross-link evidence of
+  // record re-parks the amount as a fresh unclaimed_holding credit —
+  // escrow debit, unclaimed-holding credit). Additive only.
+  "unclaimed_identifier_hold_post",
+  "unclaimed_identifier_hold_release",
 ] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
@@ -946,6 +954,33 @@ export const EVENT_CANCELLATION_ESCROW_MAX_RATE_BPS = 2_000;
 // completion timestamp of record (the sports payout gate state's
 // event_completed_at, set when the completion telemetry verifies).
 export const EVENT_CANCELLATION_RELEASE_DELAY_HOURS = 48;
+
+// --- The unclaimed identifier hold escrow (PR 53, the founder
+// universal-identifier directive) ---
+//
+// A recon line item flagged by the unmatched-code fallback detector (PR
+// 52) — its primary identifier carries NO verified cross-links — locks
+// its whole gross in a UNCLAIMED_IDENTIFIER_HOLD per identifier scope
+// (`{primaryCodeType}:{primaryCodeValue}`) while the claim verification
+// runs. The external registry ping must verify the identifier, and the
+// verified cross-link evidence of record (migration 0012's
+// global_identifier_cross_ref verification_source + verified_at) must
+// exist before the deterministic release re-parks the amount as a fresh
+// unclaimed_holding credit in the normal matching path. Sentinel payee +
+// GL account per scope key — the no-fold discipline: the hold is its own
+// escrow-shaped money, never folded into platform dust, unclaimed
+// holding, or any other escrow state.
+export const IDENTIFIER_HOLD_ESCROW_PAYEE_PREFIX = "identifier_hold_escrow";
+export function identifierHoldEscrowPayeeId(scopeKey: string): string {
+  return `${IDENTIFIER_HOLD_ESCROW_PAYEE_PREFIX}:${scopeKey}`;
+}
+export function identifierHoldEscrowPayeeName(scopeKey: string): string {
+  return `UNCLAIMED_IDENTIFIER_HOLD — ${scopeKey}`;
+}
+export const GL_ACCOUNT_IDENTIFIER_HOLD_ESCROW = "identifier_hold_escrow";
+export function identifierHoldEscrowGlAccount(scopeKey: string): string {
+  return `${GL_ACCOUNT_IDENTIFIER_HOLD_ESCROW}:${scopeKey}`;
+}
 
 export const VAULT_BUCKETS = ["available", "pending", "reserve"] as const;
 export type VaultBucket = (typeof VAULT_BUCKETS)[number];
