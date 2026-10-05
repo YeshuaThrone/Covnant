@@ -66,6 +66,12 @@ alter table public.universal_royalty_ledger enable row level security;
 alter table public.platform_allowlists enable row level security;
 
 -- deny-all default policies (service role bypasses RLS)
+-- Replay-safe: drop-if-exists guards, the house idempotency pattern
+-- (0003+). The CI schema job applies every migration twice, so the
+-- second apply must be a clean no-op.
+drop policy if exists "deny_anon_cbt_assets" on public.cbt_assets;
 create policy "deny_anon_cbt_assets" on public.cbt_assets for all using (false) with check (false);
+drop policy if exists "deny_anon_ledger" on public.universal_royalty_ledger;
 create policy "deny_anon_ledger" on public.universal_royalty_ledger for all using (false) with check (false);
+drop policy if exists "deny_anon_allowlists" on public.platform_allowlists;
 create policy "deny_anon_allowlists" on public.platform_allowlists for all using (false) with check (false);
