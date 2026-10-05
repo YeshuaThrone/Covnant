@@ -52,6 +52,7 @@ import { POST as rtpPost } from '@/app/api/v1/baas/rtp/route';
 import { POST as calculatePost } from '@/app/api/v1/splits/calculate/route';
 import { POST as reversePost } from '@/app/api/v1/splits/reverse/route';
 import { POST as recoupmentPost, GET as recoupmentGet } from '@/app/api/v1/splits/recoupment/route';
+import { GET as withholdingGet, POST as withholdingPost } from '@/app/api/v1/compliance/withholding/route';
 import { GET as dashboardGet } from '@/app/api/artist/dashboard/route';
 import { POST as withdrawPost } from '@/app/api/payouts/withdraw/route';
 import { POST as exchangePost } from '@/app/api/plaid/exchange-token/route';
@@ -146,6 +147,7 @@ const VALID_OPERATOR_BODIES: Record<string, unknown> = {
     recoupment_target_cents: 100,
     recoupment_bps: 5_000,
   },
+  '/api/v1/compliance/withholding': { creator_id: 'creator_1', gross_cents: 10_000 },
 };
 
 const ENV_KEYS = [
@@ -206,6 +208,7 @@ describe('operator-only Don routes refuse non-operators', () => {
     ['/api/v1/splits/calculate', (r) => calculatePost(r)],
     ['/api/v1/splits/reverse', (r) => reversePost(r)],
     ['/api/v1/splits/recoupment', (r) => recoupmentPost(r)],
+    ['/api/v1/compliance/withholding', (r) => withholdingPost(r)],
   ];
 
   for (const [path, handler] of operatorOnlyHandlers) {
@@ -360,6 +363,45 @@ describe('holder-scoped routes derive identity from the session', () => {
 
     const derived = await provisionPost(post('/api/covnant/accounts/provision', { assetId }));
     expect(derived.status).toBe(503);
+  });
+});
+
+describe('compliance withholding — operator POST, holder-scoped GET', () => {
+  it('POST with a real operator cookie applies withholding against the profile of record', async () => {
+    await seedHolders();
+    const response = await withholdingPost(
+      post('/api/v1/compliance/withholding', VALID_OPERATOR_BODIES['/api/v1/compliance/withholding'], operatorHeaders()),
+    );
+    expect(response.status).toBe(201);
+    const body = await bodyOf(response);
+    // No tax profile of record → unverified → the 24% backup withholding stays ON.
+    expect(body.tin_verified).toBe(false);
+    const escrow = body.escrow as { withheld_cents: number };
+    expect(escrow.withheld_cents).toBe(2_400);
+  });
+
+  it('GET — anonymous 401 no_session, cross-account 403 holder_mismatch, own passes, operator reads any creator', async () => {
+    await seedHolders();
+
+    anonymous();
+    const anon = await withholdingGet(get('/api/v1/compliance/withholding?creator_id=creator_1'));
+    expect(anon.status).toBe(401);
+    expect((await bodyOf(anon)).code).toBe('no_session');
+
+    creatorA();
+    const cross = await withholdingGet(get('/api/v1/compliance/withholding?creator_id=creator_1'));
+    expect(cross.status).toBe(403);
+    expect((await bodyOf(cross)).code).toBe('holder_mismatch');
+
+    const own = await withholdingGet(get('/api/v1/compliance/withholding?creator_id=rh_A'));
+    expect(own.status).toBe(200);
+    expect((await bodyOf(own)).creator_id).toBe('rh_A');
+
+    const operator = await withholdingGet(
+      get('/api/v1/compliance/withholding?creator_id=creator_1', operatorHeaders()),
+    );
+    expect(operator.status).toBe(200);
+    expect((await bodyOf(operator)).creator_id).toBe('creator_1');
   });
 });
 

@@ -349,6 +349,54 @@ describe("/api/v1/compliance/withholding", () => {
     expect(payload.ytd_gross_cents).toBe(10_000);
     expect(payload.ytd_withheld_cents).toBe(2_400);
   });
+
+  it("ignores self-attested tin_verified/w9_on_file body flags — the profile of record is the only source", async () => {
+    // Regression (tax audit finding 2): a body carrying tin_verified/w9_on_file
+    // used to upsert straight into the creator tax profile of record — one
+    // anonymous POST flipped the creator to verified and every later
+    // creator-role UDR split stopped withholding the 24% backup. The route no
+    // longer forwards those fields, so the flags are dead on this surface.
+    await seedVault(store, "creator_1", 0, 0, 0, "Creator One");
+    const response = await withholdingPost(
+      post("/api/v1/compliance/withholding", {
+        creator_id: "creator_1",
+        gross_cents: 10_000,
+        tax_year: 2026,
+        tin_verified: true,
+        w9_on_file: true,
+      }),
+    );
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    // The absent profile of record resolves unverified → 24% backup stays ON.
+    expect(body.tin_verified).toBe(false);
+    expect(body.w9_on_file).toBe(false);
+    expect(body.escrow.withheld_cents).toBe(2_400);
+    const profile = await store.getCreatorTaxProfile("creator_1");
+    expect(profile?.tin_verified).toBe(0);
+    expect(profile?.w9_on_file).toBe(0);
+  });
+
+  it("keeps a verified profile of record honored on later POSTs — no flag round-trip needed", async () => {
+    await store.upsertCreatorTaxProfile({
+      creator_id: "creator_1",
+      tin_verified: 1,
+      w9_on_file: 1,
+      updated_at: NOW.toISOString(),
+    });
+    const response = await withholdingPost(
+      post("/api/v1/compliance/withholding", {
+        creator_id: "creator_1",
+        gross_cents: 10_000,
+        tax_year: 2026,
+      }),
+    );
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.tin_verified).toBe(true);
+    expect(body.w9_on_file).toBe(true);
+    expect(body.escrow.withheld_cents).toBe(0);
+  });
 });
 
 describe("/api/v1/vaults", () => {
