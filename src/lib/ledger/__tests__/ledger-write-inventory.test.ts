@@ -489,6 +489,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       '0053_resource_audit_escrow_gate_states.sql',
       '0054_sports_ticketing_turnstile_league_pools_biometric_royalties.sql',
       '0055_event_cancellation_escrow_sports_gate_states.sql',
+      // The production demo-door hotfix (PR #22 dual-code follow-up): two
+      // nullable cbt_assets columns (cvt_code, holder_uct) + their indexes —
+      // the columns the engine's registerCBTAsset insert and the vault's
+      // CVT-addressed lookups required but no migration had ever created.
+      // Still no DDL on universal_royalty_ledger — the referencing pin
+      // below holds.
+      '0056_cbt_assets_dual_code_columns.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -26,6 +26,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   bootDevSeedStore,
+  createSeededStore,
   DEV_SEED_CREATOR,
   DEV_SEED_TARGETS,
   DEV_SEED_UCT,
@@ -417,5 +418,46 @@ describe('bootDevSeedStore — the analytics densification (the daily curve)', (
     expect(lit4?.cleared).toBe(92_000_000n);
     expect(lit3?.cohort).toEqual({ rank: 3n, of: 9n });
     expect(lit4?.cohort).toEqual({ rank: 3n, of: 9n });
+  });
+});
+
+describe('createSeededStore — the DB-free guarantee (the PGRST204 regression)', () => {
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  afterAll(() => {
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  });
+
+  it('seeds fully in-memory with Supabase env configured — the seed never touches the database', async () => {
+    // The production failure shape (2026-10-05): Supabase env present, the
+    // seed reaching the database. The old seed path registered through
+    // getSdk() — DB-backed whenever these variables are set — so production
+    // demo boots attempted REAL cbt_assets inserts and died on the missing
+    // cvt_code column (PGRST204). The seed now builds a dedicated in-memory
+    // engine, so ANY DB reach (a supabaseFromEnv() client, a registerCBTAsset
+    // insert, a catalog write) resolves .invalid and fails the seed. Success
+    // alone proves zero network dependency — exactly the guarantee the
+    // once-0056-ships world requires: no demo rows ever land in the
+    // production catalog on a cold boot.
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://dev-seed-must-not-reach.supabase.invalid';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'dev-seed-must-not-reach';
+
+    const store = await createSeededStore();
+
+    // The full seed landed in-memory: the founder's locked targets ...
+    const vault = await store.getVault(DEV_SEED_CREATOR.payee_id);
+    expect(vault!.available_balance).toBe(DEV_SEED_TARGETS.available_cents);
+    expect(vault!.pending_balance).toBe(DEV_SEED_TARGETS.pending_cents);
+    expect(vault!.reserve_balance).toBe(DEV_SEED_TARGETS.reserve_cents);
+
+    // ... AND the sync-library registrations — the exact path that leaked
+    // through the DB-backed singleton. Two catalog rows ("Crown Ledger" is
+    // registered engine-side only).
+    const catalog = await store.listSyncCatalogItems();
+    expect(catalog).toHaveLength(2);
   });
 });
