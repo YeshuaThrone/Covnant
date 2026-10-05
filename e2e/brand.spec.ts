@@ -879,7 +879,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(typedStyles.caretColor).not.toBe(typedStyles.color);
 });
 
-test('the mirrored Password zone closes the entry column above the consent composition (micro-edit 11): identical statement, chromeless jade type-in pre-filled with Covenant, and an input-hugging bottom ruler', async ({
+test('the mirrored Password zone closes the entry column above the consent composition (micro-edit 11): identical statement, chromeless jade type-in masked as a password entry opening empty, and an input-hugging bottom ruler', async ({
   page,
 }) => {
   await page.goto('/');
@@ -928,14 +928,15 @@ test('the mirrored Password zone closes the entry column above the consent compo
   expect(geometry.bandInterior).toBeCloseTo(92, 0);
   expect(Math.abs(geometry.inputCenter - geometry.ruleCenter)).toBeLessThan(1);
 
-  // Fully invisible field, byte-identical to the Stage Name input, PRE-FILLED
-  // with 'Covenant' (exactly 8 letters) as the delegated starting value:
-  // type text so the jade letters show, editable, no placeholder, local-only.
+  // Fully invisible field, byte-identical to the Stage Name input, EMPTY by
+  // default (no prefill — a real password never renders on screen):
+  // type password so entries render masked, editable, no placeholder,
+  // local-only.
   const stageInput = page.getByRole('textbox', { name: 'Stage Name' });
-  const passwordInput = page.getByRole('textbox', { name: 'Password' });
+  const passwordInput = page.locator('input[aria-label="Password"]');
   await expect(passwordInput).toBeVisible();
-  await expect(passwordInput).toHaveValue('Covenant');
-  expect(await passwordInput.getAttribute('type')).toBe('text');
+  await expect(passwordInput).toHaveValue('');
+  expect(await passwordInput.getAttribute('type')).toBe('password');
   expect(await passwordInput.getAttribute('placeholder')).toBeNull();
   expect(await passwordInput.getAttribute('class')).toBe(await stageInput.getAttribute('class'));
 
@@ -946,7 +947,7 @@ test('the mirrored Password zone closes the entry column above the consent compo
   await expect(sharedTopRule).toHaveCount(1);
   await expect(sharedTopRule.locator('xpath=following-sibling::*[1]')).toHaveText('Accept UDR Terms');
 
-  // The pre-filled value renders with the same jade typed treatment as the
+  // The masked entry renders with the same jade typed treatment as the
   // other fields — matched field-for-field against the hero subtitle; the
   // caret stays gold.
   const subtitle = page.locator('p', { hasText: 'The Immutable Truth Engine' });

@@ -47,11 +47,25 @@ for _ in $(seq 1 120); do
   # and pg_isready exits 0 ("accepting connections") against ANY server,
   # including one that still lacks the target database — the loop then exits
   # false-ready and the acceptance suite below dies on a missing relation.
-  # `SELECT 1` fails throughout the init window and only succeeds once the
-  # real server has universal_registry. (pg_isready would also answer for a
-  # not-yet-created role, so the probe uses the container's actual superuser
-  # — POSTGRES_USER=registry_admin; there is no `postgres` role here.)
-  if docker exec universal_registry_db psql -U registry_admin -d universal_registry -c 'SELECT 1' >/dev/null 2>&1; then
+  # (pg_isready would also answer for a not-yet-created role, so the probe
+  # uses the container's actual superuser — POSTGRES_USER=registry_admin;
+  # there is no `postgres` role here.)
+  #
+  # The probe must also speak TCP (-h 127.0.0.1), not the unix socket: the
+  # postgres image's entrypoint runs its init phase against a SOCKET-ONLY
+  # temp server (docker_temp_server_start sets -c listen_addresses=''), and
+  # initdb has already created the registry_admin role by the time init
+  # scripts run — so a socket probe succeeds against the temp server
+  # mid-init and the loop exits false-ready right before the entrypoint
+  # stops it and starts the real server. The acceptance psql then fires
+  # into that gap: "connection to server on socket ... No such file or
+  # directory", psql exit 2, set -e kills the suite (observed twice on CI
+  # 2026-10-05). The temp server never listens on TCP, and TCP host auth
+  # is password-based (pg_setup_hba_conf appends host rules using the
+  # configured password), so a TCP probe only succeeds once the REAL
+  # server is up with the target database — closing the race.
+  if docker exec -e PGPASSWORD=registry_admin_local universal_registry_db \
+      psql -h 127.0.0.1 -U registry_admin -d universal_registry -c 'SELECT 1' >/dev/null 2>&1; then
     ready=1
     break
   fi

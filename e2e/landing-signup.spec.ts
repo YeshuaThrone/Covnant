@@ -48,7 +48,9 @@ const FIELDS = [
 
 async function fillAndSubmit(page: Page): Promise<void> {
   for (const field of FIELDS) {
-    await page.getByRole('textbox', { name: field.label }).fill(field.value);
+    // getByLabel, not getByRole('textbox') — the Password input is
+    // type=password, which carries no textbox ARIA role.
+    await page.getByLabel(field.label).fill(field.value);
   }
   await page.getByRole('button', { name: 'Continue' }).click();
 }
@@ -281,7 +283,7 @@ test('a real-world phone capture rides the wire as canonical E.164', async ({ pa
   });
   await page.goto('/');
   for (const field of FIELDS.filter((f) => f.label !== 'Phone Number')) {
-    await page.getByRole('textbox', { name: field.label }).fill(field.value);
+    await page.getByLabel(field.label).fill(field.value);
   }
   // The founder's capture, exactly as typed into a real device.
   await page.getByRole('textbox', { name: 'Phone Number' }).fill('830-358-2306');
@@ -304,7 +306,7 @@ test('a blank phone capture omits the phone field entirely', async ({ page }) =>
   await page.getByRole('textbox', { name: 'Legal Name' }).fill('Jordan A. Reyes');
   await page.getByRole('textbox', { name: 'Email' }).fill('artist@example.com');
   await page.getByRole('textbox', { name: 'Core Industry & Title' }).fill('Producer');
-  await page.getByRole('textbox', { name: 'Password' }).fill('correct-horse-battery');
+  await page.getByLabel('Password').fill('correct-horse-battery');
   await page.getByRole('button', { name: 'Continue' }).click();
   // A blank phone means nothing to verify — the step never mounts; the
   // 201 holds directly at check-your-email.

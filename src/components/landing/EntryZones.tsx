@@ -191,7 +191,7 @@ export function EntryZones() {
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Email</p>
       <input
         ref={emailRef}
-        type="text"
+        type="email"
         aria-label="Email"
         className={INPUT_CLASS}
       />
@@ -245,17 +245,17 @@ export function EntryZones() {
           TOP RULE (untouched, same y as approved). The statement repeats the
           exact champagne mono treatment and the same 32px top gap below the
           shared rule; the invisible input repeats the Email field
-          byte-for-byte and arrives PRE-FILLED with 'Covenant' (exactly 8
-          letters) as the delegated starting value — type text so the jade
-          letters show; a new bottom golden ruler closes the zone HUGGING the
-          input — zero margin above it, a true pixel mirror of the Email
-          zone. The consent composition follows below this ruler. */}
+          byte-for-byte and opens EMPTY like the other collected fields —
+          type password so entries render masked (security-class fix: the
+          field never displays a value in cleartext); a new bottom golden
+          ruler closes the zone HUGGING the input — zero margin above it, a
+          true pixel mirror of the Email zone. The consent composition
+          follows below this ruler. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Password</p>
       <input
         ref={passwordRef}
-        type="text"
+        type="password"
         aria-label="Password"
-        defaultValue="Covenant"
         className={INPUT_CLASS}
       />
       <div className="gold-rule w-64" />
