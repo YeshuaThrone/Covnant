@@ -26,6 +26,7 @@ import {
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
+  type CreatorYtdIncrement,
   type LivePingRecord,
   type ReconJobInput,
   type ReconJobResult,
@@ -7135,6 +7136,26 @@ export class SupabaseStore implements Store {
         .select()
         .maybeSingle(),
       'upsertCreatorYtd',
+    );
+  }
+
+  /**
+   * Atomic accumulate (migration 0057): the deltas move inside the
+   * increment_creator_ytd SQL function — INSERT ... ON CONFLICT DO UPDATE
+   * with column arithmetic — so two concurrent settlements of one creator
+   * both land instead of last-write-wins over each other. PostgREST cannot
+   * express `col = col + $delta`, which is why the RPC exists.
+   */
+  async incrementCreatorYtd(input: CreatorYtdIncrement): Promise<CreatorYtdEarnings> {
+    return this.oneStrict<CreatorYtdEarnings>(
+      this.client.rpc('increment_creator_ytd', {
+        p_creator_id: input.creator_id,
+        p_tax_year: input.tax_year,
+        p_gross_delta: input.gross_delta_cents,
+        p_withheld_delta: input.withheld_delta_cents,
+        p_updated_at: input.updated_at,
+      }),
+      'incrementCreatorYtd',
     );
   }
 

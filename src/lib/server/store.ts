@@ -508,6 +508,17 @@ export type ApplyVaultDeltaResult =
   | { outcome: 'guard_failed' }
   | { outcome: 'not_found' };
 
+/** Input for Store.incrementCreatorYtd — the atomic YTD accumulate (0057). */
+export type CreatorYtdIncrement = {
+  creator_id: string;
+  tax_year: number;
+  /** Cents to ADD to the stored gross total (signed). */
+  gross_delta_cents: number;
+  /** Cents to ADD to the stored withheld total (signed). */
+  withheld_delta_cents: number;
+  updated_at: string;
+};
+
 /**
  * The Don Engine persistence contract — Cursor's canonical 72-method
  * `Store`, Promise-wrapped (see header, deviation 1). Ordering guarantees
@@ -2250,6 +2261,15 @@ export interface Store {
     taxYear: number,
   ): Promise<CreatorYtdEarnings | undefined>;
   upsertCreatorYtd(row: CreatorYtdEarnings): Promise<CreatorYtdEarnings>;
+  /**
+   * Atomic accumulate for YTD — the money-safe write. Adds the deltas to the
+   * stored totals in ONE server-side statement (never a read-modify-write),
+   * creating the row from the deltas when missing, so N concurrent
+   * settlements of one creator accumulate exactly and no contribution is
+   * lost (migration 0057 / audit note_c5ksDgVw). Returns the row AFTER the
+   * accumulate.
+   */
+  incrementCreatorYtd(input: CreatorYtdIncrement): Promise<CreatorYtdEarnings>;
   insertTaxEscrow(row: Omit<TaxEscrowRecord, 'id'>): Promise<TaxEscrowRecord>;
   listTaxEscrowByCreator(creatorId: string, taxYear: number): Promise<TaxEscrowRecord[]>;
 

@@ -30,6 +30,7 @@ import {
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
+  type CreatorYtdIncrement,
   type LivePingRecord,
   type ReconJobInput,
   type ReconJobResult,
@@ -4748,6 +4749,26 @@ export class InMemoryStore implements Store {
 
   async upsertCreatorYtd(row: CreatorYtdEarnings): Promise<CreatorYtdEarnings> {
     this.creatorYtd.set(`${row.creator_id}:${row.tax_year}`, row);
+    return row;
+  }
+
+  /**
+   * Atomic accumulate (migration 0057 parity): one synchronous
+   * read-accumulate-write with no await inside — the event loop can only
+   * interleave callers BETWEEN whole increments, which is the same
+   * single-statement guarantee the SQL stores give. The absolute-total
+   * upsert above stays for seeding; the engine's settlement write uses this.
+   */
+  async incrementCreatorYtd(input: CreatorYtdIncrement): Promise<CreatorYtdEarnings> {
+    const existing = this.creatorYtd.get(`${input.creator_id}:${input.tax_year}`);
+    const row: CreatorYtdEarnings = {
+      creator_id: input.creator_id,
+      tax_year: input.tax_year,
+      gross_cents: (existing?.gross_cents ?? 0) + input.gross_delta_cents,
+      withheld_cents: (existing?.withheld_cents ?? 0) + input.withheld_delta_cents,
+      updated_at: input.updated_at,
+    };
+    this.creatorYtd.set(`${input.creator_id}:${input.tax_year}`, row);
     return row;
   }
 

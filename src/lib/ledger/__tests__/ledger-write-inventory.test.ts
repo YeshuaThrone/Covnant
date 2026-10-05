@@ -496,6 +496,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // Still no DDL on universal_royalty_ledger — the referencing pin
       // below holds.
       '0056_cbt_assets_dual_code_columns.sql',
+      // Atomic YTD accumulation (tax audit note_c5ksDgVw): the
+      // increment_creator_ytd RPC over creator_ytd_earnings — settlements
+      // stop being absolute-total read-modify-writes. Still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0057_creator_ytd_atomic_increment.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
