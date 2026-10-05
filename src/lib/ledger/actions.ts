@@ -10,7 +10,9 @@
  */
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import type { RoyaltySettlementEvent, SettlementResult, SettlementCurrency } from '@/engine/covenant-master-sdk';
+import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { rememberSettlement } from '@/lib/ledger/store';
 import { getSdk } from '@/lib/sdk';
 
@@ -28,6 +30,16 @@ export type SettleDirectResult =
   | { success: false; error: string };
 
 export async function settleDirectAction(input: SettleDirectInput): Promise<SettleDirectResult> {
+  // Gated to match runVaultAuditAction: this action posts settlements to the
+  // ledger, so every invocation must carry a valid admin session cookie —
+  // unset secret → admin_not_configured (fail closed), absent/expired/forged
+  // cookie → admin_not_authenticated. The failure rides the same
+  // { success: false, error } shape the settlement form already renders.
+  const cookieStore = await cookies();
+  const verdict = verifyAdminSession(cookieStore.get(ADMIN_COOKIE_NAME)?.value);
+  if (!verdict.ok) {
+    return { success: false, error: verdict.code };
+  }
   try {
     const cbtCode = input.cbtCode.trim().toUpperCase();
     if (!cbtCode) throw new Error('An asset is required.');
