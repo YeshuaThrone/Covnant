@@ -63,7 +63,8 @@
  * loudly instead of rendering wrong numbers.
  */
 
-import { getSdk, indexAsset } from '@/lib/sdk';
+import { CovenantMasterSDK } from '@/engine/covenant-master-sdk';
+import { indexAsset, PLATFORM_FEE_PERCENTAGE } from '@/lib/sdk';
 import { calculateUdrSplits } from '@/lib/server/udrSplits';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
 import { setStore } from '@/lib/server/store';
@@ -435,7 +436,14 @@ export const DEV_SEED_TARGETS = {
  * so the pending pre-clearance state is reachable through the true path.
  */
 async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
-  const sdk = getSdk();
+  // A DEDICATED in-memory engine — never the shared getSdk() singleton, which
+  // is DB-backed whenever Supabase env is configured (src/lib/sdk.ts). A
+  // DB-backed seed turned every production demo-door boot into a real
+  // cbt_assets insert (the PGRST204 outage) and would pollute the production
+  // catalog with demo rows on every cold boot once 0056 ships. No dbClient
+  // here keeps the demo seed network-free by construction; the shadow-index
+  // flow below is unchanged.
+  const sdk = new CovenantMasterSDK(PLATFORM_FEE_PERCENTAGE, undefined);
   const creatorHolder = {
     id: DEV_SEED_CREATOR.payee_id,
     name: DEV_SEED_CREATOR.stage_name,
