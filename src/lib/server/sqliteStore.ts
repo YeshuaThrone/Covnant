@@ -31,6 +31,7 @@ import {
   type ArtistRecord,
   type CheckoutPurchaseResult,
   type CreatorUctRecord,
+  type CreatorYtdIncrement,
   type LivePingRecord,
   type ReconJobInput,
   type ReconJobResult,
@@ -11301,6 +11302,30 @@ export class SqliteStore implements Store {
            updated_at = excluded.updated_at`,
       )
       .run(row);
+    return Promise.resolve(row);
+  }
+
+  /**
+   * Atomic accumulate (migration 0057 parity): the deltas move inside one
+   * INSERT ... ON CONFLICT DO UPDATE statement — the arithmetic references
+   * the stored columns, so no read-modify-write exists to race. RETURNING
+   * yields the row after the accumulate.
+   */
+  async incrementCreatorYtd(input: CreatorYtdIncrement): Promise<CreatorYtdEarnings> {
+    const row = this.db
+      .prepare(
+        `INSERT INTO creator_ytd_earnings (
+           creator_id, tax_year, gross_cents, withheld_cents, updated_at
+         ) VALUES (
+           @creator_id, @tax_year, @gross_delta_cents, @withheld_delta_cents, @updated_at
+         )
+         ON CONFLICT(creator_id, tax_year) DO UPDATE SET
+           gross_cents = gross_cents + excluded.gross_cents,
+           withheld_cents = withheld_cents + excluded.withheld_cents,
+           updated_at = excluded.updated_at
+         RETURNING creator_id, tax_year, gross_cents, withheld_cents, updated_at`,
+      )
+      .get(input) as CreatorYtdEarnings;
     return Promise.resolve(row);
   }
 

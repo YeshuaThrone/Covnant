@@ -393,7 +393,7 @@ export class FakeSupabaseClient {
     return new FakeQueryBuilder(this.table(name), name);
   }
 
-  /** The migration-0011 claim RPC — the store's ONLY rpc on this path. */
+  /** The migration-0011 claim RPC + the migration-0057 YTD accumulate. */
   async rpc(fn: string, args: Record<string, unknown>): Promise<FakeResult> {
     if (fn === "claim_royalty_recon_job") {
       const claimed = this.table("royalty_recon_jobs").claimFirst(
@@ -407,6 +407,13 @@ export class FakeSupabaseClient {
     // function's outcome envelope exactly.
     if (fn === "apply_vault_delta") {
       return { data: this.applyVaultDelta(args), error: null };
+    }
+    // The migration-0057 YTD accumulate (the settlement paths'
+    // incrementCreatorYtd): one insert-or-add step over
+    // creator_ytd_earnings, returning the post-increment row — the jsonb
+    // the real function returns.
+    if (fn === "increment_creator_ytd") {
+      return { data: this.incrementCreatorYtd(args), error: null };
     }
     return {
       data: null,
@@ -493,6 +500,44 @@ export class FakeSupabaseClient {
     const updated = { ...existing, ...summed, updated_at: args.p_updated_at };
     table.updateReturning(updated, [["payee_id", payeeId]]);
     return { outcome: "applied", vault: { ...updated } };
+  }
+
+  /**
+   * The behavioral increment_creator_ytd (migration 0057): adds the
+   * settlement deltas to creator_ytd_earnings in one insert-or-add step,
+   * returning the post-increment row.
+   */
+  private incrementCreatorYtd(args: Record<string, unknown>): unknown {
+    const table = this.table("creator_ytd_earnings");
+    const creatorId = String(args.p_creator_id);
+    const taxYear = Number(args.p_tax_year);
+    const existing = table
+      .select()
+      .find((row) => row.creator_id === creatorId && row.tax_year === taxYear);
+    if (existing === undefined) {
+      const minted = {
+        creator_id: creatorId,
+        tax_year: taxYear,
+        gross_cents: Number(args.p_gross_delta),
+        withheld_cents: Number(args.p_withheld_delta),
+        updated_at: args.p_updated_at,
+      };
+      table.insert(minted);
+      return { ...minted };
+    }
+    const summed = {
+      creator_id: creatorId,
+      tax_year: taxYear,
+      gross_cents: Number(existing.gross_cents) + Number(args.p_gross_delta),
+      withheld_cents:
+        Number(existing.withheld_cents) + Number(args.p_withheld_delta),
+      updated_at: args.p_updated_at,
+    };
+    table.updateReturning(summed, [
+      ["creator_id", creatorId],
+      ["tax_year", taxYear],
+    ]);
+    return { ...summed };
   }
 }
 

@@ -59,11 +59,17 @@ export async function applyWithholding(
     ytd?.withheld_cents ?? 0,
     status,
   );
-  await store.upsertCreatorYtd({
+  // The read above feeds the per-payment math (backup-withholding rate and
+  // the escrow row's threshold flags at read time); the write must NOT be
+  // the absolute totals it produced — that read-modify-write lost concurrent
+  // settlements' contributions (audit note_c5ksDgVw). The atomic accumulate
+  // keeps the stored YTD exact even when settlements race; the row's
+  // requires_1099 surface (readCreatorCompliance) re-derives from it.
+  await store.incrementCreatorYtd({
     creator_id: input.creator_id,
     tax_year: input.tax_year,
-    gross_cents: computation.ytd_gross_cents,
-    withheld_cents: computation.ytd_withheld_cents,
+    gross_delta_cents: computation.gross_cents,
+    withheld_delta_cents: computation.withheld_cents,
     updated_at: createdAt,
   });
   const escrow = await store.insertTaxEscrow({

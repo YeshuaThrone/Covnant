@@ -215,6 +215,47 @@ class FakeSupabaseClient {
 
   /** The migration 0009 vault-delta function, applied to the fake's rows. */
   rpc(fn: string, params: Record<string, unknown>): { data: unknown; error: null } | { data: null; error: { message: string; code: string } } {
+    // The migration 0057 YTD accumulate: one insert-or-add step over
+    // creator_ytd_earnings, returning the post-increment row — the jsonb
+    // the real SQL function returns.
+    if (fn === "increment_creator_ytd") {
+      let table = this.tables.get("creator_ytd_earnings");
+      if (table === undefined) {
+        table = new FakeTable([]);
+        this.tables.set("creator_ytd_earnings", table);
+      }
+      const creatorId = String(params.p_creator_id);
+      const taxYear = Number(params.p_tax_year);
+      const existing = table
+        .select([], [], null)
+        .find(
+          (row) =>
+            row.creator_id === creatorId && row.tax_year === taxYear,
+        );
+      if (existing === undefined) {
+        const minted = {
+          creator_id: creatorId,
+          tax_year: taxYear,
+          gross_cents: Number(params.p_gross_delta),
+          withheld_cents: Number(params.p_withheld_delta),
+          updated_at: params.p_updated_at,
+        };
+        table.insert(minted);
+        return { data: { ...minted }, error: null };
+      }
+      const updated = {
+        creator_id: creatorId,
+        tax_year: taxYear,
+        gross_cents:
+          Number(existing.gross_cents) + Number(params.p_gross_delta),
+        withheld_cents:
+          Number(existing.withheld_cents) +
+          Number(params.p_withheld_delta),
+        updated_at: params.p_updated_at,
+      };
+      table.upsert(updated, "creator_id,tax_year");
+      return { data: { ...updated }, error: null };
+    }
     if (fn !== "apply_vault_delta") {
       return { data: null, error: { message: `unhandled rpc: ${fn}`, code: "PGRST202" } };
     }
