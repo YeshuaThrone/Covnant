@@ -6,9 +6,16 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded runs on the same branch/PR — queued-runner starvation
+# (Oct 5 incident) wasted capacity on runs that were already obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -51,146 +58,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply migrations to scratch Postgres
+      - name: Apply all migrations to scratch Postgres (each applied twice)
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0001_covenant_init.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0002_contracts.sql
+          # Every migration file under supabase/migrations/ is applied in
+          # lexical (version) order, then immediately re-applied — the
+          # second apply must be a clean no-op under ON_ERROR_STOP=1.
+          # This keeps the idempotency double-apply expectation the
+          # hand-maintained list carried for 0006 and 0011-0028, now
+          # covering ALL migrations: new files are picked up
+          # automatically and can no longer drift out of CI.
+          #
           # Supabase-auth shim (test-only, never shipped as a migration):
-          # migrations 0003/0004/0005 assume the Supabase environment — the
+          # migrations 0003+ assume the Supabase environment — the
           # auth.users table, the auth.uid() helper, and the
-          # authenticated/service_role roles — which vanilla Postgres lacks.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 <<'SQL'
-            create schema if not exists auth;
-            create table if not exists auth.users (id uuid primary key);
-            create or replace function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
-            do $$ begin
-              if not exists (select from pg_roles where rolname = 'authenticated') then
-                create role authenticated nologin;
-              end if;
-              if not exists (select from pg_roles where rolname = 'service_role') then
-                create role service_role nologin;
-              end if;
-            end $$;
+          # authenticated/service_role roles — which vanilla Postgres
+          # lacks. 0003 is the first migration that needs it (its
+          # creator_profiles table references auth.users), so the shim
+          # runs once, immediately before 0003, exactly where the
+          # hand-maintained list placed it.
+          cat > /tmp/auth_shim.sql <<'SQL'
+          create schema if not exists auth;
+          create table if not exists auth.users (id uuid primary key);
+          create or replace function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
+          do $$ begin
+            if not exists (select from pg_roles where rolname = 'authenticated') then
+              create role authenticated nologin;
+            end if;
+            if not exists (select from pg_roles where rolname = 'service_role') then
+              create role service_role nologin;
+            end if;
+          end $$;
           SQL
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0003_creator_profiles.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0004_creator_compliance.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0005_admin_action_log.sql
-          # Don Engine persistence (spec art_zxsnGP3A): the canonical 27-table
-          # schema + the atomic record_checkout_purchase RPC. Applied twice —
-          # the second apply must be a clean no-op (ON_ERROR_STOP=1), proving
-          # the migration is idempotent.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0006_don_engine.sql
-          # SDK collection surfaces + Sync Library + concurrency guards +
-          # phone verification (0007-0010), then the Deep Royalties recon
-          # queue (spec art_7M0snhxc): 0011 applied twice — the second apply
-          # must be a clean no-op, proving idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0007_sdk_collection.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0008_sync_library.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0009_concurrency_guards.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0010_phone_verifications.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0011_royalty_recon_jobs.sql
-          # Founder DDL (canon v10, addendum 29): the universal identity
-          # tables — applied twice like 0011 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0012_universal_identity.sql
-          # The UCT credential vault (spec art_7M0snhxc, PR 5): the
-          # distributor_connections table — applied twice like 0011/0012 to
-          # prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0013_distributor_credentials.sql
-          # The Astra traversal vocabulary (PR 6): the twenty-vertical
-          # distributor check constraint — applied twice like 0011-0013 to
-          # prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0014_astra_traversal_vocabulary.sql
-          # Spatial & Web3 identifier branches (canon v25): the additive
-          # CREATE OR REPLACE on the trigger — applied twice like 0011-0014
-          # to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0015_spatial_web3_identifiers.sql
-          # Film waterfall engine (Deep Royalties PR 8): the registered
-          # deal + the routing-decision distributions — applied twice like
-          # 0011-0015 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0016_film_waterfall_engine.sql
-          # Podcast episode splits + guest milestone bonuses (Deep
-          # Royalties PR 11): the split schedule/accrual ledger and the
-          # guest bonus definition/accrual ledger — applied twice like
-          # 0011-0016 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0017_podcast_episode_splits.sql
-          # Gaming engine-royalty accumulator + item splits (Deep
-          # Royalties PR 12): the append-only engine-royalty contribution
-          # log, the per-item split schedules, and the per-funding-event
-          # payout routings — applied twice like 0011-0017 to prove
-          # idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0018_gaming_fee_parser_devex.sql
-          # Gaming cashout states (Deep Royalties PR 13): the durable DevEx
-          # conversion logs and the studio KYC verification state — applied
-          # twice like 0011-0018 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0019_gaming_cashout_states.sql
-          # VTuber agency holdback states (Deep Royalties PR 15): the tax
-          # withholding verification state and the tech setup amortization
-          # schedule/line ledger — applied twice like 0011-0019 to prove
-          # idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0020_vtuber_agency_holdback_states.sql
-          # Derivative asset royalty cascade (Deep Royalties PR 16): the
-          # per-edge royalty contract table — applied twice like 0011-0020
-          # to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0021_derivative_royalty_cascade.sql
-          # Music sample cascade + statutory cover mechanicals (Deep
-          # Royalties PR 17): the sample-clearance edge contracts and the
-          # covered-composition publisher registry — applied twice like
-          # 0011-0021 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0022_sample_cascade_cover_mechanicals.sql
-          # Film multi-territory withholding + cross-collateralization
-          # firewall (Deep Royalties PR 18): the per-line pre-conversion
-          # withholding log and the per-territory routing envelopes —
-          # applied twice like 0011-0022 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0023_film_territory_withholding_firewall.sql
-          # Webtoon studio splits + translation cascades (Deep Royalties
-          # PR 20): the studio split registry, per-language localization
-          # contracts, cost amortization schedule/lines, and the isolated
-          # recoupment pools/applications — applied twice like 0011-0023
-          # to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0024_webtoon_studio_translation_cascades.sql
-          # IP adaptation optioning (Deep Royalties PR 21): the option
-          # agreement of record, the ordered author-side IP allocations,
-          # and the durable ip_rights_cleared verification state — applied
-          # twice like 0011-0024 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0025_ip_option_agreements_author_cascade.sql
-          # Merch COGS + collaboration waterfall (PR 22, founder merchandise
-          # directive): the FIFO production lots and append-only
-          # consumptions, the collaboration agreements and recoupment
-          # applications, the designer royalty tiers and billings, and the
-          # consignment settlements — applied twice like 0011-0025 to prove
-          # idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0026_merch_cogs_collaboration_waterfall.sql
-          # Merch returns reserve + fulfillment confirmation (PR 23): the
-          # returns-protection deal of record, the append-only reserve
-          # drawdowns, and the fulfillment tracking events — applied twice
-          # like 0011-0026 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0027_merch_returns_reserve_fulfillment.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0027_merch_returns_reserve_fulfillment.sql
-          # AI model registry (PR 24, founder AI directive): the nested
-          # derivative split contract of record per model and the
-          # contributors' registered dataset token weights — applied twice
-          # like 0011-0027 to prove idempotency.
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0028_ai_model_registry.sql
-          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f supabase/migrations/0028_ai_model_registry.sql
+          shim_done=0
+          for migration in supabase/migrations/*.sql; do
+            echo "applying $(basename "$migration")"
+            case "$(basename "$migration")" in
+              0003_*)
+                if [ "$shim_done" -eq 0 ]; then
+                  shim_done=1
+                  psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f /tmp/auth_shim.sql
+                fi
+                ;;
+            esac
+            psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f "$migration"
+            psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          [ "$shim_done" -eq 1 ] || { echo "auth shim never applied — no 0003_* migration found"; exit 1; }
+          echo "OK: $(ls supabase/migrations/*.sql | wc -l) migrations applied twice (replay-safe)"
 
       - name: Assert the engine's exact columns exist
         env:
@@ -1062,6 +978,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
