@@ -105,8 +105,8 @@ export function AuditStatementView({
       <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-50">Settlement audit statement</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/50">
         The itemized record of one payee&apos;s cleared settlements for the stated window — every figure below derives
-        from the GL journals, split runs, line items, and ledger transactions through the real store paths. A dash
-        means the record of truth carries no value for that field; nothing on this statement is inferred.
+        from the GL journals, split runs, line items, and ledger transactions through the real store paths. “Not on
+        file” means the record of truth carries no value for that field; nothing on this statement is inferred.
       </p>
 
       <div className="mt-6 grid grid-cols-2 gap-4 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 md:grid-cols-3">
@@ -117,8 +117,8 @@ export function AuditStatementView({
           value={windowLabel(flows.windowDays)}
           testid="audit-statement-window"
         />
-        <IdentityField label="UCT number" value={flows.uctNumber ?? '—'} testid="audit-statement-uct" />
-        <IdentityField label="ISNI" value={flows.isni ?? '—'} testid="audit-statement-isni" />
+        <IdentityField label="UCT number" value={flows.uctNumber ?? 'Not on file'} testid="audit-statement-uct" />
+        <IdentityField label="ISNI" value={flows.isni ?? 'Not on file'} testid="audit-statement-isni" />
         <IdentityField label="Generated" value={generatedAt} testid="audit-statement-generated" />
       </div>
 
@@ -145,7 +145,7 @@ export function AuditStatementView({
                 {flows.works.map((work) => (
                   <tr key={work.workRef} data-testid="audit-statement-work-row" className="border-b border-slate-600/30">
                     <td className="py-2 pr-3 font-mono text-xs text-slate-200">{work.workRef}</td>
-                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{work.title ?? '—'}</td>
+                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{work.title ?? 'Not on file'}</td>
                     <td className="py-2">
                       <IdentifierCell identifiers={work.identifiers} />
                     </td>
@@ -186,11 +186,11 @@ export function AuditStatementView({
                     className="border-b border-slate-600/30"
                   >
                     <td className="py-2 pr-3 font-mono text-xs text-slate-200">{line.day}</td>
-                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{line.entityId ?? '—'}</td>
+                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{line.entityId ?? 'Not on file'}</td>
                     <td className="py-2 pr-3 font-mono text-xs text-slate-200">
-                      {line.workTitle ?? line.workRef ?? '—'}
+                      {line.workTitle ?? line.workRef ?? 'Not on file'}
                     </td>
-                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{line.source ?? '—'}</td>
+                    <td className="py-2 pr-3 font-mono text-xs text-slate-200">{line.source ?? 'Not on file'}</td>
                     <td className="py-2 font-mono text-xs text-gold-champagne">{formatCentsBigint(line.creatorCents)}</td>
                   </tr>
                 ))}

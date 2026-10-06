@@ -58,7 +58,7 @@ export function PayoutPanel({ payouts }: { payouts: AssetPayouts }) {
                       <span className="block text-xs text-white/40">{line.role}</span>
                     </td>
                     <td className="py-2.5 text-right align-top font-mono text-xs text-[#FFD700]">
-                      {line.recordedPercent ? `${line.recordedPercent}%` : '—'}
+                      {line.recordedPercent ? `${line.recordedPercent}%` : 'Not on file'}
                     </td>
                     <td className="py-2.5 text-right align-top font-mono text-xs text-white/70">
                       {line.grossShare.toLocaleString('en-US')}

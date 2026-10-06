@@ -94,10 +94,10 @@ export function ContractsSection({
                   <tr key={execution.executionId}>
                     <td className="px-4 py-3 font-mono text-xs text-gold-champagne/90">{execution.executionId}</td>
                     <td className="px-4 py-3 text-white/80">{execution.assetTitle}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.cbt ?? '—'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.cvt ?? '—'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.templateId ?? '—'}</td>
-                    <td className="px-4 py-3 text-white/60">{execution.sector ?? '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.cbt ?? 'Not on file'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.cvt ?? 'Not on file'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-white/60">{execution.templateId ?? 'Not on file'}</td>
+                    <td className="px-4 py-3 text-white/60">{execution.sector ?? 'Not on file'}</td>
                     <td className="px-4 py-3 font-mono text-xs text-white/50">
                       {execution.stampedAt.slice(0, 10)}
                     </td>
@@ -147,11 +147,11 @@ export function ContractsSection({
                         {template.entityClassTag}
                       </span>
                     ) : (
-                      <span className="font-mono text-xs text-white/40">—</span>
+                      <span className="font-mono text-xs text-white/40">Not on file</span>
                     )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-white/60">
-                    {template.executionState ?? '—'}
+                    {template.executionState ?? 'Not on file'}
                   </td>
                   <td className="px-4 py-3 text-right text-white/60">{template.timesExecuted}</td>
                 </tr>

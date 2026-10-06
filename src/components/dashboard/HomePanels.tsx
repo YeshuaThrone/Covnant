@@ -21,7 +21,7 @@ import type { GoldBoardRevenueStream } from '../../../covnant-sdk/src/contracts/
 /** Deterministic date render — hydration-safe (UTC, fixed locale). */
 function settledOn(iso: string): string {
   const parsed = Date.parse(iso);
-  if (Number.isNaN(parsed)) return '—';
+  if (Number.isNaN(parsed)) return 'Invalid date';
   return new Date(parsed).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',

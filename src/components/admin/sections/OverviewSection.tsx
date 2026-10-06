@@ -39,7 +39,7 @@ export function OverviewSection({ data }: { data: AdminConsoleData }) {
     <div aria-label="Overview">
       <SectionEyebrow>Platform state</SectionEyebrow>
       <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Creators" value={creatorCount === null ? '—' : String(creatorCount)} />
+        <StatCard label="Creators" value={creatorCount === null ? 'Not on file' : String(creatorCount)} />
         <StatCard
           label="Rights holders"
           value={String(data.registry.rightsHolderCount)}
@@ -53,7 +53,7 @@ export function OverviewSection({ data }: { data: AdminConsoleData }) {
         />
         <StatCard
           label="Contracts"
-          value={contractCounts === null ? '—' : String(contractCounts.total)}
+          value={contractCounts === null ? 'Not on file' : String(contractCounts.total)}
           hint={
             contractCounts === null
               ? 'contract store unavailable'
@@ -62,7 +62,7 @@ export function OverviewSection({ data }: { data: AdminConsoleData }) {
         />
         <StatCard
           label="Allowlists"
-          value={allowlistCounts === null ? '—' : String(allowlistCounts.total)}
+          value={allowlistCounts === null ? 'Not on file' : String(allowlistCounts.total)}
           hint={
             allowlistCounts === null
               ? 'unavailable'

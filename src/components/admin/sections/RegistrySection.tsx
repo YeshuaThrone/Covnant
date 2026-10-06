@@ -46,10 +46,10 @@ export function RegistrySection({ registry }: { registry: RegistrySummary }) {
             <tbody className="divide-y divide-white/10">
               {registry.holders.map((holder) => (
                 <tr key={holder.rightsHolderId}>
-                  <td className="px-4 py-3 text-white">{holder.name || '—'}</td>
-                  <td className="px-4 py-3 text-white/60">{holder.role || '—'}</td>
-                  <td className="px-4 py-3 text-white/60">{holder.email ?? '—'}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gold-champagne/90">{holder.uct ?? '—'}</td>
+                  <td className="px-4 py-3 text-white">{holder.name || 'Not on file'}</td>
+                  <td className="px-4 py-3 text-white/60">{holder.role || 'Not on file'}</td>
+                  <td className="px-4 py-3 text-white/60">{holder.email ?? 'Not on file'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gold-champagne/90">{holder.uct ?? 'Not issued'}</td>
                   <td className="px-4 py-3">
                     <StatusPill label={holder.provisioning} tone={PROVISIONING_TONE[holder.provisioning]} />
                   </td>

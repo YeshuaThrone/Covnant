@@ -168,7 +168,7 @@ function TableRow({
                     <td className="py-2 pr-4 text-right text-gold">{formatLedgerAmount(d.netShare, row.currency)}</td>
                     <td className="py-2 pr-4">{d.taxFormRequired}</td>
                     <td className="py-2">
-                      {d.routing?.railType ?? '—'} · {d.routing?.countryCode ?? '—'}
+                      {d.routing?.railType ?? 'Not on file'} · {d.routing?.countryCode ?? 'Not on file'}
                     </td>
                   </tr>
                 ))}

@@ -169,8 +169,8 @@ export default async function RightsHoldersPage({
                   <div>
                     <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Payout rail</dt>
                     <dd className="mt-1 text-white/80">
-                      {holder.routing?.railType ?? '—'} · {holder.routing?.countryCode ?? '—'} ·{' '}
-                      {holder.routing?.currency ?? '—'}
+                      {holder.routing?.railType ?? 'Not on file'} · {holder.routing?.countryCode ?? 'Not on file'} ·{' '}
+                      {holder.routing?.currency ?? 'Not on file'}
                     </dd>
                   </div>
                   <div>

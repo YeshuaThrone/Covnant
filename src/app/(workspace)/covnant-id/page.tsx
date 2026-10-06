@@ -113,7 +113,7 @@ export default async function CovnantIdPage() {
             <FactRow label="Creator">{creator.stage_name}</FactRow>
             <FactRow label="Root UCT">
               <span data-testid="identity-uct" className="text-gold-champagne">
-                {identity.kind === 'anchored' ? identity.uct : '—'}
+                {identity.kind === 'anchored' ? identity.uct : 'Not issued'}
               </span>
             </FactRow>
             <FactRow label="ISNI">
