@@ -2272,6 +2272,27 @@ export interface Store {
   incrementCreatorYtd(input: CreatorYtdIncrement): Promise<CreatorYtdEarnings>;
   insertTaxEscrow(row: Omit<TaxEscrowRecord, 'id'>): Promise<TaxEscrowRecord>;
   listTaxEscrowByCreator(creatorId: string, taxYear: number): Promise<TaxEscrowRecord[]>;
+  /**
+   * Escrow rows stamped for one split run (migration 0059) — the
+   * attribution key the reversal unwind (audit #7) and the failed-saga
+   * compensation (audit #6) list before posting compensating entries.
+   * Rows predating 0059 (split_run_id null) are not attributable and are
+   * never returned.
+   */
+  listTaxEscrowByRun(splitRunId: string): Promise<TaxEscrowRecord[]>;
+  /**
+   * Guard-first atomic status transition for split runs (audit #13): moves
+   * the status from `from` to `to` in ONE conditional statement and returns
+   * whether it happened. A false return means the run is no longer in
+   * `from` — another writer (e.g. a concurrent reversal) holds it — and the
+   * caller aborts instead of racing a stale status check. Replaces the
+   * read-check-write `updateSplitRunStatus` as the reversal's claim.
+   */
+  transitionSplitRunStatus(
+    id: string,
+    from: SplitRunRecord['status'],
+    to: SplitRunRecord['status'],
+  ): Promise<boolean>;
 
   // --- Sovereign vaults + disputes ---
   getVault(payeeId: string): Promise<SovereignVaultRecord | undefined>;
