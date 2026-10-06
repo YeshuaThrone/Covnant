@@ -33,18 +33,33 @@ export function indexAsset(asset: CovenantBlockAsset): void {
   else index.unshift(asset);
 }
 
-function rowToAsset(row: Record<string, unknown>): CovenantBlockAsset {
+/**
+ * A listed asset — the engine's asset record plus the DB-only holder UCT
+ * column (migration 0056). The in-memory index carries engine-shaped
+ * assets, so `holderUct` is absent there: an absent fact, honestly.
+ */
+export type ListedAsset = CovenantBlockAsset & { readonly holderUct?: string | null };
+
+/** Column value → string when present and non-blank, else `undefined`. */
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+function rowToAsset(row: Record<string, unknown>): ListedAsset {
+  const cvtCode = optionalString(row.cvt_code);
   return {
     cbtCode: row.cbt_code as string,
+    ...(cvtCode !== undefined ? { cvtCode } : {}),
     title: row.title as string,
     medium: row.medium as MediaMedium,
     mappedIdentifiers: row.mapped_identifiers as UniversalAssetIdentifier,
     rightsHolders: row.rights_holders as SelfServeRightsHolder[],
     createdTimestamp: Number(row.created_timestamp),
+    holderUct: optionalString(row.holder_uct) ?? null,
   };
 }
 
-export async function listAssets(sdk: CovenantMasterSDK = getSdk()): Promise<CovenantBlockAsset[]> {
+export async function listAssets(sdk: CovenantMasterSDK = getSdk()): Promise<ListedAsset[]> {
   if (sdk.dbClient) {
     const { data, error } = await sdk.dbClient
       .from('cbt_assets')

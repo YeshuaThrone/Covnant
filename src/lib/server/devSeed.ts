@@ -63,6 +63,7 @@
  * loudly instead of rendering wrong numbers.
  */
 
+import { canonicalSeedIdentifier } from '@/lib/covnant/vault';
 import { CovenantMasterSDK } from '@/engine/covenant-master-sdk';
 import { indexAsset, PLATFORM_FEE_PERCENTAGE } from '@/lib/sdk';
 import { calculateUdrSplits } from '@/lib/server/udrSplits';
@@ -494,10 +495,12 @@ async function seedSyncLibrary(store: InMemoryStore): Promise<void> {
   };
 
   for (const sheet of [
-    { title: 'Midnight Clear', genre: 'Cinematic R&B', bpm: 92, fee: 495_000, identifiers: { isrc: 'US-CVN-26-00001' } },
-    { title: 'Gold Hours', genre: 'Alt Soul', bpm: 78, fee: 320_000, identifiers: { isrc: 'US-CVN-26-00002' } },
+    // Seed ISRCs canonicalize through the vault canonicalizer — the demo
+    // lane and the registration path agree on identifier shape.
+    { title: 'Midnight Clear', genre: 'Cinematic R&B', bpm: 92, fee: 495_000, identifiers: { isrc: canonicalSeedIdentifier('ISRC', 'US-CVN-26-00001') } },
+    { title: 'Gold Hours', genre: 'Alt Soul', bpm: 78, fee: 320_000, identifiers: { isrc: canonicalSeedIdentifier('ISRC', 'US-CVN-26-00002') } },
     // Registered in the CBT catalog only — NOT yet in the Sync Library.
-    { title: 'Crown Ledger', genre: 'Neo Soul', bpm: 84, fee: null, identifiers: { isrc: 'US-CVN-26-00003' } },
+    { title: 'Crown Ledger', genre: 'Neo Soul', bpm: 84, fee: null, identifiers: { isrc: canonicalSeedIdentifier('ISRC', 'US-CVN-26-00003') } },
   ]) {
     const { cbtCode } = await sdk.registerCBTAsset(sheet.title, 'MUSIC_TRACK', sheet.identifiers, [
       creatorHolder,

@@ -28,10 +28,12 @@
  *      `isanCode` (ISAN), LITERARY_WORK → `isbnNumber` (ISBN);
  *   3. every other form — TV, podcast, live, sports, esports, social,
  *      sponsorship — has NO industry code anywhere in the schemas, so it
- *      falls back to the platform's own code of record (templateId/CVT)
- *      LABELED AS SUCH (`codeOfRecord: true` — the section renders
- *      `Code of Record (CVT)`). An ISRC is never claimed for a form that
- *      has none.
+ *      falls back to the platform's own code of record LABELED AS SUCH
+ *      (`codeOfRecord: true` — the section renders `Code of Record (CBT)`
+ *      for the asset's CBT code, `(TPL)` for a template literal, `(REF)`
+ *      for a bare work ref). `(CVT)` is claimed only when the value is
+ *      genuinely the asset's CVT handle. An ISRC is never claimed for a
+ *      form that has none, and a CBT code is never labeled CVT.
  *   ISWC rides as a secondary row only where the mapped record carries it
  *   ("ISWC where mapped"). An unresolvable work ref renders its own ref
  *   verbatim as the code of record — never a guessed scheme.
@@ -95,12 +97,21 @@ export function statementWindowFromParam(param: string | undefined): StatementWi
   }
 }
 
-/** The statement's identifier schemes — the industry codes of record and the labeled CVT fallback. */
-export type StatementIdentifierScheme = 'ISRC' | 'ISWC' | 'ISAN' | 'ISBN' | 'CVT';
+/** The statement's identifier schemes — the industry codes of record plus the honest labeled fallbacks (CBT/TPL/REF are the platform's own codes; CVT only when genuine). */
+export type StatementIdentifierScheme =
+  | 'ISRC'
+  | 'ISWC'
+  | 'ISAN'
+  | 'ISBN'
+  | 'CVT'
+  | 'CBT'
+  | 'TPL'
+  | 'REF';
 
 /**
  * One work's identifier of record. `codeOfRecord: true` marks the honest
- * fallback — the platform's own code (templateId/CVT), NOT an industry
+ * fallback — the platform's own code (CVT handle, CBT code, templateId, or
+ * the bare work ref, labeled with its true scheme), NOT an industry
  * identifier; the section renders it labeled as such. The scheme field
  * never claims an industry standard the record does not carry.
  */
@@ -230,9 +241,12 @@ function identifierFromEntitySeed(entity: SovereignAtomicEntity): string | null 
   }
 }
 
-/** The fallback row — the platform's own code of record, labeled as such. */
-function codeOfRecordRow(code: string): StatementWorkIdentifier {
-  return { scheme: 'CVT', code, codeOfRecord: true };
+/** The fallback row — the platform's own code of record, labeled with its TRUE scheme. */
+function codeOfRecordRow(
+  code: string,
+  scheme: 'CVT' | 'CBT' | 'TPL' | 'REF',
+): StatementWorkIdentifier {
+  return { scheme, code, codeOfRecord: true };
 }
 
 /**
@@ -251,8 +265,11 @@ export function identifiersForWorkRef(
     const fromMapped = identifierFromMappedAsset(asset);
     if (fromMapped !== null) return fromMapped;
     // The asset resolves but carries no class-slot industry code — its own
-    // CVT/cbt code of record, labeled as such.
-    return [codeOfRecordRow(asset.cvtCode ?? asset.cbtCode)];
+    // code of record, labeled with its true family: CVT only when the CVT
+    // handle is mapped, CBT when the value is the asset's CBT code (a CBT
+    // is never labeled CVT — the audited mislabel).
+    if (asset.cvtCode) return [codeOfRecordRow(asset.cvtCode, 'CVT')];
+    return [codeOfRecordRow(asset.cbtCode, 'CBT')];
   }
 
   const entity = entityRecordForWorkRef(workRef);
@@ -262,12 +279,13 @@ export function identifiersForWorkRef(
       return [{ scheme: identifierFromEntitySeedScheme(entity), code: seedCode, codeOfRecord: false }];
     }
     // A class with no industry code — the templateId is the universal code
-    // of record (spec: templateId/CVT), labeled as such.
-    return [codeOfRecordRow(entity.templateId)];
+    // of record, labeled TPL (it is a template literal, not a CVT handle).
+    return [codeOfRecordRow(entity.templateId, 'TPL')];
   }
 
-  // Unresolvable — the ref of record stands alone, labeled, never renamed.
-  return [codeOfRecordRow(workRef)];
+  // Unresolvable — the ref of record stands alone, labeled REF, never
+  // renamed and never re-schemed.
+  return [codeOfRecordRow(workRef, 'REF')];
 }
 
 /** The scheme name of the entity class's industry code — the pair of identifierFromEntitySeed. */

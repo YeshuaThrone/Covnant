@@ -71,7 +71,7 @@ describe('atomic entity binding — sector-driven', () => {
     const music = entity as MusicEntity;
     expect(music.entityType).toBe('MASTER_RECORDING');
     expect(music.templateId).toBe('TPL-MUS-001');
-    expect(music.isrcCode).toBe('US-S1Z-26-00001');
+    expect(music.isrcCode).toBe('USS1Z2600001');
     expect(music.subSecondMicroRoyaltyRate).toBe(0.0035);
     expect(music.proTelemetryBinding).toBe('ASCAP');
     expect(music.targetSplit).toEqual({ ownership: 0.50, creative: 0.35, operations: 0.15 });

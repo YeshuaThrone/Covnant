@@ -9,7 +9,7 @@
  *
  * Honesty law on this page: absent facts render dashes; a payee the store
  * never names renders the payeeId; a work without an industry identifier
- * renders its code of record labeled `Code of Record (CVT)`; and a
+ * renders its code of record labeled with its true scheme — `Code of Record (CBT)`, `(TPL)`, `(REF)`, or `(CVT)` only when genuine; and a
  * divergence between the itemized total and the leaderboard-basis window
  * credits is DISCLOSED in plain text — never smoothed over.
  */
@@ -48,7 +48,9 @@ function IdentifierCell({ identifiers }: { identifiers: readonly StatementWorkId
         >
           <span className="text-white/40">{identifier.scheme}</span> {identifier.code}
           {identifier.codeOfRecord ? (
-            <span className="ml-2 text-gold-champagne/80">Code of Record (CVT)</span>
+            <span className="ml-2 text-gold-champagne/80">
+              Code of Record ({identifier.scheme})
+            </span>
           ) : null}
         </span>
       ))}
