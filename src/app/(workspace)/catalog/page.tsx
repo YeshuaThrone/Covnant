@@ -4,7 +4,7 @@ import { listAssets } from '@/lib/sdk';
 import { MEDIUM_LABELS } from '@/lib/splits/shared';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
-import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { MASTER_TAB_PANEL_ID, masterCategoryFromParam, masterTabId } from '@/lib/master/taxonomy';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import {
@@ -82,8 +82,16 @@ export default async function CatalogPage({
 
       <section aria-label="Master ledger for this vertical" className="space-y-4">
         <MasterCategoryTabs active={active} basePath="/catalog" />
-        <MasterStatCards summary={summary} />
-        <SovereignLedgerTable records={scoped} />
+        <div
+          role="tabpanel"
+          id={MASTER_TAB_PANEL_ID}
+          aria-labelledby={masterTabId(active)}
+          tabIndex={0}
+          className="space-y-4"
+        >
+          <MasterStatCards summary={summary} />
+          <SovereignLedgerTable records={scoped} />
+        </div>
       </section>
 
       <div className="gold-rule my-8" />

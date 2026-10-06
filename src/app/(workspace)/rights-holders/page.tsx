@@ -17,7 +17,7 @@ import type { SelfServeRightsHolder, TaxProfile } from '@/engine/covenant-master
 import { listAssets } from '@/lib/sdk';
 import { holderStatsFrom, listLedger } from '@/lib/ledger/store';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
-import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { MASTER_TAB_PANEL_ID, masterCategoryFromParam, masterTabId } from '@/lib/master/taxonomy';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import {
@@ -118,8 +118,16 @@ export default async function RightsHoldersPage({
 
       <div className="mt-8 space-y-4">
         <MasterCategoryTabs active={active} basePath="/rights-holders" />
-        <MasterStatCards summary={summary} />
-        <SovereignLedgerTable records={scoped} />
+        <div
+          role="tabpanel"
+          id={MASTER_TAB_PANEL_ID}
+          aria-labelledby={masterTabId(active)}
+          tabIndex={0}
+          className="space-y-4"
+        >
+          <MasterStatCards summary={summary} />
+          <SovereignLedgerTable records={scoped} />
+        </div>
       </div>
 
       <div className="gold-rule my-8" />

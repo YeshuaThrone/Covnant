@@ -11,10 +11,11 @@
  */
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { CvRibbonMonogram } from '@/components/brand/CvRibbonMonogram';
 import { IdentityBadge } from '@/components/brand/IdentityBadge';
+import { useDialogA11y } from './useDialogA11y';
 import type { ShellUser } from './AppShell';
 import type { NavItem } from './SidebarNav';
 
@@ -27,17 +28,11 @@ export function MobileDrawer({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
 
-  // Close on Escape — the drawer is a modal surface on a dark scrim.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
   const close = (): void => setOpen(false);
+
+  // Modal semantics on the dark scrim — focus trap, Escape close, and focus
+  // restoration to the hamburger on close (UI audit #12).
+  const dialogRef = useDialogA11y(open, close);
 
   return (
     <>
@@ -57,7 +52,14 @@ export function MobileDrawer({
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Workspace navigation">
+        <div
+          ref={dialogRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Workspace navigation"
+        >
           <button
             type="button"
             aria-label="Close navigation"

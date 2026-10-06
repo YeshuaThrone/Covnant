@@ -59,6 +59,19 @@ body {
   color: var(--foreground);
 }
 
+/* The shared keyboard-focus ring — the ONE gold token (UI audit #22).
+   Keyboard-only via :focus-visible; unlayered on purpose: unlayered rules
+   outrank Tailwind's layered utilities, so fields carrying outline-none /
+   focus:outline-none (SettlementTable, the admin sections, SyncLicenseForm)
+   get the ring back without each call site repeating the variant trio
+   (the variant fight is documented in EntryZones' INPUT_CLASS comment).
+   Champagne matches the AdminGate/EntryZones treatment; 2px offset separates
+   the ring from the element's own border so it reads on obsidian grounds. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 1px solid var(--color-gold-champagne);
+  outline-offset: 2px;
+}
+
 /* Bold geometric display type for headings and the wordmark. */
 h1,
 h2 {

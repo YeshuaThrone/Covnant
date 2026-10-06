@@ -39,6 +39,17 @@ export function AuditRunner() {
         Runs the embedded auditor across every registered asset: split sums, ledger
         fee-overrun scan, and anomaly detection.
       </p>
+      {/* The audit is async — announce pending and outcome (UI audit #25). */}
+      <p
+        role="status"
+        className="sr-only"
+      >
+        {pending
+          ? 'Running system audit…'
+          : report
+            ? `Audit complete: ${report.status} — ${report.totalAssetsChecked} assets checked, ${report.anomaliesDetected.length} anomalies detected.`
+            : ''}
+      </p>
       <button
         type="button"
         onClick={run}
@@ -49,7 +60,10 @@ export function AuditRunner() {
       </button>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-300">
+        <p
+          role="alert"
+          className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-300"
+        >
           {error}
         </p>
       )}

@@ -169,6 +169,8 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
           />
         </label>
       </div>
+      {/* Ledger posting is async — announce the in-flight state (UI audit #25). */}
+      <p role="status" className="sr-only">{pending ? 'Recording settlement…' : ''}</p>
       <button
         type="submit"
         disabled={!ready}
@@ -176,7 +178,7 @@ function SettleForm({ assets }: { assets: { cbtCode: string; title: string }[] }
       >
         {pending ? 'Settling…' : 'Settle'}
       </button>
-      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      {error && <p role="alert" className="mt-3 text-sm text-red-400">{error}</p>}
       {receipt && (
         <p className="mt-3 font-mono text-xs text-emerald-300" role="status">
           {receipt}

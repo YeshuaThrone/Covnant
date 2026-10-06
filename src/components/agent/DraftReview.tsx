@@ -32,8 +32,10 @@ import { registerAssetPayloadSchema } from '@/lib/agent/registrationDraft';
 import type { AgentRegistrationDraft } from '@/lib/agent/registrationDraft';
 import type { ActionResult, RegisterAssetPayload } from '@/lib/assets/actions';
 
+// The keyboard focus ring is the shared :focus-visible token in globals.css
+// (UI audit #22) — no per-field suppressor here, it would zero the ring.
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 /** Client-side holder id for the editor keys — the write action re-ids as it normalizes. */
@@ -131,6 +133,10 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
 
   return (
     <div className="space-y-8" data-testid="agent-draft-review">
+      {/* Registration is async — announce the in-flight state (UI audit #25). */}
+      <p role="status" className="sr-only">
+        {confirming ? 'Registering the asset…' : ''}
+      </p>
       {duplicate && (
         <GoldNotificationBanner title="Asset already registered in CBT catalog">
           The identical medium and title are already on the ledger — that catalog entry is the
@@ -183,8 +189,11 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className={LABEL}>Asset title</label>
+            <label htmlFor="draft-title" className={LABEL}>
+              Asset title
+            </label>
             <input
+              id="draft-title"
               className={FIELD}
               value={title}
               placeholder="Song, film, episode, book…"
@@ -192,8 +201,11 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
             />
           </div>
           <div>
-            <label className={LABEL}>Medium</label>
+            <label htmlFor="draft-medium" className={LABEL}>
+              Medium
+            </label>
             <select
+              id="draft-medium"
               className={FIELD}
               value={medium}
               onChange={(event) => setMedium(event.target.value as typeof draft.medium)}
@@ -206,9 +218,13 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
             </select>
           </div>
           <div>
-            <label className={LABEL}>ISRC / ISWC / EIDR</label>
+            <label htmlFor="draft-identifier-isrc" className={LABEL}>
+              ISRC / ISWC / EIDR
+            </label>
             <div className="flex gap-2">
               <input
+                id="draft-identifier-isrc"
+                aria-label="ISRC"
                 className={FIELD}
                 value={identifiers.isrc ?? ''}
                 placeholder="ISRC"
@@ -217,6 +233,7 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
                 }
               />
               <input
+                aria-label="ISWC"
                 className={FIELD}
                 value={identifiers.iswc ?? ''}
                 placeholder="ISWC"
@@ -225,6 +242,7 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
                 }
               />
               <input
+                aria-label="EIDR"
                 className={FIELD}
                 value={identifiers.eidrCanonical ?? ''}
                 placeholder="EIDR"
@@ -253,7 +271,7 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
       )}
 
       {error && (
-        <p className="rounded-lg border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+        <p role="alert" className="rounded-lg border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-red-300">
           {error}
         </p>
       )}

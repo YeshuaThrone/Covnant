@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { moveTabFocus } from '@/lib/a11y/tabKeyboard';
 import {
   MASTER_CATEGORY_BLURBS,
   MASTER_CATEGORY_LABELS,
@@ -93,6 +94,13 @@ function tabPillClasses(active: boolean): string {
   }`;
 }
 
+/** Tab/panel wiring (UI audit #11): each tab controls the one board panel. */
+const VERTICAL_PANEL_ID = 'vertical-panel';
+
+function verticalTabId(category: GlobalEntertainmentCategory | null): string {
+  return `vertical-tab-${category ?? 'all'}`;
+}
+
 export function TemplatesControlBoard({
   initial,
   historyMode = 'url',
@@ -166,16 +174,32 @@ export function TemplatesControlBoard({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Master categories">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        role="tablist"
+        aria-label="Master categories"
+        onKeyDown={moveTabFocus}
+      >
         {ownsHistory ? (
-          <Link href="/templates" role="tab" aria-selected={view.active === null} className={tabPillClasses(view.active === null)}>
+          <Link
+            href="/templates"
+            id={verticalTabId(null)}
+            role="tab"
+            aria-selected={view.active === null}
+            aria-controls={VERTICAL_PANEL_ID}
+            tabIndex={view.active === null ? 0 : -1}
+            className={tabPillClasses(view.active === null)}
+          >
             All verticals
           </Link>
         ) : (
           <button
             type="button"
+            id={verticalTabId(null)}
             role="tab"
             aria-selected={view.active === null}
+            aria-controls={VERTICAL_PANEL_ID}
+            tabIndex={view.active === null ? 0 : -1}
             onClick={() => setView(initial)}
             className={tabPillClasses(view.active === null)}
           >
@@ -187,8 +211,11 @@ export function TemplatesControlBoard({
             <Link
               key={category}
               href={`/templates?category=${category}`}
+              id={verticalTabId(category)}
               role="tab"
               aria-selected={view.active === category}
+              aria-controls={VERTICAL_PANEL_ID}
+              tabIndex={view.active === category ? 0 : -1}
               data-testid="vertical-tab"
               data-vertical={category}
               onClick={(event) => {
@@ -205,8 +232,11 @@ export function TemplatesControlBoard({
             <button
               key={category}
               type="button"
+              id={verticalTabId(category)}
               role="tab"
               aria-selected={view.active === category}
+              aria-controls={VERTICAL_PANEL_ID}
+              tabIndex={view.active === category ? 0 : -1}
               data-testid="vertical-tab"
               data-vertical={category}
               onClick={() => {
@@ -245,7 +275,13 @@ export function TemplatesControlBoard({
         </p>
       ) : null}
 
-      <div className="mt-6 space-y-12">
+      <div
+        role="tabpanel"
+        id={VERTICAL_PANEL_ID}
+        aria-labelledby={verticalTabId(view.active)}
+        tabIndex={0}
+        className="mt-6 space-y-12"
+      >
         {view.verticals.map((section) => (
           <VerticalSection key={section.vertical} section={section} />
         ))}

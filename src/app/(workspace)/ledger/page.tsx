@@ -18,7 +18,7 @@ import { SettlementTable } from '@/components/ledger/SettlementTable';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 import { VerificationBadge } from '@/components/brand/VerificationBadge';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
-import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { MASTER_TAB_PANEL_ID, masterCategoryFromParam, masterTabId } from '@/lib/master/taxonomy';
 import { formatCentsBigint } from '@/lib/money/format';
 import { cornerDustRemainder } from '@/lib/tax/controlBoardSummary';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
@@ -97,7 +97,14 @@ export default async function LedgerPage({
         <MasterCategoryTabs active={active} basePath="/ledger" />
       </div>
 
-      <section aria-label="Master ledger for this vertical" className="mt-6 space-y-4">
+      <section
+        aria-label="Master ledger for this vertical"
+        role="tabpanel"
+        id={MASTER_TAB_PANEL_ID}
+        aria-labelledby={masterTabId(active)}
+        tabIndex={0}
+        className="mt-6 space-y-4"
+      >
         <MasterStatCards summary={summary} />
         <SovereignLedgerTable records={scoped} />
       </section>

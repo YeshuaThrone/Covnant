@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { GoldNotificationBanner } from '@/components/brand/GoldNotificationBanner';
 import { generateCBTAsset } from '@/lib/splits/generate-cbt-asset';
+import { useDialogA11y } from '@/components/shell/useDialogA11y';
 import {
   MEDIA_MEDIUMS,
   MEDIUM_LABELS,
@@ -13,8 +14,10 @@ import {
 } from '@/lib/splits/shared';
 import { freshPools, PoolSplitEditor } from './PoolSplitEditor';
 
+// The keyboard focus ring is the shared :focus-visible token in globals.css
+// (UI audit #22) — no per-field suppressor here, it would zero the ring.
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function AssetRegistrationForm() {
@@ -26,6 +29,9 @@ export function AssetRegistrationForm() {
   const [duplicate, setDuplicate] = useState(false);
   const [mulOpen, setMulOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // The MUL confirmation is a modal dialog: trap, Escape, restore (audit #12).
+  const mulDialogRef = useDialogA11y(mulOpen, () => setMulOpen(false));
 
   const allPoolsExact =
     title.trim().length > 0 &&
@@ -68,8 +74,11 @@ export function AssetRegistrationForm() {
         <h2 className="font-mono text-sm uppercase tracking-widest text-gold">Identity</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className={LABEL}>Asset title</label>
+            <label htmlFor="asset-title" className={LABEL}>
+              Asset title
+            </label>
             <input
+              id="asset-title"
               className={FIELD}
               value={title}
               placeholder="Song, film, episode, book…"
@@ -77,8 +86,10 @@ export function AssetRegistrationForm() {
             />
           </div>
           <div>
-            <label className={LABEL}>Medium</label>
-            <select className={FIELD} value={medium} onChange={(e) => setMedium(e.target.value)}>
+            <label htmlFor="asset-medium" className={LABEL}>
+              Medium
+            </label>
+            <select id="asset-medium" className={FIELD} value={medium} onChange={(e) => setMedium(e.target.value)}>
               {MEDIA_MEDIUMS.map((m) => (
                 <option key={m} value={m} className="bg-onyx-800">
                   {MEDIUM_LABELS[m]}
@@ -119,6 +130,8 @@ export function AssetRegistrationForm() {
       {mulOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
           <div
+            ref={mulDialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="Master Recording & Universal Asset License"
