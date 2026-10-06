@@ -7186,10 +7186,27 @@ export class SupabaseStore implements Store {
     return this.oneStrict<TaxEscrowRecord>(
       this.client
         .from(TABLES.taxEscrow)
-        .insert({ ...row, id: crypto.randomUUID() })
+        .insert({ ...row, idempotency_key: row.idempotency_key ?? null, id: crypto.randomUUID() })
         .select()
         .maybeSingle(),
       'insertTaxEscrow',
+    );
+  }
+
+  /**
+   * The escrow row carrying one withholding idempotency key (migration
+   * 0060, audit #12) — applyWithholding's replay probe.
+   */
+  async getTaxEscrowByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<TaxEscrowRecord | undefined> {
+    return this.one<TaxEscrowRecord>(
+      this.client
+        .from(TABLES.taxEscrow)
+        .select()
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle(),
+      'getTaxEscrowByIdempotencyKey',
     );
   }
 

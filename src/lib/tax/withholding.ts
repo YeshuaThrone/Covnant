@@ -49,6 +49,13 @@ export interface TaxResolutionFold {
   payouts: ResolvedPayeePayout[];
   /** Running cleared gross USD per payee identity key, after each payout. */
   ytdByPayee: Map<string, number>;
+  /**
+   * Running cleared gross USD per (taxYear | identityKey), after each
+   * payout — the map the ENGINE's form thresholds evaluate (audit #9):
+   * a $600 1099 crossing is a tax-year event, so the per-payout profile
+   * must see the payee's year-to-date, not their lifetime total.
+   */
+  ytdByPayeeYear: Map<string, number>;
   /** Settled rows in other currencies — outside the USD engine, disclosed. */
   excludedNonUsdSettlements: number;
 }
@@ -172,6 +179,11 @@ export function isDemoLedger(rows: readonly LedgerRow[]): boolean {
   return rows.some((row) => row.transactionId.startsWith(DEMO_TRANSACTION_PREFIX));
 }
 
+/** Year-scoped running-YTD map key: a crossing is a (payee, taxYear) event (audit #9). */
+function yearScopedYtdKey(taxYear: number, identityKey: string): string {
+  return `${taxYear}|${identityKey}`;
+}
+
 /** Chronological USD-only fold: every disbursement through the founder's engine. */
 export function resolvePayeePayouts(
   rows: readonly LedgerRow[],
@@ -186,10 +198,17 @@ export function resolvePayeePayouts(
     );
   const payouts: ResolvedPayeePayout[] = [];
   const ytdByPayee = new Map<string, number>();
+  const ytdByPayeeYear = new Map<string, number>();
   for (const row of ordered) {
+    const taxYear = rowDate(row).getUTCFullYear();
     for (const disbursement of row.disbursements) {
       const identityKey = identityKeyFromPayeeId(disbursement.rightsHolderId);
-      const ytdBefore = ytdByPayee.get(identityKey) ?? 0;
+      // The profile's YTD is the YEAR-scoped running total (audit #9):
+      // thresholds like the $600 1099 crossing evaluate the tax year. The
+      // lifetime map (ytdByPayee) stays for the register's all-time view —
+      // the two maps answer different questions and both are disclosed.
+      const yearKey = yearScopedYtdKey(taxYear, identityKey);
+      const ytdBefore = ytdByPayeeYear.get(yearKey) ?? 0;
       const profile = payeeTaxProfileFor(
         disbursement.rightsHolderId,
         disbursement.rightsHolderName,
@@ -203,10 +222,11 @@ export function resolvePayeePayouts(
         eventState: joins.eventStateByCbt.get(row.cbtCode) ?? null,
       });
       payouts.push({ row, disbursement, resolution });
-      ytdByPayee.set(identityKey, ytdBefore + disbursement.grossShare);
+      ytdByPayeeYear.set(yearKey, ytdBefore + disbursement.grossShare);
+      ytdByPayee.set(identityKey, (ytdByPayee.get(identityKey) ?? 0) + disbursement.grossShare);
     }
   }
-  return { payouts, ytdByPayee, excludedNonUsdSettlements: rows.length - ordered.length };
+  return { payouts, ytdByPayee, ytdByPayeeYear, excludedNonUsdSettlements: rows.length - ordered.length };
 }
 
 /** Exact engine totals for a set of payouts (USD cents, bigint). */

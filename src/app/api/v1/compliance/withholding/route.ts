@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
       creator_id: parsed.value.creator_id,
       gross_cents: parsed.value.gross_cents,
       tax_year: parsed.value.tax_year ?? new Date().getUTCFullYear(),
+      idempotency_key: parsed.value.idempotency_key,
     });
     return NextResponse.json(result.value, { status: 201 });
   } catch (error) {

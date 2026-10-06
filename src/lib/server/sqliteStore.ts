@@ -552,8 +552,12 @@ CREATE TABLE IF NOT EXISTS tax_escrow_ledger (
   requires_1099 INTEGER NOT NULL,
   crossed_1099_threshold INTEGER NOT NULL,
   created_at TEXT NOT NULL,
-  split_run_id TEXT
+  split_run_id TEXT,
+  idempotency_key TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tax_escrow_idempotency_key_unique
+  ON tax_escrow_ledger (idempotency_key);
 
 CREATE TABLE IF NOT EXISTS sovereign_vaults (
   payee_id TEXT PRIMARY KEY,
@@ -5812,6 +5816,20 @@ export class SqliteStore implements Store {
     }
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_tax_escrow_run ON tax_escrow_ledger (split_run_id)`,
+    );
+
+    // 0060 — tax_escrow_ledger.idempotency_key (audit note_c5ksDgVw #12):
+    // applyWithholding replays used to double-withhold. The key makes one
+    // settlement effect idempotent end-to-end; the partial index leaves the
+    // legacy unkeyed rows out of uniqueness entirely.
+    const escrowColumns0060 = columnsOf('tax_escrow_ledger');
+    if (!escrowColumns0060.has('idempotency_key')) {
+      this.db.exec(`ALTER TABLE tax_escrow_ledger ADD COLUMN idempotency_key TEXT`);
+    }
+    this.db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS tax_escrow_idempotency_key_unique
+       ON tax_escrow_ledger (idempotency_key)
+       WHERE idempotency_key IS NOT NULL`,
     );
   }
 
@@ -11357,6 +11375,7 @@ export class SqliteStore implements Store {
     const record: TaxEscrowRecord = {
       ...row,
       split_run_id: row.split_run_id ?? null,
+      idempotency_key: row.idempotency_key ?? null,
       id: randomUUID(),
     };
     this.db
@@ -11364,11 +11383,11 @@ export class SqliteStore implements Store {
         `INSERT INTO tax_escrow_ledger (
            id, creator_id, tax_year, gross_cents, withheld_cents, net_cents,
            tin_verified, w9_on_file, requires_1099, crossed_1099_threshold, created_at,
-           split_run_id
+           split_run_id, idempotency_key
          ) VALUES (
            @id, @creator_id, @tax_year, @gross_cents, @withheld_cents, @net_cents,
            @tin_verified, @w9_on_file, @requires_1099, @crossed_1099_threshold, @created_at,
-           @split_run_id
+           @split_run_id, @idempotency_key
          )`,
       )
       .run(record);
@@ -11397,6 +11416,17 @@ export class SqliteStore implements Store {
          ORDER BY created_at ASC, rowid ASC`,
         )
         .all(splitRunId) as TaxEscrowRecord[],
+    );
+  }
+
+  /** The escrow row carrying one withholding idempotency key (migration 0060 / audit #12). */
+  async getTaxEscrowByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<TaxEscrowRecord | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(`SELECT * FROM tax_escrow_ledger WHERE idempotency_key = ?`)
+        .get(idempotencyKey) as TaxEscrowRecord | undefined,
     );
   }
 

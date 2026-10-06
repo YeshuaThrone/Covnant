@@ -2281,6 +2281,13 @@ export interface Store {
    */
   listTaxEscrowByRun(splitRunId: string): Promise<TaxEscrowRecord[]>;
   /**
+   * The escrow row carrying one withholding idempotency key (migration
+   * 0060, audit #12) — the replay probe applyWithholding runs before any
+   * write, and the winner re-read after a lost concurrent insert. Undefined
+   * when no row carries the key (the normal first-apply case).
+   */
+  getTaxEscrowByIdempotencyKey(idempotencyKey: string): Promise<TaxEscrowRecord | undefined>;
+  /**
    * Guard-first atomic status transition for split runs (audit #13): moves
    * the status from `from` to `to` in ONE conditional statement and returns
    * whether it happened. A false return means the run is no longer in
