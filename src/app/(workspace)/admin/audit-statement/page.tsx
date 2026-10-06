@@ -22,6 +22,12 @@ import { isDevSeedMode, getSeededStore } from '@/lib/server/devSeed';
 import { getStore, type Store } from '@/lib/server/store';
 import { auditStatementFlows, statementWindowFromParam } from '@/lib/admin/auditStatement';
 import type { CreatorWindowDays } from '@/lib/admin/creatorAnalytics';
+
+export const metadata = {
+  title: 'Settlement Audit Statement — Covnant',
+  description:
+    "The itemized audit statement for one payee's cleared settlements — every figure derived from the stores of record.",
+};
 import { AdminGate } from '@/components/admin/AdminGate';
 import { AuditStatementView } from '@/components/admin/sections/AuditStatementView';
 

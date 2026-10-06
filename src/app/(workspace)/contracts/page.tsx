@@ -17,6 +17,12 @@ import {
 } from '@/components/master/MasterData';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 
+export const metadata = {
+  title: 'Master Contract Data — Covnant',
+  description:
+    'Master contract data across every vertical — templates, executions, and settlement runs.',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function ContractsPage({

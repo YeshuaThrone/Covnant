@@ -5,6 +5,12 @@ import type { HolderDraft, PoolDraft } from '@/lib/splits/shared';
 import { getSdk } from '@/lib/sdk';
 import { SplitSheetEditor } from '@/components/studio/SplitSheetEditor';
 
+export const metadata = {
+  title: 'Asset Splits — Covnant',
+  description:
+    'The split sheet for one registered asset — pool percentages and rights holders of record.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface PageProps {

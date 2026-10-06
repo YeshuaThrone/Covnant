@@ -23,6 +23,12 @@ import type {
 import { HeaderActions } from '@/components/workspace/HeaderActions';
 import { TemplatesControlBoard } from '@/components/master/TemplatesControlBoard';
 
+export const metadata = {
+  title: 'Control Board — Covnant',
+  description:
+    'The Covnant Control Board — master templates, entity telemetry, and canonical allocations.',
+};
+
 export const dynamic = 'force-dynamic';
 
 function bindFactoryPair(record: ContractTemplateRecord): EntityBoundFactoryTemplate {

@@ -67,6 +67,12 @@ import { AdminGate } from '@/components/admin/AdminGate';
 import { AdminConsole } from '@/components/admin/AdminConsole';
 import type { AdminConsoleData, ContractRow, SectionData } from '@/components/admin/types';
 
+export const metadata = {
+  title: 'Operator Console — Covnant',
+  description:
+    'The gated operator console — creators, contracts, operations, and platform analytics on the stores of record.',
+};
+
 export const dynamic = 'force-dynamic';
 
 const NOT_CONFIGURED_NOTICE =

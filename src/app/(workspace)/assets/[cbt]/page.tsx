@@ -18,6 +18,12 @@ import { getSdk } from '@/lib/sdk';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import { AssetVerificationStrip } from '@/components/brand/AssetVerificationStrip';
 
+export const metadata = {
+  title: 'Asset Detail — Covnant',
+  description:
+    'One registered asset — registry identifiers, pools, and settlement status on the record of truth.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface PageProps {

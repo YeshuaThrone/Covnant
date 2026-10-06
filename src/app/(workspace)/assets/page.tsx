@@ -15,6 +15,12 @@ import {
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
 
+export const metadata = {
+  title: 'Your Asset Registry — Covnant',
+  description:
+    'Your registered assets across every vertical — identifiers, pools, and settlement state.',
+};
+
 export const dynamic = 'force-dynamic';
 
 function poolCount(asset: CovenantBlockAsset): number {

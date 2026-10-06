@@ -30,6 +30,12 @@ import { getTemplate } from '@/lib/contracts/templates';
 import NewContractLegacyView from '@/components/vault/NewContractLegacyView';
 import { formatCents } from '@/lib/money/format';
 
+export const metadata = {
+  title: 'New Contract — Covnant',
+  description:
+    'Draft a new agreement from the registered template library — terms, parties, and payouts.',
+};
+
 export const dynamic = 'force-dynamic';
 
 // ─────────────────────────────────────────────────────────────────────────────

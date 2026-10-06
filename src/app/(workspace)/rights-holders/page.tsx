@@ -26,6 +26,12 @@ import {
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
 
+export const metadata = {
+  title: 'Rights Holders — Covnant',
+  description:
+    'Every rights holder of record — payout rails, registries, and UCT status.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface HolderRow {

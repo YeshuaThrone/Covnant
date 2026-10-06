@@ -43,6 +43,12 @@ function summaryDustDisplay(dustOfRecordMinor: bigint): string {
   return formatCentsBigint(cornerDustRemainder(dustOfRecordMinor, dustOfRecordMinor));
 }
 
+export const metadata = {
+  title: 'Master Ledger & Settlement History — Covnant',
+  description:
+    'The settlement ledger — double-entry postings, reconciliation, and disbursement history.',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function LedgerPage({
