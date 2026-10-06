@@ -59,7 +59,7 @@ export default async function ContractsPage({
         Master Contract Data — Every Vertical, One Sovereign Ledger
       </h1>
       <p className="mt-4 max-w-2xl text-white/60">
-        {TEMPLATES.length} deterministic agreement templates across the six master
+        {TEMPLATES.length} deterministic agreement templates across the seven master
         entertainment verticals — generated from the registered asset of record (names,
         roles, exact pool percentages, registry identifiers) with draft saving, signature
         tracking, immutable finalization, text export, and an embedded ledger audit. Click

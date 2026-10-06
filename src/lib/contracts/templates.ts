@@ -1,16 +1,21 @@
 /**
- * Contract template catalog — directive §4 (twenty deterministic agreements).
+ * Contract template catalog — directive §4 (twenty deterministic agreements),
+ * completed by the vertical-coverage expansion (data audit note_3rl8AMrq #4):
+ * twenty-three agreements covering all seven master entertainment verticals.
  *
- * Five browsing categories span the industries the platform serves, mapped
- * onto the six master entertainment verticals (src/lib/master/taxonomy —
+ * Eight browsing categories span the industries the platform serves, mapped
+ * onto the seven master entertainment verticals (src/lib/master/taxonomy —
  * the master taxonomy is the presentation vocabulary; non-standard labels
  * like 'Film, TV & Hollywood' are banned by canon):
  *
- *   - MUSIC    — Audio & Recorded Sound (6)
- *   - FILM_TV  — Film & Television (4)
- *   - GAMING   — Interactive & Digital Media (3)
- *   - CREATORS — Podcasts, Creators & Streamers (3)
- *   - FASHION  — Fashion & Apparel (4)
+ *   - MUSIC      — Audio & Recorded Sound (6)
+ *   - FILM_TV    — Film & Television (4)
+ *   - GAMING     — Interactive & Digital Media (3)
+ *   - CREATORS   — Podcasts, Creators & Streamers (3)
+ *   - FASHION    — Fashion & Apparel (4)
+ *   - LIVE       — Live Performance & Comedy (1)
+ *   - PUBLISHING — Publishing & Literary (1)
+ *   - SPORTS     — Sports & Athletics (1)
  *
  * The category is a catalog/presentation concept only. Persistence keeps the
  * `contracts.industry` column inside its existing CHECK domain
@@ -20,20 +25,31 @@
  * across renames so previously stored contracts still resolve.
  */
 
-import type { GlobalEntertainmentCategory } from '@/lib/master/taxonomy';
+import { MASTER_CATEGORY_ORDER, type GlobalEntertainmentCategory } from '@/lib/master/taxonomy';
 
-export type ContractCategory = 'MUSIC' | 'FILM_TV' | 'GAMING' | 'CREATORS' | 'FASHION';
+export type ContractCategory =
+  | 'MUSIC'
+  | 'FILM_TV'
+  | 'GAMING'
+  | 'CREATORS'
+  | 'FASHION'
+  | 'LIVE'
+  | 'PUBLISHING'
+  | 'SPORTS';
 
 /** Persisted domain — must stay inside the contracts.industry CHECK constraint. */
 export type ContractIndustry = 'MUSIC' | 'FILM_MEDIA_MERCH';
 
-/** Browsing order for the five-way /templates and vault grouping. */
+/** Browsing order for the vault's category grouping and the asset page. */
 export const CATEGORY_ORDER: readonly ContractCategory[] = [
   'MUSIC',
   'FILM_TV',
   'GAMING',
   'CREATORS',
   'FASHION',
+  'LIVE',
+  'PUBLISHING',
+  'SPORTS',
 ];
 
 export const CATEGORY_LABELS: Record<ContractCategory, string> = {
@@ -42,6 +58,9 @@ export const CATEGORY_LABELS: Record<ContractCategory, string> = {
   GAMING: 'Interactive & Digital Media',
   CREATORS: 'Podcasts, Creators & Streamers',
   FASHION: 'Commercial & Brand Licensing',
+  LIVE: 'Live Performance & Comedy',
+  PUBLISHING: 'Publishing & Literary',
+  SPORTS: 'Sports & Athletics',
 };
 
 /** Category blurbs shown atop each /templates section. */
@@ -51,9 +70,12 @@ export const CATEGORY_BLURBS: Record<ContractCategory, string> = {
   GAMING: 'Interactive sync, studio royalty splits, and voiceover/mocap releases for game audio and performance.',
   CREATORS: 'Co-host splits, brand deals, and channel revenue shares for podcasts, streamers, and channels.',
   FASHION: 'Design licenses, production terms, brand collaborations, and runway talent releases for fashion houses and apparel lines.',
+  LIVE: 'Performance engagements, touring terms, venue settlement, and ticket escrow for stand-up, theater, and touring.',
+  PUBLISHING: 'Publishing grants, royalty terms, and collections for books, e-books, periodicals, and scores.',
+  SPORTS: 'Athlete engagements, prize-purse settlements, and eligibility terms for tournaments and competitions.',
 };
 
-/** Industry persistence mapping — collapses the five categories onto the CHECK domain. */
+/** Industry persistence mapping — collapses the eight categories onto the CHECK domain. */
 export function industryForCategory(category: ContractCategory): ContractIndustry {
   return category === 'MUSIC' ? 'MUSIC' : 'FILM_MEDIA_MERCH';
 }
@@ -239,6 +261,30 @@ export const TEMPLATES: readonly ContractTemplate[] = [
     ['parties', 'production', 'runwayRelease', 'consideration', 'publicity', 'signatures'],
     'Releases a runway walk and event performance for documentation and promotion.',
   ),
+  // ── Live Performance & Comedy (1) ─────────────────────────────────────
+  template(
+    'LIVE_PERFORMANCE_ENGAGEMENT',
+    'LIVE',
+    'Live Performance & Touring Agreement',
+    ['parties', 'engagement', 'livePerformances', 'poolSheets', 'liveSettlement', 'compensation', 'termination', 'signatures'],
+    'Engages a performer or comedian for live shows with venue settlement and escrowed ticket receipts.',
+  ),
+  // ── Publishing & Literary (1) ─────────────────────────────────────────
+  template(
+    'PUBLISHING_RIGHTS_AGREEMENT',
+    'PUBLISHING',
+    'Publishing & Literary Rights Agreement',
+    ['parties', 'workIdentified', 'publishingGrant', 'territory', 'term', 'publishingRoyalties', 'collections', 'termination', 'signatures'],
+    'Grants publishing rights to the written work with royalties and collections at recorded shares.',
+  ),
+  // ── Sports & Athletics (1) ────────────────────────────────────────────
+  template(
+    'SPORTS_ATHLETE_AGREEMENT',
+    'SPORTS',
+    'Athlete Engagement & Prize Purse Agreement',
+    ['parties', 'engagement', 'athleteServices', 'prizePurse', 'poolSheets', 'compensation', 'eligibility', 'termination', 'signatures'],
+    'Records athlete competition services and prize-purse shares with escrowed settlement.',
+  ),
 ] as const;
 
 export function getTemplate(id: string): ContractTemplate | undefined {
@@ -251,12 +297,14 @@ export function templatesByCategory(category: ContractCategory): readonly Contra
 
 /**
  * Template → master entertainment vertical (src/lib/master/taxonomy): the
- * presentation mapping that groups the library under the founder's six
- * verticals on /templates and the contract vault. Per-template, not
+ * presentation mapping that groups the library under the founder's seven
+ * verticals on /contracts and the vault. Per-template, not
  * per-browsing-category — the podcast agreements settle in Audio & Recorded
  * Sound, the sponsorship deal in Commercial & Brand Licensing, while the
  * music stays in Audio and fashion goods license under Commercial & Brand.
- * Persistence (contracts.industry) is untouched — presentation only.
+ * The expansion verticals (Live Performance & Comedy, Publishing & Literary,
+ * Sports & Athletics) each carry their own agreement. Persistence
+ * (contracts.industry) is untouched — presentation only.
  */
 export const TEMPLATE_VERTICAL: Record<ContractTemplate['id'], GlobalEntertainmentCategory> = {
   MUSIC_SPLIT_SHEET: 'AUDIO_AND_RECORDED_SOUND',
@@ -279,6 +327,9 @@ export const TEMPLATE_VERTICAL: Record<ContractTemplate['id'], GlobalEntertainme
   FASHION_APPAREL_PRODUCTION: 'COMMERCIAL_AND_BRAND_LICENSING',
   FASHION_BRAND_COLLABORATION: 'COMMERCIAL_AND_BRAND_LICENSING',
   FASHION_RUNWAY_TALENT_RELEASE: 'COMMERCIAL_AND_BRAND_LICENSING',
+  LIVE_PERFORMANCE_ENGAGEMENT: 'LIVE_PERFORMANCE_AND_COMEDY',
+  PUBLISHING_RIGHTS_AGREEMENT: 'PUBLISHING_AND_LITERARY',
+  SPORTS_ATHLETE_AGREEMENT: 'SPORTS_AND_ATHLETICS',
 };
 
 /** The library's agreements for one master vertical (may be empty — real coverage). */
@@ -349,4 +400,45 @@ export const CLAUSE_LABELS: Record<string, string> = {
   apparelProduction: 'Production Terms',
   collabContent: 'Collaboration Deliverables',
   runwayRelease: 'Runway Performance Release',
+  livePerformances: 'Performances & Venues',
+  liveSettlement: 'Venue Settlement & Ticket Escrow',
+  publishingGrant: 'Grant of Publishing Rights',
+  publishingRoyalties: 'Royalties & Accounting',
+  athleteServices: 'Athlete Services',
+  prizePurse: 'Prize Purse & Settlement',
+  eligibility: 'Eligibility & Conduct',
 };
+
+/**
+ * The catalog's integrity gate — runs once at module load and THROWS on any
+ * violation, so a broken catalog can never render as a working vault (the
+ * devSeed law: never a half-seeded store). Fails on a duplicate template id,
+ * a template missing its master-vertical mapping, a clause without a display
+ * label, or — the founder's "every form of entertainment" directive — a
+ * master vertical the catalog does not cover.
+ */
+function assertCatalogIntegrity(): void {
+  const byId = new Set<string>();
+  for (const t of TEMPLATES) {
+    if (byId.has(t.id)) {
+      throw new Error(`templates: duplicate template id ${t.id}`);
+    }
+    byId.add(t.id);
+    if (!(t.id in TEMPLATE_VERTICAL)) {
+      throw new Error(`templates: ${t.id} has no master-vertical mapping`);
+    }
+    for (const clause of t.clauseOrder) {
+      if (!(clause in CLAUSE_LABELS)) {
+        throw new Error(`templates: ${t.id} clause "${clause}" has no display label`);
+      }
+    }
+  }
+  for (const vertical of MASTER_CATEGORY_ORDER) {
+    if (templatesByVertical(vertical).length === 0) {
+      throw new Error(
+        `templates: master vertical ${vertical} has no agreement — every form of entertainment must be covered`,
+      );
+    }
+  }
+}
+assertCatalogIntegrity();
