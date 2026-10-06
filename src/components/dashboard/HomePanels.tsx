@@ -193,7 +193,7 @@ export function ReadinessChecklist({ readiness }: { readiness: DashboardReadines
   return (
     <aside
       data-testid="readiness-checklist"
-      className="h-fit rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5"
+      className="h-fit min-w-0 rounded-2xl border border-slate-600/50 bg-gradient-to-b from-white/[0.06] to-white/[0.02] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.55)] p-5"
       aria-label="Financial readiness"
     >
       <h3 className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">

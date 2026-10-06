@@ -268,7 +268,12 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
       </section>
 
       <div className="mt-8 grid gap-6 md:mt-10 lg:grid-cols-[1fr_320px]">
-        <section aria-label="Transactions">
+        {/* min-w-0: grid items default to min-width:auto, so the nowrap
+            (truncate) transaction metadata line propagates its min-content
+            width into the track — the 2026-10-06 phone-width overflow. The
+            row content already truncates; the item just has to be allowed
+            to shrink. */}
+        <section aria-label="Transactions" className="min-w-0">
           <SectionLabel>Transactions</SectionLabel>
           <div className="mt-3">
             <TransactionsPanel rows={transactions} />

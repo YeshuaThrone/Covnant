@@ -79,16 +79,13 @@ test('the landing renders without horizontal overflow at phone width', async ({ 
   expect(overflow, 'the landing scrolls horizontally at phone width').toBeLessThanOrEqual(0);
 });
 
-// KNOWN DEFECT, unfixable here — this change is test infra only (no app
-// edits): the Gold Board overflows horizontally at 390px by 225px —
-// scrollWidth 615px against a 390px viewport, driven by
-// data-testid="transactions-panel" and data-testid="readiness-checklist"
-// rendering 599px wide (their transaction rows neither wrap nor scroll in
-// their own container). When the app-side responsive fix lands, un-fixme
-// this and re-pin /dashboard to zero overflow.
-test.fixme('the dashboard renders without horizontal overflow at phone width', async ({
-  page,
-}) => {
+// The Gold Board must not scroll horizontally at phone width. It used to —
+// a 225px overflow at 390px (2026-10-06): the transactions rows' nowrap
+// metadata line propagated its min-content width through the panels'
+// grid track (min-width:auto on the grid items). The grid items are now
+// allowed to shrink, and the rows' existing truncate clips the line —
+// this pins /dashboard to zero overflow so it cannot regress.
+test('the dashboard renders without horizontal overflow at phone width', async ({ page }) => {
   await page.goto('/dashboard');
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
