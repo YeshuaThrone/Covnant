@@ -138,8 +138,9 @@ export function AssetRegistrationForm() {
             </p>
             <p className="mt-3 text-sm text-white/60">
               Registry identifiers are provisioned automatically — ISRC (Recording) and ISWC
-              (Composition) for Music &amp; Audio, EIDR for Film/TV/Video, plus CVT/CBT internal
-              audit keys for ledger verification. No external registry code is ever fabricated.
+              (Composition) for Audio &amp; Recorded Sound, EIDR for Film &amp; Television, plus
+              CVT/CBT internal audit keys for ledger verification. No external registry code is
+              ever fabricated.
             </p>
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
