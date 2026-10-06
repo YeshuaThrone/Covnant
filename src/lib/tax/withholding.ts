@@ -22,7 +22,7 @@
  * layer) — the Tax section renders the composed payload, never this file.
  */
 
-import { cvtDisplayCode } from '@/lib/splits/codes';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 import { toMinor } from '@/lib/ledger/reconciliation';
 import type { LedgerRow } from '@/lib/ledger/store';
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
@@ -119,7 +119,8 @@ export interface TaxTransactionRowView {
   /** ISO date of the settlement. */
   date: string;
   cbt: string;
-  cvt: string;
+  /** The asset's stored outward CVT — null when the asset has no stored handle (fail-closed; never derived). */
+  cvt: string | null;
   entityType: string | null;
   template: string | null;
   payeeCount: number;
@@ -152,6 +153,8 @@ export interface TaxJoinContext {
   templateByCbt: ReadonlyMap<string, string>;
   /** The event's US state jurisdiction per CBT, when the record carries one. */
   eventStateByCbt: ReadonlyMap<string, string>;
+  /** The asset's stored outward CVT per CBT (cbt_assets.cvt_code) — absent when the asset has no stored handle (fail-closed; never derived). */
+  cvtByCbt: ReadonlyMap<string, string>;
 }
 
 const ENGINE = new CovnantTaxEngineSDK();
@@ -436,7 +439,7 @@ export function transactionRegisterRows(
         transactionId: row.transactionId,
         date: rowDate(row).toISOString(),
         cbt: row.cbtCode,
-        cvt: cvtDisplayCode(row.cbtCode),
+        cvt: joins.cvtByCbt.get(row.cbtCode) ?? null,
         entityType: joins.entityTypeByCbt.get(row.cbtCode) ?? null,
         template: joins.templateByCbt.get(row.cbtCode) ?? null,
         payeeCount: group.length,
@@ -490,6 +493,8 @@ export function buildTaxJoinContext(
   options: {
     /** Entity-type labels of record beyond the assets (the demo registry's kinds). */
     entityTypeLabels?: readonly { cbtCode: string; label: string }[];
+    /** Demo-door-only stored handles — the demo registry's assets' values of record. Applied BEFORE the real assets so a real row's stored handle always wins on a shared code. */
+    cvtLabels?: readonly { cbtCode: string; cvt: string }[];
     templateBindings: readonly { cbtCode: string; templateId: string | null }[];
     eventStates: readonly { cbtCode: string; state: string }[];
   },
@@ -505,5 +510,15 @@ export function buildTaxJoinContext(
   }
   const eventStateByCbt = new Map<string, string>();
   for (const entry of options.eventStates) eventStateByCbt.set(entry.cbtCode, entry.state);
-  return { entityTypeByCbt, templateByCbt, eventStateByCbt };
+  // The stored column is the only outward CVT — assets without a well-shaped
+  // stored handle join nothing (fail-closed, never derived). Demo-door entries
+  // land first; real asset rows overwrite any shared code below.
+  const cvtByCbt = new Map<string, string>(
+    (options.cvtLabels ?? []).map((entry) => [entry.cbtCode, entry.cvt]),
+  );
+  for (const asset of assets) {
+    const stored = storedCvtHandle(asset.cvtCode);
+    if (stored !== null) cvtByCbt.set(asset.cbtCode, stored);
+  }
+  return { entityTypeByCbt, templateByCbt, eventStateByCbt, cvtByCbt };
 }

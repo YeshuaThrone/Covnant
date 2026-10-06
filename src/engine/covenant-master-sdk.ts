@@ -291,6 +291,11 @@ export class CovenantMasterSDK {
 
       asset = {
         cbtCode: data.cbt_code,
+        // The stored column is the only outward CVT — a hydrated asset keeps
+        // its handle of record (a DB-only asset must not read as handle-less).
+        ...(typeof data.cvt_code === 'string' && data.cvt_code.trim() !== ''
+          ? { cvtCode: data.cvt_code }
+          : {}),
         title: data.title,
         medium: data.medium as MediaMedium,
         mappedIdentifiers: data.mapped_identifiers,

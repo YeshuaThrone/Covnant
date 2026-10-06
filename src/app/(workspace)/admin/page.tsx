@@ -23,6 +23,7 @@ import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { isDemoDoorOpen, seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
 import {
+  attachContractCvt,
   buildContractRegistrySection,
   buildLedgerFinancesSection,
   buildOperationsSection,
@@ -400,10 +401,15 @@ export default async function AdminPage() {
     safeCatalogGrowthRead(),
   ]);
 
+  const contractsSection = attachContractCvt(toSectionData(contracts), assets);
+
   const data: AdminConsoleData = {
     registry: registrySummary(assets),
     ledger: ledgerSummary(ledgerRows),
-    contracts: toSectionData(contracts),
+    // One stored-CVT join for every section that reads contract rows — the
+    // vault index, the tax template bindings, and the operations flows all
+    // see the same enriched rows (one truth, never re-derived).
+    contracts: contractsSection,
     creators: toSectionData(creators),
     creatorsDemo: isDemoDoorOpen(),
     allowlists: toSectionData(allowlists),
@@ -414,7 +420,7 @@ export default async function AdminPage() {
       masterTemplates,
       master.kind === 'ready' ? master.value.records : [],
     ),
-    tax: buildTaxSection(ledgerRows, assets, toSectionData(contracts)),
+    tax: buildTaxSection(ledgerRows, assets, contractsSection),
     revenueStreams,
     analytics,
     analyticsDemo: isDemoDoorOpen(),
@@ -426,7 +432,7 @@ export default async function AdminPage() {
     operations: await safeOperationsRead(
       ledgerRows,
       assets,
-      toSectionData(contracts),
+      contractsSection,
       creators && creators.ok ? creators.value : null,
     ),
     operationsDemo: isDemoDoorOpen(),

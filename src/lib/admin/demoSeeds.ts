@@ -22,11 +22,11 @@ import { supabaseFromEnv } from '@/lib/supabase';
 import { listLedger, rememberSettlement } from '@/lib/ledger/store';
 import { listContracts, markContractFinal, saveContract } from '@/lib/contracts/store';
 import { hydrateContext } from '@/lib/contracts/generator';
-import { cvtDisplayCode } from '@/lib/splits/codes';
 import type { ExecutionStampRow } from '@/components/admin/types';
 import {
   MASTER_DEMO_ASSET_REGISTRY,
   UCT_DEMO_IDENTITIES,
+  demoCvtCode,
   resolveMasterLedger,
   type LanePoolPartySeed,
   type MasterDemoAsset,
@@ -184,7 +184,9 @@ function mappedIdentifiersFor(asset: MasterDemoAsset): UniversalAssetIdentifier 
 function registerDemoAsset(sdk: CovenantMasterSDK, asset: MasterDemoAsset): CovenantBlockAsset {
   const medium = mediumForKind(asset.kind);
   const block: CovenantBlockAsset = {
-    cvtCode: cvtDisplayCode(asset.cbt),
+    // The demo block's stored outward handle — the SAME engine-shape CVT
+    // every demo surface reads (deterministic so replays are identical).
+    cvtCode: demoCvtCode(asset.cbt),
     cbtCode: asset.cbt,
     title: asset.title,
     medium,
@@ -378,7 +380,7 @@ export async function seedDemoLaneExecutionIfMissing(): Promise<void> {
     ledgerId: execution.ledgerId,
     assetTitle: minted.ledgerRecord.assetTitle,
     cbt: DEMO_LANE_BINDING.cbt,
-    cvt: cvtDisplayCode(DEMO_LANE_BINDING.cbt),
+    cvt: demoCvtCode(DEMO_LANE_BINDING.cbt),
     templateId: minted.lane.template.templateId,
     sector: minted.ledgerRecord.subcategory,
   });

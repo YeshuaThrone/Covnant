@@ -17,9 +17,9 @@ import { operationsFlows, type OperationsFlows } from '@/lib/admin/operations';
 import type { Store } from '@/lib/server/store';
 import type { AdminCreatorProfile } from '@/lib/admin/types';
 import { attachRegistryPills } from '@/lib/ledger/finances';
-import { cvtDisplayCode } from '@/lib/splits/codes';
 import { isDemoDoorOpen, listDemoLaneExecutions } from '@/lib/admin/demoSeeds';
-import { MASTER_DEMO_ASSET_REGISTRY, bindFactoryEntity, executionTelemetryFor } from '@/lib/master/masterStore';
+import { demoCvtCode, MASTER_DEMO_ASSET_REGISTRY, bindFactoryEntity, executionTelemetryFor } from '@/lib/master/masterStore';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 import { entityClassTag } from '@/lib/master/CovnantAtomicDataSDK';
 import {
   annualPayeeRows,
@@ -114,7 +114,7 @@ export function buildContractRegistrySection(
       ledgerId: record.ledgerId,
       assetTitle: record.assetTitle,
       cbt: asset?.cbt ?? null,
-      cvt: asset ? cvtDisplayCode(asset.cbt) : null,
+      cvt: asset ? demoCvtCode(asset.cbt) : null,
       templateId: null,
       sector: record.subcategory,
     });
@@ -135,6 +135,43 @@ export function buildContractRegistrySection(
   }));
 
   return { demo: masterTemplates.demo, executions, templates };
+}
+
+/**
+ * The vault records' stored-CVT join — the Contracts section's rows carry the
+ * asset's stored outward handle (`cbt_assets.cvt_code`) resolved through the
+ * ONE fail-closed resolver. A contract whose asset has no stored handle renders
+ * no CVT — never a client-side derivation from the CBT body (data-identity
+ * audit P1 #2: one asset, one outward handle).
+ */
+export function attachContractCvt(
+  contracts: SectionData<ContractRow[]>,
+  assets: ListAssetsResult,
+): SectionData<ContractRow[]> {
+  if (contracts.kind !== 'ready') return contracts;
+  // The join's base layer: behind the demo door, the demo master-store's
+  // contracts reference the demo registry's CBTs — whose deterministic
+  // engine-shape handles (demoCvtCode, the seed's stored values) are the
+  // demo rows' handles of record. Real asset rows overlay and win on any
+  // code collision; the layer is empty in production (the door is closed),
+  // so a real deployment path carries zero demo entries — beta-readiness
+  // purge, 2026-10-01.
+  const demoLayer = isDemoDoorOpen()
+    ? MASTER_DEMO_ASSET_REGISTRY.map((asset) => [asset.cbt, demoCvtCode(asset.cbt)] as const)
+    : [];
+  const cvtByCbt = new Map<string, string>([
+    ...demoLayer,
+    ...assets
+      .map((asset) => [asset.cbtCode, storedCvtHandle(asset.cvtCode)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== null),
+  ]);
+  return {
+    ...contracts,
+    value: contracts.value.map((contract) => ({
+      ...contract,
+      cvt: cvtByCbt.get(contract.cbtCode) ?? null,
+    })),
+  };
 }
 
 /** The event's US state jurisdiction from the agreement's governing law ('US-TX Ledger Standard' → 'TX'). */
@@ -164,6 +201,16 @@ export function buildAdminTaxJoinContext(
       ? MASTER_DEMO_ASSET_REGISTRY.map((asset) => ({
           cbtCode: asset.cbt,
           label: asset.kind,
+        }))
+      : [],
+    // The demo door's assets of record — their deterministic stored-shape
+    // handles (demoCvtCode) join the demo ledger's tax rows. Real rows
+    // overlay and win; empty in production (no demo entry rides a real
+    // path — beta-readiness purge, 2026-10-01).
+    cvtLabels: demoDoor
+      ? MASTER_DEMO_ASSET_REGISTRY.map((asset) => ({
+          cbtCode: asset.cbt,
+          cvt: demoCvtCode(asset.cbt),
         }))
       : [],
     templateBindings: [

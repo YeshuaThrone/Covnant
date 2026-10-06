@@ -42,7 +42,7 @@ const ctx: AgreementContext = {
     title: 'Vale Autumn Capsule',
     mediumLabel: 'Fashion Design',
     cbtCode: 'CBT-TRK-F4SH10NTEST1',
-    displayCode: 'CVT-TRK-EST1',
+    displayCode: 'CVT-3F2A9C-2026',
     identifiers: [],
   },
   pools: [pool],
@@ -86,5 +86,20 @@ describe('contract template catalog', () => {
     expect(first.document).toContain('FASHION DESIGN LICENSE AGREEMENT');
     expect(first.document).toContain('CBT-TRK-F4SH10NTEST1');
     expect(first.document).toContain('Vale Autumn Capsule');
+    // The stored handle renders in the header lineage.
+    expect(first.document).toContain('CVT: CVT-3F2A9C-2026');
+  });
+
+  it('renders the CBT of record alone when the asset has no stored CVT (fail-closed)', () => {
+    const template = getTemplate('FASHION_DESIGN_LICENSE');
+    expect(template).toBeDefined();
+
+    const document = generateAgreement(template!, {
+      ...ctx,
+      asset: { ...ctx.asset, displayCode: null },
+    }).document;
+    expect(document).toContain('CBT-TRK-F4SH10NTEST1');
+    expect(document).not.toContain('display code');
+    expect(document).not.toContain('CVT:');
   });
 });

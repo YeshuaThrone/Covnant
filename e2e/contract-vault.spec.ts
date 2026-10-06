@@ -142,12 +142,12 @@ test('template navigation generates an auto-filled agreement from the asset of r
   await expect(page.getByText('Bob E2E').first()).toBeVisible();
   await expect(page.getByText('100.0000%').first()).toBeVisible();
 
-  // Registry identifiers map in: the MUL flow auto-provisions the canonical
-  // CBT and CVT tracking pills (codes derive per registration, so assert the
-  // pattern, not a literal). Absent holder-profile data renders as
-  // to-be-completed — never fabricated.
+  // Registry identifiers map in: the MUL flow mints the canonical CBT code
+  // and stores the asset's CVT handle of record (codes derive per
+  // registration, so assert the pattern, not a literal). Absent
+  // holder-profile data renders as to-be-completed — never fabricated.
   await expect(page.getByText(/CBT-TRK-[0-9A-F]{12}/).first()).toBeVisible();
-  await expect(page.getByText(/CVT-TRK-/).first()).toBeVisible();
+  await expect(page.getByText(/CVT-[0-9A-F]{6}-[0-9]{4}/).first()).toBeVisible();
   await expect(page.getByText('IPI (PRO): To be completed').first()).toBeVisible();
 
   // Status presentation maps the stored DRAFT to "Draft".

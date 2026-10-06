@@ -97,7 +97,8 @@ export interface AutoFillPool {
 }
 
 export interface AutoFillSummary {
-  work: { title: string; mediumLabel: string; cbtCode: string; displayCode: string };
+  /** The stored outward CVT handle — null when the asset carries no stored CVT (rendered as no CVT row, never fabricated). */
+  work: { title: string; mediumLabel: string; cbtCode: string; displayCode: string | null };
   /** CBT/CVT plus every registered identifier (ISRC, ISWC, EIDR, …). */
   identifiers: AutoFilledField[];
   parties: AutoFillParty[];
@@ -117,7 +118,12 @@ export function autoFillSummary(ctx: AgreementContext): AutoFillSummary {
 
   const identifiers: AutoFilledField[] = [
     { label: 'CBT', value: asset.cbtCode, toBeCompleted: false },
-    { label: 'CVT', value: asset.displayCode, toBeCompleted: false },
+    // The stored CVT is the only outward handle — when the asset has none,
+    // the CVT row is omitted entirely (never fabricated, never "to be
+    // completed": absence of a stored handle is not a missing form field).
+    ...(asset.displayCode === null
+      ? []
+      : [{ label: 'CVT', value: asset.displayCode, toBeCompleted: false }]),
     ...asset.identifiers.map((i): AutoFilledField => ({ label: i.label, value: i.value, toBeCompleted: false })),
   ];
 

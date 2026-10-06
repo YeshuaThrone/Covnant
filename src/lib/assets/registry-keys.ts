@@ -8,13 +8,15 @@
  * audit keys for the sector identifiers the engine does not supply — and it
  * never presents a fabricated real-world registry code (ISRC / ISWC / EIDR /
  * ISBN) as if it were externally registered: everything derived is a clearly
- * internal `CVT-<PREFIX>-XXXX` audit key.
+ * internal `AUD-<PREFIX>-XXXX` audit key (the `CVT-` prefix is reserved for
+ * the asset's ONE outward-facing handle — the stored `cbt_assets.cvt_code`,
+ * surfaced through the `cvt` pill when the asset carries one).
  *
  * Pure and isomorphic: imported by server components (asset detail, ledger)
  * and client adapters alike, with no engine runtime import.
  */
 import type { MediaMedium, UniversalAssetIdentifier } from '@/engine/covenant-master-sdk';
-import { cvtDisplayCode } from '@/lib/splits/codes';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 
 export interface RegistryPill {
   key: string;
@@ -29,6 +31,8 @@ export interface RegistryPill {
 
 export interface RegistryKeyAsset {
   cbtCode: string;
+  /** The asset's stored outward handle (cbt_assets.cvt_code) — absent when the row predates the column or the write failed. */
+  cvtCode?: string | null;
   medium: MediaMedium;
   mappedIdentifiers?: UniversalAssetIdentifier;
 }
@@ -89,21 +93,24 @@ export function auditKeyHash(seed: string): string {
   return hash.toString(16).toUpperCase().padStart(8, '0').slice(-4);
 }
 
-/** Deterministic `CVT-<PREFIX>-XXXX` internal audit key per asset + sector slot. */
+/** Deterministic `AUD-<PREFIX>-XXXX` internal audit key per asset + sector slot — never CVT-shaped (that prefix is the stored handle's alone). */
 export function sectorAuditKey(cbtCode: string, slot: SectorSlot): string {
-  return `CVT-${slot.prefix}-${auditKeyHash(`${cbtCode}::${slot.prefix}`)}`;
+  return `AUD-${slot.prefix}-${auditKeyHash(`${cbtCode}::${slot.prefix}`)}`;
 }
 
 function mappedIdentifierLabel(field: string): string {
   return field.replaceAll('_', ' ').toUpperCase();
 }
 
-/** CBT canonical code + CVT display code — derivable from the code alone. */
-export function registryPillsForCode(cbtCode: string): RegistryPill[] {
-  return [
-    { key: 'cbt', label: 'CBT', value: cbtCode, source: 'engine' },
-    { key: 'cvt', label: 'CVT', value: cvtDisplayCode(cbtCode), source: 'derived' },
-  ];
+/** The CBT canonical code pill — the identifier of record, derivable from the code alone. */
+export function cbtPillForCode(cbtCode: string): RegistryPill {
+  return { key: 'cbt', label: 'CBT', value: cbtCode, source: 'engine' };
+}
+
+/** The stored-CVT pill — rendered ONLY when the asset carries a well-shaped stored handle (fail-closed; never derived). */
+export function cvtPillForCode(cvtCode: string | null | undefined): RegistryPill | null {
+  const stored = storedCvtHandle(cvtCode);
+  return stored === null ? null : { key: 'cvt', label: 'CVT', value: stored, source: 'engine' };
 }
 
 /**
@@ -112,7 +119,8 @@ export function registryPillsForCode(cbtCode: string): RegistryPill[] {
  * audit keys for every sector slot the engine does not already supply.
  */
 export function resolveRegistryPills(asset: RegistryKeyAsset): RegistryPill[] {
-  const pills = registryPillsForCode(asset.cbtCode);
+  const cvtPill = cvtPillForCode(asset.cvtCode);
+  const pills = cvtPill === null ? [cbtPillForCode(asset.cbtCode)] : [cbtPillForCode(asset.cbtCode), cvtPill];
 
   const mapped = asset.mappedIdentifiers ?? {};
   for (const [field, value] of Object.entries(mapped)) {
@@ -152,8 +160,8 @@ export function withRegistryPills<P extends { cbtCode: string }>(
 ): P & { registry: RegistryPill[] } {
   return {
     ...payload,
-    registry: asset
-      ? resolveRegistryPills(asset)
-      : registryPillsForCode(payload.cbtCode),
+    // Fail-closed fallback: without the asset row at hand the shield shows the
+    // identifier of record (CBT) only — never a synthesized CVT handle.
+    registry: asset ? resolveRegistryPills(asset) : [cbtPillForCode(payload.cbtCode)],
   };
 }

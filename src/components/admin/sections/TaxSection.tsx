@@ -322,7 +322,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.date.slice(0, 10)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/80">{row.transactionId}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cbt}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cvt}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cvt ?? '—'}</td>
                       <td className="px-4 py-3 text-white/60">{row.entityType ?? row.cbt.split('-')[1] ?? row.cbt}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.template ?? 'Unbound'}</td>
                       <td className="px-4 py-3 text-right text-white/60">{row.payeeCount}</td>

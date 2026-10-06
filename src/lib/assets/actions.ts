@@ -22,6 +22,8 @@ export interface RegisterAssetPayload {
 export interface ActionResult {
   ok: boolean;
   cbtCode?: string;
+  /** The registered asset's stored outward handle (cbt_assets.cvt_code) — null when no stored CVT was persisted (fail-closed; never synthesized for the response). */
+  cvtCode?: string | null;
   error?: string;
   /** True when the collision was classified as an already-registered identical asset. */
   duplicate?: boolean;
@@ -64,7 +66,7 @@ export async function registerAssetAction(payload: RegisterAssetPayload): Promis
     const asset = sdk.getInMemoryAsset(result.cbtCode);
     if (asset) indexAsset(asset);
     revalidatePath('/assets');
-    return { ok: true, cbtCode: result.cbtCode };
+    return { ok: true, cbtCode: result.cbtCode, cvtCode: asset?.cvtCode ?? null };
   } catch (error) {
     if (error instanceof DuplicateAssetRegistrationError) {
       return { ok: false, duplicate: true, error: DUPLICATE_ASSET_MESSAGE };

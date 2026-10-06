@@ -130,7 +130,8 @@ export function buildTaxExportCsv(tax: TaxSectionData): string {
         row.date.slice(0, 10),
         row.transactionId,
         row.cbt,
-        row.cvt,
+        // Fail-closed: no stored handle means an empty cell — never a backfilled value.
+        row.cvt ?? '',
         row.entityType ?? row.cbt.split('-')[1] ?? row.cbt,
         row.template ?? 'Unbound',
         String(row.payeeCount),

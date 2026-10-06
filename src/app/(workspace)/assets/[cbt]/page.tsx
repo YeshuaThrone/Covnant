@@ -62,6 +62,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
   );
   const pills = resolveRegistryPills({
     cbtCode: asset.cbtCode,
+    cvtCode: asset.cvtCode,
     medium: asset.medium,
     mappedIdentifiers: asset.mappedIdentifiers,
   });
@@ -88,8 +89,8 @@ export default async function AssetDetailPage({ params }: PageProps) {
       </div>
       <p className="mt-3 max-w-2xl text-xs text-white/40">
         Universal tracking keys are provisioned automatically — the CBT code is the engine&apos;s
-        canonical record and every CVT value is an internal audit key for ledger verification. No
-        external registry code is fabricated.
+        canonical record, the CVT is the asset&apos;s stored outward handle, and every AUD value is
+        an internal audit key for ledger verification. No external registry code is fabricated.
       </p>
 
       <div className="mt-6">

@@ -214,13 +214,14 @@ describe('identifiersForWorkRef — the per-class identifier mapping', () => {
   });
 
   it('falls back to the code of record labeled as such for forms with no industry code — never a claimed ISRC', () => {
-    // A TV episode carries no ISRC/ISAN/ISBN slot — its CVT code of
-    // record stands in, labeled, never renamed to an industry standard.
+    // A TV episode carries no ISRC/ISAN/ISBN slot — its STORED CVT code of
+    // record stands in (engine shape, the ONE validator's shape), labeled,
+    // never renamed to an industry standard.
     const assets = [
-      asset({ cbtCode: 'CBT-TV-1', cvtCode: 'CVT-TV-0001', medium: 'TV_EPISODE', mappedIdentifiers: {} }),
+      asset({ cbtCode: 'CBT-TV-1', cvtCode: 'CVT-8D2C41-2026', medium: 'TV_EPISODE', mappedIdentifiers: {} }),
     ];
     expect(identifiersForWorkRef('CBT-TV-1', assets)).toEqual([
-      { scheme: 'CVT', code: 'CVT-TV-0001', codeOfRecord: true },
+      { scheme: 'CVT', code: 'CVT-8D2C41-2026', codeOfRecord: true },
     ]);
     // Without a cvtCode, the CBT code of record stands in — labeled CBT,
     // its true family. A CBT is never labeled CVT: the two are distinct
@@ -228,6 +229,13 @@ describe('identifiersForWorkRef — the per-class identifier mapping', () => {
     // system of record), and the scheme names the family of the value.
     expect(
       identifiersForWorkRef('CBT-TV-1', [asset({ cbtCode: 'CBT-TV-1', medium: 'TV_EPISODE' })]),
+    ).toEqual([{ scheme: 'CBT', code: 'CBT-TV-1', codeOfRecord: true }]);
+    // A MALFORMED stored value (legacy type+4hex shape) is not the outward
+    // handle either — fail-closed to the CBT of record, never re-shaped.
+    expect(
+      identifiersForWorkRef('CBT-TV-1', [
+        asset({ cbtCode: 'CBT-TV-1', cvtCode: 'CVT-TV-0001', medium: 'TV_EPISODE', mappedIdentifiers: {} }),
+      ]),
     ).toEqual([{ scheme: 'CBT', code: 'CBT-TV-1', codeOfRecord: true }]);
   });
 

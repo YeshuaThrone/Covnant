@@ -41,7 +41,7 @@ test.describe('execution lane — founder URL hydration', () => {
 
     // Live contract preview — the COVNANT spelling and the display lineage.
     await expect(page.getByText('Covnant Block: CBT-TRK-A51DF05B4279').first()).toBeVisible();
-    await expect(page.getByText('CVT-TRK-4279').first()).toBeVisible();
+    await expect(page.getByText('CVT-A82FF6-2026').first()).toBeVisible();
 
     // Guard verdicts visible in the payload.
     await expect(page.getByText('Guard report').first()).toBeVisible();
@@ -67,7 +67,7 @@ test.describe('execution lane — every vertical renders', () => {
     await page.getByRole('link', { name: 'Meridian Line — Theatrical Master' }).click();
     await expect(page.getByText('CBT-FLM-7C3A91D2E40B').first()).toBeVisible();
     await expect(page.getByText('Covnant Block: CBT-FLM-7C3A91D2E40B').first()).toBeVisible();
-    await expect(page.getByText('CVT-FLM-E40B').first()).toBeVisible();
+    await expect(page.getByText('CVT-F01237-2026').first()).toBeVisible();
   });
 
   test('the publishing vertical renders its sector payload through the picker', async ({ page }) => {
@@ -75,7 +75,7 @@ test.describe('execution lane — every vertical renders', () => {
     await page.getByRole('link', { name: 'The Ownership Ledger — Hardcover Edition' }).click();
     await expect(page.getByText('CBT-BOK-2E6B4F08A3D9').first()).toBeVisible();
     await expect(page.getByText('Covnant Block: CBT-BOK-2E6B4F08A3D9').first()).toBeVisible();
-    await expect(page.getByText('CVT-BOK-A3D9').first()).toBeVisible();
+    await expect(page.getByText('CVT-29A923-2026').first()).toBeVisible();
   });
 
   test('the fashion vertical renders the seeded fashion asset', async ({ page }) => {
