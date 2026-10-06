@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
  *     - increase webhook: 2 statements (1 wired merge point ×
  *       metadata / 42703-fallback variants) — Gen 8, unchanged.
  *
- *   Mechanism 2 · supabase-js .insert()/.upsert() calls .. 4
+ *   Mechanism 2 · supabase-js .insert()/.upsert() calls .. 6
  *     - payouts/withdraw route: 2 calls (1 wired site × stamped
  *       primary / bare-fallback) — Gen 9.
  *     - lib/ledger/store.ts rememberSettlement: 2 calls (1 wired
@@ -23,6 +23,13 @@ import { describe, it, expect } from 'vitest';
  *       (it is the repo-side mirror of the engine's upsert); it is
  *       mechanically a supabase-js upsert, so it is pinned here AND
  *       as an engine-result persistence boundary below.
+ *     - lib/escrow/intentReconciler.ts: 2 calls (1 wired site ×
+ *       stamped primary / bare-fallback) — the reconciliation
+ *       completion/compensation writer: completes the deterministic
+ *       ESCROW-PAYOUT-<intent_id> debit (settle) or appends the
+ *       deterministic …-REVERSAL compensating entry (release),
+ *       converging on UNIQUE(transaction_id) — never absolute-total
+ *       writes.
  *
  *   Mechanism 3 · engine (SDK) ledger upsert + repo callers . 1 + 1
  *     - engine/covenant-master-sdk.ts: exactly 1 `.upsert(ledgerEntries…)`
@@ -39,7 +46,7 @@ import { describe, it, expect } from 'vitest';
  *       variants) — Gen 16: the settlement credit is CBT-stamped
  *       at INSERT and replay-guarded by the UNIQUE reference_id.
  *
- *   TOTAL: 15 ledger-write call expressions across 8 wired write paths.
+ *   TOTAL: 17 ledger-write call expressions across 9 wired write paths.
  *
  *   READ SEAM (spec art_qNu4T32F — Creator Analytics Top Markets) ..... 0 writes
  *     - lib/server/{store,territorySettlement,supabaseStore,
@@ -103,6 +110,8 @@ const INVENTORIED_FILES: Record<string, string> = {
   'engine/covenant-master-sdk.ts': 'ENGINE ×1 — hash-locked internal ledger upsert',
   'lib/contracts/payouts.ts': 'DOC — display layer, type-only ledger reference',
   'lib/escrow/balance.ts': 'READ — disbursements scan',
+  'lib/escrow/intentReconciler.ts':
+    'SUPABASE_JS ×2 — reconciliation completion/compensation inserts (1 wired site: deterministic ESCROW-PAYOUT debit or …-REVERSAL compensating entry, stamped primary / bare-fallback)',
   'lib/ledger/cbt-settlement.ts': 'HELPER — stamp derivation docs (Gen 8/9)',
   'lib/ledger/engine-stamp.ts': 'ENGINE — Gen 9 bounded metadata-only enrichment executor',
   'lib/ledger/store.ts': 'SUPABASE_JS ×2 — Gen 9 stamped rememberSettlement upsert (1 wired site)',
@@ -129,15 +138,18 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
     expect(countMatches(webhook, /withCbtSettlementCode\(/g)).toBe(1);
   });
 
-  it('pins mechanism 2 at exactly 4 supabase-js ledger writes (withdraw 2 + store 2, one wired site each)', () => {
+  it('pins mechanism 2 at exactly 6 supabase-js ledger writes (withdraw 2 + store 2 + reconciler 2, one wired site each)', () => {
     const withdraw = read('app/api/payouts/withdraw/route.ts');
     const store = read('lib/ledger/store.ts');
+    const reconciler = read('lib/escrow/intentReconciler.ts');
     // Stamped primary + bare 42703/PGRST204 fallback per wired site.
     expect(countMatches(withdraw, /from\('universal_royalty_ledger'\)\s*\.insert\(/g)).toBe(2);
     expect(countMatches(store, /from\('universal_royalty_ledger'\)\s*\.upsert\(/g)).toBe(2);
-    // Both sites stamp the primary attempt with the frozen derivation.
+    expect(countMatches(reconciler, /from\('universal_royalty_ledger'\)\s*\.insert\(/g)).toBe(2);
+    // All three sites stamp the primary attempt with the frozen derivation.
     expect(countMatches(withdraw, /stampSupabaseLedgerRow\(/g)).toBe(1);
     expect(countMatches(store, /stampSupabaseLedgerRow\(/g)).toBe(1);
+    expect(countMatches(reconciler, /stampSupabaseLedgerRow\(/g)).toBe(1);
   });
 
   it('pins mechanism 3 at exactly 1 hash-locked engine upsert with exactly 1 repo-side caller', () => {
@@ -163,17 +175,18 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
     expect(wire).toContain("'23505'");
   });
 
-  it('pins the full inventory at 15 ledger-write call expressions across 8 wired paths', () => {
+  it('pins the full inventory at 17 ledger-write call expressions across 9 wired paths', () => {
     const raw =
       countMatches(read('app/api/banking/route.ts'), /INSERT INTO universal_royalty_ledger/g) +
       countMatches(read('app/api/covnant/webhooks/increase/route.ts'), /INSERT INTO universal_royalty_ledger/g) +
       countMatches(read('../covnant-sdk/src/engine/wire.ts'), /INSERT INTO universal_royalty_ledger/g);
     const supabaseJs =
       countMatches(read('app/api/payouts/withdraw/route.ts'), /from\('universal_royalty_ledger'\)\s*\.insert\(/g) +
-      countMatches(read('lib/ledger/store.ts'), /from\('universal_royalty_ledger'\)\s*\.upsert\(/g);
+      countMatches(read('lib/ledger/store.ts'), /from\('universal_royalty_ledger'\)\s*\.upsert\(/g) +
+      countMatches(read('lib/escrow/intentReconciler.ts'), /from\('universal_royalty_ledger'\)\s*\.insert\(/g);
     const engine =
       countMatches(read('engine/covenant-master-sdk.ts'), /\.upsert\(ledgerEntries/g);
-    expect(raw + supabaseJs + engine).toBe(15);
+    expect(raw + supabaseJs + engine).toBe(17);
   });
 
   it('inventories every file that references the table — a new write path cannot be added silently', () => {
