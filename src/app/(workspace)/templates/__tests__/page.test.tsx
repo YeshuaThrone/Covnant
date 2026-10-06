@@ -52,7 +52,7 @@ describe('/templates — the Covnant Control Board', () => {
   it('binds the canonical Music card with the drop-5 telemetry read from the store', async () => {
     const html = await renderTemplatesPage();
     expect(html).toContain('ISRC code');
-    expect(html).toContain('US-S1Z-26-00001');
+    expect(html).toContain('USS1Z2600001');
     expect(html).toContain('0.0035');
     expect(html).toContain('ASCAP');
     expect(html).toContain('Sub-second micro royalty rate');

@@ -7,8 +7,9 @@
  *     computed through the real settle path in settleSovereignRecord.
  *     Rendered ONLY under the DEMO DATA disclosure.
  *   - REAL: derived from the live stores — each settled royalty row becomes
- *     a sovereign record through the SAME allocation path (audio vertical,
-     'Commercial Music Releases', the rebuilt platform's registered medium).
+ *     a sovereign record through the SAME allocation path, placed by the
+ *     asset's registered medium of record (masterPlacementForMedium; a row
+ *     whose asset record is gone places by its own CBT type segment).
  *     Thin where the real ledger is thin — never padded with demo rows.
  */
 
@@ -21,6 +22,8 @@ import {
   ATOMIC_SECTOR_TO_VERTICAL,
   MASTER_CATEGORY_ORDER,
   MASTER_SUBCATEGORIES,
+  masterPlacementForCbt,
+  masterPlacementForMedium,
   sectorsForVertical,
   atomicSectorFromParam,
   type AtomicSector,
@@ -53,6 +56,7 @@ import {
 } from './CovnantAtomicDataSDK';
 import { flowKindForEntity, type FlowKind } from './flowKinds';
 import { buildUct, isValidUct } from '@/lib/covnant/uct';
+import { canonicalSeedIdentifier } from '@/lib/covnant/vault';
 
 // The atomic sector vocabulary keeps its masterStore import surface (existing
 // importers unchanged) while the client-side Control Board reads the same
@@ -220,21 +224,34 @@ export function seededMasterLedger(): SovereignLedgerRecord[] {
 
 /**
  * REAL mode — derive sovereign records from the live stores: every settled
- * royalty row becomes one audio-vertical record through the same allocation
- * path. No demo padding; a thin real ledger renders thin (honestly).
+ * royalty row becomes one record placed by the asset's registered MEDIUM of
+ * record through the same allocation path. No demo padding; a thin real
+ * ledger renders thin (honestly).
  */
 async function deriveMasterLedgerFromRealStores(): Promise<SovereignLedgerRecord[]> {
   const [assets, ledgerRows] = await Promise.all([listAssets(), listLedger()]);
   const assetByCode = new Map(assets.map((asset) => [asset.cbtCode, asset]));
-  const category: GlobalEntertainmentCategory = 'AUDIO_AND_RECORDED_SOUND';
   return ledgerRows.map((row, index) => {
     const asset = assetByCode.get(row.cbtCode);
+    // The placement of record: the asset's registered medium first; a row
+    // whose asset record is gone still places by its own CBT type segment
+    // (every real code is engine-minted through the CBT type vocabulary).
+    // An off-canon code fails loud — a settled row is never mislabeled into
+    // the wrong vertical (the audited all-AUDIO bug).
+    const placement = asset
+      ? masterPlacementForMedium(asset.medium)
+      : masterPlacementForCbt(row.cbtCode);
+    if (placement === null) {
+      throw new Error(
+        `masterStore: royalty row ${row.cbtCode} resolves to no master placement — its CBT type segment is not in the canon`,
+      );
+    }
     const holderKey = asset
       ? asset.rightsHolders.map((holder) => holder.id).join(',')
       : row.cbtCode;
     return settleSovereignRecord({
-      category,
-      subcategory: 'Commercial Music Releases',
+      category: placement.category,
+      subcategory: placement.subcategory,
       assetTitle: asset?.title ?? row.cbtCode,
       rightsHolderKey: holderKey,
       grossVolumeCents: row.grossSettled,
@@ -1268,7 +1285,10 @@ const ENTITY_TELEMETRY_SEEDS: Readonly<Record<string, SovereignAtomicEntity>> = 
   'TPL-MUS-001': {
     entityType: 'MASTER_RECORDING',
     templateId: 'TPL-MUS-001',
-    isrcCode: 'US-S1Z-26-00001',
+    // Canonicalized through the vault canonicalizer at load — the seed and
+    // the registration path agree on identifier shape (audit: seeds must
+    // never bypass the one canonicalizer).
+    isrcCode: canonicalSeedIdentifier('ISRC', 'US-S1Z-26-00001'),
     subSecondMicroRoyaltyRate: 0.0035,
     proTelemetryBinding: 'ASCAP',
     targetSplit: ENTITY_TARGET_SPLIT,
@@ -1575,7 +1595,7 @@ export const MASTER_DEMO_ASSET_REGISTRY: readonly MasterDemoAsset[] = Object.fre
     kind: 'Music Track',
     title: 'E2E Pool Gate Song',
     sector: 'MUSIC',
-    workIdentifiers: [{ label: 'ISRC', value: 'US-S1Z-26-42791' }],
+    workIdentifiers: [{ label: 'ISRC', value: canonicalSeedIdentifier('ISRC', 'US-S1Z-26-42791') }],
     agreement: {
       effectiveDate: '2026-09-01',
       territory: 'Worldwide',

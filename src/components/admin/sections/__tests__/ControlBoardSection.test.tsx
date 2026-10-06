@@ -104,7 +104,7 @@ describe('the /admin Control Board section', () => {
     }
 
     // Drop-5 canon values, bound from the store engine — never inline literals.
-    expect(html).toContain('US-S1Z-26-00001');
+    expect(html).toContain('USS1Z2600001');
     expect(html).toContain('ASCAP');
     expect(html).toContain('Ownership reserve 50%');
     expect(html).toContain('Creative payout 35%');

@@ -98,6 +98,24 @@ export function normalizeVaultIdentifier(
 }
 
 /**
+ * Seed-side canonicalization — the fail-loud twin of normalizeVaultIdentifier
+ * for seed constants. Seeds and registrations agree on identifier shape
+ * because both pass through the same canonicalizer; a seed literal that
+ * cannot canonicalize throws at module load instead of rendering a
+ * non-canonical code as if it were one.
+ */
+export function canonicalSeedIdentifier(
+  kind: VaultExternalIdentifierKind,
+  raw: string,
+): string {
+  const canonical = canonicalizeIdentifier(kind, raw);
+  if (canonical === null) {
+    throw new Error(`vault: seed ${kind} "${raw}" is not a canonicalizable ${kind}`);
+  }
+  return canonical;
+}
+
+/**
  * The lowercase mapped_identifiers JSONB key each kind is stored under.
  * Kinds the vendored engine models reuse the ENGINE's persisted field
  * names — registration writes `eidrCanonical`/`isanHex`/`prs_tunecode`

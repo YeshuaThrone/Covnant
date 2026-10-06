@@ -10,7 +10,8 @@
  *    for an absent UCT/ISNI, the window of record, the generation
  *    timestamp, and the demo-data disclosure badge.
  * 2. The works & identifiers table — the per-class scheme of record with
- *    the CVT fallback LABELED AS SUCH, and the honest empty state.
+ *    the code-of-record fallback labeled with its TRUE scheme (CBT/TPL/
+ *    REF/CVT — a CBT is never labeled CVT), and the honest empty state.
  * 3. The itemized settlements — exact bigint cents through
  *    formatCentsBigint, dashes for absent fields, the honest zero
  *    statement's empty state.
@@ -124,18 +125,35 @@ describe('AuditStatementView — works and identifiers', () => {
       flows({
         works: [
           {
-            workRef: 'TPL-POD-001',
+            workRef: 'TPL-PDC-001',
             title: null,
-            identifiers: identifiers({ scheme: 'CVT', code: 'TPL-POD-001', codeOfRecord: true }),
+            identifiers: identifiers({ scheme: 'TPL', code: 'TPL-PDC-001', codeOfRecord: true }),
           },
         ],
       }),
     );
-    expect(html).toContain('data-scheme="CVT"');
-    expect(html).toContain('Code of Record (CVT)');
+    expect(html).toContain('data-scheme="TPL"');
+    expect(html).toContain('Code of Record (TPL)');
     expect(html).toContain('data-code-of-record="true"');
     // A null title renders the dash — the record of truth carries none.
     expect(html).toContain('—');
+  });
+
+  it('labels the CBT fallback CBT — never CVT (distinct code families, distinct labels)', () => {
+    const html = render(
+      flows({
+        works: [
+          {
+            workRef: 'CBT-TV-1',
+            title: 'Season Archive',
+            identifiers: identifiers({ scheme: 'CBT', code: 'CBT-TV-1', codeOfRecord: true }),
+          },
+        ],
+      }),
+    );
+    expect(html).toContain('data-scheme="CBT"');
+    expect(html).toContain('Code of Record (CBT)');
+    expect(html).not.toContain('Code of Record (CVT)');
   });
 
   it('renders the honest empty state when the window carries no works', () => {

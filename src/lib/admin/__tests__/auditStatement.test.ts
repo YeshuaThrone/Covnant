@@ -7,8 +7,11 @@
  *
  * 1. The identifier mapping per class — music→ISRC (ISWC as a secondary
  *    row where mapped), film→ISAN, publishing→ISBN, the forms with NO
- *    industry code falling back to the code of record labeled as such
- *    (the CVT scheme — never a claimed industry standard), the template
+ *    industry code falling back to the code of record labeled with its
+ *    TRUE scheme (CBT for the asset's CBT code, TPL for a template
+ *    literal, REF for a bare ref, CVT only for a genuine CVT handle —
+ *    never a claimed industry standard, and a CBT is never labeled CVT),
+ *    the template
  *    seeds' own codes (isrcCode music, isanCode film, isbnNumber
  *    publishing), and the unresolvable ref rendered verbatim.
  * 2. The statement derivation — the payee's own itemized lines (only
@@ -219,10 +222,13 @@ describe('identifiersForWorkRef — the per-class identifier mapping', () => {
     expect(identifiersForWorkRef('CBT-TV-1', assets)).toEqual([
       { scheme: 'CVT', code: 'CVT-TV-0001', codeOfRecord: true },
     ]);
-    // Without a cvtCode, the CBT code of record stands in.
+    // Without a cvtCode, the CBT code of record stands in — labeled CBT,
+    // its true family. A CBT is never labeled CVT: the two are distinct
+    // code families (CVT-XXXXXX-2026 outward handle vs CBT-<TYPE>-<HASH>
+    // system of record), and the scheme names the family of the value.
     expect(
       identifiersForWorkRef('CBT-TV-1', [asset({ cbtCode: 'CBT-TV-1', medium: 'TV_EPISODE' })]),
-    ).toEqual([{ scheme: 'CVT', code: 'CBT-TV-1', codeOfRecord: true }]);
+    ).toEqual([{ scheme: 'CBT', code: 'CBT-TV-1', codeOfRecord: true }]);
   });
 
   it("reads the template seeds' own industry codes — isrcCode for the music class", () => {
@@ -235,9 +241,17 @@ describe('identifiersForWorkRef — the per-class identifier mapping', () => {
     expect(rows[0]?.code.length).toBeGreaterThan(0);
   });
 
-  it('renders an unresolvable ref verbatim as the code of record — never renamed or guessed', () => {
+  it("renders an unresolvable ref verbatim as the code of record — labeled REF, never renamed or guessed", () => {
     expect(identifiersForWorkRef('gone-work-42', [])).toEqual([
-      { scheme: 'CVT', code: 'gone-work-42', codeOfRecord: true },
+      { scheme: 'REF', code: 'gone-work-42', codeOfRecord: true },
+    ]);
+  });
+
+  it('labels the templateId fallback TPL — a template literal is not a CVT handle', () => {
+    // A podcast network class carries no industry code; its templateId is
+    // the universal code of record, labeled with its true family.
+    expect(identifiersForWorkRef('TPL-PDC-001', [])).toEqual([
+      { scheme: 'TPL', code: 'TPL-PDC-001', codeOfRecord: true },
     ]);
   });
 });

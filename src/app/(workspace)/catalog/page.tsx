@@ -15,7 +15,12 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-/** Pill set every catalog card shows — value or an explicit em-dash. */
+/**
+ * Pill set for a catalog card — rendered ONLY for identifiers of record.
+ * An unmapped identifier renders nothing (no empty pill placeholder, no
+ * dash): a pill that renders a dash would claim a code the registry never
+ * mapped.
+ */
 function registryPills(cbtCode: string, identifiers: UniversalAssetIdentifier) {
   const entries: Array<[string, string | undefined]> = [
     ['CBT', cbtCode],
@@ -25,9 +30,11 @@ function registryPills(cbtCode: string, identifiers: UniversalAssetIdentifier) {
   ];
   return (
     <div className="flex flex-wrap gap-2">
-      {entries.map(([label, value]) => (
-        <IdentifierBadge key={label} label={label} value={value ?? '—'} />
-      ))}
+      {entries
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== '')
+        .map(([label, value]) => (
+          <IdentifierBadge key={label} label={label} value={value} />
+        ))}
     </div>
   );
 }

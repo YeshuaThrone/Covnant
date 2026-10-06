@@ -126,9 +126,9 @@ describe('entityIntelligence — the derivation over the real entity binding', (
     }
     expect(readout.class).toBe('MASTER_RECORDING');
     expect(readout.templateId).toBe('TPL-MUS-001');
-    // The profile is the class record of read — ISRC US-S1Z-26-00001,
-    // micro royalty 0.0035, ASCAP (the drop-5 canon seed).
-    expect(readout.isrcCode).toBe('US-S1Z-26-00001');
+    // The profile is the class record of read — the canonical ISRC of the
+    // drop-5 canon seed (seeds canonicalize through the vault canonicalizer),
+    expect(readout.isrcCode).toBe('USS1Z2600001');
     expect(readout.subSecondMicroRoyaltyRate).toBe(0.0035);
     expect(readout.proTelemetryBinding).toBe('ASCAP');
     expect(readout.cleared).toBe(50_000n);

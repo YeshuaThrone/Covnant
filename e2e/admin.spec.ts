@@ -155,7 +155,7 @@ test('the Control Board tab renders the master board; Ledger is the finances; Co
   await expect(page.locator('[aria-label="Control Board"]')).toBeVisible();
   await expect(page.locator('[data-testid="vertical-tab"]')).toHaveCount(7);
   await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
-  await expect(page.getByText('US-S1Z-26-00001')).toBeVisible();
+  await expect(page.getByText('USS1Z2600001')).toBeVisible();
   await expect(page.getByText('Ownership reserve 50%').first()).toBeVisible();
   await expect(page.getByText('Demo data').first()).toBeVisible();
 

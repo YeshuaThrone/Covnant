@@ -25,7 +25,7 @@ test.describe('execution lane — founder URL hydration', () => {
     await expect(page.getByRole('heading', { name: 'Asset of record' })).toBeVisible();
     await expect(page.getByText('E2E Pool Gate Song').first()).toBeVisible();
     await expect(page.getByText('CBT-TRK-A51DF05B4279').first()).toBeVisible();
-    await expect(page.getByText('US-S1Z-26-42791')).toBeVisible();
+    await expect(page.getByText('USS1Z2642791')).toBeVisible();
     await expect(page.getByText('bound · no manual entry, nothing invented')).toBeVisible();
 
     // Identities — full UCT blocks, never 'To be completed'.

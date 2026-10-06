@@ -10,6 +10,8 @@
  * the admin pages render.
  */
 
+import type { MediaMedium } from '@/engine/covenant-master-sdk';
+
 /**
  * The seven master verticals — the founder's GlobalEntertainmentCategory
  * canon (six drops, 2026-09-20) plus the generation-4 expansion vertical
@@ -265,4 +267,106 @@ export function atomicSectorFromParam(value: string): AtomicSector | null {
   return (ATOMIC_SECTOR_ORDER as readonly string[]).includes(value)
     ? (value as AtomicSector)
     : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Medium placement — where a REGISTERED asset's medium of record clears on
+// the master surfaces. The engine's CBT type prefixes (CBT_PREFIX_MAP, the
+// vendored engine's mint vocabulary) pair every MediaMedium with a type
+// segment; the placements here carry the canonical vertical + subcategory
+// each medium clears under. Sector-backed mediums ride the frozen
+// ATOMIC_SECTOR_TO_VERTICAL placement law exactly (MOTORSPORT/ARENA/
+// ATHLETICS stay where the founder put them — LIVE_PERFORMANCE_AND_COMEDY);
+// mediums with no atomic sector (sheet music, audiobooks, e-books,
+// periodicals, the orbital broadcast) place by the MASTER_SUBCATEGORIES
+// canon lists — the same lists the seeded master library reads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Where a registered medium of record clears — master vertical + subcategory. */
+export interface MasterPlacement {
+  readonly category: GlobalEntertainmentCategory;
+  readonly subcategory: string;
+}
+
+/**
+ * Every MediaMedium's placement — compiler-total over the engine union. A
+ * new medium without an arm fails the build here, and the module-load gate
+ * beneath pins every arm to a canon (vertical, subcategory) pair.
+ */
+const MEDIUM_PLACEMENTS: Record<MediaMedium, MasterPlacement> = {
+  MUSIC_TRACK: { category: 'AUDIO_AND_RECORDED_SOUND', subcategory: 'Commercial Music Releases' },
+  MUSIC_ALBUM: { category: 'AUDIO_AND_RECORDED_SOUND', subcategory: 'Commercial Music Releases' },
+  PODCAST_EPISODE: { category: 'AUDIO_AND_RECORDED_SOUND', subcategory: 'Podcasts' },
+  AUDIOBOOK: { category: 'AUDIO_AND_RECORDED_SOUND', subcategory: 'Audiobooks' },
+  FEATURE_FILM: { category: 'FILM_AND_TELEVISION', subcategory: 'Theatrical' },
+  TV_SHOW: { category: 'FILM_AND_TELEVISION', subcategory: 'Broadcast TV' },
+  TV_SEASON: { category: 'FILM_AND_TELEVISION', subcategory: 'Broadcast TV' },
+  TV_EPISODE: { category: 'FILM_AND_TELEVISION', subcategory: 'Broadcast TV' },
+  LIVE_STREAM: { category: 'FILM_AND_TELEVISION', subcategory: 'SVOD / Streaming VOD' },
+  MARS_ORBITAL_BROADCAST: { category: 'FILM_AND_TELEVISION', subcategory: 'Broadcast TV' },
+  SHEET_MUSIC: { category: 'PUBLISHING_AND_LITERARY', subcategory: 'Sheet Music & Scores' },
+  PRINT_BOOK: { category: 'PUBLISHING_AND_LITERARY', subcategory: 'Print Books' },
+  EBOOK: { category: 'PUBLISHING_AND_LITERARY', subcategory: 'e-Books' },
+  MAGAZINE_SERIAL: { category: 'PUBLISHING_AND_LITERARY', subcategory: 'Periodicals' },
+  VIDEO_GAME: { category: 'INTERACTIVE_AND_DIGITAL_MEDIA', subcategory: 'Video Games' },
+  LIVE_EVENT: { category: 'LIVE_PERFORMANCE_AND_COMEDY', subcategory: 'Venue Ticketing Ledgers' },
+  GARMENT_LINE: { category: 'COMMERCIAL_AND_BRAND_LICENSING', subcategory: 'Merchandising & Physical Goods' },
+};
+
+/** The placement of record for a registered medium — total, never null. */
+export function masterPlacementForMedium(medium: MediaMedium): MasterPlacement {
+  return MEDIUM_PLACEMENTS[medium];
+}
+
+/** Every armed medium — compiler-total over the engine union (the table's keys). */
+export function masterPlacementMediums(): readonly MediaMedium[] {
+  return Object.keys(MEDIUM_PLACEMENTS) as MediaMedium[];
+}
+
+/**
+ * The engine's medium → CBT type segment vocabulary (CBT_PREFIX_MAP), kept
+ * here as the reverse lookup so a ledger row whose asset record is gone
+ * still places by its own code of record. Drift from the engine's map is
+ * caught by the suite's cross-check against generateCBTCode.
+ */
+const CBT_TYPE_TO_MEDIUM: Record<string, MediaMedium> = {
+  TRK: 'MUSIC_TRACK',
+  ALB: 'MUSIC_ALBUM',
+  SHT: 'SHEET_MUSIC',
+  FLM: 'FEATURE_FILM',
+  TVS: 'TV_SHOW',
+  SSN: 'TV_SEASON',
+  TVE: 'TV_EPISODE',
+  POD: 'PODCAST_EPISODE',
+  ABK: 'AUDIOBOOK',
+  PBK: 'PRINT_BOOK',
+  EBK: 'EBOOK',
+  MAG: 'MAGAZINE_SERIAL',
+  GME: 'VIDEO_GAME',
+  STR: 'LIVE_STREAM',
+  MOB: 'MARS_ORBITAL_BROADCAST',
+  LVE: 'LIVE_EVENT',
+  FSH: 'GARMENT_LINE',
+};
+
+/**
+ * The placement of record for a settled row keyed only by its CBT code —
+ * the type segment self-describes the medium (every real code is engine-
+ * minted through CBT_PREFIX_MAP). Null when the segment is off-canon: the
+ * caller decides, and the master derivation fails loud rather than
+ * mislabeling a settlement.
+ */
+export function masterPlacementForCbt(cbtCode: string): MasterPlacement | null {
+  const type = /^CBT-([A-Z]+)-/.exec(cbtCode.trim().toUpperCase())?.[1];
+  const medium = type === undefined ? undefined : CBT_TYPE_TO_MEDIUM[type];
+  return medium === undefined ? null : MEDIUM_PLACEMENTS[medium];
+}
+
+/** Module-load placement gate — every arm lands on a canon subcategory pair. */
+for (const [medium, placement] of Object.entries(MEDIUM_PLACEMENTS)) {
+  if (!MASTER_SUBCATEGORIES[placement.category].includes(placement.subcategory)) {
+    throw new Error(
+      `taxonomy: medium ${medium} places at ${placement.category} / "${placement.subcategory}", which is not a canon subcategory of that vertical`,
+    );
+  }
 }

@@ -70,7 +70,7 @@ describe('GET /api/v1/entities/[sector]', () => {
     expect(canonical).toBeDefined();
     const entity = canonical?.entity as Record<string, unknown>;
     expect(entity.entityType).toBe('MASTER_RECORDING');
-    expect(entity.isrcCode).toBe('US-S1Z-26-00001');
+    expect(entity.isrcCode).toBe('USS1Z2600001');
     expect(entity.subSecondMicroRoyaltyRate).toBe(0.0035);
     expect(entity.proTelemetryBinding).toBe('ASCAP');
     expect(canonical?.execution).toEqual({ executionState: 'CLEARED', grossVolumeCents: 12_500_000 });
