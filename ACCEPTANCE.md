@@ -1,3 +1,11 @@
+> **⚠️ Historical snapshot — not current state.** This report describes the
+> platform at the original pinned-spec release (art_zXNe0LQJ, four-PR
+> delivery). The test suite, CI surface, and feature set have all grown since
+> (the vitest suite alone is now ~50× the 42 tests counted here). Kept for
+> release-history reference; for the current architecture and test layout
+> read [`README.md`](README.md), [`AGENTS.md`](AGENTS.md), and
+> [`docs/covenant-layers.md`](docs/covenant-layers.md).
+
 # Covnant Platform — Acceptance Report
 
 **Verdict: the pinned production-build spec (§1–§8, art_zXNe0LQJ head `40bc82fd`) is satisfied.** All four PRs merged to `main`; the release sweep verified every acceptance criterion against `main` as merged, with the full Playwright suite, Vitest suite, lint, typecheck, production build, and scratch-Postgres schema verification green.

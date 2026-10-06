@@ -1,3 +1,10 @@
+> **⚠️ Historical snapshot — not current state.** This manifest describes the
+> 2026-09-02 local delivery checkpoint (pre-GitHub, five commits on
+> `feat/brand-schema-sdk`). Everything has since been pushed, restructured,
+> and grown far past this state. Kept for delivery-history reference; for the
+> current architecture read [`README.md`](README.md) and
+> [`AGENTS.md`](AGENTS.md).
+
 # Covnant — Local Delivery Manifest
 
 **Date:** 2026-09-02 · **Branch:** `feat/brand-schema-sdk` (local, 5 commits) · **GitHub delivery:** parked per your instruction — nothing has been pushed.

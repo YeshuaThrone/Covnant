@@ -10,6 +10,14 @@
 !.yarn/releases
 !.yarn/versions
 
+# lockfiles — npm is the only blessed package manager; package-lock.json is
+# the single tracked lockfile (see AGENTS.md). Competing lockfiles must never
+# be committed.
+/bun.lock
+/bun.lockb
+/yarn.lock
+/pnpm-lock.yaml
+
 # testing
 /coverage
 
