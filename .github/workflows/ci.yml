@@ -964,6 +964,102 @@ jobs:
           [ "$rls" = "t" ] || { echo "RLS NOT ENABLED on escrow_withdrawal_intents"; exit 1; }
           echo "OK: reserve_escrow_withdrawal is service-role-only and the intent table has RLS"
 
+      - name: YTD increment regression (migrations 0057/0061) — real Postgres RPC calls
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # The blind spot that shipped hotfix 0061: the apply-twice loop above
+          # never CALLS the RPCs it installs. increment_creator_ytd shipped in
+          # 0057 with its data-modifying CTE inside a parenthesized scalar
+          # return — PostgreSQL rejected the function on EVERY call (SQLSTATE
+          # 0A000, probed live on production 2026-10-06) while the schema job
+          # stayed green. This step CALLS increment_creator_ytd the way the
+          # compliance engine's applyWithholding does: first call inserts, the
+          # second accumulates through the on-conflict arm, in autocommit and
+          # inside an explicit transaction. A control first proves this step
+          # FAILS on the exact broken body that shipped — a rotten gate is
+          # worse than no gate.
+          PSQL="psql -h localhost -U postgres -d covnant_check -tAX -v ON_ERROR_STOP=1"
+
+          # Control: recreate the ORIGINAL 0057 body — the call must FAIL.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+          create or replace function public.increment_creator_ytd(
+            p_creator_id     text,
+            p_tax_year       integer,
+            p_gross_delta    bigint,
+            p_withheld_delta bigint,
+            p_updated_at     timestamptz
+          ) returns jsonb
+          language plpgsql
+          set search_path = public
+          as $$
+          begin
+            return (
+              with upserted as (
+                insert into public.creator_ytd_earnings as y (
+                  creator_id, tax_year, gross_cents, withheld_cents, updated_at
+                ) values (
+                  p_creator_id, p_tax_year, p_gross_delta, p_withheld_delta, p_updated_at
+                )
+                on conflict (creator_id, tax_year) do update set
+                  gross_cents    = y.gross_cents + excluded.gross_cents,
+                  withheld_cents = y.withheld_cents + excluded.withheld_cents,
+                  updated_at     = excluded.updated_at
+                returning creator_id, tax_year, gross_cents, withheld_cents, updated_at
+              )
+              select to_jsonb(upserted) from upserted
+            );
+          end;
+          $$;
+          SQL
+          if $PSQL -c "select increment_creator_ytd('ci_ytd_control', 2026, 1, 1, now())" >/dev/null 2>&1; then
+            echo "REGRESSION GATE ROTTEN: the broken 0057 body called fine"; exit 1
+          fi
+          echo "OK: control — the broken 0057 body fails the call (the gate detects the bug)"
+
+          # Restore the fixed 0061 body; re-applying AFTER calls have run also
+          # proves the replay-safe double-apply on a database with data.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/0061_creator_ytd_increment_fix.sql >/dev/null
+          $PSQL -c "delete from creator_ytd_earnings where creator_id in ('ci_ytd_control', 'ci_ytd_creator')" >/dev/null
+
+          # 1) Autocommit: the first call inserts and returns the jsonb row —
+          #    the exact envelope SupabaseStore.incrementCreatorYtd reads.
+          r1=$($PSQL -c "select increment_creator_ytd('ci_ytd_creator', 2026, 60000, 14400, now())")
+          echo "$r1" | grep -F '"creator_id": "ci_ytd_creator"' >/dev/null || { echo "BAD ENVELOPE (creator_id): $r1"; exit 1; }
+          echo "$r1" | grep -F '"gross_cents": 60000'           >/dev/null || { echo "BAD ENVELOPE (insert-arm gross): $r1"; exit 1; }
+          echo "$r1" | grep -F '"withheld_cents": 14400'        >/dev/null || { echo "BAD ENVELOPE (insert-arm withheld): $r1"; exit 1; }
+          echo "OK: autocommit call returns the post-insert jsonb row"
+          # 2) Second call INSIDE an explicit transaction accumulates through
+          #    the on-conflict arm: 60000+100 gross → 60100, 14400+24 → 14424.
+          txout=$($PSQL <<'SQL'
+          begin;
+          select increment_creator_ytd('ci_ytd_creator', 2026, 100, 24, now());
+          commit;
+          SQL
+          )
+          echo "$txout" | grep -F '"gross_cents": 60100'    >/dev/null || { echo "BAD ACCUMULATE (gross): $txout"; exit 1; }
+          echo "$txout" | grep -F '"withheld_cents": 14424' >/dev/null || { echo "BAD ACCUMULATE (withheld): $txout"; exit 1; }
+          echo "OK: in-transaction accumulate returns 60100/14424"
+          # 3) The write actually landed — persisted row matches and the PK
+          #    kept it a single row (the upsert never created a second row).
+          row=$($PSQL -c "select gross_cents || '/' || withheld_cents || '/' || count(*) over () from creator_ytd_earnings where creator_id = 'ci_ytd_creator' and tax_year = 2026")
+          [ "$row" = "60100/14424/1" ] || { echo "BAD PERSISTED ROW: $row"; exit 1; }
+          echo "OK: persisted 60100/14424 in exactly one row (upsert-on-conflict verified)"
+          # 4) One more call after everything above: the arithmetic survives
+          #    replacement + data (60100+1 → 60101, 14424+1 → 14425), and the
+          #    returned jsonb keeps EXACTLY the five store keys.
+          r4=$($PSQL -c "select increment_creator_ytd('ci_ytd_creator', 2026, 1, 1, now())")
+          echo "$r4" | grep -F '"gross_cents": 60101'    >/dev/null || { echo "BAD POST-REPLACE ACCUMULATE (gross): $r4"; exit 1; }
+          echo "$r4" | grep -F '"withheld_cents": 14425' >/dev/null || { echo "BAD POST-REPLACE ACCUMULATE (withheld): $r4"; exit 1; }
+          keys=$($PSQL -c "select string_agg(k, ',' order by k) from jsonb_object_keys(increment_creator_ytd('ci_ytd_creator', 2026, 0, 0, now())) k")
+          [ "$keys" = "creator_id,gross_cents,tax_year,updated_at,withheld_cents" ] || { echo "DRIFTED JSONB KEYS: $keys"; exit 1; }
+          echo "OK: post-replacement accumulate + exact five-key jsonb envelope"
+          # 5) The production caller holds EXECUTE.
+          svc=$($PSQL -c "select has_function_privilege('service_role', 'increment_creator_ytd(text,integer,bigint,bigint,timestamptz)', 'execute')")
+          [ "$svc" = "t" ] || { echo "service_role LOST EXECUTE: $svc"; exit 1; }
+          echo "OK: service_role execute grant in place"
+
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
           bash supabase/tests/0012_docker_harness.sh

@@ -528,6 +528,13 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // replayed applyWithholding books ONE effect. Still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0060_tax_escrow_idempotency_key.sql',
+      // YTD increment hotfix (todo_0XOoMBTm): 0057's increment_creator_ytd
+      // shipped with its data-modifying CTE inside a parenthesized scalar
+      // return — PostgreSQL rejected the function on every call. 0061
+      // replaces the body (CREATE OR REPLACE, identical signature and
+      // returned jsonb shape). Touches only creator_ytd_earnings — still no
+      // DDL on universal_royalty_ledger — the referencing pin below holds.
+      '0061_creator_ytd_increment_fix.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
