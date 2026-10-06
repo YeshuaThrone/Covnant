@@ -4,6 +4,7 @@ import { POST } from '../route';
 import { resetRateLimits } from '@/lib/server/rateLimit';
 import { supabaseFromEnv } from '@/lib/supabase';
 import { CBT_SETTLEMENT_CODE_PATTERN, generateCBTSettlementCode } from '@/lib/ledger/cbt-settlement';
+import { fakeEscrowDb } from './fakeEscrowDb';
 
 /**
  * Generation 9 — CBT stamp evidence for the payouts/withdraw ledger insert
@@ -12,8 +13,9 @@ import { CBT_SETTLEMENT_CODE_PATTERN, generateCBTSettlementCode } from '@/lib/le
  * deterministically from the row's own transaction_id, and a live table
  * without the additive metadata column (42703/PGRST204) retries the row
  * WITHOUT the stamp so the payout — the money already moved — is still
- * recorded. Harness mirrors route.test.ts (unmodified): fetch stubbed for
- * the two Plaid calls, supabaseFromEnv mocked with a capture fake.
+ * recorded. Harness shares route.test.ts's stateful escrow fake
+ * (fakeEscrowDb.ts): fetch stubbed for the two Plaid calls,
+ * supabaseFromEnv mocked with the migration-0058-aware capture fake.
  */
 
 vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: vi.fn() }));
@@ -34,63 +36,6 @@ vi.mock('@/lib/server/apiAccess', () => ({
 }));
 
 const mockSupabaseFromEnv = vi.mocked(supabaseFromEnv);
-
-function fakeDb(options: {
-  holderRow?: unknown;
-  assetRows?: unknown[];
-  ledgerData?: unknown[];
-  insertError?: { code?: string; message: string } | null;
-  metadataColumnMissing?: boolean;
-}) {
-  const inserts: Record<string, unknown>[] = [];
-  const db = {
-    from: (table: string) => {
-      if (table === 'rights_holders') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: options.holderRow ?? null, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === 'cbt_assets') {
-        return {
-          select: () =>
-            Promise.resolve({
-              data: (options.assetRows ?? []).map((rights_holders) => ({ rights_holders })),
-              error: null,
-            }),
-        };
-      }
-      if (table === 'universal_royalty_ledger') {
-        // fetchEscrowBalance reads this table via select; the payout write
-        // lands via insert — the fake serves both and fails the STAMPED
-        // attempt only when metadataColumnMissing is set (the live-table
-        // shape where the additive metadata column has not been added yet).
-        return {
-          select: () => Promise.resolve({ data: options.ledgerData ?? [], error: null }),
-          insert: (payload: Record<string, unknown>) => {
-            inserts.push(payload);
-            const missingColumn = options.metadataColumnMissing === true && 'metadata' in payload;
-            if (missingColumn) {
-              return Promise.resolve({
-                error: {
-                  code: 'PGRST204',
-                  message:
-                    "Could not find the 'metadata' column of 'universal_royalty_ledger' in the schema cache",
-                },
-              });
-            }
-            return Promise.resolve({ error: options.insertError ?? null });
-          },
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
-    },
-  };
-  return { db: db as never, inserts };
-}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -136,7 +81,7 @@ function happyDb(
     metadataColumnMissing?: boolean;
   } = {},
 ) {
-  return fakeDb({
+  return fakeEscrowDb({
     holderRow: connectedHolder,
     assetRows: [
       [
@@ -148,7 +93,9 @@ function happyDb(
         },
       ],
     ],
-    ledgerData: grossLedgerRows,
+    ledgerData: [...grossLedgerRows],
+    taxProfile: overrides.taxProfile ?? holderProfile,
+    rightsHolderId: 'rh_1',
     insertError: overrides.insertError ?? null,
     metadataColumnMissing: overrides.metadataColumnMissing,
   });

@@ -154,6 +154,18 @@ function serviceDb(options: ServiceFakeOptions = {}) {
           select: vi.fn(async () => ({ data: options.ledgerRows ?? [], error: options.ledgerError ?? null })),
         };
       }
+      if (table === 'escrow_withdrawal_intents') {
+        // fetchEscrowBalance's pending-withdrawal read (migration 0058)
+        // chains .eq() filters before awaiting; serve that shape (no holds
+        // in these fixtures).
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => Promise.resolve({ data: [], error: null }),
+            }),
+          }),
+        };
+      }
       return {
         select: vi.fn(async () => ({ data: options.assetRows ?? [], error: options.assetsError ?? null })),
       };
@@ -263,8 +275,14 @@ describe('GET /api/covnant/me', () => {
       expect(profileEntry?.columns).toContain('tax_verified');
       expect(profileEntry?.columns).toContain('bank_account_linked');
       expect(profileEntry?.eq).toEqual(['id', USER_ID]);
-      // The service-role reads hit exactly the two documented tables.
-      expect(db.from.mock.calls).toEqual([['cbt_assets'], ['universal_royalty_ledger']]);
+      // The service-role reads hit exactly the three documented tables
+      // (assets for the tax profile, the ledger, then the pending
+      // withdrawal intents the balance subtracts).
+      expect(db.from.mock.calls).toEqual([
+        ['cbt_assets'],
+        ['universal_royalty_ledger'],
+        ['escrow_withdrawal_intents'],
+      ]);
     });
 
     it('reports PROVISIONED with no reason key when the holder stores a virtual account', async () => {

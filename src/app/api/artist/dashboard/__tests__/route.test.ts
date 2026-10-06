@@ -102,7 +102,16 @@ type TableResult = { data: unknown[] | null; error: { message: string } | null }
 function fakeDb(tables: Record<string, TableResult>): ReturnType<typeof supabaseFromEnv> {
   return {
     from: (table: string) => ({
-      select: () => Promise.resolve(tables[table] ?? { data: [], error: null }),
+      select: () => {
+        const result = tables[table] ?? { data: [], error: null };
+        // fetchEscrowBalance's pending-withdrawal read (migration 0058)
+        // chains .eq() filters before awaiting; serve that shape (no holds
+        // in these fixtures).
+        if (table === 'escrow_withdrawal_intents') {
+          return { eq: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) };
+        }
+        return Promise.resolve(result);
+      },
     }),
   } as never;
 }

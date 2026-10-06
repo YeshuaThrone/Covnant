@@ -18,6 +18,12 @@
  *
  * Balance reads select ONLY the disbursements column, so this math works
  * identically before and after the optional transaction_type column DDL.
+ *
+ * Pending withdrawal intents (migration 0058) subtract from the fetched
+ * available balance like any other escrow debit: an intent-first withdrawal
+ * holds its funds from reserve until settled or released, so neither the
+ * dashboard nor a retry withdrawal can spend them in between (audit
+ * note_c5ksDgVw #4/#5).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -163,9 +169,34 @@ export function escrowBalanceForHolder(params: {
 }
 
 /**
+ * Σ pending withdrawal intents (migration 0058) for the holder — the
+ * funds currently held by intent-first withdrawals, exact BigInt from the
+ * stored unit strings. Fail closed: a failed hold read must never surface
+ * as "nothing pending".
+ */
+export async function fetchPendingWithdrawalUnits(
+  db: SupabaseClient,
+  rightsHolderId: string,
+): Promise<bigint> {
+  const { data, error } = await db
+    .from('escrow_withdrawal_intents')
+    .select('amount_units')
+    .eq('rights_holder_id', rightsHolderId)
+    .eq('status', 'pending');
+  if (error) {
+    throw new EscrowLedgerReadError(`Pending withdrawal read failed: ${error.message}`);
+  }
+  return (data ?? []).reduce(
+    (sum, row) => sum + BigInt((row as { amount_units: string }).amount_units),
+    0n,
+  );
+}
+
+/**
  * Canonical ledger read behind both routes: select ONLY the disbursements
- * column (never transaction_type), then run the shared math. Injected client
- * keeps this module free of environment reads; failures fail closed.
+ * column (never transaction_type), then run the shared math, then subtract
+ * the holder's pending withdrawal intents (the intent-first holds). Injected
+ * client keeps this module free of environment reads; failures fail closed.
  */
 export async function fetchEscrowBalance(
   db: SupabaseClient,
@@ -181,7 +212,12 @@ export async function fetchEscrowBalance(
       ? (row as { disbursements: unknown[] }).disbursements
       : [],
   );
-  return escrowBalanceForHolder({ disbursementsByRow: rows, rightsHolderId, taxProfile });
+  const balance = escrowBalanceForHolder({ disbursementsByRow: rows, rightsHolderId, taxProfile });
+  const pendingWithdrawalUnits = await fetchPendingWithdrawalUnits(db, rightsHolderId);
+  return {
+    ...balance,
+    availableUnits: balance.availableUnits - pendingWithdrawalUnits,
+  };
 }
 
 /**
