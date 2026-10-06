@@ -348,6 +348,11 @@ export async function calculateUdrSplits(
           // row with this run so the reversal (and this saga's own failure
           // compensation) can attribute and negate exactly these rows.
           split_run_id: splitRun.id,
+          // The replay key (migration 0060 / audit #12): a retried apply of
+          // the SAME (run, line item, party) returns the stored escrow
+          // effect instead of double-withholding. Distinct line items stay
+          // distinct effects — the key carries the item id.
+          idempotency_key: `udr_split:${splitRun.id}:${storedItem.id}:${party.payee_id}`,
         });
         withholding.push(taxed.value.escrow);
         creditAmount = taxed.value.net_cents;

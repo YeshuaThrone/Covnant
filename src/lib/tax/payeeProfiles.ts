@@ -16,6 +16,11 @@
 
 import { UCT_DEMO_IDENTITIES } from '@/lib/master/masterStore';
 import type { PayeeTaxProfile, TaxFormClassification, TaxTinStatus } from './CovnantTaxComplianceSDK';
+import {
+  failClosedPayeeProfile,
+  profileFromDemoBranch,
+  toPayeeTaxProfile,
+} from './profileOfRecord';
 
 /** The compliance fields a profile adds to a payee's identity of record. */
 export interface PayeeTaxBranch {
@@ -131,16 +136,12 @@ export function payeeTaxProfileFor(
   const identityKey = identityKeyFromPayeeId(payeeId);
   const identity = UCT_DEMO_IDENTITIES[identityKey];
   const branch = DEMO_PAYEE_TAX_BRANCHES[identityKey];
-  return {
-    payeeId,
-    payeeName: identity?.name ?? payeeName,
-    ...(branch ?? {
-      countryCode: 'US',
-      tinStatus: 'UNSUBMITTED',
-      formType: '1099_MISC',
-      usResident: true,
-      treatyClaimActive: false,
-    }),
-    ytdClearedGrossUSD,
-  };
+  // The profile of record (audit #10): the demo door's branch when one is
+  // assigned, the fail-closed default otherwise — built by the registry
+  // module and projected into the founder engine's vocabulary. Outputs are
+  // identical to the pre-registry inline construction.
+  const profile = branch
+    ? profileFromDemoBranch(identityKey, branch)
+    : failClosedPayeeProfile(identityKey);
+  return toPayeeTaxProfile(profile, payeeId, identity?.name ?? payeeName, ytdClearedGrossUSD);
 }

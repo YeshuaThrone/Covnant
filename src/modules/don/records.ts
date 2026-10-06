@@ -42,6 +42,15 @@ export type TaxEscrowRecord = {
    * predating 0059.
    */
   split_run_id?: string | null;
+  /**
+   * The withholding idempotency key (migration 0060, audit note_c5ksDgVw
+   * #12) — stamped by applyWithholding when the caller supplies one. A
+   * replay with the same key returns this stored row instead of booking a
+   * second withholding; the unique index tax_escrow_idempotency_key_unique
+   * arbitrates the concurrent-replay race. Null for callers without a key
+   * (the vertical settlement engines) and for rows predating 0060.
+   */
+  idempotency_key?: string | null;
 };
 
 export type SovereignVaultRecord = {

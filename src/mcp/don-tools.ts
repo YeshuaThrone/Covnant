@@ -279,7 +279,7 @@ export const DON_MCP_TOOLS: readonly McpToolDescriptor[] = [
   {
     name: "withholding_apply",
     description:
-      "POST /api/v1/compliance/withholding — 24% backup tax when TIN/W-9 is unverified.",
+      "POST /api/v1/compliance/withholding — 24% backup tax when TIN/W-9 is unverified. Pass idempotency_key to make replays return the stored effect instead of double-withholding.",
     inputSchema: {
       type: "object",
       properties: {
@@ -288,6 +288,7 @@ export const DON_MCP_TOOLS: readonly McpToolDescriptor[] = [
         tax_year: { type: "number" },
         tin_verified: { type: "boolean" },
         w9_on_file: { type: "boolean" },
+        idempotency_key: { type: "string" },
       },
       required: ["creator_id", "gross_cents"],
     },
@@ -520,6 +521,7 @@ export class DonMcpToolHost {
               tax_year: checked.value.tax_year ?? new Date().getUTCFullYear(),
               tin_verified: checked.value.tin_verified,
               w9_on_file: checked.value.w9_on_file,
+              idempotency_key: checked.value.idempotency_key,
             }),
           );
         }

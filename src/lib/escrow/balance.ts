@@ -28,12 +28,17 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  CovenantTaxEngine,
   type DisbursementDetail,
   type SelfServeRightsHolder,
   type TaxProfile,
 } from '@/engine/covenant-master-sdk';
 import { FixedPointParseError, MICRO_SCALE, microFromNumber } from '@/lib/fixed-point';
+import {
+  effectiveWithholdingRateOf,
+  profileFromRightsHolderTaxProfile,
+  toEngineTaxProfile,
+  unverifiedForeignFallbackProfile,
+} from '@/lib/tax/profileOfRecord';
 
 /** Thrown when the ledger read behind a balance computation fails. Fail closed: an escrow error must never surface as a zero (or stale) balance. */
 export class EscrowLedgerReadError extends Error {
@@ -70,12 +75,15 @@ export interface EscrowBalance {
 }
 
 /**
- * Engine tax rate for the holder's profile on US territory (the locked
- * dashboard territory): unverified US → 0.24, unverified foreign → 0.30,
- * verified → 0 unless backup withholding applies, foreign verified → treaty.
+ * THE profile of record's rate of record for a rights-holder tax profile —
+ * the vendored engine's locked calculation, reached through the unified
+ * registry (audit note_c5ksDgVw #10) so every escrow consumer resolves the
+ * same rate from the same record. The registry's adapters preserve the
+ * locked semantics exactly: unverified US 24%, unverified foreign 30%,
+ * verified US exempt, verified foreign treaty rate.
  */
 export function taxRateForProfile(profile: TaxProfile): number {
-  return CovenantTaxEngine.calculateEffectiveTaxRate(profile, 'US');
+  return effectiveWithholdingRateOf(profileFromRightsHolderTaxProfile(profile));
 }
 
 /**
@@ -243,17 +251,14 @@ export function findRightsHolder(assetRows: unknown[], rightsHolderId: string): 
 }
 
 /**
- * Conservative fallback when a rights holder carries no tax profile on any
- * asset: an unverified foreign profile → the engine's mandatory 30% US
- * withholding. Compliance errs toward withholding more, never less.
+ * The fail-closed profile for a rights holder on NO asset — an unverified
+ * foreign profile so the engine charges the mandatory 30%: compliance errs
+ * toward withholding more, never less. Built by the profile-of-record
+ * registry (the single place the fallback is defined, audit #10).
  */
-export const UNVERIFIED_FALLBACK_TAX_PROFILE: TaxProfile = {
-  taxFormType: 'W8BEN_FOREIGN_INDIVIDUAL',
-  taxIdentifierEncrypted: '',
-  usTaxResident: false,
-  isBackupWithholdingRequired: false,
-  isVerified: false,
-};
+export const UNVERIFIED_FALLBACK_TAX_PROFILE: TaxProfile = toEngineTaxProfile(
+  unverifiedForeignFallbackProfile(),
+);
 
 /**
  * Plaid boundary conversion: smallest ledger units → Plaid's 2-decimal

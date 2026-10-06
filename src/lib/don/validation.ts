@@ -564,7 +564,16 @@ export type WithholdingPayload = {
   tax_year: number | null;
   tin_verified?: boolean;
   w9_on_file?: boolean;
+  /**
+   * The withholding idempotency key (migration 0060, audit #12) — passed
+   * through to applyWithholding. Optional: absent means the caller accepts
+   * no replay protection (the vertical settlement engines' posture).
+   */
+  idempotency_key?: string;
 };
+
+/** Keys are compared byte-exact for replay detection — never truncated, so over-long keys fail rather than silently collide. */
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 
 export function validateWithholdingPayload(
   input: unknown,
@@ -595,6 +604,20 @@ export function validateWithholdingPayload(
   }
   if (typeof input.w9_on_file === "boolean") {
     value.w9_on_file = input.w9_on_file;
+  }
+  if (input.idempotency_key !== undefined && input.idempotency_key !== null) {
+    if (typeof input.idempotency_key !== "string") {
+      return fail("invalid_idempotency_key");
+    }
+    const idempotencyKey = input.idempotency_key.trim();
+    // An empty key means the caller sends no key; anything else must fit
+    // whole — a silently truncated key could equal ANOTHER payment's key.
+    if (idempotencyKey.length > 0) {
+      if (idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+        return fail("invalid_idempotency_key");
+      }
+      value.idempotency_key = idempotencyKey;
+    }
   }
   return { ok: true, value };
 }

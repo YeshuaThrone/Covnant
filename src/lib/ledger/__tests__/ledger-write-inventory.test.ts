@@ -510,6 +510,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // sagas can attribute (and unwind) their escrow rows. Still no DDL
       // on universal_royalty_ledger — the referencing pin below holds.
       '0059_tax_escrow_run_linkage.sql',
+      // Withholding idempotency (audit note_c5ksDgVw #12): a nullable
+      // tax_escrow_ledger.idempotency_key + partial unique index so a
+      // replayed applyWithholding books ONE effect. Still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0060_tax_escrow_idempotency_key.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -4790,9 +4790,34 @@ export class InMemoryStore implements Store {
   }
 
   async insertTaxEscrow(row: Omit<TaxEscrowRecord, 'id'>): Promise<TaxEscrowRecord> {
-    const record: TaxEscrowRecord = { ...row, id: randomUUID() };
+    // Parity with the SQL stores' tax_escrow_idempotency_key_unique index
+    // (migration 0060, audit #12): a keyed insert that collides throws the
+    // same vocabulary of error, so the engine's duplicate classification
+    // behaves identically across all three stores.
+    if (row.idempotency_key !== undefined && row.idempotency_key !== null) {
+      const collision = this.taxEscrow.some(
+        (existing) => existing.idempotency_key === row.idempotency_key,
+      );
+      if (collision) {
+        throw new Error(
+          `duplicate key value violates unique constraint "tax_escrow_idempotency_key_unique"`,
+        );
+      }
+    }
+    const record: TaxEscrowRecord = {
+      ...row,
+      idempotency_key: row.idempotency_key ?? null,
+      id: randomUUID(),
+    };
     this.taxEscrow.push(record);
     return record;
+  }
+
+  /** The escrow row carrying one withholding idempotency key (migration 0060 / audit #12). */
+  async getTaxEscrowByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<TaxEscrowRecord | undefined> {
+    return this.taxEscrow.find((row) => row.idempotency_key === idempotencyKey);
   }
 
   async listTaxEscrowByCreator(
