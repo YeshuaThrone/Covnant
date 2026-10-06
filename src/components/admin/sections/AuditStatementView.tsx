@@ -102,7 +102,7 @@ export function AuditStatementView({
           </p>
         ) : null}
       </div>
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-50">Settlement audit statement</h1>
+      <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-50 md:text-4xl">Settlement audit statement</h1>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/50">
         The itemized record of one payee&apos;s cleared settlements for the stated window — every figure below derives
         from the GL journals, split runs, line items, and ledger transactions through the real store paths. “Not on

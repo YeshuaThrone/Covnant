@@ -79,7 +79,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
           <p className="font-mono text-xs uppercase tracking-[0.35em] text-gold-champagne">
             Covnant Operator Console
           </p>
-          <h1 className="mt-3 text-3xl font-semibold">
+          <h1 className="mt-3 text-3xl font-semibold md:text-4xl">
             <span className="bg-gradient-to-r from-gold-champagne to-gold bg-clip-text text-transparent">
               Covnant operations
             </span>

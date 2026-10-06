@@ -47,13 +47,13 @@ export default async function AssetsPage({
   const assets = await listAssets();
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-16">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
             Covenant Block Vault
           </p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#F2F4F8]">Assets</h1>
+          <h1 className="mt-2 text-3xl font-semibold text-[#F2F4F8] md:text-4xl">Assets</h1>
           <p className="mt-2 text-sm text-white/50">
             Every registered Covenant Block asset with its multi-pool split sheet.
           </p>
