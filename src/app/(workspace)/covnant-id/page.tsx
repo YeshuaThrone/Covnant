@@ -53,7 +53,7 @@ export default async function CovnantIdPage() {
           Your Universal Covnant Tag lives behind your sign-in.
         </p>
         <Link
-          href="/"
+          href="/dashboard"
           className="mt-6 inline-flex items-center rounded-full border border-gold/40 bg-gold/10 px-4 py-2 text-sm font-semibold text-gold-champagne transition-colors hover:bg-gold/20"
         >
           Go to the Gold Board

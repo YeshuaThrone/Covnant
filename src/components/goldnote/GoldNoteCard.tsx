@@ -504,12 +504,12 @@ export function GoldNoteCard({
 
         <a
           data-testid="goldnote-transactions-link"
-          href="/ledger"
+          href="/transactions"
           className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-white/[0.02] p-4 transition-colors hover:border-gold/40"
         >
           <span className="text-sm text-slate-200">Transactions &amp; History</span>
           <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-gold-champagne">
-            Open ledger →
+            Open transactions →
           </span>
         </a>
       </section>
