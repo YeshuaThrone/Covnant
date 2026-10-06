@@ -70,10 +70,10 @@ describe('AuditStatementView — the identity block', () => {
     expect(html).toMatch(/data-testid="audit-statement-payee"[^>]*>rh_one</);
   });
 
-  it('renders the honest dash for an absent UCT or ISNI — never a placeholder value', () => {
+  it('renders the honest no-data copy for an absent UCT or ISNI — never a placeholder value', () => {
     const html = render(flows({ uctNumber: null, isni: null }));
-    expect(html).toMatch(/data-testid="audit-statement-uct"[^>]*>—</);
-    expect(html).toMatch(/data-testid="audit-statement-isni"[^>]*>—</);
+    expect(html).toMatch(/data-testid="audit-statement-uct"[^>]*>Not on file</);
+    expect(html).toMatch(/data-testid="audit-statement-isni"[^>]*>Not on file</);
   });
 
   it('renders each bounded window in operator language', () => {

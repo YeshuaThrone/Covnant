@@ -81,7 +81,7 @@ export function AdminConsole({ data }: { data: AdminConsoleData }) {
           </p>
           <h1 className="mt-3 text-3xl font-semibold">
             <span className="bg-gradient-to-r from-gold-champagne to-gold bg-clip-text text-transparent">
-              Covenant operations
+              Covnant operations
             </span>
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-white/50">

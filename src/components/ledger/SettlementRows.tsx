@@ -20,9 +20,16 @@ import type { RegistryPill } from '@/lib/assets/registry-keys';
 /** Ledger rows ride with their asset's registry pills (Black Box Shield). */
 type LedgerRowWithRegistry = LedgerRow & { registry: RegistryPill[] };
 
+/** The reconciliation engine's status vocabulary, in the cell's voice —
+ * unknown statuses pass through exactly as the engine wrote them. */
+const RECONCILIATION_STATUS_LABELS: Record<string, string> = {
+  PASS: 'Passed',
+  DRIFT: 'Drift',
+};
+
 function StatusCell({ status }: { status: string | undefined }) {
   if (status === undefined) {
-    return <span className="font-mono text-[10px] uppercase text-white/30">—</span>;
+    return <span className="font-mono text-[10px] uppercase text-white/30">Not reconciled</span>;
   }
   const pass = status === 'PASS';
   return (
@@ -33,7 +40,7 @@ function StatusCell({ status }: { status: string | undefined }) {
           : 'border-amber-300/40 text-amber-300'
       }`}
     >
-      {status}
+      {RECONCILIATION_STATUS_LABELS[status] ?? status}
     </span>
   );
 }

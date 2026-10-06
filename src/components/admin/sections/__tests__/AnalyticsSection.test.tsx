@@ -218,8 +218,8 @@ describe('analytics presentation helpers', () => {
     expect(byGross[0]?.runId).toBe('run-big');
   });
 
-  it('voices momentum honestly — dash for no prior point, true sign both ways', () => {
-    expect(formatMomentumPercent(null)).toBe('—');
+  it('voices momentum honestly — no-prior-window copy for a null point, true sign both ways', () => {
+    expect(formatMomentumPercent(null)).toBe('No prior window');
     expect(formatMomentumPercent(0)).toBe('0%');
     expect(formatMomentumPercent(1245)).toBe('+1,245%');
     expect(formatMomentumPercent(-42)).toBe('−42%');

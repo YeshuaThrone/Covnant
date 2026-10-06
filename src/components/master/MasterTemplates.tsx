@@ -26,6 +26,13 @@ import {
   type SovereignAtomicEntity,
 } from '@/lib/master/CovnantAtomicDataSDK';
 import { formatCents, formatUsdAmount } from '@/lib/money/format';
+import { CLASS_LABELS } from '@/components/admin/sections/IntelligenceSection';
+
+/** Canonical entity-class label — the one map the admin surfaces already
+ * speak; unknown values pass through exactly as the store carries them. */
+function entityClassLabel(value: string): string {
+  return value in CLASS_LABELS ? CLASS_LABELS[value as keyof typeof CLASS_LABELS] : value;
+}
 
 /** Execution status chip — the two canon states, distinct voices. */
 export function ExecutionStatusChip({ status }: { status: TemplateExecutionStatus }): React.JSX.Element {
@@ -304,7 +311,7 @@ export function AtomicTemplateCard({
         <AtomicSectorChip sector={record.atomicSector} />
       </div>
       <p className="mt-2 text-sm text-white/50">
-        {record.entityType}
+        {entityClassLabel(record.entityType)}
         <br />
         {record.telemetryMetric}
       </p>
