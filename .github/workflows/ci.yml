@@ -923,7 +923,7 @@ jobs:
           # one wins (the pre-fix code let every reader pass the same check).
           $PSQL -c "update escrow_withdrawal_intents set status='released', released_at=now() where id='ci_intent_1'"
           for i in 1 2 3 4 5 6; do
-            $PSQL -c "select (reserve_escrow_withdrawal('ci_race_'\"$i\"', 'probe_rh', 152000000, 0.24) ->> 'reserved')" > "/tmp/race_$i.out" 2>&1 &
+            $PSQL -c "select (reserve_escrow_withdrawal('ci_race_$i', 'probe_rh', 152000000, 0.24) ->> 'reserved')" > "/tmp/race_$i.out" 2>&1 &
           done
           wait
           wins=$(grep -c '^true$' /tmp/race_*.out | awk -F: '{s+=$2} END {print s}')
