@@ -1152,6 +1152,29 @@ export class SupabaseStore implements Store {
     );
   }
 
+  /**
+   * Guard-first atomic transition (audit #13): PostgREST cannot express
+   * rowcount, but a conditional UPDATE ... SELECT returns exactly the rows
+   * it moved — an empty array is the lost race, the same signal the SQLite
+   * `changes === 1` check gives.
+   */
+  async transitionSplitRunStatus(
+    id: string,
+    from: SplitRunRecord['status'],
+    to: SplitRunRecord['status'],
+  ): Promise<boolean> {
+    const rows = await this.many<SplitRunRecord>(
+      this.client
+        .from(TABLES.splitRuns)
+        .update({ status: to })
+        .eq('id', id)
+        .eq('status', from)
+        .select(),
+      'transitionSplitRunStatus',
+    );
+    return rows.length === 1;
+  }
+
   async insertRoyaltyLineItem(
     row: Omit<RoyaltyLineItemRecord, 'id'>,
   ): Promise<RoyaltyLineItemRecord> {
@@ -7183,6 +7206,19 @@ export class SupabaseStore implements Store {
         .order('created_at', { ascending: true })
         .order('insertion_order', { ascending: true }),
       'listTaxEscrowByCreator',
+    );
+  }
+
+  /** Escrow rows stamped for one split run (migration 0059 / audit #7). */
+  async listTaxEscrowByRun(splitRunId: string): Promise<TaxEscrowRecord[]> {
+    return this.many<TaxEscrowRecord>(
+      this.client
+        .from(TABLES.taxEscrow)
+        .select()
+        .eq('split_run_id', splitRunId)
+        .order('created_at', { ascending: true })
+        .order('insertion_order', { ascending: true }),
+      'listTaxEscrowByRun',
     );
   }
 

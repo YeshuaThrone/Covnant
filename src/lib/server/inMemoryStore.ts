@@ -1094,6 +1094,23 @@ export class InMemoryStore implements Store {
     return row;
   }
 
+  /**
+   * Atomic guard-first transition (audit #13): one synchronous
+   * check-and-set with no await inside — like incrementCreatorYtd above,
+   * the event loop can only interleave callers BETWEEN whole transitions,
+   * which is the same single-statement guarantee the SQL stores give.
+   */
+  transitionSplitRunStatus(
+    id: string,
+    from: SplitRunRecord['status'],
+    to: SplitRunRecord['status'],
+  ): Promise<boolean> {
+    const row = this.splitRuns.get(id);
+    if (row === undefined || row.status !== from) return Promise.resolve(false);
+    row.status = to;
+    return Promise.resolve(true);
+  }
+
   async insertRoyaltyLineItem(
     row: Omit<RoyaltyLineItemRecord, 'id'>,
   ): Promise<RoyaltyLineItemRecord> {
@@ -4786,6 +4803,15 @@ export class InMemoryStore implements Store {
       this.taxEscrow.filter(
         (row) => row.creator_id === creatorId && row.tax_year === taxYear,
       ),
+      (row) => row.created_at,
+      'asc',
+    );
+  }
+
+  /** Escrow rows stamped for one split run (migration 0059 / audit #7). */
+  async listTaxEscrowByRun(splitRunId: string): Promise<TaxEscrowRecord[]> {
+    return sortByTime(
+      this.taxEscrow.filter((row) => row.split_run_id === splitRunId),
       (row) => row.created_at,
       'asc',
     );

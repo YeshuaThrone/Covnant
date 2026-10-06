@@ -17,6 +17,13 @@ export type ApplyWithholdingInput = {
   tax_year: number;
   tin_verified?: boolean;
   w9_on_file?: boolean;
+  /**
+   * The split run whose settlement this withholding belongs to (migration
+   * 0059) — stamped on the escrow row so the reversal unwind (audit #7)
+   * and failed-saga compensation (audit #6) can attribute it. Omitted by
+   * callers without a run; the row is stored with null.
+   */
+  split_run_id?: string;
 };
 
 export function resolveTinStatus(
@@ -83,6 +90,7 @@ export async function applyWithholding(
     requires_1099: computation.requires_1099 ? 1 : 0,
     crossed_1099_threshold: computation.crossed_1099_threshold ? 1 : 0,
     created_at: createdAt,
+    split_run_id: input.split_run_id ?? null,
   });
   return {
     ok: true as const,

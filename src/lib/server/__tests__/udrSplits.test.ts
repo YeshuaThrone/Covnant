@@ -296,3 +296,79 @@ describe("calculateUdrSplits — validation failures", () => {
     }
   });
 });
+
+// Audit #6: the saga used to return its failure envelope with every write
+// still live — line items, ledger rows, vault credits, escrow, YTD — while
+// the GL never got the journal, so the vaults and the GL disagreed. The
+// failed saga must compensate the external world completely.
+describe("calculateUdrSplits — mid-saga journal failure", () => {
+  class ThrowingChainStore extends InMemoryStore {
+    /** Split runs the saga wrote ledger rows for (for GL assertions). */
+    seenRunIds: string[] = [];
+    private chainCalls = 0;
+
+    override async insertLedgerTransaction(
+      row: Parameters<InMemoryStore["insertLedgerTransaction"]>[0],
+    ) {
+      this.seenRunIds.push(row.split_run_id);
+      return super.insertLedgerTransaction(row);
+    }
+
+    override async getLatestGlJournal() {
+      this.chainCalls += 1;
+      if (this.chainCalls === 1) {
+        // The first chain read is the saga's postJournal — kill the journal
+        // write the way a real store failure would (bounded retry
+        // exhausted, insert rejected).
+        throw new Error("boom: journal write rejected");
+      }
+      return super.getLatestGlJournal();
+    }
+  }
+
+  it("leaves zero partial state — vaults and GL agree", async () => {
+    const store = new ThrowingChainStore();
+    await seedVault(store, "creator_1", 0, 0, 0, "Creator One");
+    await seedVault(store, COMPANY_VARIANCE_PAYEE_ID, 0, 0, 0, "Don Engine Variance");
+    // Unverified TIN → backup withholding, so the reserve credit is live
+    // alongside the pending credit and both must be walked back.
+    await store.upsertCreatorTaxProfile({
+      creator_id: "creator_1",
+      tin_verified: 0,
+      w9_on_file: 0,
+      updated_at: NOW.toISOString(),
+    });
+
+    const result = await calculateUdrSplits(store, input());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(500);
+    expect(result.code).toBe("journal_write_failed");
+    expect(result.message).toContain("Saga writes fully compensated.");
+
+    // The GL never got the journal — and no vault cent survived either.
+    expect(store.seenRunIds.length).toBeGreaterThan(0);
+    for (const runId of store.seenRunIds) {
+      expect(await store.listGlJournalsByRef("split_run", runId)).toHaveLength(0);
+    }
+
+    // Vault credits compensated: net (pending), withheld (reserve), and the
+    // platform's share are all back to seed state.
+    const creator = await store.getVault("creator_1");
+    expect(creator?.pending_balance).toBe(0); // 7,220 net credit walked back
+    expect(creator?.reserve_balance).toBe(0); // 2,280 withheld walked back
+    const platform = await store.getVault(COMPANY_VARIANCE_PAYEE_ID);
+    expect(platform?.pending_balance).toBe(0); // 500 share walked back
+
+    // Tax trail compensated: YTD back to zero on both totals.
+    const ytd = await store.getCreatorYtd("creator_1", NOW.getUTCFullYear());
+    expect(ytd?.gross_cents).toBe(0);
+    expect(ytd?.withheld_cents).toBe(0);
+
+    // Escrow trail nets to zero (original + compensating rows).
+    const escrow = await store.listTaxEscrowByCreator("creator_1", NOW.getUTCFullYear());
+    expect(escrow).toHaveLength(2);
+    expect(escrow.reduce((s, row) => s + row.gross_cents, 0)).toBe(0);
+    expect(escrow.reduce((s, row) => s + row.withheld_cents, 0)).toBe(0);
+  });
+});

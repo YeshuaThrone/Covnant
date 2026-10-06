@@ -551,7 +551,8 @@ CREATE TABLE IF NOT EXISTS tax_escrow_ledger (
   w9_on_file INTEGER NOT NULL,
   requires_1099 INTEGER NOT NULL,
   crossed_1099_threshold INTEGER NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  split_run_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sovereign_vaults (
@@ -5801,6 +5802,17 @@ export class SqliteStore implements Store {
     this.db.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS split_runs_idempotency_key_unique ON split_runs (idempotency_key)`,
     );
+
+    // 0059 — tax_escrow_ledger.split_run_id (audit note_c5ksDgVw #7): the
+    // attribution key the reversal unwind lists escrow rows by. Mirrors the
+    // Supabase migration for pre-0059 SQLite databases.
+    const escrowColumns0059 = columnsOf('tax_escrow_ledger');
+    if (!escrowColumns0059.has('split_run_id')) {
+      this.db.exec(`ALTER TABLE tax_escrow_ledger ADD COLUMN split_run_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_tax_escrow_run ON tax_escrow_ledger (split_run_id)`,
+    );
   }
 
   async insertShow(show: ValidShowPayload): Promise<ShowRecord> {
@@ -6065,6 +6077,18 @@ export class SqliteStore implements Store {
   ): Promise<SplitRunRecord | undefined> {
     this.db.prepare(`UPDATE split_runs SET status = ? WHERE id = ?`).run(status, id);
     return this.getSplitRun(id);
+  }
+
+  /** Guard-first atomic transition (audit #13): one conditional UPDATE. */
+  transitionSplitRunStatus(
+    id: string,
+    from: SplitRunRecord['status'],
+    to: SplitRunRecord['status'],
+  ): Promise<boolean> {
+    const result = this.db
+      .prepare(`UPDATE split_runs SET status = ? WHERE id = ? AND status = ?`)
+      .run(to, id, from);
+    return Promise.resolve(result.changes === 1);
   }
 
   async insertRoyaltyLineItem(
@@ -11330,15 +11354,21 @@ export class SqliteStore implements Store {
   }
 
   async insertTaxEscrow(row: Omit<TaxEscrowRecord, 'id'>): Promise<TaxEscrowRecord> {
-    const record: TaxEscrowRecord = { ...row, id: randomUUID() };
+    const record: TaxEscrowRecord = {
+      ...row,
+      split_run_id: row.split_run_id ?? null,
+      id: randomUUID(),
+    };
     this.db
       .prepare(
         `INSERT INTO tax_escrow_ledger (
            id, creator_id, tax_year, gross_cents, withheld_cents, net_cents,
-           tin_verified, w9_on_file, requires_1099, crossed_1099_threshold, created_at
+           tin_verified, w9_on_file, requires_1099, crossed_1099_threshold, created_at,
+           split_run_id
          ) VALUES (
            @id, @creator_id, @tax_year, @gross_cents, @withheld_cents, @net_cents,
-           @tin_verified, @w9_on_file, @requires_1099, @crossed_1099_threshold, @created_at
+           @tin_verified, @w9_on_file, @requires_1099, @crossed_1099_threshold, @created_at,
+           @split_run_id
          )`,
       )
       .run(record);
@@ -11354,6 +11384,19 @@ export class SqliteStore implements Store {
          ORDER BY created_at ASC, rowid ASC`,
         )
         .all(creatorId, taxYear) as TaxEscrowRecord[],
+    );
+  }
+
+  /** Escrow rows stamped for one split run (migration 0059 / audit #7). */
+  async listTaxEscrowByRun(splitRunId: string): Promise<TaxEscrowRecord[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT * FROM tax_escrow_ledger
+         WHERE split_run_id = ?
+         ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(splitRunId) as TaxEscrowRecord[],
     );
   }
 

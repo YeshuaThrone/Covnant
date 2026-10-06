@@ -505,6 +505,11 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // escrow_withdrawal_intents table + reserve RPC; still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0058_escrow_withdrawal_intents.sql',
+      // Tax-audit run linkage (audit note_c5ksDgVw #7/#6): nullable
+      // tax_escrow_ledger.split_run_id + index so reversals and failed
+      // sagas can attribute (and unwind) their escrow rows. Still no DDL
+      // on universal_royalty_ledger — the referencing pin below holds.
+      '0059_tax_escrow_run_linkage.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

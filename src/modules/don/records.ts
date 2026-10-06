@@ -34,6 +34,14 @@ export type TaxEscrowRecord = {
   requires_1099: number;
   crossed_1099_threshold: number;
   created_at: string;
+  /**
+   * The split run whose settlement created this row (migration 0059) — the
+   * key the reversal unwind (audit #7) and failed-saga compensation (audit
+   * #6) attribute escrow rows by. Null for callers without a run (the
+   * withholding route and the vertical settlement engines) and for rows
+   * predating 0059.
+   */
+  split_run_id?: string | null;
 };
 
 export type SovereignVaultRecord = {
