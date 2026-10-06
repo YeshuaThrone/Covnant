@@ -1167,3 +1167,16 @@ jobs:
           # Throwaway e2e password — deliberately NOT the production secret.
           # The production ADMIN_DASHBOARD_PASSWORD is set in Vercel after merge.
           ADMIN_DASHBOARD_PASSWORD: e2e-admin-test-password
+
+      # A single e2e failure (asset-studio MUL registration) hung at
+      # waitForURL three times on CI while passing every local run — the
+      # page snapshot and trace in test-results/ are the only way to see
+      # what the page actually showed. Upload them whenever the suite fails.
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-evidence
+          path: test-results/
+          retention-days: 7
+
