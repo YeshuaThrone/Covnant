@@ -34,7 +34,13 @@ const INPUT_CLASS =
   'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 const BUTTON_BASE_CLASS =
-  'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+  'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
+
+/* The keyboard focus ring is the audit fix: the champagne focus-visible
+ * outline matches the zone's inputs and consent checkbox. Appended last so
+ * the rest-state pin (e2e/brand.spec.ts) reads base, state, then ring. */
+const BUTTON_FOCUS_CLASS =
+  'focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 /* The signup response-state lines — the statement voice of the composition,
  * in the same slot. No boxes, no error chrome: the design language of the
@@ -136,6 +142,7 @@ export function EntryZones() {
     isSubmitting
       ? 'cursor-wait text-gold-champagne/50'
       : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne',
+    BUTTON_FOCUS_CLASS,
   ].join(' ');
 
   return (
