@@ -15,6 +15,11 @@ import { adminPageView } from '@/lib/admin/console';
 import { AdminGate } from '@/components/admin/AdminGate';
 import { RegistryAdminDashboard } from '@/components/admin/sections/RegistryAdminDashboard';
 
+export const metadata = {
+  title: 'Rights Holder Registry — Covnant',
+  description: 'Rights holder registry and UCT provisioning behind the operator gate.',
+};
+
 const NOT_CONFIGURED_NOTICE =
   'The admin console is not configured. Set the ADMIN_DASHBOARD_PASSWORD environment variable to enable operator access.';
 

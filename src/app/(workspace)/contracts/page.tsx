@@ -17,6 +17,12 @@ import {
 } from '@/components/master/MasterData';
 import { AuditRunner } from '@/components/vault/AuditRunner';
 
+export const metadata = {
+  title: 'Master Contract Data — Covnant',
+  description:
+    'Master contract data across every vertical — templates, executions, and settlement runs.',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function ContractsPage({
@@ -89,7 +95,7 @@ export default async function ContractsPage({
                   href={`/contracts/new?template=${template.id}`}
                   className="glass-card flex h-full flex-col p-5 transition hover:border-gold/40"
                 >
-                  <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#D4AF37]">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-gold">
                     {CATEGORY_LABELS[template.category]}
                   </span>
                   <span className="mt-2 font-medium text-white">{template.name}</span>

@@ -13,6 +13,12 @@ import {
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
 
+export const metadata = {
+  title: 'Covenant Block Catalog — Covnant',
+  description:
+    'The master catalog of Covenant Block agreements across the seven entertainment verticals.',
+};
+
 export const dynamic = 'force-dynamic';
 
 /**

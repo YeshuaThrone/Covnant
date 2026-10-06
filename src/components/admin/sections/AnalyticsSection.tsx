@@ -151,9 +151,9 @@ export function nextGameLogSort(current: GameLogSort, key: GameLogSortKey): Game
   return { key, dir: 'desc' };
 }
 
-/** Momentum as the cell's voice — '+' gains, a true minus sign for losses, a dash for no prior point. */
+/** Momentum as the cell's voice — '+' gains, a true minus sign for losses, plain no-prior-window copy otherwise. */
 export function formatMomentumPercent(momentum: number | null): string {
-  if (momentum === null) return '—';
+  if (momentum === null) return 'No prior window';
   if (momentum === 0) return '0%';
   const sign = momentum > 0 ? '+' : '−';
   const grouped = Math.abs(momentum).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -388,7 +388,7 @@ export function CompanyAnalyticsView({
         <KpiCard
           testid="analytics-kpi-avg-run"
           label="Avg run"
-          value={kpis.avgRunCents === null ? '—' : formatCentsBigint(kpis.avgRunCents)}
+          value={kpis.avgRunCents === null ? 'None yet' : formatCentsBigint(kpis.avgRunCents)}
           note={kpis.avgRunCents === null ? 'No runs cleared yet' : 'Per-run average'}
         />
       </div>
@@ -487,7 +487,7 @@ export function CompanyAnalyticsView({
                     </td>
                     <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId}</td>
                     <td className="py-2 pr-3 text-sm text-slate-300">{classLabelOf(row.classLabel)}</td>
-                    <td className="py-2 pr-3 font-mono text-sm text-white/50">{cohortRankLabel(readouts, row.entityId) ?? '—'}</td>
+                    <td className="py-2 pr-3 font-mono text-sm text-white/50">{cohortRankLabel(readouts, row.entityId) ?? 'Not ranked'}</td>
                     <td className="py-2 pr-3 font-mono text-sm text-slate-100">{row.runCount}</td>
                     <td className="py-2 pr-3 font-mono text-sm text-gold-champagne">{formatCentsBigint(row.grossCents)}</td>
                     <td className="py-2 pr-3 font-mono text-sm text-slate-100">{formatCentsBigint(row.creatorPaidCents)}</td>
@@ -546,11 +546,11 @@ export function CompanyAnalyticsView({
                 {gameLogRows.map((row, index) => (
                   <tr key={row.runId ?? `${row.day}-${row.entityId}-${index}`} data-testid="analytics-gamelog-row" className="border-b border-slate-600/30">
                     <td className="py-2 pr-3 font-mono text-sm text-slate-300">{row.day}</td>
-                    <td className="py-2 pr-3 font-mono text-xs text-white/40">{row.runId ?? '—'}</td>
-                    <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? '—'}</td>
-                    <td className="py-2 pr-3 text-sm text-slate-300">{row.classLabel === null ? '—' : classLabelOf(row.classLabel)}</td>
-                    <td className="py-2 pr-3 text-sm text-slate-300">{row.flowKind === null ? '—' : flowKindLabel(row.flowKind)}</td>
-                    <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? '—'}</td>
+                    <td className="py-2 pr-3 font-mono text-xs text-white/40">{row.runId ?? 'Not on file'}</td>
+                    <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? 'Not on file'}</td>
+                    <td className="py-2 pr-3 text-sm text-slate-300">{row.classLabel === null ? 'Not on file' : classLabelOf(row.classLabel)}</td>
+                    <td className="py-2 pr-3 text-sm text-slate-300">{row.flowKind === null ? 'Not on file' : flowKindLabel(row.flowKind)}</td>
+                    <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? 'Not on file'}</td>
                     <HeatCell heat={heatShare(row.grossCents, peakGross)}>
                       <span className="font-mono text-sm text-gold-champagne">{formatCentsBigint(row.grossCents)}</span>
                     </HeatCell>

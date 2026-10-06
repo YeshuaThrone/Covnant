@@ -60,7 +60,7 @@ export function CheckYourEmail({ email }: { email: string }) {
     BUTTON_BASE_CLASS,
     isHold
       ? 'cursor-wait text-gold-champagne/50'
-      : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne',
+      : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne',
   ].join(' ');
 
   return (

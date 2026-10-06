@@ -20,7 +20,7 @@ import { registerAssetAction } from '@/lib/assets/actions';
 import type { AgentRegistrationDraft } from '@/lib/agent/registrationDraft';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
 
 type Phase =
   | { kind: 'describe' }
@@ -64,7 +64,7 @@ export function AgentRegistrationStudio() {
     return (
       <div className="glass-card p-8 text-center" data-testid="agent-confirmed">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Registered</p>
-        <h2 className="mt-3 text-2xl font-semibold text-[#F2F4F8]">
+        <h2 className="mt-3 text-2xl font-semibold text-pearl">
           Covenant Block {phase.cbtCode} is open.
         </h2>
         <p className="mt-2 text-sm text-white/50">
@@ -73,7 +73,7 @@ export function AgentRegistrationStudio() {
         <div className="mt-6 flex items-center justify-center gap-4">
           <a
             href={`/assets/${phase.cbtCode}`}
-            className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20"
+            className="rounded-lg border border-gold-bright/60 bg-gold/10 px-6 py-3 text-sm font-medium text-gold-bright hover:bg-gold/20"
           >
             View the asset
           </a>
@@ -134,7 +134,7 @@ export function AgentRegistrationStudio() {
             disabled={!description.trim() || phase.kind === 'loading'}
             onClick={requestDraft}
             data-testid="agent-draft-submit"
-            className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-gold-bright/60 bg-gold/10 px-6 py-3 text-sm font-medium text-gold-bright hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {phase.kind === 'loading' ? 'Composing your draft…' : 'Draft my registration'}
           </button>

@@ -365,7 +365,7 @@ function RecoupmentPanel({
               </div>
               <p className="mt-2 font-mono text-[11px] text-white/40">
                 {formatCentsBigint(row.appliedCents)} applied of {formatCentsBigint(row.advanceTargetCents)} break-even
-                · last sweep {row.lastSweepDay ?? '—'}
+                · last sweep {row.lastSweepDay ?? 'not yet run'}
               </p>
             </div>
           ))}
@@ -679,9 +679,9 @@ function GameLogPanel({
               <tr key={`${row.day}-${row.payeeId}-${index}`} data-testid="creator-analytics-gamelog-row" className="border-b border-slate-600/30">
                 <td className="py-2 pr-3 font-mono text-sm text-slate-300">{row.day}</td>
                 <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.payeeId}</td>
-                <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? '—'}</td>
-                <td className="py-2 pr-3 text-sm text-slate-300">{row.workTitle ?? '—'}</td>
-                <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? '—'}</td>
+                <td className="py-2 pr-3 font-mono text-sm text-slate-200">{row.entityId ?? 'Not on file'}</td>
+                <td className="py-2 pr-3 text-sm text-slate-300">{row.workTitle ?? 'Not on file'}</td>
+                <td className="py-2 pr-3 text-sm text-slate-300">{row.source ?? 'Not on file'}</td>
                 <HeatCell heat={heatShare(row.creatorCents, peakCents)}>
                   <span className="font-mono text-sm text-gold-champagne">{formatCentsBigint(row.creatorCents)}</span>
                 </HeatCell>

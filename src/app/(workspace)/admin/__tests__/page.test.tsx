@@ -104,7 +104,7 @@ describe('the /admin page', () => {
     const html = await renderAdminPage();
 
     expect(html).toContain('data-admin="console"');
-    expect(html).toContain('Covenant operations');
+    expect(html).toContain('Covnant operations');
     expect(html).not.toContain('data-admin="gate"');
     // All seven operator tabs render in the console nav — the Control Board
     // section (founder directive, 2026-09-20) sits alongside Contracts.

@@ -9,6 +9,12 @@ import { getSdk } from '@/lib/sdk';
 import { reconciliationSnapshotForAsset } from '@/lib/splits/reconciliation-server';
 import { ContractEditor } from '@/components/vault/ContractEditor';
 
+export const metadata = {
+  title: 'Contract Detail — Covnant',
+  description:
+    'One contract on the master ledger — its template, parties, payouts, and settlement state.',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function ContractDetailPage({

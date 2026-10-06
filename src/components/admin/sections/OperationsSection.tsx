@@ -66,7 +66,7 @@ export function auditChangeLines(changes: OperationsAuditRow['changes']): readon
 }
 
 function auditChangeValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return 'Not on file';
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
@@ -245,7 +245,7 @@ function EscrowSettlementsArea({ flows }: { flows: OperationsFlows }) {
                     <StatusPill label={transfer.status} tone={transferStatusTone(transfer.status)} />
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-white/40">
-                    {transfer.estimatedSettlement ?? '—'}
+                    {transfer.estimatedSettlement ?? 'Not on file'}
                   </td>
                 </tr>
               ))}
@@ -398,7 +398,7 @@ function EscrowSettlementsArea({ flows }: { flows: OperationsFlows }) {
                 <td className={TABLE_CELL}>{movement.journalCount}</td>
                 <td className={TABLE_CELL}>{formatCentsBigint(movement.creditCents)}</td>
                 <td className={TABLE_CELL}>{formatCentsBigint(movement.debitCents)}</td>
-                <td className="px-4 py-3 font-mono text-xs text-white/40">{movement.latestDay ?? '—'}</td>
+                <td className="px-4 py-3 font-mono text-xs text-white/40">{movement.latestDay ?? 'Not on file'}</td>
               </tr>
             ))}
           </tbody>
@@ -445,7 +445,7 @@ function RunsPipelineArea({ flows }: { flows: OperationsFlows }) {
                 <tr key={run.runId}>
                   <td className="px-4 py-3 font-mono text-xs text-white/60">{run.runId}</td>
                   <td className="px-4 py-3 text-sm text-white/80">{run.source}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-white/60">{run.period ?? '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-white/60">{run.period ?? 'Not on file'}</td>
                   <td className="px-4 py-3">
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                   </td>
@@ -455,7 +455,7 @@ function RunsPipelineArea({ flows }: { flows: OperationsFlows }) {
                   <td className={TABLE_CELL}>{run.lineItemCount}</td>
                   <td className={TABLE_CELL}>{formatCentsBigint(run.varianceAccountCents)}</td>
                   <td className="px-4 py-3 font-mono text-xs text-white/40">
-                    {run.reversal === null ? '—' : run.reversal.reversalId}
+                    {run.reversal === null ? 'None' : run.reversal.reversalId}
                   </td>
                 </tr>
               ))}
@@ -493,8 +493,8 @@ function RunsPipelineArea({ flows }: { flows: OperationsFlows }) {
                   <td className="px-4 py-3">
                     <StatusPill label={ingest.status} tone={ingest.status === 'parsed' ? 'jade' : 'red'} />
                   </td>
-                  <td className={TABLE_CELL}>{ingest.eventCount ?? '—'}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-white/40">{ingest.error ?? '—'}</td>
+                  <td className={TABLE_CELL}>{ingest.eventCount ?? 'Not on file'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-white/40">{ingest.error ?? 'None'}</td>
                 </tr>
               ))}
             </tbody>
@@ -526,7 +526,7 @@ function RunsPipelineArea({ flows }: { flows: OperationsFlows }) {
               <span className="font-mono text-xs text-white/60">{entry.eventId}</span>
               <span className="text-white/80">{entry.reason}</span>
               <span className="font-mono text-xs text-white/40">
-                {entry.platform ?? '—'} · {entry.territory ?? '—'} · {entry.currency ?? '—'}
+                {entry.platform ?? 'Not on file'} · {entry.territory ?? 'Not on file'} · {entry.currency ?? 'Not on file'}
                 {entry.grossMicros === null ? '' : ` · ${formatMicroUnits(entry.grossMicros, entry.currency ?? 'USD')}`}
               </span>
             </li>
@@ -623,7 +623,7 @@ function ExceptionQueueArea({ flows }: { flows: OperationsFlows }) {
                   <td className="px-4 py-3 font-mono text-xs text-white/60">{lock.identityKey}</td>
                   <td className={TABLE_CELL_LEFT}>{lock.payeeName}</td>
                   <td className="px-4 py-3">
-                    <StatusPill label={lock.lockReason ?? '—'} tone="red" />
+                    <StatusPill label={lock.lockReason ?? 'Not on file'} tone="red" />
                   </td>
                   <td className={TABLE_CELL}>{lock.payoutCount}</td>
                   <td className={TABLE_CELL}>{formatCentsBigint(lock.grossCents)}</td>
@@ -703,11 +703,11 @@ function RegistryArea({ flows }: { flows: OperationsFlows }) {
                   <td className="px-4 py-3 font-mono text-xs text-white/60">{row.identityKey}</td>
                   <td className="px-4 py-3 font-mono text-xs text-white/60">
                     {row.uctIdentity === null
-                      ? '—'
+                      ? 'Not linked'
                       : `${row.uctIdentity.uctId}${row.uctIdentity.isni === '' ? '' : ` · ISNI ${row.uctIdentity.isni}`}${row.uctIdentity.ipi === null ? '' : ` · IPI ${row.uctIdentity.ipi}`}`}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-white/60">
-                    {row.taxBranch === null ? '—' : `${row.taxBranch.countryCode} · ${row.taxBranch.tinStatus}`}
+                    {row.taxBranch === null ? 'Not on file' : `${row.taxBranch.countryCode} · ${row.taxBranch.tinStatus}`}
                   </td>
                   <td className={TABLE_CELL}>
                     {formatMicroUnits(row.creditedGrossUnits, row.settlementCurrencies[0] ?? 'USD')}

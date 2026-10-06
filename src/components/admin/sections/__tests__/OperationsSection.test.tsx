@@ -325,8 +325,8 @@ describe('auditChangeLines — the field-level diff voice', () => {
       'kyc_status: PENDING_INITIALIZATION → VERIFIED',
       'reserveCents: 0 → 100000000',
       'locked: false → true',
-      'note: — → first freeze',
-      'cleared: — → yes',
+      'note: Not on file → first freeze',
+      'cleared: Not on file → yes',
       'meta: {"a":1} → {"a":2}',
     ]);
   });

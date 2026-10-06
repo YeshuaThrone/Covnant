@@ -24,7 +24,7 @@ export function AutoFillPanel({ summary }: { summary: AutoFillSummary }) {
           <div
             key={field.label}
             className={`rounded-full border px-3 py-1 font-mono text-xs ${
-              field.toBeCompleted ? 'border-white/20 text-white/40 italic' : 'border-gold/30 text-[#FFD700]'
+              field.toBeCompleted ? 'border-white/20 text-white/40 italic' : 'border-gold/30 text-gold-bright'
             }`}
           >
             <span className="mr-1.5 text-white/40">{field.label}</span>
@@ -47,7 +47,7 @@ export function AutoFillPanel({ summary }: { summary: AutoFillSummary }) {
                 ))}
               </p>
             </div>
-            <span className="font-mono text-sm text-[#FFD700]">
+            <span className="font-mono text-sm text-gold-bright">
               {party.sharePercent ? `${party.sharePercent}%` : 'Multi-pool'}
             </span>
           </li>
@@ -61,7 +61,7 @@ export function AutoFillPanel({ summary }: { summary: AutoFillSummary }) {
               <span className="text-white/50">{pool.label}</span>
               <span className="font-mono text-white/40">
                 {pool.holders.map((h) => `${h.name} ${h.sharePercent}%`).join(' · ')}{' '}
-                <span className="text-[#FFD700]">= {pool.totalPercent}%</span>
+                <span className="text-gold-bright">= {pool.totalPercent}%</span>
               </span>
             </p>
           ))}

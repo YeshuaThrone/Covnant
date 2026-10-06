@@ -28,7 +28,11 @@ export function PayoutPanel({ payouts }: { payouts: AssetPayouts }) {
         </p>
       ) : (
         <>
-          <table className="mt-4 w-full text-sm" data-testid="payout-flows-table">
+          {/* Six money columns cannot fit a phone column — the table scrolls in
+              its own pane instead of widening the page (verified at 375px: the
+              bare table drove the document 103px past the layout viewport). */}
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm" data-testid="payout-flows-table">
             <thead>
               <tr className="text-left font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">
                 <th className="pb-2 font-normal">Settlement</th>
@@ -57,8 +61,8 @@ export function PayoutPanel({ payouts }: { payouts: AssetPayouts }) {
                       {line.holder}
                       <span className="block text-xs text-white/40">{line.role}</span>
                     </td>
-                    <td className="py-2.5 text-right align-top font-mono text-xs text-[#FFD700]">
-                      {line.recordedPercent ? `${line.recordedPercent}%` : '—'}
+                    <td className="py-2.5 text-right align-top font-mono text-xs text-gold-bright">
+                      {line.recordedPercent ? `${line.recordedPercent}%` : 'Not on file'}
                     </td>
                     <td className="py-2.5 text-right align-top font-mono text-xs text-white/70">
                       {line.grossShare.toLocaleString('en-US')}
@@ -73,11 +77,12 @@ export function PayoutPanel({ payouts }: { payouts: AssetPayouts }) {
                 )),
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
 
           <div className="mt-4 flex flex-wrap gap-3 border-t border-white/10 pt-4" aria-label="Payout totals">
             {totals.map((total) => (
-              <span key={total.currency} className="rounded-full border border-gold/30 px-3 py-1 font-mono text-xs text-[#FFD700]">
+              <span key={total.currency} className="rounded-full border border-gold/30 px-3 py-1 font-mono text-xs text-gold-bright">
                 {total.currency} · gross {total.gross.toLocaleString('en-US')} · fees{' '}
                 {total.fees.toLocaleString('en-US')} · net {total.net.toLocaleString('en-US')} ·{' '}
                 {total.settlements} settlement{total.settlements === 1 ? '' : 's'}

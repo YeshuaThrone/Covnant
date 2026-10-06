@@ -54,7 +54,7 @@ const KYC_TONE: Record<KycStatus, PillTone> = {
 };
 
 function BooleanPill({ label, value }: { label: string; value: boolean | null }) {
-  if (value === null) return <span className="font-mono text-xs text-white/35">—</span>;
+  if (value === null) return <span className="font-mono text-xs text-white/35">Not on file</span>;
   return <StatusPill label={`${label}: ${value ? 'true' : 'false'}`} tone={value ? 'jade' : 'neutral'} />;
 }
 
@@ -241,9 +241,9 @@ function CreatorEditor({
         <ReadOnlyField label="Email" value={profile.email} />
         <ReadOnlyField label="Stage name" value={profile.stage_name} />
         <ReadOnlyField label="Legal name" value={profile.legal_name} />
-        <ReadOnlyField label="Phone" value={profile.phone ?? '—'} />
+        <ReadOnlyField label="Phone" value={profile.phone ?? 'Not on file'} />
         <ReadOnlyField label="Core industry" value={profile.core_industry} />
-        <ReadOnlyField label="Title" value={profile.title ?? '—'} />
+        <ReadOnlyField label="Title" value={profile.title ?? 'Not on file'} />
         <ReadOnlyField
           label="Bank account linked"
           value={
@@ -442,12 +442,12 @@ export function CreatorsSection({
                   <td className="px-4 py-3 text-white/60">{profile.email}</td>
                   <td className="px-4 py-3">
                     {profile.kyc_status === null ? (
-                      <span className="font-mono text-xs text-white/35">—</span>
+                      <span className="font-mono text-xs text-white/35">Not on file</span>
                     ) : (
                       <StatusPill label={profile.kyc_status} tone={KYC_TONE[profile.kyc_status]} />
                     )}
                   </td>
-                  <td className="px-4 py-3 text-white/60">{profile.tax_form_type ?? '—'}</td>
+                  <td className="px-4 py-3 text-white/60">{profile.tax_form_type ?? 'Not on file'}</td>
                   <td className="px-4 py-3">
                     <BooleanPill label="verified" value={profile.tax_verified} />
                   </td>

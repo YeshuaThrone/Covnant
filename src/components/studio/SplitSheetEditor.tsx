@@ -52,7 +52,7 @@ export function SplitSheetEditor({ cbtCode, initialPools }: SplitSheetEditorProp
           type="button"
           disabled={!allPoolsExact || pending}
           onClick={save}
-          className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-gold-bright/60 bg-gold/10 px-6 py-3 text-sm font-medium text-gold-bright hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending ? 'Saving…' : 'Save split sheet'}
         </button>

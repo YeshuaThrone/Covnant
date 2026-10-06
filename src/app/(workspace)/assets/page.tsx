@@ -15,6 +15,12 @@ import {
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
 
+export const metadata = {
+  title: 'Your Asset Registry — Covnant',
+  description:
+    'Your registered assets across every vertical — identifiers, pools, and settlement state.',
+};
+
 export const dynamic = 'force-dynamic';
 
 function poolCount(asset: CovenantBlockAsset): number {
@@ -41,13 +47,13 @@ export default async function AssetsPage({
   const assets = await listAssets();
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-16">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
             Covenant Block Vault
           </p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#F2F4F8]">Assets</h1>
+          <h1 className="mt-2 text-3xl font-semibold text-pearl md:text-4xl">Assets</h1>
           <p className="mt-2 text-sm text-white/50">
             Every registered Covenant Block asset with its multi-pool split sheet.
           </p>
@@ -110,7 +116,7 @@ export default async function AssetsPage({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-lg font-medium text-[#F2F4F8]">{asset.title}</p>
+                        <p className="text-lg font-medium text-pearl">{asset.title}</p>
                         <p className="mt-1 text-sm text-white/50">
                           {MEDIUM_LABELS[asset.medium]} · {poolCount(asset)} pools ·{' '}
                           {asset.rightsHolders.length} holders

@@ -148,7 +148,7 @@ test('the 200 repeat response advances to /agent too', async ({ page }) => {
   await page.waitForURL('**/agent');
 });
 
-test('the 409 duplicate_email response renders the sign-in framing and stays on the page', async ({
+test('the 409 duplicate_email response names the duplicate and stays on the page', async ({
   page,
 }) => {
   await page.route(SIGNUP_PATH, (route) =>
@@ -166,7 +166,8 @@ test('the 409 duplicate_email response renders the sign-in framing and stays on 
   await fillAndSubmit(page);
 
   await expect(responseLine(page, 'An account with this email already exists')).toHaveCount(1);
-  await expect(responseLine(page, 'try signing in')).toHaveCount(1);
+  // No sign-in instruction — there is no sign-in surface to route to.
+  await expect(responseLine(page, 'try signing in')).toHaveCount(0);
   await expect(page.getByText(/UCT-/)).toHaveCount(0);
   // No navigation — the visitor retries from the composition.
   expect(page.url()).not.toContain('/agent');

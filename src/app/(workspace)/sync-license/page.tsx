@@ -175,7 +175,7 @@ export default async function SyncLicensePage() {
                         data-testid="sync-fee-floor"
                         className="font-mono text-gold-champagne"
                       >
-                        {entry.floorCents !== null ? `${formatCents(entry.floorCents)} minimum` : '—'}
+                        {entry.floorCents !== null ? `${formatCents(entry.floorCents)} minimum` : 'Not on file'}
                       </span>
                     </p>
                     {entry.genre !== null && entry.genre.length > 0 && (

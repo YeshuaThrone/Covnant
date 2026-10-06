@@ -33,7 +33,7 @@ import type { AgentRegistrationDraft } from '@/lib/agent/registrationDraft';
 import type { ActionResult, RegisterAssetPayload } from '@/lib/assets/actions';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 /** Client-side holder id for the editor keys — the write action re-ids as it normalizes. */
@@ -165,14 +165,14 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
         {draft.assumptions.length > 0 && (
           <div
             data-testid="agent-assumptions"
-            className="mt-4 rounded-lg border border-[#FFD700]/30 bg-[#D4AF37]/[0.06] px-4 py-3"
+            className="mt-4 rounded-lg border border-gold-bright/30 bg-gold/[0.06] px-4 py-3"
           >
             <p className="text-xs font-medium uppercase tracking-wider text-gold">
               Agent assumptions — fill these in before you confirm
             </p>
             <ul className="mt-2 space-y-1">
               {draft.assumptions.map((assumption) => (
-                <li key={assumption} className="flex gap-2 text-sm text-[#F2F4F8]/80">
+                <li key={assumption} className="flex gap-2 text-sm text-pearl/80">
                   <span aria-hidden className="text-gold">◆</span>
                   <span>{assumption}</span>
                 </li>
@@ -242,7 +242,7 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
       {draft.templateSuggestion && (
         <section className="glass-card p-6">
           <h2 className="font-mono text-sm uppercase tracking-widest text-gold">Suggested agreement</h2>
-          <p className="mt-3 text-sm text-[#F2F4F8]/80">
+          <p className="mt-3 text-sm text-pearl/80">
             {templateName ? `${templateName} — ` : ''}
             {draft.templateSuggestion.rationale}
           </p>
@@ -271,7 +271,7 @@ export function DraftReview({ draft, warnings, onConfirm, onRegistered, onStartO
           disabled={!canConfirm}
           onClick={confirm}
           data-testid="agent-confirm"
-          className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-gold-bright/60 bg-gold/10 px-6 py-3 text-sm font-medium text-gold-bright hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {confirming ? 'Registering…' : 'Confirm & register'}
         </button>

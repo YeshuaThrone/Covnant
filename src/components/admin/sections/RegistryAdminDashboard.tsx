@@ -135,7 +135,7 @@ export function RegistryAdminDashboard({
       <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-gold-champagne/80">
         Covnant · Operator Console · Registry Admin
       </p>
-      <h1 className="mt-2 font-mono text-xl text-white">Registry Admin Dashboard</h1>
+      <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">Registry Admin Dashboard</h1>
       <p className="mt-1 font-mono text-xs text-white/50">
         Universal identifier engine — 0012 tables
         {redis.reachable

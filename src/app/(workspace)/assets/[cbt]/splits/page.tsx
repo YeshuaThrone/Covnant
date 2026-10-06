@@ -5,6 +5,12 @@ import type { HolderDraft, PoolDraft } from '@/lib/splits/shared';
 import { getSdk } from '@/lib/sdk';
 import { SplitSheetEditor } from '@/components/studio/SplitSheetEditor';
 
+export const metadata = {
+  title: 'Asset Splits — Covnant',
+  description:
+    'The split sheet for one registered asset — pool percentages and rights holders of record.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
@@ -40,11 +46,11 @@ export default async function AssetSplitsPage({ params }: PageProps) {
   if (!asset) notFound();
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-16">
+    <main className="mx-auto max-w-5xl px-6 py-12">
       <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Asset Studio · {asset.cbtCode}
       </p>
-      <h1 className="mt-2 text-3xl font-semibold text-[#F2F4F8]">{asset.title}</h1>
+      <h1 className="mt-2 text-3xl font-semibold text-pearl md:text-4xl">{asset.title}</h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
         Adjust each pool independently. The save gate re-validates every pool server-side before
         anything is written.

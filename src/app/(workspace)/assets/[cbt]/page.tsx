@@ -18,6 +18,12 @@ import { getSdk } from '@/lib/sdk';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
 import { AssetVerificationStrip } from '@/components/brand/AssetVerificationStrip';
 
+export const metadata = {
+  title: 'Asset Detail — Covnant',
+  description:
+    'One registered asset — registry identifiers, pools, and settlement status on the record of truth.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
@@ -68,12 +74,12 @@ export default async function AssetDetailPage({ params }: PageProps) {
   });
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-16">
+    <main className="mx-auto max-w-5xl px-6 py-12">
       <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
         Covenant Block
       </p>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-3xl font-semibold text-[#F2F4F8]">{asset.title}</h1>
+        <h1 className="text-3xl font-semibold text-pearl md:text-4xl">{asset.title}</h1>
         <Link
           href={`/assets/${asset.cbtCode}/splits`}
           className="rounded-lg border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"
@@ -117,14 +123,14 @@ export default async function AssetDetailPage({ params }: PageProps) {
               {pool.holders.map((holder) => (
                 <li key={holder.id} className="flex items-center justify-between gap-4 py-3">
                   <div>
-                    <p className="text-sm text-[#F2F4F8]">{holder.name}</p>
+                    <p className="text-sm text-pearl">{holder.name}</p>
                     <p className="text-xs text-white/40">
                       {holderRole(holder)} · {holder.taxProfile.taxFormType} ·{' '}
                       {holder.taxProfile.usTaxResident ? 'US' : 'Non-US'}
                       {holder.taxProfile.isVerified ? ' · Verified' : ' · Unverified'}
                     </p>
                   </div>
-                  <span className="font-mono text-sm text-[#FFD700]">
+                  <span className="font-mono text-sm text-gold-bright">
                     {formatPercentValue(holder.splitPercentage)}%
                   </span>
                 </li>
@@ -145,7 +151,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {CATEGORY_ORDER.map((category) => (
             <div key={category} className="glass-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#D4AF37]">
+              <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-gold">
                 {CATEGORY_LABELS[category]}
               </p>
               <ul className="mt-3 space-y-2">
@@ -153,7 +159,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                   <li key={t.id}>
                     <Link
                       href={`/contracts/new?template=${t.id}&cbt=${encodeURIComponent(asset.cbtCode)}`}
-                      className="text-sm text-white/70 transition hover:text-[#FFD700]"
+                      className="text-sm text-white/70 transition hover:text-gold-bright"
                     >
                       {t.name} →
                     </Link>

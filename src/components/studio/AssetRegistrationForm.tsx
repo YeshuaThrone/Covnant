@@ -14,7 +14,7 @@ import {
 import { freshPools, PoolSplitEditor } from './PoolSplitEditor';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function AssetRegistrationForm() {
@@ -110,7 +110,7 @@ export function AssetRegistrationForm() {
           type="button"
           disabled={!allPoolsExact || pending}
           onClick={openMulPrompt}
-          className="rounded-lg border border-[#FFD700]/60 bg-[#D4AF37]/10 px-6 py-3 text-sm font-medium text-[#FFD700] hover:bg-[#D4AF37]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-gold-bright/60 bg-gold/10 px-6 py-3 text-sm font-medium text-gold-bright hover:bg-gold/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Register asset
         </button>
@@ -127,7 +127,7 @@ export function AssetRegistrationForm() {
             <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
               One-click agreement
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[#F2F4F8]">
+            <h2 className="mt-2 text-2xl font-semibold text-pearl">
               Master Recording &amp; Universal Asset License
             </h2>
             <p className="mt-4 text-sm text-white/60">
@@ -138,8 +138,9 @@ export function AssetRegistrationForm() {
             </p>
             <p className="mt-3 text-sm text-white/60">
               Registry identifiers are provisioned automatically — ISRC (Recording) and ISWC
-              (Composition) for Music &amp; Audio, EIDR for Film/TV/Video, plus CVT/CBT internal
-              audit keys for ledger verification. No external registry code is ever fabricated.
+              (Composition) for Audio &amp; Recorded Sound, EIDR for Film &amp; Television, plus
+              CVT/CBT internal audit keys for ledger verification. No external registry code is
+              ever fabricated.
             </p>
             <div className="mt-6 flex items-center justify-end gap-3">
               <button

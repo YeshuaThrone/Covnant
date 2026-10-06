@@ -26,6 +26,12 @@ import {
   SovereignLedgerTable,
 } from '@/components/master/MasterData';
 
+export const metadata = {
+  title: 'Rights Holders — Covnant',
+  description:
+    'Every rights holder of record — payout rails, registries, and UCT status.',
+};
+
 export const dynamic = 'force-dynamic';
 
 interface HolderRow {
@@ -96,14 +102,14 @@ export default async function RightsHoldersPage({
   const unverified = [...rows.values()].filter((r) => !r.taxProfile.isVerified).length;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <div className="flex items-center justify-between gap-2.5">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
           Rights Holder Registry
         </p>
         <HeaderActions demo={demo} />
       </div>
-      <h1 className="mt-2 text-3xl font-semibold text-white">Rights Holders</h1>
+      <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">Rights Holders</h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
         Tax standing, payout routing, and year-to-date earnings for every rights holder across
         registered assets. {rows.size} holder{rows.size === 1 ? '' : 's'} on the books
@@ -169,8 +175,8 @@ export default async function RightsHoldersPage({
                   <div>
                     <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-white/40">Payout rail</dt>
                     <dd className="mt-1 text-white/80">
-                      {holder.routing?.railType ?? '—'} · {holder.routing?.countryCode ?? '—'} ·{' '}
-                      {holder.routing?.currency ?? '—'}
+                      {holder.routing?.railType ?? 'Not on file'} · {holder.routing?.countryCode ?? 'Not on file'} ·{' '}
+                      {holder.routing?.currency ?? 'Not on file'}
                     </dd>
                   </div>
                   <div>

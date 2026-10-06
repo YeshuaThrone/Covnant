@@ -18,11 +18,22 @@
  */
 
 import { formatMinor } from '@/lib/ledger/reconciliation';
+import { MEDIUM_LABELS } from '@/lib/splits/shared';
+import { CLASS_LABELS } from './IntelligenceSection';
 import { formatCentsBigint } from '@/lib/money/format';
 import { escrowStatusOf, formTagOf, tinStatusOf } from '@/lib/tax/controlBoardSummary';
 import type { TaxLockState } from '@/lib/tax/CovnantTaxComplianceSDK';
 import { SectionEyebrow, StatusPill } from '../shared';
 import type { TaxSectionData, TaxPayeeRowView } from '../types';
+
+/** Canonical entity-type label — the medium map first, then the entity-class
+ * map; anything else (demo-kind phrases, payload labels) passes through
+ * exactly as the record of truth carries it. */
+function entityTypeLabel(value: string): string {
+  if (value in MEDIUM_LABELS) return MEDIUM_LABELS[value as keyof typeof MEDIUM_LABELS];
+  if (value in CLASS_LABELS) return CLASS_LABELS[value as keyof typeof CLASS_LABELS];
+  return value;
+}
 
 const usdCentsFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
@@ -218,7 +229,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(period.withheldMinor, 'USD')}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(period.dustMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/80">
@@ -272,7 +283,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(totals.feeMinor, totals.currency)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(totals.dustMinor, totals.currency)}
                       </td>
                     </tr>
@@ -322,8 +333,10 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.date.slice(0, 10)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/80">{row.transactionId}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cbt}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cvt ?? '—'}</td>
-                      <td className="px-4 py-3 text-white/60">{row.entityType ?? row.cbt.split('-')[1] ?? row.cbt}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-white/60">{row.cvt ?? 'Not on file'}</td>
+                      <td className="px-4 py-3 text-white/60">
+                        {row.entityType !== null ? entityTypeLabel(row.entityType) : (row.cbt.split('-')[1] ?? row.cbt)}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{row.template ?? 'Unbound'}</td>
                       <td className="px-4 py-3 text-right text-white/60">{row.payeeCount}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/80">
@@ -332,7 +345,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(row.feeMinor, 'USD')}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(row.dustMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">

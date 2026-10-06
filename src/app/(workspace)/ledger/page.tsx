@@ -43,6 +43,12 @@ function summaryDustDisplay(dustOfRecordMinor: bigint): string {
   return formatCentsBigint(cornerDustRemainder(dustOfRecordMinor, dustOfRecordMinor));
 }
 
+export const metadata = {
+  title: 'Master Ledger & Settlement History — Covnant',
+  description:
+    'The settlement ledger — double-entry postings, reconciliation, and disbursement history.',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function LedgerPage({
@@ -70,14 +76,14 @@ export default async function LedgerPage({
   const recon = reconcileLedger(rows);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       <div className="flex items-center justify-between gap-2.5">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
           Universal Royalty Ledger
         </p>
         <HeaderActions demo={demo} />
       </div>
-      <h1 className="mt-2 text-3xl font-semibold text-white">
+      <h1 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
         Master Ledger &amp; Settlement History
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-white/50">

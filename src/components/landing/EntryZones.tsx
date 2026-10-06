@@ -25,14 +25,24 @@ import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
  * as before.
  */
 
-/* Field class string — byte-identical to the approved chromeless input
- * across every mirrored zone, and the ONLY input state: fields stay
- * editable before, during, and after a submit attempt. */
+/* Field class string — the approved chromeless input across every mirrored
+ * zone, and the ONLY input state: fields stay editable before, during, and
+ * after a submit attempt. The keyboard focus ring is the audit fix: the
+ * champagne focus-visible outline matches the zone's button and consent
+ * checkbox. */
 const INPUT_CLASS =
-  'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none';
+  'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 const BUTTON_BASE_CLASS =
   'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
+
+/* The keyboard focus ring is the audit fix: the champagne focus-visible
+ * outline matches the zone's inputs and consent checkbox. outline-solid
+ * sets --tw-outline-style, which outline-none zeroes; the variant beats its
+ * (0,1,0) specificity so the ring actually renders. Appended last so the
+ * rest-state pin (e2e/brand.spec.ts) reads base, state, then ring. */
+const BUTTON_FOCUS_CLASS =
+  'focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 /* The signup response-state lines — the statement voice of the composition,
  * in the same slot. No boxes, no error chrome: the design language of the
@@ -133,7 +143,8 @@ export function EntryZones() {
     BUTTON_BASE_CLASS,
     isSubmitting
       ? 'cursor-wait text-gold-champagne/50'
-      : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne',
+      : 'cursor-pointer text-gold-champagne/90 hover:text-gold-champagne',
+    BUTTON_FOCUS_CLASS,
   ].join(' ');
 
   return (
@@ -311,7 +322,7 @@ export function EntryZones() {
           at. */}
       {request.phase === 'duplicate' && (
         <p className={RESPONSE_LINE_CLASS}>
-          An account with this email already exists — try signing in
+          An account with this email already exists
         </p>
       )}
       {request.phase === 'invalid' && <p className={RESPONSE_LINE_CLASS}>{request.message}</p>}

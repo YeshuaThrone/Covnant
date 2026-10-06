@@ -178,11 +178,11 @@ describe('/virtual-card — the GoldNote surface', () => {
     expect(googleBadge.slice(0, 500)).not.toContain('disabled');
   });
 
-  it('renders the additional-payment disclosure and the ledger link — no fake account numbers', async () => {
+  it('renders the additional-payment disclosure and the transactions link — no fake account numbers', async () => {
     const html = await renderVirtualCardPage();
     expect(html).toContain('data-testid="goldnote-additional-payment"');
     expect(html).toContain('data-testid="goldnote-transactions-link"');
-    expect(html).toContain('href="/ledger"');
+    expect(html).toContain('href="/transactions"');
     // No account/routing number shapes anywhere.
     expect(html).not.toMatch(/\b\d{9,12}\b/);
   });
