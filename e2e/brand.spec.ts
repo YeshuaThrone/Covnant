@@ -229,6 +229,8 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
       borderBottomWidth: s.borderBottomWidth,
       borderLeftWidth: s.borderLeftWidth,
       outlineStyle: s.outlineStyle,
+      outlineWidth: s.outlineWidth,
+      outlineColor: s.outlineColor,
       boxShadow: s.boxShadow,
       cursor: s.cursor,
     };
@@ -245,7 +247,9 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: still no lines, no glow — every state chromeless.
+  // On focus: the keyboard focus ring is the single allowed chrome — the
+  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
+  // glow.
   await input.focus();
   const onFocus = await input.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -253,7 +257,9 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.outlineStyle).toBe('solid');
+  expect(onFocus.outlineWidth).toBe('1px');
+  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
   expect(onFocus.boxShadow).toBe('none');
 
   // Placement: the field sits directly beneath the statement in the open black
@@ -423,6 +429,8 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
       borderBottomWidth: s.borderBottomWidth,
       borderLeftWidth: s.borderLeftWidth,
       outlineStyle: s.outlineStyle,
+      outlineWidth: s.outlineWidth,
+      outlineColor: s.outlineColor,
       boxShadow: s.boxShadow,
       cursor: s.cursor,
     };
@@ -439,7 +447,9 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: still no lines, no glow — every state chromeless.
+  // On focus: the keyboard focus ring is the single allowed chrome — the
+  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
+  // glow.
   await legalInput.focus();
   const onFocus = await legalInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -447,7 +457,9 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.outlineStyle).toBe('solid');
+  expect(onFocus.outlineWidth).toBe('1px');
+  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Legal Name bottom ruler now doubles as the shared top rule of the
@@ -581,6 +593,8 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
       borderBottomWidth: s.borderBottomWidth,
       borderLeftWidth: s.borderLeftWidth,
       outlineStyle: s.outlineStyle,
+      outlineWidth: s.outlineWidth,
+      outlineColor: s.outlineColor,
       boxShadow: s.boxShadow,
       cursor: s.cursor,
     };
@@ -597,7 +611,9 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: still no lines, no glow — every state chromeless.
+  // On focus: the keyboard focus ring is the single allowed chrome — the
+  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
+  // glow.
   await emailInput.focus();
   const onFocus = await emailInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -605,7 +621,9 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.outlineStyle).toBe('solid');
+  expect(onFocus.outlineWidth).toBe('1px');
+  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Email bottom ruler now doubles as the shared top rule of the Phone
@@ -807,6 +825,8 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
       borderBottomWidth: s.borderBottomWidth,
       borderLeftWidth: s.borderLeftWidth,
       outlineStyle: s.outlineStyle,
+      outlineWidth: s.outlineWidth,
+      outlineColor: s.outlineColor,
       boxShadow: s.boxShadow,
       cursor: s.cursor,
     };
@@ -823,7 +843,9 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: still no lines, no glow — every state chromeless.
+  // On focus: the keyboard focus ring is the single allowed chrome — the
+  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
+  // glow.
   await industryInput.focus();
   const onFocus = await industryInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -831,7 +853,9 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('none');
+  expect(onFocus.outlineStyle).toBe('solid');
+  expect(onFocus.outlineWidth).toBe('1px');
+  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Core Industry & Title bottom ruler now doubles as the shared top
