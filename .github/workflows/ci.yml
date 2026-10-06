@@ -895,6 +895,73 @@ jobs:
           [ "$dup_contrib" = "1" ] || { echo "SECOND REGISTRATION ROW ACCEPTED for one (model, contributor)"; exit 1; }
           echo "OK: ai_model_contributions UNIQUE pair keeps one weight of record per (model, contributor)"
 
+      - name: Intent-first withdrawal regression (migration 0058) — real Postgres concurrency
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Audit note_c5ksDgVw #4/#5, at the RPC level the withdraw route
+          # leans on: reserve_escrow_withdrawal must hold funds as a pending
+          # intent BEFORE any dispatch, refuse the concurrent/retry
+          # withdrawal of the same funds, restore them on release, and keep
+          # settled funds spent once the ledger debit exists. Real Postgres,
+          # real advisory lock, real parallel sessions.
+          PSQL="psql -h localhost -U postgres -d covnant_check -tAX -v ON_ERROR_STOP=1"
+          # Seed: $2.00 gross settled for the probe holder (the route
+          # supplies the engine's 24% unverified-US rate → $0.48 withheld →
+          # $1.52 available).
+          $PSQL -c "insert into universal_royalty_ledger (transaction_id, cbt_code, platform, gross_settled, currency, disbursements) values ('ci_probe_0058', 'CI-PROBE', 'CI', 2.0, 'USD', '[{\"rightsHolderId\": \"probe_rh\", \"grossShare\": 2.0}]'::jsonb)"
+          # 1) The first reserve of the full available balance wins.
+          r1=$($PSQL -c "select (reserve_escrow_withdrawal('ci_intent_1', 'probe_rh', 152000000, 0.24) ->> 'reserved')")
+          [ "$r1" = "true" ] || { echo "FIRST RESERVE REFUSED: $r1"; exit 1; }
+          # 2) The immediate retry of the SAME funds refuses — the winner's
+          # pending hold is exactly what the loser of a race sees (#4).
+          r2=$($PSQL -c "select (reserve_escrow_withdrawal('ci_intent_2', 'probe_rh', 152000000, 0.24) ->> 'reserved')")
+          [ "$r2" = "false" ] || { echo "RETRY OF SPENT FUNDS ACCEPTED: $r2"; exit 1; }
+          echo "OK: the reserve holds funds and refuses the retry of the same funds"
+          # 3) Release restores the funds, then a 6-way PARALLEL race fires:
+          # the per-holder advisory lock serializes the reserves and exactly
+          # one wins (the pre-fix code let every reader pass the same check).
+          $PSQL -c "update escrow_withdrawal_intents set status='released', released_at=now() where id='ci_intent_1'"
+          for i in 1 2 3 4 5 6; do
+            $PSQL -c "select (reserve_escrow_withdrawal('ci_race_'\"$i\"', 'probe_rh', 152000000, 0.24) ->> 'reserved')" > "/tmp/race_$i.out" 2>&1 &
+          done
+          wait
+          wins=$(grep -c '^true$' /tmp/race_*.out | awk -F: '{s+=$2} END {print s}')
+          [ "$wins" = "1" ] || { echo "PARALLEL RACE ADMITTED $wins WINNERS (exactly 1 required)"; cat /tmp/race_*.out; exit 1; }
+          pending=$($PSQL -c "select count(*) from escrow_withdrawal_intents where rights_holder_id='probe_rh' and status='pending'")
+          [ "$pending" = "1" ] || { echo "RACE LEFT $pending PENDING HOLDS (need exactly 1)"; exit 1; }
+          echo "OK: exactly one of six parallel withdrawals wins the same funds"
+          # 4) The settle leg: the intent flips with its timestamp (the
+          # status/timestamp pinning CHECK refuses a settle without one)...
+          winner=$($PSQL -c "select id from escrow_withdrawal_intents where rights_holder_id='probe_rh' and status='pending'")
+          $PSQL -v ON_ERROR_STOP=0 -c "update escrow_withdrawal_intents set status='settled' where id='$winner'" >/dev/null 2>&1 || true
+          bare_settle=$($PSQL -c "select count(*) from escrow_withdrawal_intents where id='$winner' and status='settled'")
+          [ "$bare_settle" = "0" ] || { echo "SETTLE WITHOUT settled_at ACCEPTED by the pinning check"; exit 1; }
+          $PSQL -c "update escrow_withdrawal_intents set status='settled', settled_at=now(), plaid_transfer_id='tr_ci_probe' where id='$winner'"
+          # 5) ...reconciliation restores the DISBURSEMENT ledger row (the
+          # route writes ESCROW-PAYOUT-<intent_id>, idempotent on the
+          # ledger's UNIQUE(transaction_id)), and the settled funds STAY
+          # SPENT: the balance math counts the payout debit, so the same
+          # 1.52 refuses a second time.
+          $PSQL -c "update universal_royalty_ledger set disbursements = disbursements || jsonb_build_array(jsonb_build_object('type', 'DISBURSEMENT', 'rightsHolderId', 'probe_rh', 'payoutAmount', '152000000', 'amountPaid', '115520000', 'taxWithheld', '36480000', 'timestamp', (extract(epoch from now()) * 1000)::bigint, 'remainingNetBalance', '0')) where transaction_id = 'ci_probe_0058'"
+          r3=$($PSQL -c "select (reserve_escrow_withdrawal('ci_intent_3', 'probe_rh', 152000000, 0.24) ->> 'reserved')")
+          [ "$r3" = "false" ] || { echo "SETTLED FUNDS WITHDRAWABLE AGAIN (ledger debit not counted): $r3"; exit 1; }
+          echo "OK: settled funds stay spent — the ledger debit closes the repeat-withdrawal window (#5)"
+          # 6) The money-shape CHECK refuses a negative or non-integer hold.
+          $PSQL -v ON_ERROR_STOP=0 -c "insert into escrow_withdrawal_intents (id, rights_holder_id, amount_units) values ('ci_bad_neg', 'probe_rh', '-5')" >/dev/null 2>&1 || true
+          $PSQL -v ON_ERROR_STOP=0 -c "insert into escrow_withdrawal_intents (id, rights_holder_id, amount_units) values ('ci_bad_nan', 'probe_rh', '1.5e9')" >/dev/null 2>&1 || true
+          bad=$($PSQL -c "select count(*) from escrow_withdrawal_intents where id in ('ci_bad_neg', 'ci_bad_nan')")
+          [ "$bad" = "0" ] || { echo "NEGATIVE OR NON-INTEGER HOLD ACCEPTED by the amount CHECK"; exit 1; }
+          echo "OK: the amount_units CHECK refuses negative and non-integer holds"
+          # 7) Locking down the gate itself: the reserve RPC is service-role
+          # only — PUBLIC must not hold EXECUTE, and the intent table must
+          # have RLS enabled.
+          public_exec=$(psql -h localhost -U postgres -d covnant_check -tAX -c "select has_function_privilege('public', 'reserve_escrow_withdrawal(text,text,numeric,numeric)', 'execute')")
+          [ "$public_exec" = "false" ] || { echo "PUBLIC STILL HOLDS EXECUTE on reserve_escrow_withdrawal"; exit 1; }
+          rls=$(psql -h localhost -U postgres -d covnant_check -tAX -c "select relrowsecurity from pg_class where oid = 'public.escrow_withdrawal_intents'::regclass")
+          [ "$rls" = "t" ] || { echo "RLS NOT ENABLED on escrow_withdrawal_intents"; exit 1; }
+          echo "OK: reserve_escrow_withdrawal is service-role-only and the intent table has RLS"
+
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
           bash supabase/tests/0012_docker_harness.sh

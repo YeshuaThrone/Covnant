@@ -4,12 +4,14 @@ import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { POST } from '../route';
 import { resetRateLimits } from '@/lib/server/rateLimit';
 import { supabaseFromEnv } from '@/lib/supabase';
+import { fakeEscrowDb, type FakeEscrowDb } from './fakeEscrowDb';
 
 /**
  * POST /api/payouts/withdraw contract tests. Mocks only — no network, no
  * database. fetch is stubbed for the two Plaid calls; supabaseFromEnv is
- * mocked with a fake client covering rights_holders reads, cbt_assets reads,
- * and the ledger insert payload capture.
+ * mocked with the shared stateful escrow fake (fakeEscrowDb.ts), which
+ * models migration 0058's reserve RPC, pending-intent reads, and settle/
+ * release flips over one shared pool of funds.
  */
 
 vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: vi.fn() }));
@@ -41,50 +43,6 @@ function unverifiedUsProfile(): TaxProfile {
   };
 }
 
-function fakeDb(options: {
-  holderRow?: unknown;
-  assetRows?: unknown[];
-  ledgerData?: unknown[];
-  insertError?: { message: string } | null;
-}) {
-  const inserts: Record<string, unknown>[] = [];
-  const db = {
-    from: (table: string) => {
-      if (table === 'rights_holders') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: options.holderRow ?? null, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === 'cbt_assets') {
-        return {
-          select: () =>
-            Promise.resolve({
-              data: (options.assetRows ?? []).map((rights_holders) => ({ rights_holders })),
-              error: null,
-            }),
-        };
-      }
-      if (table === 'universal_royalty_ledger') {
-        // fetchEscrowBalance reads this table via select; the payout write
-        // lands via insert — the fake serves both.
-        return {
-          select: () => Promise.resolve({ data: options.ledgerData ?? [], error: null }),
-          insert: (payload: Record<string, unknown>) => {
-            inserts.push(payload);
-            return Promise.resolve({ error: options.insertError ?? null });
-          },
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
-    },
-  };
-  return { db: db as never, inserts };
-}
-
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -110,8 +68,14 @@ const holderProfile = unverifiedUsProfile();
 /** Ledger gross of 2.00 for rh_1 → 24% tax 0.48 → available 1.52. */
 const grossLedgerRows = [{ disbursements: [{ rightsHolderId: 'rh_1', grossShare: 2.0 }] }];
 
-function happyDb(overrides: { taxProfile?: TaxProfile; insertError?: { message: string } | null } = {}) {
-  return fakeDb({
+function happyDb(
+  overrides: {
+    taxProfile?: TaxProfile;
+    insertError?: { message: string } | null;
+    ledgerData?: unknown[];
+  } = {},
+): FakeEscrowDb {
+  return fakeEscrowDb({
     holderRow: connectedHolder,
     assetRows: [
       [
@@ -123,7 +87,9 @@ function happyDb(overrides: { taxProfile?: TaxProfile; insertError?: { message: 
         },
       ],
     ],
-    ledgerData: grossLedgerRows,
+    ledgerData: overrides.ledgerData ?? [...grossLedgerRows],
+    taxProfile: overrides.taxProfile ?? holderProfile,
+    rightsHolderId: 'rh_1',
     insertError: overrides.insertError ?? null,
   });
 }
@@ -186,10 +152,12 @@ describe('POST /api/payouts/withdraw', () => {
   });
 
   it('returns 409 when the rights_holders row is missing', async () => {
-    const { db } = fakeDb({
+    const { db } = fakeEscrowDb({
       holderRow: null,
       assetRows: [[{ id: 'rh_1', taxProfile: holderProfile }]],
       ledgerData: grossLedgerRows,
+      taxProfile: holderProfile,
+      rightsHolderId: 'rh_1',
     });
     mockSupabaseFromEnv.mockReturnValue(db);
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
@@ -197,10 +165,12 @@ describe('POST /api/payouts/withdraw', () => {
   });
 
   it('returns 409 when the rights_holders row lacks the Plaid token or account id', async () => {
-    const { db } = fakeDb({
+    const { db } = fakeEscrowDb({
       holderRow: { plaid_access_token: null, plaid_account_id: 'acc_1' },
       assetRows: [[{ id: 'rh_1', taxProfile: holderProfile }]],
       ledgerData: grossLedgerRows,
+      taxProfile: holderProfile,
+      rightsHolderId: 'rh_1',
     });
     mockSupabaseFromEnv.mockReturnValue(db);
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
@@ -215,12 +185,29 @@ describe('POST /api/payouts/withdraw', () => {
     expect(res.status).toBe(422);
   });
 
+  it('counts a PENDING withdrawal hold against the balance the pre-check sees', async () => {
+    // A stuck hold of 0.60 from an earlier attempt: the shared balance math
+    // (dashboard and withdraw agree) must see available 0.92, so a 1.00
+    // request is refused BEFORE anything dispatches.
+    const { db } = fakeEscrowDb({
+      holderRow: connectedHolder,
+      assetRows: [[{ id: 'rh_1', name: 'Test Holder', role: 'COMPOSER', taxProfile: holderProfile }]],
+      ledgerData: grossLedgerRows,
+      taxProfile: holderProfile,
+      rightsHolderId: 'rh_1',
+      seedIntents: [{ id: 'intent_stuck', amount_units: '60000000' }],
+    });
+    mockSupabaseFromEnv.mockReturnValue(db);
+    const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
+    expect(res.status).toBe(422);
+  });
+
   it('authorizes and creates the Plaid transfer, inserts the DISBURSEMENT ledger row, and returns the exact payload', async () => {
     const fetchMock = stubFetch([
       jsonResponse({ id: 'auth_1', decision: 'approved' }),
       jsonResponse({ transfer: { id: 'tr_1' } }),
     ]);
-    const { db, inserts } = happyDb();
+    const { db, inserts, intents } = happyDb();
     mockSupabaseFromEnv.mockReturnValue(db);
 
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
@@ -272,6 +259,12 @@ describe('POST /api/payouts/withdraw', () => {
       },
     ]);
 
+    // The intent-first lifecycle ran: one hold, settled once the row landed.
+    expect(intents).toHaveLength(1);
+    expect(intents[0].status).toBe('settled');
+    expect(intents[0].plaid_transfer_id).toBe('tr_1');
+    expect(intents[0].settled_at).toEqual(expect.any(String));
+
     // Exact response shape, money as smallest-unit strings.
     const body = await res.json();
     expect(Object.keys(body).sort()).toEqual([
@@ -304,9 +297,9 @@ describe('POST /api/payouts/withdraw', () => {
     expect(body.remainingNetBalance).toBe('100000000');
   });
 
-  it('propagates an authorization failure as a sanitized 502 and records nothing', async () => {
+  it('propagates an authorization failure as a sanitized 502, records nothing, and RELEASES the hold', async () => {
     const fetchMock = stubFetch([jsonResponse({ error: 'insufficient_funds' }, 400)]);
-    const { db, inserts } = happyDb();
+    const { db, inserts, intents } = happyDb();
     mockSupabaseFromEnv.mockReturnValue(db);
 
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
@@ -316,26 +309,140 @@ describe('POST /api/payouts/withdraw', () => {
     expect(JSON.stringify(body)).not.toContain('insufficient_funds');
     expect(inserts).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The compensating release ran: the hold was taken (intent-first) and
+    // then flipped to released — the funds are spendable again.
+    expect(intents).toHaveLength(1);
+    expect(intents[0].status).toBe('released');
+    expect(intents[0].released_at).toEqual(expect.any(String));
   });
 
-  it('propagates a network-level fetch rejection as a sanitized 502', async () => {
+  it('releases the hold when the fetch rejects at the authorize stage (no transfer exists)', async () => {
     const fetchMock = vi.fn<() => Promise<Response>>().mockRejectedValue(new TypeError('fetch failed'));
     vi.stubGlobal('fetch', fetchMock);
-    const { db } = happyDb();
+    const { db, intents } = happyDb();
     mockSupabaseFromEnv.mockReturnValue(db);
 
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
     expect(res.status).toBe(502);
     expect((await res.json()).ok).toBe(false);
+    expect(intents).toHaveLength(1);
+    expect(intents[0].status).toBe('released');
   });
 
-  it('returns 502 when the ledger insert fails (payout not silently unrecorded)', async () => {
-    stubFetch([jsonResponse({ id: 'auth_1' }), jsonResponse({ transfer: { id: 'tr_1' } })]);
-    const { db } = happyDb({ insertError: { message: 'duplicate key' } });
+  it('KEEPS the hold pending when the fetch rejects at the create stage (outcome unknown — reconciliation decides)', async () => {
+    const fetchMock = vi.fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(jsonResponse({ id: 'auth_1' })) // authorize ok
+      .mockRejectedValueOnce(new TypeError('fetch failed')); // create: network drop
+    vi.stubGlobal('fetch', fetchMock);
+    const { db, inserts, intents } = happyDb();
     mockSupabaseFromEnv.mockReturnValue(db);
 
     const res = await POST(postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }));
     expect(res.status).toBe(502);
     expect((await res.json()).ok).toBe(false);
+    expect(inserts).toHaveLength(0);
+    // Funds that may have moved are never released back by guesswork.
+    expect(intents).toHaveLength(1);
+    expect(intents[0].status).toBe('pending');
+  });
+
+  it('leaves the hold PENDING when the ledger insert fails — the retry is blocked until reconciliation settles it', async () => {
+    stubFetch([jsonResponse({ id: 'auth_1' }), jsonResponse({ transfer: { id: 'tr_1' } })]);
+    // Per-test ledger copy: reconciliation pushes the restored DISBURSEMENT
+    // row into it later in the test.
+    const ledgerData: { disbursements: unknown[] }[] = [
+      { disbursements: [{ rightsHolderId: 'rh_1', grossShare: 2.0 }] },
+    ];
+    const fake = happyDb({ insertError: { message: 'duplicate key' }, ledgerData });
+    mockSupabaseFromEnv.mockReturnValue(fake.db);
+
+    // First attempt: the transfer moves, the DISBURSEMENT insert fails → 502,
+    // and the intent-first hold STAYS PENDING — closing the repeat-withdrawal
+    // window (audit #5).
+    const first = await POST(
+      postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }, { 'x-forwarded-for': '198.51.100.20' }),
+    );
+    expect(first.status).toBe(502);
+    expect((await first.json()).ok).toBe(false);
+    expect(fake.inserts).toHaveLength(1);
+    expect(fake.intents).toHaveLength(1);
+    expect(fake.intents[0].status).toBe('pending');
+
+    // The immediate retry of the SAME funds: refused by the pending hold —
+    // even though the ledger never recorded the payout.
+    const retry = await POST(
+      postRequest({ rightsHolderId: 'rh_1', amount: '100000000' }, { 'x-forwarded-for': '198.51.100.21' }),
+    );
+    expect(retry.status).toBe(422);
+    expect(fake.inserts).toHaveLength(1); // no second ledger row
+
+    // Reconciliation: restore the DISBURSEMENT row (deterministic
+    // ESCROW-PAYOUT-<intentId> id, UNIQUE(transaction_id)-idempotent) and
+    // settle the hold. The fake models the post-restoration state.
+    ledgerData.push({
+      disbursements: [
+        {
+          type: 'DISBURSEMENT',
+          rightsHolderId: 'rh_1',
+          payoutAmount: '100000000',
+          amountPaid: '76000000',
+          taxWithheld: '24000000',
+          timestamp: Date.now(),
+          remainingNetBalance: '52000000',
+        },
+      ],
+    });
+    fake.forceSettle(fake.intents[0].id, 'tr_1');
+    fake.setInsertError(null); // the reconciliation leg also cleared the fault
+    stubFetch([jsonResponse({ id: 'auth_2' }), jsonResponse({ transfer: { id: 'tr_2' } })]);
+
+    // Now the holder's remaining 0.52 is withdrawable again — and only 0.52.
+    const after = await POST(
+      postRequest({ rightsHolderId: 'rh_1', amount: '52000000' }, { 'x-forwarded-for': '198.51.100.22' }),
+    );
+    expect(after.status, JSON.stringify(await after.clone().json())).toBe(200);
+    const overAfter = await POST(
+      postRequest({ rightsHolderId: 'rh_1', amount: '52000000' }, { 'x-forwarded-for': '198.51.100.23' }),
+    );
+    expect(overAfter.status).toBe(422);
+  });
+
+  it('admits exactly ONE of N concurrent withdrawals of the same funds (audit #4)', async () => {
+    // The fake's reserve RPC serializes on the shared pending state — the
+    // observable behavior of migration 0058's per-holder advisory lock. Base
+    // pool 1.52; all six requests ask for 1.00.
+    let plaidCall = 0;
+    const fetchMock = vi.fn<() => Promise<Response>>(() => {
+      plaidCall += 1;
+      return Promise.resolve(
+        plaidCall % 2 === 1
+          ? jsonResponse({ id: 'auth_c' })
+          : jsonResponse({ transfer: { id: 'tr_c' } }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const fake = happyDb();
+    mockSupabaseFromEnv.mockReturnValue(fake.db);
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        POST(
+          postRequest(
+            { rightsHolderId: 'rh_1', amount: '100000000' },
+            // Unique addresses: the shared 5/min limiter must not gate the race.
+            { 'x-forwarded-for': `198.51.101.${i + 10}` },
+          ),
+        ),
+      ),
+    );
+
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 422, 422, 422, 422, 422]);
+    // Only the winner reached the rail — one authorize + one create.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Exactly one ledger row; exactly one intent, and it settled.
+    expect(fake.inserts).toHaveLength(1);
+    expect(fake.intents).toHaveLength(1);
+    expect(fake.intents[0].status).toBe('settled');
   });
 });

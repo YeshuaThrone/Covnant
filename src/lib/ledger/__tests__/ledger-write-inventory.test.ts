@@ -501,10 +501,20 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // stop being absolute-total read-modify-writes. Still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0057_creator_ytd_atomic_increment.sql',
+      // Intent-first withdrawal holds (audit note_c5ksDgVw #4/#5): a NEW
+      // escrow_withdrawal_intents table + reserve RPC; still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0058_escrow_withdrawal_intents.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
     );
-    expect(referencing).toEqual(['0001_covenant_init.sql']);
+    // 0058's reserve RPC READS the ledger (balance re-derivation at reserve
+    // time, mirroring the balance helper's select) but performs no DDL on
+    // it — the schema stays 0001's.
+    expect(referencing).toEqual([
+      '0001_covenant_init.sql',
+      '0058_escrow_withdrawal_intents.sql',
+    ]);
   });
 });

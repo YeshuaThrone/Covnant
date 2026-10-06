@@ -3,9 +3,24 @@
  *
  * Flow: validate → load the holder's connected payout account → compute the
  * balance through the shared escrow helper (same math as the dashboard, so
- * the two surfaces can never disagree) → withhold tax for unverified
- * profiles → authorize + create the Plaid transfer → record the payout as a
- * DISBURSEMENT ledger row.
+ * the two surfaces can never disagree; pending withdrawal intents already
+ * subtracted) → withhold tax for unverified profiles → RESERVE the
+ * withdrawal as a pending intent (migration 0058 — the atomic
+ * conditional-debit RPC everything after it must get past) → authorize +
+ * create the Plaid transfer → record the payout as a DISBURSEMENT ledger
+ * row (transaction_id deterministic from the intent) → settle the intent.
+ *
+ * Intent-first ordering closes the two withdraw-path P1s from the tax audit
+ * (note_c5ksDgVw): the pending hold is inserted BEFORE dispatch, so a
+ * concurrent second withdrawal of the same funds serializes behind it and
+ * refuses (#4, the TOCTOU double-spend), and a failed DISBURSEMENT insert
+ * leaves the hold standing — the funds stay blocked until the intent is
+ * settled or released, instead of opening a repeat-withdrawal window (#5).
+ * An authoritative Plaid refusal (no transfer exists) releases the hold; an
+ * outcome-UNKNOWN dispatch failure (network drop mid-call, unparseable 2xx
+ * body) keeps it pending — never release funds that may have moved.
+ * Settlement of a stuck intent from the recorded Plaid ids is a state flip
+ * for the reconciliation/webhook path.
  *
  * `amount` is a string-formatted BigInt in smallest ledger units (1e-8
  * scale). Conversion to Plaid's decimal-string amount happens ONLY at the
@@ -22,6 +37,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseFromEnv } from '@/lib/supabase';
 import { requireHolderAccess } from '@/lib/server/apiAccess';
 import { formatMicro } from '@/lib/fixed-point';
@@ -33,6 +49,12 @@ import {
   UNVERIFIED_FALLBACK_TAX_PROFILE,
   withholdingUnitsOn,
 } from '@/lib/escrow/balance';
+import {
+  releaseEscrowWithdrawal,
+  reserveEscrowWithdrawal,
+  settleEscrowWithdrawal,
+  type EscrowWithdrawalReservation,
+} from '@/lib/escrow/withdrawalIntents';
 import { checkSharedRateLimit, MONEY_INITIATION_RATE_LIMIT } from '@/lib/server/rateLimit';
 import { clientAddress } from '@/lib/server/clientAddress';
 
@@ -48,6 +70,29 @@ interface WithdrawBody {
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ ok: false, error }, { status, headers: { 'cache-control': 'no-store' } });
+}
+
+/**
+ * Best-effort compensating release after an authoritative rail failure —
+ * the transfer was refused, so no transfer exists and the hold must
+ * unblock the funds. A failed release leaves the intent pending (funds
+ * over-held, never over-paid) and is logged for reconciliation, mirroring
+ * the banking route's DISBURSEMENT_REVERSAL posture.
+ */
+async function releaseBestEffort(db: SupabaseClient, intentId: string): Promise<void> {
+  try {
+    const released = await releaseEscrowWithdrawal(db, intentId);
+    if (!released) {
+      console.error(
+        `Withdrawal intent ${intentId} was not pending at release — check escrow_withdrawal_intents.`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Withdrawal intent ${intentId} release failed — the hold remains pending and needs reconciliation:`,
+      error,
+    );
+  }
 }
 
 /** Amount must be a plain positive BigInt string of smallest ledger units. */
@@ -149,9 +194,38 @@ export async function POST(request: Request): Promise<Response> {
   const plaidAmount = smallestUnitsToPlaidAmount(netPayableUnits);
   const remainingUnits = balance.availableUnits - amountUnits;
 
+  // Intent-first gate (audit note_c5ksDgVw #4/#5): the pending-debit hold is
+  // what the Plaid call must get past. The RPC re-derives the balance
+  // server-side under a per-holder advisory lock and inserts the intent row
+  // only when the floor holds — a concurrent second withdrawal of the same
+  // funds serializes behind the first and refuses. The TS pre-check above is
+  // advisory UX; the database is the gate.
+  const intentId = randomUUID();
+  let reservation: EscrowWithdrawalReservation;
+  try {
+    reservation = await reserveEscrowWithdrawal(db, {
+      intentId,
+      rightsHolderId,
+      amountUnits,
+      taxRate: balance.taxRate,
+    });
+  } catch (error) {
+    console.error('Escrow withdrawal reserve failed:', error);
+    return jsonError('Failed to reserve the withdrawal.', 502);
+  }
+  if (!reservation.reserved) {
+    return jsonError('Withdrawal amount exceeds the available escrow balance.', 422);
+  }
+
   // Plaid boundary: authorize the transfer, then create it.
   let authorizationId: string | undefined;
   let plaidTransferId: string | undefined;
+  // Flips once transfer/create is in flight: from that point the transfer
+  // outcome can be UNKNOWN (network drop mid-call, unparseable 2xx body) —
+  // the hold STAYS pending (never release funds that may have moved) and
+  // reconciliation decides. Only failures that provably produced no
+  // transfer release the hold.
+  let plaidStage: 'authorize' | 'create' = 'authorize';
   try {
     const authRes = await fetch(`${PLAID_HOST}/transfer/authorization/create`, {
       method: 'POST',
@@ -169,14 +243,26 @@ export async function POST(request: Request): Promise<Response> {
       }),
     });
     if (!authRes.ok) {
+      // Authoritative refusal with no create call attempted — no transfer
+      // exists: release the hold (the compensating write restores the
+      // available balance).
       console.error('Plaid transfer/authorization/create failed with status', authRes.status);
+      await releaseBestEffort(db, intentId);
       return jsonError('Plaid transfer authorization failed.', 502);
     }
     // The authorization id sits at different positions across Plaid response
     // revisions; resolve defensively instead of trusting one shape.
     const auth = (await authRes.json()) as { id?: string; authorization_id?: string; authorization?: { id?: string } };
     authorizationId = auth.authorization?.id ?? auth.authorization_id ?? auth.id;
+    if (!authorizationId) {
+      // 2xx but unreadable authorization — no create call was attempted, so
+      // the hold can be released safely.
+      console.error('Plaid transfer/authorization/create returned no authorization id:', auth);
+      await releaseBestEffort(db, intentId);
+      return jsonError('Plaid transfer failed.', 502);
+    }
 
+    plaidStage = 'create';
     const transferRes = await fetch(`${PLAID_HOST}/transfer/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'PLAID-CLIENT-ID': clientId, 'PLAID-SECRET': secret },
@@ -191,21 +277,33 @@ export async function POST(request: Request): Promise<Response> {
       }),
     });
     if (!transferRes.ok) {
+      // Authoritative refusal — the transfer was NOT created: release the
+      // hold.
       console.error('Plaid transfer/create failed with status', transferRes.status);
+      await releaseBestEffort(db, intentId);
       return jsonError('Plaid transfer failed.', 502);
     }
     const transfer = (await transferRes.json()) as { id?: string; transfer?: { id?: string } };
     plaidTransferId = transfer.transfer?.id ?? transfer.id;
-    if (!authorizationId || !plaidTransferId) {
+    if (!plaidTransferId) {
+      // 2xx with an unparseable body: outcome unknown — the hold STAYS
+      // pending and reconciliation decides.
+      console.error('Plaid transfer/create returned no transfer id:', transfer);
       return jsonError('Plaid transfer failed.', 502);
     }
   } catch (error) {
     console.error('Plaid transfer request failed:', error);
+    // Outcome unknown once create is in flight — keep the hold. An error at
+    // the authorize stage (before any create call) means no transfer exists.
+    if (plaidStage === 'authorize') await releaseBestEffort(db, intentId);
     return jsonError('Plaid transfer failed.', 502);
   }
 
   const timestamp = Date.now();
-  const transactionId = `ESCROW-PAYOUT-${timestamp}-${randomUUID()}`;
+  // Deterministic from the intent: a reconciliation settle of a stuck
+  // intent re-writes the SAME transaction_id and converges on the ledger's
+  // UNIQUE(transaction_id) instead of double-recording (audit #5).
+  const transactionId = `ESCROW-PAYOUT-${intentId}`;
   // The legacy DISBURSEMENT payload (transaction_id, transaction_type,
   // cbt_code, platform, gross_settled, currency, disbursements) is never
   // reshaped. Generation 9 adds ONLY the metadata.cbt stamp to the primary
@@ -251,6 +349,25 @@ export async function POST(request: Request): Promise<Response> {
   } else if (insertError) {
     console.error('universal_royalty_ledger insert failed:', insertError.message);
     return jsonError('Failed to record payout.', 502);
+  }
+
+  // The DISBURSEMENT row landed: settle the intent. Best-effort — a failed
+  // flip leaves the hold pending (over-held, never over-paid) and is logged
+  // for reconciliation; the payout itself is complete and recorded. The
+  // ledger row already carries the intent id in its transaction_id, so a
+  // reconciliation settle re-derives everything it needs.
+  try {
+    const settled = await settleEscrowWithdrawal(db, { intentId, plaidTransferId });
+    if (!settled) {
+      console.error(
+        `Withdrawal intent ${intentId} was not pending at settle — check escrow_withdrawal_intents.`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Withdrawal intent ${intentId} settle failed — the hold remains pending and needs reconciliation:`,
+      error,
+    );
   }
 
   return Response.json(
