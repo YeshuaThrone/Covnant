@@ -341,6 +341,9 @@ const EMPTY_JOINS = {
   entityTypeByCbt: new Map<string, string>(),
   templateByCbt: new Map<string, string>(),
   eventStateByCbt: new Map<string, string>(),
+  // #162 added the CVT join to TaxJoinContext; the fold reads it with
+  // `.get(...) ?? null`, so an empty map preserves these fixtures' intent.
+  cvtByCbt: new Map<string, string>(),
 };
 
 describe("resolvePayeePayouts — form thresholds evaluate the TAX YEAR (audit #9)", () => {
