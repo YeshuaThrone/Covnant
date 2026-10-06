@@ -138,3 +138,29 @@ export async function settleEscrowWithdrawal(
   }
   return (data ?? []).length === 1;
 }
+
+/**
+ * Stamp the Plaid transfer id onto the pending intent the moment the rail
+ * accepts the create call — BEFORE the ledger insert. Without this stamp a
+ * pending intent's transfer id exists only in the route process's memory,
+ * leaving reconciliation nothing to re-query or map a webhook to; with it,
+ * every intent is webhook-addressable and sweep-requeryable. Guard-first
+ * (status must still be pending) and non-fatal by contract: a failed stamp
+ * is logged by the route, the hold stays pending, and the DISBURSEMENT row
+ * — when it lands — remains the fallback source for the id.
+ */
+export async function recordWithdrawalTransferId(
+  db: SupabaseClient,
+  params: { intentId: string; plaidTransferId: string },
+): Promise<boolean> {
+  const { data, error } = await db
+    .from('escrow_withdrawal_intents')
+    .update({ plaid_transfer_id: params.plaidTransferId })
+    .eq('id', params.intentId)
+    .eq('status', 'pending')
+    .select('id');
+  if (error) {
+    throw new EscrowLedgerReadError(`Withdrawal transfer-id stamp failed: ${error.message}`);
+  }
+  return (data ?? []).length === 1;
+}

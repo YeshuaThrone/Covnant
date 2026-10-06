@@ -178,6 +178,14 @@ export const MONEY_INITIATION_RATE_LIMIT: RateLimitConfig = { limit: 5, windowMs
  */
 export const AGENT_RATE_LIMIT: RateLimitConfig = { limit: 10, windowMs: 600_000 };
 
+/**
+ * The Plaid transfer webhook (reconciliation): 30 deliveries per client
+ * address per minute — the house window. Plaid's signers are few and their
+ * delivery bursts are legitimate (retry storms on a 503), so the budget is
+ * the default read limit, not the money-initiation one.
+ */
+export const PAYOUTS_WEBHOOK_RATE_LIMIT: RateLimitConfig = { limit: 30, windowMs: 60_000 };
+
 /** Bound sweep cost: at most one expired-row DELETE per process per interval. */
 const SWEEP_INTERVAL_MS = 60_000;
 

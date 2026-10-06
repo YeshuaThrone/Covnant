@@ -50,6 +50,7 @@ import {
   withholdingUnitsOn,
 } from '@/lib/escrow/balance';
 import {
+  recordWithdrawalTransferId,
   releaseEscrowWithdrawal,
   reserveEscrowWithdrawal,
   settleEscrowWithdrawal,
@@ -290,6 +291,16 @@ export async function POST(request: Request): Promise<Response> {
       // pending and reconciliation decides.
       console.error('Plaid transfer/create returned no transfer id:', transfer);
       return jsonError('Plaid transfer failed.', 502);
+    }
+    // Stamp the rail id onto the pending hold BEFORE the ledger insert: this
+    // is what makes the intent webhook-addressable and sweep-requeryable.
+    // Best-effort — a failed stamp leaves the hold pending (safe), the
+    // DISBURSEMENT row remains the fallback source for the id, and the
+    // sweep logs unstamped intents for operator review.
+    try {
+      await recordWithdrawalTransferId(db, { intentId, plaidTransferId });
+    } catch (stampError) {
+      console.error('Withdrawal transfer-id stamp failed:', stampError);
     }
   } catch (error) {
     console.error('Plaid transfer request failed:', error);
