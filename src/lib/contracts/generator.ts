@@ -314,6 +314,20 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
       return `The Parties collaborate on the co-branded capsule in connection with ${work} (CBT ${asset.cbtCode}); each Party's design and production contributions are credited exactly as recorded in the Covenant registry, and proceeds reconcile through the embedded auditor at the recorded percentages.`;
     case 'runwayRelease':
       return `The releasing Party's walk, likeness, and performance in the runway presentation of ${work} are captured and released for the event's documentation, archive, and promotion, in ${fields.territory}, with the identifiers registered for the Work in the Covenant registry incorporated by reference.`;
+    case 'livePerformances':
+      return `The engagement covers each live performance of ${work} agreed in writing between the Parties, with every venue, date, and gate recorded against the Work's Covenant Block code ${asset.cbtCode}. Each performance settles individually through the Covenant pipeline so that one show's receipts are never commingled with another's.`;
+    case 'liveSettlement':
+      return `Box office, ticketing, and gate receipts for the performances of ${work} are held pending settlement and disbursed through the Covenant settlement pipeline at the Parties' exact recorded percentages in the Covenant pools. The embedded auditor reconciles every venue statement against the split sheet before a distribution posts, and no receipt is settled outside the recorded percentages.`;
+    case 'publishingGrant':
+      return `The owner grants the publishing Party the right to publish, reproduce, and distribute editions of the written work ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), throughout the Territory (${fields.territory}) for the Term (${fields.term}), in the formats and editions agreed in writing and subject to the ownership recorded in the Covenant registry.`;
+    case 'publishingRoyalties':
+      return `Royalties on sales of the Work are computed on net receipts at the Parties' exact recorded percentages in the Covenant pools and are payable through the Covenant settlement pipeline. The embedded auditor reconciles every accounting statement against the split sheet before it posts, and no royalty is disbursed outside the recorded percentages.`;
+    case 'athleteServices':
+      return `The engaging Party engages the athlete's competition, appearance, and allied services in connection with ${work} (CBT ${asset.cbtCode}) on the terms of this Agreement, covering the events, tournaments, and appearances agreed in writing and recorded against the asset of record.`;
+    case 'prizePurse':
+      return `Prize purses, guarantees, and bonus pools earned in connection with ${work} are held pending settlement and disbursed through the Covenant settlement pipeline at the Parties' exact recorded percentages in the Covenant pools, which are authoritative and sum to 100.0000%. The embedded auditor reconciles every distribution against the split sheet before it posts.`;
+    case 'eligibility':
+      return `Each athlete Party remains solely responsible for maintaining eligibility under the rules of the relevant governing body, and nothing in this Agreement requires a Party to violate those rules. The recorded percentages and accrued payment obligations survive the conclusion or termination of this Agreement.`;
     case 'usage':
       return `All content produced under this Agreement may be used by the brand in ${fields.territory} for the Term (${fields.term}), credited to its creators as recorded in the Covenant registry.`;
     case 'expenses':
