@@ -143,7 +143,10 @@ export function ContractEditor({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-      <div className="space-y-6">
+      {/* min-w-0 lets the column shrink below its content's min-width so the
+          payout table's overflow pane can actually clip instead of widening
+          the whole grid track (verified at 375px). */}
+      <div className="min-w-0 space-y-6">
         <section className="glass-card p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">
