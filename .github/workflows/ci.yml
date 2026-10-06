@@ -957,7 +957,9 @@ jobs:
           # only — PUBLIC must not hold EXECUTE, and the intent table must
           # have RLS enabled.
           public_exec=$(psql -h localhost -U postgres -d covnant_check -tAX -c "select has_function_privilege('public', 'reserve_escrow_withdrawal(text,text,numeric,numeric)', 'execute')")
-          [ "$public_exec" = "false" ] || { echo "PUBLIC STILL HOLDS EXECUTE on reserve_escrow_withdrawal"; exit 1; }
+          # psql -tA renders a plain boolean as t/f (the RPC probes above
+          # compare JSONB text, which renders as true/false).
+          [ "$public_exec" = "f" ] || { echo "PUBLIC STILL HOLDS EXECUTE on reserve_escrow_withdrawal (got: $public_exec)"; exit 1; }
           rls=$(psql -h localhost -U postgres -d covnant_check -tAX -c "select relrowsecurity from pg_class where oid = 'public.escrow_withdrawal_intents'::regclass")
           [ "$rls" = "t" ] || { echo "RLS NOT ENABLED on escrow_withdrawal_intents"; exit 1; }
           echo "OK: reserve_escrow_withdrawal is service-role-only and the intent table has RLS"
