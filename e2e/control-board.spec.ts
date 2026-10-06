@@ -28,7 +28,7 @@ test.describe('Covnant Control Board', () => {
     await expect(page.locator('[data-entity-class="MUSIC"]').first()).toBeVisible();
     await expect(page.locator('[data-entity-class="FILM"]').first()).toBeVisible();
     // Drop-5 canonical Music record — bound from the store engine.
-    await expect(page.getByText('US-S1Z-26-00001')).toBeVisible();
+    await expect(page.getByText('USS1Z2600001')).toBeVisible();
     await expect(page.getByText('ASCAP')).toBeVisible();
     // Split badges unchanged.
     await expect(page.getByText('Ownership reserve 50%').first()).toBeVisible();
