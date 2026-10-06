@@ -56,6 +56,7 @@ import {
 } from './CovnantAtomicDataSDK';
 import { flowKindForEntity, type FlowKind } from './flowKinds';
 import { buildUct, isValidUct } from '@/lib/covnant/uct';
+import { deterministicCvtCode } from '@/lib/covnant/cvt';
 import { canonicalSeedIdentifier } from '@/lib/covnant/vault';
 
 // The atomic sector vocabulary keeps its masterStore import surface (existing
@@ -1724,6 +1725,19 @@ export function demoAssetForCbt(cbt: string): MasterDemoAsset | undefined {
 /** Picker read — the registry's assets for the no-CBT asset chooser. */
 export function listDemoLaneAssets(): readonly Pick<MasterDemoAsset, 'cbt' | 'kind' | 'title' | 'sector'>[] {
   return MASTER_DEMO_ASSET_REGISTRY.map(({ cbt, kind, title, sector }) => ({ cbt, kind, title, sector }));
+}
+
+/** The demo registry's issuance year — the demo seed instant (2026-09-20) lands here. */
+const DEMO_CVT_ISSUANCE_YEAR = 2026;
+
+/**
+ * The demo asset's CVT of record — the deterministic engine-shape code
+ * (`CVT-XXXXXX-2026`) the seed stores on the demo asset's engine block
+ * (lib/admin/demoSeeds.ts `registerDemoAsset`). Every demo surface reads the
+ * SAME stored value through this helper — never a per-surface synthesis.
+ */
+export function demoCvtCode(cbt: string): string {
+  return deterministicCvtCode(cbt, DEMO_CVT_ISSUANCE_YEAR);
 }
 
 /**

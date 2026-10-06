@@ -88,7 +88,7 @@ const SHEET_50_30_20 = [
 const SHEET_100 = [{ id: 'holder-sole', name: 'Sole Writer', role: 'PUBLISHER', splitPercentage: 100 }];
 
 const ASSET_A: SandboxAsset = {
-  cvt_code: 'CVT-9F3A7C21-2026',
+  cvt_code: 'CVT-9F3A7C-2026',
   cbt_code: 'CBT-TRK-1234567890AB',
   title: 'SECOND BEST',
   medium: 'MUSIC_TRACK',
@@ -97,7 +97,7 @@ const ASSET_A: SandboxAsset = {
 };
 
 const ASSET_B: SandboxAsset = {
-  cvt_code: 'CVT-44BB11DD-2026',
+  cvt_code: 'CVT-44BB11-2026',
   cbt_code: 'CBT-REC-ABCDEF123456',
   title: 'NEXT BEST',
   medium: 'MUSIC_TRACK',

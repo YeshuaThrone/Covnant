@@ -26,7 +26,6 @@ import { formatUsdAmount } from '@/lib/money/format';
 import { isDevSeedMode } from '@/lib/server/devSeed';
 import { allocateWithCompanyDustSweep } from '@/modules/don/dust';
 import type { PayeeRole, SplitPartyInput } from '@/lib/don/types';
-import { cvtDisplayCode } from '@/lib/splits/codes';
 import {
   ATOMIC_SECTOR_GUARDS,
   FACTORY_VERTICAL_GUARDS,
@@ -50,6 +49,7 @@ import {
   bindAtomicEntity,
   bindFactoryEntity,
   demoAssetForCbt,
+  demoCvtCode,
   recordExecutionInMasterLedger,
   validateServedEntity,
   type AtomicContractRecord,
@@ -640,8 +640,8 @@ function buildLanePayload(template: LaneTemplateResolution, asset: MasterDemoAss
     auditor,
     lineage: {
       cbt: asset.cbt,
-      cvt: cvtDisplayCode(asset.cbt),
-      derivation: 'CVT display code derived server-side from the CBT body — last four hex',
+      cvt: demoCvtCode(asset.cbt),
+      derivation: 'the demo asset\'s stored-shape CVT of record (deterministic engine shape, CVT-XXXXXX-2026)',
     },
     execution: null,
   };

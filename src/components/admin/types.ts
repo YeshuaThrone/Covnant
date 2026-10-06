@@ -80,6 +80,8 @@ export type CatalogGrowthWindows = Record<CreatorAnalyticsWindowId, CatalogGrowt
 export interface ContractRow {
   id: string;
   cbtCode: string;
+  /** The asset's stored outward handle (cbt_assets.cvt_code), joined at composition — undefined/null when no stored handle exists (fail-closed; never derived). */
+  cvt?: string | null;
   templateId: string;
   industry: string;
   status: 'DRAFT' | 'FINAL';
@@ -118,7 +120,7 @@ export interface ExecutionStampRow {
   assetTitle: string;
   /** Canonical CBT when the asset is known (null when the record predates the join). */
   cbt: string | null;
-  /** Derived from the canonical CBT (null when the record predates derivation). */
+  /** The asset's stored-shape CVT of record (null when the record predates the join). */
   cvt: string | null;
   templateId: string | null;
   /** The lane's vertical sector label, when the record carries one. */

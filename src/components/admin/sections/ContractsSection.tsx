@@ -7,14 +7,13 @@
  *     clearing ledger (the Universal Execution Lane's CBT/CVT lineage).
  *  2. Template bindings — the master template library's binding state:
  *     sector, execution status, entity class telemetry, lane execution state.
- *  3. The vault index — stored agreements with their signature state and
- *     CVT display lineage.
+ *  3. The vault index — stored agreements with their signature state and the
+ *     asset's stored CVT of record.
  *
  * No settlement math renders here — gross, fees, withholding, corner dust,
  * and net live exclusively on the Ledger finances surface.
  */
 
-import { cvtDisplayCode } from '@/lib/splits/codes';
 import type { ContractRegistrySection, ContractRow, SectionData } from '../types';
 import { SectionEmpty, SectionEyebrow, SectionUnavailable, StatusPill, type PillTone } from '../shared';
 
@@ -68,8 +67,8 @@ export function ContractsSection({
       <section aria-label="Contract execution stamps" className="mt-6">
         <h3 className="text-lg font-semibold text-white">Contract executions</h3>
         <p className="mt-2 max-w-2xl text-sm text-white/50">
-          Every lane execution the clearing ledger stamped — CBT bound to its derived
-          CVT display badge, with the template and sector of record.
+          Every lane execution the clearing ledger stamped — CBT bound to its stored CVT of
+          record, with the template and sector of record.
         </p>
         {registry.executions.length === 0 ? (
           <SectionEmpty>
@@ -194,7 +193,7 @@ export function ContractsSection({
                   return (
                     <tr key={contract.id}>
                       <td className="px-4 py-3 font-mono text-xs text-gold-champagne/90">{contract.cbtCode}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/60">{cvtDisplayCode(contract.cbtCode)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-white/60">{contract.cvt ?? '—'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-white/60">{contract.templateId}</td>
                       <td className="px-4 py-3 text-white/60">{contract.industry}</td>
                       <td className="px-4 py-3">

@@ -88,10 +88,15 @@ test.describe.serial('MUL gate, auto identifier pills, duplicate shield', () => 
     await expect(page.getByText('ISRC (Recording)')).toBeVisible();
     await expect(page.getByText('ISWC (Composition)')).toBeVisible();
     await expect(page.getByText(cbtCode)).toBeVisible();
-    await expect(page.getByText(/CVT-ISRC-[0-9A-F]{4}/)).toBeVisible();
-    await expect(page.getByText(/CVT-ISWC-[0-9A-F]{4}/)).toBeVisible();
+    // The ONE outward handle — the stored CVT minted at registration.
+    await expect(page.getByText(/CVT-[0-9A-F]{6}-[0-9]{4}/)).toBeVisible();
+    // Missing sector identifiers render internal AUD- audit keys — never
+    // CVT-shaped, never a fabricated real-world registry code.
+    await expect(page.getByText(/AUD-ISRC-[0-9A-F]{4}/)).toBeVisible();
+    await expect(page.getByText(/AUD-ISWC-[0-9A-F]{4}/)).toBeVisible();
 
-    // No fabricated real-world registry codes: every derived value is a CVT key.
+    // No fabricated real-world registry codes: every derived value is an
+    // internal AUD- audit key, and the CVT pill is the stored handle alone.
     await expect(page.getByText(/[A-Z]{2}-[A-Z0-9]{3}-[0-9]{2}-[0-9]{5}/)).toHaveCount(0);
     await expect(page.getByText(/10\.5240\//)).toHaveCount(0);
 

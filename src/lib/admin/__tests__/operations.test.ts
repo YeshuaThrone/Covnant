@@ -34,6 +34,7 @@ const EMPTY_JOINS: TaxJoinContext = {
   entityTypeByCbt: new Map(),
   templateByCbt: new Map(),
   eventStateByCbt: new Map(),
+  cvtByCbt: new Map(),
 };
 
 let store: Store;

@@ -32,7 +32,7 @@ interface QueryCall {
 
 function assetRow(overrides: Record<string, unknown> = {}) {
   return {
-    cvt_code: 'CVT-9F3A7C21-2026',
+    cvt_code: 'CVT-9F3A7C-2026',
     cbt_code: 'CBT-TRK-1234567890AB',
     title: 'Test Song',
     medium: 'MUSIC_TRACK',
@@ -146,7 +146,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
   it('attaches a new identifier with an additive JSONB merge keyed on the stored CVT code', async () => {
     const { db, txQueries } = vaultDb(assetRow());
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'ISWC',
       value: 'T-123456789-1',
     });
@@ -154,19 +154,19 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     expect(result).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
     });
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
     expect(updates).toHaveLength(1);
     expect(updates[0].sql).toContain('jsonb_build_object($1, $2)');
-    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C21-2026']);
+    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C-2026']);
   });
 
   it('re-attaching the IDENTICAL pair is a no-op — never a duplicate', async () => {
     const { db, txQueries } = vaultDb(assetRow());
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'ISRC',
       value: 'US-X7U-26-00001', // same identifier, unnormalized form
     });
@@ -174,7 +174,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     expect(result).toEqual({
       ok: true,
       attached: false,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
     });
     expect(txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'))).toHaveLength(0);
@@ -185,7 +185,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
       assetRow({ mapped_identifiers: { isrc: 'USX7U2600001', title: 'free-form sibling' } }),
     );
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'MLC_WORK_ID',
       value: 'MLC-123456',
     });
@@ -193,7 +193,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     expect(result).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
     });
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
@@ -201,7 +201,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     // The SQL is a JSONB concat, not a replace — siblings survive at the
     // storage level, and only the new key/value is passed.
     expect(updates[0].sql).toContain("COALESCE(mapped_identifiers, '{}'::jsonb) || jsonb_build_object($1, $2)");
-    expect(updates[0].params).toEqual(['mlc_work_id', 'MLC-123456', 'CVT-9F3A7C21-2026']);
+    expect(updates[0].params).toEqual(['mlc_work_id', 'MLC-123456', 'CVT-9F3A7C-2026']);
   });
 
   it('attaching over a LEGACY stored ISWC form supersedes it in place — one value per kind', async () => {
@@ -212,7 +212,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     // this only happens when an admin attaches the ISO form.
     const { db, txQueries } = vaultDb(assetRow({ mapped_identifiers: { iswc: 'T-1234567890-1' } }));
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'ISWC',
       value: 'T-123456789-1',
     });
@@ -220,18 +220,18 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     expect(result).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
     });
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
     expect(updates).toHaveLength(1);
-    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C21-2026']);
+    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C-2026']);
   });
 
   it('replacing a kind with a different value is a single in-place update', async () => {
     const { db, txQueries } = vaultDb(assetRow());
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'ISRC',
       value: 'GBX7U2600002',
     });
@@ -239,12 +239,12 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
     expect(result).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
     });
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
     expect(updates).toHaveLength(1);
-    expect(updates[0].params).toEqual(['isrc', 'GBX7U2600002', 'CVT-9F3A7C21-2026']);
+    expect(updates[0].params).toEqual(['isrc', 'GBX7U2600002', 'CVT-9F3A7C-2026']);
   });
 
   it('an unknown CVT reference returns not-found and never auto-creates an asset', async () => {
@@ -262,7 +262,7 @@ describe('attachExternalIdentifier (V6 — idempotent exact-match dedupe)', () =
   it('an invalid identifier is rejected before any query runs', async () => {
     const { db, txQueries, poolQueries } = vaultDb(assetRow());
 
-    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C21-2026', {
+    const result = await attachExternalIdentifier(db as unknown as Db, 'CVT-9F3A7C-2026', {
       kind: 'UPC',
       value: 'not-a-upc',
     });
@@ -280,7 +280,7 @@ describe('findByIdentifier (V6 — exact-only lookup, never auto-create)', () =>
     const record = await findByIdentifier(db as unknown as Db, 'ISRC', 'US-X7U-26-00001');
 
     expect(record).toEqual({
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
       title: 'Test Song',
       medium: 'MUSIC_TRACK',

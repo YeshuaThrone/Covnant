@@ -10,7 +10,7 @@
  */
 
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
-import { cvtDisplayCode } from '@/lib/splits/codes';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 import { poolsFromSheet } from '@/lib/splits/multi-pool';
 import { percentUnitsToNumber, formatPercentValue } from '@/lib/fixed-point';
 import {
@@ -60,12 +60,22 @@ export interface AgreementContext {
     title: string;
     mediumLabel: string;
     cbtCode: string;
-    displayCode: string;
+    /** The asset's stored outward handle — null when no well-shaped stored CVT exists (fail-closed). */
+    displayCode: string | null;
     identifiers: AgreementIdentifier[];
   };
   pools: AgreementPool[];
   parties: AgreementParty[];
   fields: AgreementFields;
+}
+
+/**
+ * The document's display-code clause — ` (display code CVT-…)` when the asset
+ * carries a stored handle, else nothing: an asset with no stored CVT renders
+ * its CBT code of record alone, never a synthesized handle.
+ */
+export function displayCodeClause(displayCode: string | null): string {
+  return displayCode === null ? '' : ` (display code ${displayCode})`;
 }
 
 export const DEFAULT_FIELDS: AgreementFields = {
@@ -128,7 +138,7 @@ export function hydrateContext(
       title: asset.title,
       mediumLabel: MEDIUM_LABELS[asset.medium],
       cbtCode: asset.cbtCode,
-      displayCode: cvtDisplayCode(asset.cbtCode),
+      displayCode: storedCvtHandle(asset.cvtCode),
       identifiers,
     },
     pools,
@@ -193,9 +203,9 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
 
   switch (clause) {
     case 'preamble':
-      return `This ${template.name} (the "Agreement") is entered into as of ${effectiveDate(fields)} by and between ${parties}, in connection with the work ${work}, identified by Covenant Block code ${asset.cbtCode} (display code ${asset.displayCode}).`;
+      return `This ${template.name} (the "Agreement") is entered into as of ${effectiveDate(fields)} by and between ${parties}, in connection with the work ${work}, identified by Covenant Block code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}.`;
     case 'workIdentified':
-      return `The Work is ${work}, registered in the Covenant registry under CBT code ${asset.cbtCode} (display code ${asset.displayCode}).${asset.identifiers.length > 0 ? ` Registered identifiers: ${asset.identifiers.map((i) => `${i.label} ${i.value}`).join(' · ')}.` : ''}`;
+      return `The Work is ${work}, registered in the Covenant registry under CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}.${asset.identifiers.length > 0 ? ` Registered identifiers: ${asset.identifiers.map((i) => `${i.label} ${i.value}`).join(' · ')}.` : ''}`;
     case 'poolSheets':
       return `Ownership of the Work is recorded in the Covenant pools exactly as stored on the asset of record. Each pool's shares are authoritative and sum to 100.0000%:\n${poolSheetBody(ctx)}`;
     case 'control':
@@ -215,7 +225,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'contribution':
       return `The contributing Party's performance, composition, or other creative contribution to ${work} is recorded in the Covenant pools and is compensated as set out below.`;
     case 'licensedWork':
-      return `The licensor grants the license with respect to ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), including the registered identifiers${asset.identifiers.length > 0 ? ` (${asset.identifiers.map((i) => `${i.label} ${i.value}`).join(', ')})` : ''}.`;
+      return `The licensor grants the license with respect to ${work}, identified by CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}, including the registered identifiers${asset.identifiers.length > 0 ? ` (${asset.identifiers.map((i) => `${i.label} ${i.value}`).join(', ')})` : ''}.`;
     case 'scope':
       return `The license is granted for the uses expressly agreed in writing between the Parties and recorded in the Covenant ledger at settlement time. All uses outside the agreed scope require separate written consent.`;
     case 'use':
@@ -235,7 +245,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'waiver':
       return `To the extent any contribution is determined not to be a work made for hire, the contributing Party irrevocably assigns all such rights to the commissioning Party and waives any moral rights to the extent permitted by law.`;
     case 'composition':
-      return `This Agreement concerns the composition ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}).`;
+      return `This Agreement concerns the composition ${work}, identified by CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}.`;
     case 'writerShares':
       return `Writer and publisher shares of the composition are those recorded in the Writer/Composition and Publisher Administration pools of the Covenant registry, which sum to exactly 100.0000% each and are authoritative:\n${poolSheetBody(ctx)}`;
     case 'administration':
@@ -273,7 +283,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'clearance':
       return `The remixer's rights are cleared for the Territory (${fields.territory}) for the Term (${fields.term}), subject to the Covenant registry's recorded ownership and the auditor's settlement reconciliation.`;
     case 'property':
-      return `The property under option is the screenplay ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), together with all rights of every kind therein owned or controlled by the owner as recorded in the Covenant registry.`;
+      return `The property under option is the screenplay ${work}, identified by CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}, together with all rights of every kind therein owned or controlled by the owner as recorded in the Covenant registry.`;
     case 'optionGrant':
       return `The owner grants the producer an exclusive option to acquire the motion picture and allied rights in the property on the terms of this Agreement.`;
     case 'optionFee':
@@ -287,7 +297,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'publicity':
       return `The production may use the releasing Party's name, likeness, and biographical material to publicize ${work}, without additional consideration beyond that stated above.`;
     case 'artwork':
-      return `The consignor delivers the artwork ${work} (medium: ${asset.mediumLabel}), identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), to the consignee for sale on consignment.`;
+      return `The consignor delivers the artwork ${work} (medium: ${asset.mediumLabel}), identified by CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}, to the consignee for sale on consignment.`;
     case 'consignmentTerm':
       return `The consignment runs for ${fields.term} from ${effectiveDate(fields)}, covering the Territory (${fields.territory}).`;
     case 'insurance':
@@ -297,7 +307,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
     case 'campaign':
       return `This Agreement engages the talent for the brand campaign in connection with ${work} (CBT ${asset.cbtCode}), on the terms below.`;
     case 'designLicense':
-      return `The licensor grants the licensee the right to reproduce, produce, and distribute garments and accessories embodying the design ${work}, identified by CBT code ${asset.cbtCode} (display code ${asset.displayCode}), throughout the Territory (${fields.territory}) for the Term (${fields.term}), subject to the ownership recorded in the Covenant registry.`;
+      return `The licensor grants the licensee the right to reproduce, produce, and distribute garments and accessories embodying the design ${work}, identified by CBT code ${asset.cbtCode} ${displayCodeClause(asset.displayCode)}, throughout the Territory (${fields.territory}) for the Term (${fields.term}), subject to the ownership recorded in the Covenant registry.`;
     case 'apparelProduction':
       return `The manufacturer produces the apparel line derived from ${work} (CBT ${asset.cbtCode}) strictly to the tech packs, materials, and sample approvals recorded in the Covenant registry, at the unit quantities and production schedule agreed in writing.`;
     case 'collabContent':
@@ -321,7 +331,7 @@ function clauseBody(clause: string, template: ContractTemplate, ctx: AgreementCo
 export function renderClauses(template: ContractTemplate, ctx: AgreementContext): string {
   const header = [
     template.name.toUpperCase(),
-    'Covenant Block: ' + ctx.asset.cbtCode + ' · Display: ' + ctx.asset.displayCode,
+    'Covenant Block: ' + ctx.asset.cbtCode + (ctx.asset.displayCode === null ? '' : ' · CVT: ' + ctx.asset.displayCode),
     '',
   ].join('\n');
 

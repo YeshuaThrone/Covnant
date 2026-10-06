@@ -9,20 +9,33 @@ import {
 } from '@/lib/splits/multi-pool';
 import {
   auditKeyHash,
-  registryPillsForCode,
+  cbtPillForCode,
+  cvtPillForCode,
   resolveRegistryPills,
   sectorAuditKey,
   withRegistryPills,
 } from '@/lib/assets/registry-keys';
+import { CVT_PATTERN } from '@/lib/covnant/cvt';
 
 describe('registry pill resolver (universal tracking keys)', () => {
   const CBT = 'CBT-TRK-000000000001';
 
-  it('derives CBT + CVT audit pills from the canonical code alone', () => {
-    const pills = registryPillsForCode(CBT);
-    expect(pills.map((p) => p.key)).toEqual(['cbt', 'cvt']);
-    expect(pills[0]).toMatchObject({ label: 'CBT', value: CBT, source: 'engine' });
-    expect(pills[1]).toMatchObject({ label: 'CVT', value: 'CVT-TRK-0001', source: 'derived' });
+  it('renders the CBT pill (the identifier of record) from the canonical code alone', () => {
+    const pill = cbtPillForCode(CBT);
+    expect(pill).toMatchObject({ key: 'cbt', label: 'CBT', value: CBT, source: 'engine' });
+  });
+
+  it('renders the CVT pill ONLY from a well-shaped stored handle (fail-closed, never derived)', () => {
+    // No stored handle → no CVT pill — never a synthesized shape.
+    expect(cvtPillForCode(null)).toBeNull();
+    expect(cvtPillForCode(undefined)).toBeNull();
+    // A stored handle that fails the ONE validator renders nothing.
+    expect(cvtPillForCode('CVT-TRK-0001')).toBeNull(); // legacy type+4hex shape — retired
+    expect(cvtPillForCode('CBT-TRK-000000000001')).toBeNull();
+    // A valid stored handle renders as the engine's record.
+    const pill = cvtPillForCode('CVT-3F2A9C-2026');
+    expect(pill).toMatchObject({ key: 'cvt', label: 'CVT', value: 'CVT-3F2A9C-2026', source: 'engine' });
+    expect(CVT_PATTERN.test('CVT-3F2A9C-2026')).toBe(true);
   });
 
   it('provisions ISRC (Recording) + ISWC (Composition) for Music & Audio', () => {
@@ -32,8 +45,8 @@ describe('registry pill resolver (universal tracking keys)', () => {
     expect(labels).toContain('ISWC (Composition)');
     const isrc = pills.find((p) => p.label === 'ISRC (Recording)');
     const iswc = pills.find((p) => p.label === 'ISWC (Composition)');
-    expect(isrc?.value).toMatch(/^CVT-ISRC-[0-9A-F]{4}$/);
-    expect(iswc?.value).toMatch(/^CVT-ISWC-[0-9A-F]{4}$/);
+    expect(isrc?.value).toMatch(/^AUD-ISRC-[0-9A-F]{4}$/);
+    expect(iswc?.value).toMatch(/^AUD-ISWC-[0-9A-F]{4}$/);
     expect(pills.some((p) => p.label.startsWith('EIDR'))).toBe(false);
   });
 
@@ -44,12 +57,21 @@ describe('registry pill resolver (universal tracking keys)', () => {
       expect(pills.some((p) => p.label.startsWith('ISRC'))).toBe(false);
       expect(pills.some((p) => p.label.startsWith('ISWC'))).toBe(false);
       const eidr = pills.find((p) => p.label.startsWith('EIDR'));
-      expect(eidr?.value).toMatch(/^CVT-EIDR-[0-9A-F]{4}$/);
+      expect(eidr?.value).toMatch(/^AUD-EIDR-[0-9A-F]{4}$/);
     }
   });
 
-  it('gives print media only the CBT/CVT internal audit keys', () => {
+  it('gives print media without a stored handle only the CBT pill', () => {
     const pills = resolveRegistryPills({ cbtCode: CBT, medium: 'PRINT_BOOK' });
+    expect(pills.map((p) => p.key)).toEqual(['cbt']);
+  });
+
+  it('renders the stored CVT pill between CBT and the audit keys when the asset carries one', () => {
+    const pills = resolveRegistryPills({
+      cbtCode: CBT,
+      cvtCode: 'CVT-3F2A9C-2026',
+      medium: 'PRINT_BOOK',
+    });
     expect(pills.map((p) => p.key)).toEqual(['cbt', 'cvt']);
   });
 
@@ -74,9 +96,9 @@ describe('registry pill resolver (universal tracking keys)', () => {
       value: 'US-S1M-26-00001',
       source: 'engine',
     });
-    expect(pills.some((p) => p.value.startsWith('CVT-ISRC-'))).toBe(false);
+    expect(pills.some((p) => p.value.startsWith('AUD-ISRC-'))).toBe(false);
     // The engine does not supply ISWC — its derived audit key remains.
-    expect(pills.some((p) => p.value.startsWith('CVT-ISWC-'))).toBe(true);
+    expect(pills.some((p) => p.value.startsWith('AUD-ISWC-'))).toBe(true);
   });
 });
 
@@ -164,16 +186,25 @@ describe('Black Box Shield payload attachment', () => {
     expect(shielded.grossSettled).toBe(100);
     expect(shielded.registry.map((p) => p.key)).toEqual([
       'cbt',
-      'cvt',
       'derived-isrc',
       'derived-iswc',
     ]);
   });
 
-  it('falls back to code-derived pills when the asset is not at hand', () => {
+  it('attaches the stored CVT pill when the shield carries the asset row', () => {
+    const shielded = withRegistryPills({ cbtCode: 'CBT-TRK-000000000009' }, {
+      cbtCode: 'CBT-TRK-000000000009',
+      cvtCode: 'CVT-9B8C7D-2026',
+      medium: 'MUSIC_TRACK',
+    });
+    expect(shielded.registry.map((p) => p.key)).toEqual(['cbt', 'cvt', 'derived-isrc', 'derived-iswc']);
+    expect(shielded.registry[1].value).toBe('CVT-9B8C7D-2026');
+  });
+
+  it('falls back to the CBT pill alone when the asset is not at hand (no synthesized CVT)', () => {
     const shielded = withRegistryPills({ cbtCode: 'CBT-FLM-00000000000A' });
-    expect(shielded.registry.map((p) => p.key)).toEqual(['cbt', 'cvt']);
-    expect(shielded.registry[1].value).toBe('CVT-FLM-000A');
+    expect(shielded.registry.map((p) => p.key)).toEqual(['cbt']);
+    expect(shielded.registry.some((p) => p.value.startsWith('CVT-'))).toBe(false);
   });
 });
 

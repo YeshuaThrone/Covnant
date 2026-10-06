@@ -14,14 +14,16 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { bootDevSeedStore } from '@/lib/server/devSeed';
 import { seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
 import {
+  attachContractCvt,
   buildContractRegistrySection,
   buildLedgerFinancesSection,
+  type ListAssetsResult,
 } from '@/lib/admin/sectionPayloads';
-import { resolveMasterLedger, resolveMasterTemplates } from '@/lib/master/masterStore';
+import { resolveMasterLedger, resolveMasterTemplates, demoCvtCode } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
-import { cvtDisplayCode } from '@/lib/splits/codes';
+import { CVT_PATTERN } from '@/lib/covnant/cvt';
 import { listContracts } from '@/lib/contracts/store';
 import type { ContractRow } from '@/components/admin/types';
 import { ContractsSection } from '../ContractsSection';
@@ -34,10 +36,10 @@ beforeAll(async () => {
   await seedAdminDemoDataIfEmpty();
 });
 
-/** The /admin page's StoredContract → read-only row mapping, verbatim shape. */
-async function seededContractRows(): Promise<ContractRow[]> {
+/** The /admin page's StoredContract → read-only row mapping WITH its stored-CVT join, verbatim shape. */
+async function seededContractRows(assets: ListAssetsResult): Promise<ContractRow[]> {
   const contracts = await listContracts();
-  return contracts.map((contract) => ({
+  const rows: ContractRow[] = contracts.map((contract) => ({
     id: contract.id,
     cbtCode: contract.cbtCode,
     templateId: contract.templateId,
@@ -46,6 +48,9 @@ async function seededContractRows(): Promise<ContractRow[]> {
     createdAt: new Date(contract.createdAt).toISOString(),
     updatedAt: new Date(contract.updatedAt).toISOString(),
   }));
+  const enriched = attachContractCvt({ kind: 'ready', value: rows }, assets);
+  if (enriched.kind !== 'ready') throw new Error(`contract CVT join unavailable: ${enriched.code}`);
+  return enriched.value;
 }
 
 describe('ContractsSection — the contract registry', () => {
@@ -57,12 +62,13 @@ describe('ContractsSection — the contract registry', () => {
     expect(payload.executions.length).toBeGreaterThan(0);
     const stamp = payload.executions[0];
     expect(stamp.executionId.startsWith('CBT-EXEC-')).toBe(true);
-    // The stamp's lineage is the minted binding's own pair — the CVT derives
-    // from the CBT by the display-code path, never an invented pairing.
+    // The stamp's lineage is the minted binding's own pair — the CVT is the
+    // demo asset's stored-shape handle of record, never an invented pairing.
     const { cbt } = stamp;
     expect(cbt).not.toBeNull();
     if (cbt === null) return; // narrows the nullable lineage type for the checker
-    expect(stamp.cvt).toBe(cvtDisplayCode(cbt));
+    expect(stamp.cvt).toBe(demoCvtCode(cbt));
+    expect(stamp.cvt === null || CVT_PATTERN.test(stamp.cvt)).toBe(true);
     expect(stamp.templateId).toMatch(/^TPL-/);
 
     const markup = renderToStaticMarkup(
@@ -80,7 +86,7 @@ describe('ContractsSection — the contract registry', () => {
     const payload = buildContractRegistrySection({ demo, records }, masterRecords);
     expect(payload.templates.length).toBeGreaterThan(0);
 
-    const rows = await seededContractRows();
+    const rows = await seededContractRows(await listAssets());
     expect(rows.length).toBeGreaterThan(0);
     const markup = renderToStaticMarkup(
       <ContractsSection registry={payload} contracts={{ kind: 'ready', value: rows }} />,
@@ -89,6 +95,38 @@ describe('ContractsSection — the contract registry', () => {
     expect(markup).toContain('Entity class');
     expect(markup).toContain('Lane state');
     expect(markup).toContain('Signature state: AWAITING SIGNATURE');
+    // The vault's CVT column shows the stored handle of record — and when the
+    // asset carries one, the engine-shaped value renders verbatim.
+    const withCvt = rows.find((row) => row.cvt != null);
+    expect(withCvt).toBeDefined();
+    expect(markup).toContain(withCvt?.cvt ?? '');
+  });
+
+  it('renders NO synthesized CVT for an asset with no stored handle (fail-closed)', async () => {
+    const { demo, records } = await resolveMasterTemplates();
+    const { records: masterRecords } = await resolveMasterLedger();
+    const payload = buildContractRegistrySection({ demo, records }, masterRecords);
+    // A vault row whose asset has NO stored CVT — the pre-migration null case.
+    // The old synthesis for this CBT would read `CVT-TRK-FF01`; it must never appear.
+    const orphan: ContractRow = {
+      id: 'contract-orphan-shape',
+      cbtCode: 'CBT-TRK-FFFFFFFFFF01',
+      cvt: null,
+      templateId: 'TPL-MUSIC-MASTER',
+      industry: 'Music',
+      status: 'FINAL',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const markup = renderToStaticMarkup(
+      <ContractsSection registry={payload} contracts={{ kind: 'ready', value: [orphan] }} />,
+    );
+    expect(markup).toContain(orphan.cbtCode);
+    expect(markup).not.toContain('CVT-TRK-FF01');
+    // Every well-shaped CVT value in the tree is engine-shaped or absent.
+    for (const match of markup.match(/CVT-[A-Z0-9]{6}-\d{4}/g) ?? []) {
+      expect(CVT_PATTERN.test(match)).toBe(true);
+    }
   });
 
   it('renders NO settlement math — money lives exclusively on the Ledger tab', async () => {
@@ -97,7 +135,7 @@ describe('ContractsSection — the contract registry', () => {
     const markup = renderToStaticMarkup(
       <ContractsSection
         registry={buildContractRegistrySection({ demo, records }, masterRecords)}
-        contracts={{ kind: 'ready', value: await seededContractRows() }}
+        contracts={{ kind: 'ready', value: await seededContractRows(await listAssets()) }}
       />,
     );
     // None of the finances surface's tables or money vocabulary may appear.
@@ -125,7 +163,7 @@ describe('Dedupe regression — the two admin sections render DISTINCT trees', (
     const contractsMarkup = renderToStaticMarkup(
       <ContractsSection
         registry={buildContractRegistrySection({ demo: tDemo, records: tRecords }, lRecords)}
-        contracts={{ kind: 'ready', value: await seededContractRows() }}
+        contracts={{ kind: 'ready', value: await seededContractRows(assets) }}
       />,
     );
 

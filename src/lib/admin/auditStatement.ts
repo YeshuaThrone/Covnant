@@ -64,6 +64,7 @@ import type { RoyaltyLineItemRecord, SplitRunRecord } from '@/lib/don/types';
 import type { Store } from '@/lib/server/store';
 import type { CreatorWindowDays } from '@/lib/admin/creatorAnalytics';
 import { entityRecordForWorkRef } from '@/lib/master/masterStore';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 import type { SovereignAtomicEntity } from '@/lib/master/CovnantAtomicDataSDK';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -265,10 +266,12 @@ export function identifiersForWorkRef(
     const fromMapped = identifierFromMappedAsset(asset);
     if (fromMapped !== null) return fromMapped;
     // The asset resolves but carries no class-slot industry code — its own
-    // code of record, labeled with its true family: CVT only when the CVT
-    // handle is mapped, CBT when the value is the asset's CBT code (a CBT
-    // is never labeled CVT — the audited mislabel).
-    if (asset.cvtCode) return [codeOfRecordRow(asset.cvtCode, 'CVT')];
+    // code of record, labeled with its true family: CVT only when the STORED
+    // handle passes the ONE validator (a malformed stored value never
+    // masquerades as the outward handle), CBT when the value is the asset's
+    // CBT code (a CBT is never labeled CVT — the audited mislabel).
+    const storedCvt = storedCvtHandle(asset.cvtCode);
+    if (storedCvt !== null) return [codeOfRecordRow(storedCvt, 'CVT')];
     return [codeOfRecordRow(asset.cbtCode, 'CBT')];
   }
 

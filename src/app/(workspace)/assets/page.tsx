@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
+import { storedCvtHandle } from '@/lib/covnant/cvt';
 import type { PoolTaggedHolder } from '@/lib/splits/multi-pool';
-import { cvtDisplayCode } from '@/lib/splits/codes';
 import { MEDIUM_LABELS } from '@/lib/splits/shared';
 import { listAssets } from '@/lib/sdk';
 import { IdentifierBadge } from '@/components/brand/IdentifierBadge';
@@ -98,28 +98,33 @@ export default async function AssetsPage({
           </div>
         ) : (
           <ul className="mt-4 space-y-4">
-            {assets.map((asset) => (
-              <li key={asset.cbtCode}>
-                <Link
-                  href={`/assets/${asset.cbtCode}`}
-                  className="glass-card block p-5 hover:border-gold/40"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-medium text-[#F2F4F8]">{asset.title}</p>
-                      <p className="mt-1 text-sm text-white/50">
-                        {MEDIUM_LABELS[asset.medium]} · {poolCount(asset)} pools ·{' '}
-                        {asset.rightsHolders.length} holders
-                      </p>
+            {assets.map((asset) => {
+              // The stored column is the ONLY outward CVT — no stored handle,
+              // no badge (fail-closed; never derived from the CBT body).
+              const cvt = storedCvtHandle(asset.cvtCode);
+              return (
+                <li key={asset.cbtCode}>
+                  <Link
+                    href={`/assets/${asset.cbtCode}`}
+                    className="glass-card block p-5 hover:border-gold/40"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-lg font-medium text-[#F2F4F8]">{asset.title}</p>
+                        <p className="mt-1 text-sm text-white/50">
+                          {MEDIUM_LABELS[asset.medium]} · {poolCount(asset)} pools ·{' '}
+                          {asset.rightsHolders.length} holders
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-xs text-white/40">{asset.cbtCode}</span>
+                        {cvt !== null && <IdentifierBadge label="CVT" value={cvt} />}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs text-white/40">{asset.cbtCode}</span>
-                      <IdentifierBadge label="CVT" value={cvtDisplayCode(asset.cbtCode)} />
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            ))}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

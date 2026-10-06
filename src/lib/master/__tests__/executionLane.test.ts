@@ -15,8 +15,10 @@ import {
   ATOMIC_TEMPLATE_REGISTRY,
   MASTER_TEMPLATE_LIBRARY,
   demoAssetForCbt,
+  demoCvtCode,
   listDemoLaneAssets,
 } from '../masterStore';
+import { CVT_PATTERN } from '@/lib/covnant/cvt';
 import {
   CROSS_DOMAIN_BINDING_ALLOWLIST,
   LANE_POOL_BPS,
@@ -162,11 +164,14 @@ describe('payload hydration — completeness for every seeded sector', () => {
     }
   });
 
-  it('serves the CBT/CVT lineage canon — CBT-TRK-A51DF05B4279 displays as CVT-TRK-4279', () => {
+  it('serves the CBT/CVT lineage canon — the stored-shape handle of record, never a type+4hex derivation', () => {
     const resolution = resolveExecutionLane({ templateKey: 'TPL-MUS-001', cbt: FOUNDER_CBT });
     expect(resolution.ok).toBe(true);
     expect(resolution.ok && resolution.lane.lineage.cbt).toBe(FOUNDER_CBT);
-    expect(resolution.ok && resolution.lane.lineage.cvt).toBe('CVT-TRK-4279');
+    // The lineage CVT is the demo asset's stored-shape handle of record
+    // (deterministic engine shape) — the old `CVT-TRK-4279` synthesis is gone.
+    expect(resolution.ok && resolution.lane.lineage.cvt).toBe(demoCvtCode(FOUNDER_CBT));
+    expect(resolution.ok && CVT_PATTERN.test(resolution.lane.lineage.cvt)).toBe(true);
   });
 
   it('renders full entity fields for the seeded MUSIC class and canon metrics elsewhere', () => {

@@ -13,7 +13,7 @@ function makeContext(overrides: Partial<AgreementContext> = {}): AgreementContex
       title: 'E2E Pool Gate Song',
       mediumLabel: 'Music Track',
       cbtCode: 'CBT-TRK-4A3F2879BD05',
-      displayCode: 'CVT-TRK-4A3F2879BD05',
+      displayCode: 'CVT-3F2A9C-2026',
       identifiers: [{ label: 'ISRC', value: 'US-S1M-26-77777' }],
     },
     pools: [
@@ -82,10 +82,22 @@ describe('autoFillSummary', () => {
     expect(summary.work.cbtCode).toBe('CBT-TRK-4A3F2879BD05');
     expect(summary.identifiers).toEqual([
       { label: 'CBT', value: 'CBT-TRK-4A3F2879BD05', toBeCompleted: false },
-      { label: 'CVT', value: 'CVT-TRK-4A3F2879BD05', toBeCompleted: false },
+      { label: 'CVT', value: 'CVT-3F2A9C-2026', toBeCompleted: false },
       { label: 'ISRC', value: 'US-S1M-26-77777', toBeCompleted: false },
     ]);
     expect(summary.parties[0].sharePercent).toBe('60.0000');
+  });
+
+  it('omits the CVT row entirely when the asset has no stored handle (fail-closed)', () => {
+    const ctx = makeContext();
+    const summary = autoFillSummary({
+      ...ctx,
+      asset: { ...ctx.asset, displayCode: null },
+    });
+    // Absence of a stored handle is not a missing form field — the CVT row is
+    // omitted, never rendered as a synthesized value or "To be completed".
+    expect(summary.identifiers.some((f) => f.label === 'CVT')).toBe(false);
+    expect(summary.identifiers[0]).toEqual({ label: 'CBT', value: 'CBT-TRK-4A3F2879BD05', toBeCompleted: false });
   });
 
   it('never fabricates missing holder profile data — renders to-be-completed', () => {

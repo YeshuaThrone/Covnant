@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SelfServeRightsHolder } from '@/engine/covenant-master-sdk';
 import { CovenantMasterSDK } from '@/engine/covenant-master-sdk';
-import { cvtDisplayCode } from '../splits/codes';
 import {
   buildPoolWeightedSheet,
   holdersFromDrafts,
@@ -241,16 +240,5 @@ describe('studio draft mapping', () => {
     expect(holders[0].taxProfile.isVerified).toBe(false);
     expect(holders[0].payoutRouting.railType).toBe('SWIFT');
     expect(holders[0].confirmedByArtist).toBe(true);
-  });
-});
-
-describe('CVT display codes', () => {
-  it('derives CVT-<PREFIX>-XXXX from the canonical CBT code', () => {
-    expect(cvtDisplayCode('CBT-TRK-ABCDEF123456')).toBe('CVT-TRK-3456');
-    expect(cvtDisplayCode('CBT-FILM-0000000000FF')).toBe('CVT-FILM-00FF');
-  });
-
-  it('passes malformed codes through uppercased', () => {
-    expect(cvtDisplayCode('not-a-code')).toBe('NOT-A-CODE');
   });
 });

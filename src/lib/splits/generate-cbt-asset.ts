@@ -4,14 +4,16 @@
  * the vendored engine is never imported at runtime here.
  *
  * One call: registers the multi-pool asset through the server action (which
- * routes through the engine's single write path), then deterministically
- * provisions the universal tracking pills from the canonical CBT-<TYPE>-<HASH>
- * code the engine returns — ISRC (Recording) + ISWC (Composition) for Music &
- * Audio, EIDR (10.5240 Root Standard) for Film/TV/Video, plus the CVT/CBT
- * internal audit keys for ledger verification. Sector registry codes are
- * never fabricated: whatever the engine does not supply is presented as a
- * clearly internal `CVT-<PREFIX>-XXXX` audit key, never as a registered
- * external identifier.
+ * routes through the engine's single write path), then resolves the universal
+ * tracking pills from the returned record — the canonical CBT-<TYPE>-<HASH>
+ * code the engine returns, the asset's STORED outward CVT handle when the
+ * engine minted one (never a client-side derivation), and deterministic audit
+ * keys for the sector registries: ISRC (Recording) + ISWC (Composition) for
+ * Music & Audio, EIDR (10.5240 Root Standard) for Film/TV/Video. Sector
+ * registry codes are never fabricated: whatever the engine does not supply is
+ * presented as a clearly internal `AUD-<PREFIX>-XXXX` audit key, never as a
+ * registered external identifier — and the `CVT-` prefix belongs to the
+ * stored handle alone.
  *
  * Duplicate collisions come back classified (`duplicate: true`) so the UI can
  * render the gold banner instead of a raw Postgres error.
@@ -28,7 +30,13 @@ export interface GenerateCbtAssetInput {
 }
 
 export type GenerateCbtAssetResult =
-  | { ok: true; cbtCode: string; pills: RegistryPill[] }
+  | {
+      ok: true;
+      cbtCode: string;
+      /** The stored outward handle the engine minted, when one was persisted (null = no stored CVT; never synthesized). */
+      cvtCode: string | null;
+      pills: RegistryPill[];
+    }
   | { ok: false; duplicate: boolean; error: string };
 
 export async function generateCBTAsset(
@@ -54,8 +62,10 @@ export async function generateCBTAsset(
   return {
     ok: true,
     cbtCode: result.cbtCode,
+    cvtCode: result.cvtCode ?? null,
     pills: resolveRegistryPills({
       cbtCode: result.cbtCode,
+      cvtCode: result.cvtCode ?? null,
       // The action validated the medium against MEDIA_MEDIUMS before writing.
       medium: input.medium as MediaMedium,
     }),

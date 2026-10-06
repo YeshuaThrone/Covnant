@@ -20,8 +20,15 @@ import path from 'path';
  * (CBT prefix FSH) — two additions and nothing else — so the founder's demo
  * asset registry (Live Event, Garment Line) settles through the REAL engine
  * instead of failing on an unknown medium. Re-blessed hash:
+ *
+ * AMENDMENT 2026-10-06 (one CVT shape — data-identity standardization,
+ * todo_5jNVoY43): getOrHydrateAsset's DB hydration now carries the stored
+ * cbt_assets.cvt_code onto the hydrated asset (one conditional addition and
+ * nothing else) — a DB-only asset keeps its handle of record instead of
+ * reading as handle-less, per the one-CVT-shape doctrine: the stored column
+ * is the only outward CVT. Re-blessed hash:
  */
-const VENDORED_SHA256 = '2cafbd50197a1ad05d12cfa804cc746313e4389ef20167b1c6afe99e2b513288';
+const VENDORED_SHA256 = '69eb3a7c356ff4ac9dcadaca3c12999d105381935e81e83ea25ae1428bab4b5b';
 
 describe('vendored engine integrity', () => {
   it('matches the blessed source-of-truth hash', () => {

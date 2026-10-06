@@ -85,7 +85,7 @@ type QueryFn = (sql: string, params?: unknown[]) => Promise<{ rows: Record<strin
 
 function assetRow(overrides: Record<string, unknown> = {}) {
   return {
-    cvt_code: 'CVT-9F3A7C21-2026',
+    cvt_code: 'CVT-9F3A7C-2026',
     cbt_code: 'CBT-TRK-1234567890AB',
     title: 'Test Song',
     medium: 'MUSIC_TRACK',
@@ -167,7 +167,7 @@ describe('POST /api/admin/vault/identifiers — authentication (fail closed FIRS
     delete process.env.ADMIN_DASHBOARD_PASSWORD;
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }),
     );
     expect(status).toBe(503);
     expect(body).toEqual({ ok: false, reason: 'admin_not_configured', error: 'Admin dashboard is not configured.' });
@@ -176,7 +176,7 @@ describe('POST /api/admin/vault/identifiers — authentication (fail closed FIRS
   it('answers 401 admin_not_authenticated with no cookie', async () => {
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }),
     );
     expect(status).toBe(401);
     expect(body).toEqual({ ok: false, reason: 'admin_not_authenticated', error: 'Admin sign-in required.' });
@@ -186,7 +186,7 @@ describe('POST /api/admin/vault/identifiers — authentication (fail closed FIRS
     const { status, body } = await call(
       POST,
       attachRequest(
-        { assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' },
+        { assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' },
         `${ADMIN_COOKIE_NAME}=1750000000000.deadbeef`,
       ),
     );
@@ -216,7 +216,7 @@ describe('POST /api/admin/vault/identifiers — validation', () => {
   it('answers 422 invalid_kind for kinds outside the vault union — including creator-party kinds', async () => {
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISNI', value: '0000000123456789' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISNI', value: '0000000123456789' }, authedCookie()),
     );
     expect(status).toBe(422);
     expect(body).toEqual({
@@ -227,7 +227,7 @@ describe('POST /api/admin/vault/identifiers — validation', () => {
   });
 
   it('answers 400 missing_value when the identifier value is absent', async () => {
-    const request = attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC' }, authedCookie());
+    const request = attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC' }, authedCookie());
     const { status, body } = await call(POST, request);
     expect(status).toBe(400);
     expect(body).toEqual({ ok: false, reason: 'missing_value', error: 'value is required.' });
@@ -239,7 +239,7 @@ describe('POST /api/admin/vault/identifiers — fail-closed posture', () => {
     rateMock.checkRateLimit.mockReturnValue({ ok: false, retryAfterSeconds: 42 });
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
     );
     expect(status).toBe(429);
     expect(body).toEqual({
@@ -253,7 +253,7 @@ describe('POST /api/admin/vault/identifiers — fail-closed posture', () => {
     dbMock.getDb.mockReturnValue(null);
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
     );
     expect(status).toBe(503);
     expect(body).toEqual({
@@ -268,7 +268,7 @@ describe('POST /api/admin/vault/identifiers — fail-closed posture', () => {
     dbMock.getDb.mockReturnValue(db);
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-1234567890-1' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-1234567890-1' }, authedCookie()),
     );
     expect(status).toBe(422);
     expect(body).toEqual({
@@ -298,7 +298,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     const { status, body } = await call(
       POST,
       attachRequest(
-        { assetRef: ' CVT-9F3A7C21-2026 ', kind: 'ISWC', value: 'T-123456789-1' },
+        { assetRef: ' CVT-9F3A7C-2026 ', kind: 'ISWC', value: 'T-123456789-1' },
         authedCookie(),
       ),
     );
@@ -307,7 +307,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     expect(body).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
       action: {
         id: 'log-vault-1',
@@ -319,7 +319,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     // transaction, then the additive JSONB merge wrote the canonical value.
     const updates = txQueries.filter((q) => q.sql.startsWith('UPDATE cbt_assets'));
     expect(updates).toHaveLength(1);
-    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C21-2026']);
+    expect(updates[0].params).toEqual(['iswc', 'T-123456789-1', 'CVT-9F3A7C-2026']);
   });
 
   it('a replayed attach is a 200 attached:false no-op — idempotent on the wire', async () => {
@@ -329,7 +329,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     const { status, body } = await call(
       POST,
       attachRequest(
-        { assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' },
+        { assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-123456789-1' },
         authedCookie(),
       ),
     );
@@ -338,7 +338,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     expect(body).toEqual({
       ok: true,
       attached: false,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
       action: null,
     });
@@ -352,7 +352,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     const { status, body } = await call(
       POST,
       attachRequest(
-        { assetRef: 'CVT-9F3A7C21-2026', kind: 'EIDR', value: '10.5240/abcd-efgh-jklm-nopq-rstu-v' },
+        { assetRef: 'CVT-9F3A7C-2026', kind: 'EIDR', value: '10.5240/abcd-efgh-jklm-nopq-rstu-v' },
         authedCookie(),
       ),
     );
@@ -361,7 +361,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     expect(body).toEqual({
       ok: true,
       attached: true,
-      cvtCode: 'CVT-9F3A7C21-2026',
+      cvtCode: 'CVT-9F3A7C-2026',
       cbtCode: 'CBT-TRK-1234567890AB',
       action: {
         id: 'log-vault-1',
@@ -373,7 +373,7 @@ describe('POST /api/admin/vault/identifiers — authenticated attach (the produc
     expect(updates[0]?.params).toEqual([
       'eidrCanonical',
       '10.5240/ABCD-EFGH-JKLM-NOPQ-RSTU-V',
-      'CVT-9F3A7C21-2026',
+      'CVT-9F3A7C-2026',
     ]);
   });
 });
@@ -390,7 +390,7 @@ describe('GET /api/admin/vault/identifiers — authenticated lookup (the second 
       ok: true,
       found: true,
       asset: {
-        cvtCode: 'CVT-9F3A7C21-2026',
+        cvtCode: 'CVT-9F3A7C-2026',
         cbtCode: 'CBT-TRK-1234567890AB',
         title: 'Test Song',
         medium: 'MUSIC_TRACK',
@@ -443,7 +443,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
     supabaseMock.supabaseFromEnv.mockReturnValue(audit as never);
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
     );
 
     expect(status).toBe(200);
@@ -453,7 +453,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
       actor: 'admin',
       action: 'vault.identifier.attach',
       target_table: 'cbt_assets',
-      target_row_id: 'CVT-9F3A7C21-2026',
+      target_row_id: 'CVT-9F3A7C-2026',
       changes: { 'mapped_identifiers.iswc': { from: null, to: 'T-123456789-1' } },
     });
   });
@@ -465,7 +465,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
 
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
     );
 
     expect(status).toBe(200);
@@ -481,7 +481,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
 
     const { status } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
     );
 
     expect(status).toBe(200);
@@ -498,7 +498,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
 
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
     );
 
     expect(status).toBe(502);
@@ -506,7 +506,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
     // The compensating UPDATE removes the kind's key (no prior value existed).
     const restores = poolQueries.filter((q) => (q.sql as string).includes('- $1'));
     expect(restores).toHaveLength(1);
-    expect(restores[0].params).toEqual(['isrc', 'CVT-9F3A7C21-2026']);
+    expect(restores[0].params).toEqual(['isrc', 'CVT-9F3A7C-2026']);
   });
 
   it('compensates — restores the REPLACED prior value — when the audit insert fails over an existing kind', async () => {
@@ -517,13 +517,13 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
 
     const { status } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISWC', value: 'T-123456789-1' }, authedCookie()),
     );
 
     expect(status).toBe(502);
     const restores = poolQueries.filter((q) => (q.sql as string).includes('jsonb_build_object'));
     expect(restores).toHaveLength(1);
-    expect(restores[0].params).toEqual(['iswc', 'T-999999999-9', 'CVT-9F3A7C21-2026']);
+    expect(restores[0].params).toEqual(['iswc', 'T-999999999-9', 'CVT-9F3A7C-2026']);
   });
 
   it('answers 503 supabase_not_configured and attaches NOTHING when the audit client is absent', async () => {
@@ -533,7 +533,7 @@ describe('POST /api/admin/vault/identifiers — the audit trail (an attach never
 
     const { status, body } = await call(
       POST,
-      attachRequest({ assetRef: 'CVT-9F3A7C21-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
+      attachRequest({ assetRef: 'CVT-9F3A7C-2026', kind: 'ISRC', value: 'USX7U2600001' }, authedCookie()),
     );
 
     expect(status).toBe(503);

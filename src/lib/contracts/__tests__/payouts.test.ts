@@ -9,7 +9,7 @@ function makeContext(): AgreementContext {
       title: 'E2E Pool Gate Song',
       mediumLabel: 'Music Track',
       cbtCode: 'CBT-TRK-4A3F2879BD05',
-      displayCode: 'CVT-TRK-4A3F2879BD05',
+      displayCode: 'CVT-3F2A9C-2026',
       identifiers: [],
     },
     pools: [
