@@ -90,10 +90,14 @@ test.describe('execution lane — every vertical renders', () => {
     expect(page.url()).toContain('/contracts');
   });
 
-  test('unknown CBT with a known template fails closed on 404 — no invented record', async ({ page }) => {
-    const response = await page.goto('/contracts/new?template=TPL-MUS-001&cbt=CBT-XXX-000000000000');
-    expect(response?.status()).toBe(404);
-    await expect(page.getByText('could not be found', { exact: false })).toBeVisible();
+  test('unknown CBT with a known template fails closed — not-found statement, no invented record', async ({ page }) => {
+    await page.goto('/contracts/new?template=TPL-MUS-001&cbt=CBT-XXX-000000000000');
+    // The root loading boundary streams the shell (HTTP 200) before this
+    // page's notFound() resolves — Next.js streams the 404 UI into the live
+    // document, so the fail-closed contract is asserted on the rendered
+    // statement and on the absence of any invented execution lane.
+    await expect(page.getByText('Nothing is registered at this address')).toBeVisible();
+    await expect(page.getByText('Execution lane')).toHaveCount(0);
   });
 });
 
