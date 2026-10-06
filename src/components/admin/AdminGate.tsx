@@ -77,7 +77,7 @@ export function AdminGate({ notice }: { notice?: string }) {
           required
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          className="mt-2 w-full rounded-lg border border-gold/25 bg-obsidian-950/60 px-4 py-2.5 text-sm text-white outline-none transition focus:border-gold/60 focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne"
+          className="mt-2 w-full rounded-lg border border-gold/25 bg-obsidian-950/60 px-4 py-2.5 text-sm text-white outline-none transition focus:border-gold/60 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne"
         />
 
         <button

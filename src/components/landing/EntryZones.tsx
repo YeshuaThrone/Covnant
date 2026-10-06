@@ -31,16 +31,18 @@ import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
  * champagne focus-visible outline matches the zone's button and consent
  * checkbox. */
 const INPUT_CLASS =
-  'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+  'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 const BUTTON_BASE_CLASS =
   'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200';
 
 /* The keyboard focus ring is the audit fix: the champagne focus-visible
- * outline matches the zone's inputs and consent checkbox. Appended last so
- * the rest-state pin (e2e/brand.spec.ts) reads base, state, then ring. */
+ * outline matches the zone's inputs and consent checkbox. outline-solid
+ * sets --tw-outline-style, which outline-none zeroes; the variant beats its
+ * (0,1,0) specificity so the ring actually renders. Appended last so the
+ * rest-state pin (e2e/brand.spec.ts) reads base, state, then ring. */
 const BUTTON_FOCUS_CLASS =
-  'focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+  'focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
 /* The signup response-state lines — the statement voice of the composition,
  * in the same slot. No boxes, no error chrome: the design language of the

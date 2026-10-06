@@ -1065,7 +1065,7 @@ test('the final Consent & Submit zone: an Accept UDR Terms checkbox in the state
   await expect(button).toBeVisible();
   expect(await button.getAttribute('type')).toBe('submit');
   const REST_BUTTON_CLASS =
-    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline focus-visible:outline-1 focus-visible:outline-gold-champagne';
+    'h-10 w-64 bg-transparent font-mono text-sm uppercase tracking-[0.3em] transition-colors duration-200 cursor-pointer text-gold-champagne/90 hover:text-gold-champagne focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
   expect(await button.getAttribute('class')).toBe(REST_BUTTON_CLASS);
   // ABSENCE of a border: no border class in the string, and the computed
   // box renders zero-width edges.
