@@ -370,3 +370,14 @@ for (const [medium, placement] of Object.entries(MEDIUM_PLACEMENTS)) {
     );
   }
 }
+
+/**
+ * Tab-bar semantics shared by the vertical tab bars (client) and their host
+ * pages (server — plain string helpers, safe across the client boundary):
+ * every tab controls the page's single content panel (UI audit #11).
+ */
+export const MASTER_TAB_PANEL_ID = 'master-category-panel';
+
+export function masterTabId(category: GlobalEntertainmentCategory | null): string {
+  return `master-tab-${category ?? 'all'}`;
+}

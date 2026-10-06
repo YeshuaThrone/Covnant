@@ -9,61 +9,19 @@
  * established gold/obsidian classes already on the foundation pages.
  */
 
-import Link from 'next/link';
 import { formatCents } from '@/lib/money/format';
-import {
-  MASTER_CATEGORY_LABELS,
-  MASTER_CATEGORY_ORDER,
-  type GlobalEntertainmentCategory,
-} from '@/lib/master/taxonomy';
 import type {
   ClearinghouseStatus,
   SovereignLedgerRecord,
   SovereignLedgerSummary,
 } from '@/lib/master/sovereignLedger';
 
-/** The six-vertical tab bar — `null` active = ALL. */
-export function MasterCategoryTabs({
-  active,
-  basePath,
-}: {
-  active: GlobalEntertainmentCategory | null;
-  basePath: string;
-}): React.JSX.Element {
-  const tabHref = (category: GlobalEntertainmentCategory | null) =>
-    category ? `${basePath}?category=${category}` : basePath;
-  return (
-    <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Master categories">
-      <Link
-        href={tabHref(null)}
-        role="tab"
-        aria-selected={active === null}
-        className={`rounded-full border px-4 py-1.5 text-sm transition ${
-          active === null
-            ? 'border-gold/60 bg-gold/10 text-gold'
-            : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
-        }`}
-      >
-        All verticals
-      </Link>
-      {MASTER_CATEGORY_ORDER.map((category) => (
-        <Link
-          key={category}
-          href={tabHref(category)}
-          role="tab"
-          aria-selected={active === category}
-          className={`rounded-full border px-4 py-1.5 text-sm transition ${
-            active === category
-              ? 'border-gold/60 bg-gold/10 text-gold'
-              : 'border-white/10 text-white/60 hover:border-white/25 hover:text-white'
-          }`}
-        >
-          {MASTER_CATEGORY_LABELS[category]}
-        </Link>
-      ))}
-    </div>
-  );
-}
+/**
+ * The seven-vertical tab bar — a client component in its own file (the
+ * arrow-key interaction needs 'use client'); re-exported here so every host
+ * page's import site is unchanged (UI audit #11).
+ */
+export { MasterCategoryTabs } from './MasterCategoryTabs';
 
 /** Clearinghouse status chip — the three canon states, distinct voices. */
 export function ClearinghouseChip({ status }: { status: ClearinghouseStatus }): React.JSX.Element {

@@ -19,8 +19,10 @@ import { DraftReview } from '@/components/agent/DraftReview';
 import { registerAssetAction } from '@/lib/assets/actions';
 import type { AgentRegistrationDraft } from '@/lib/agent/registrationDraft';
 
+// The keyboard focus ring is the shared :focus-visible token in globals.css
+// (UI audit #22) — no per-field suppressor here, it would zero the ring.
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30';
 
 type Phase =
   | { kind: 'describe' }
@@ -62,7 +64,7 @@ export function AgentRegistrationStudio() {
 
   if (phase.kind === 'confirmed') {
     return (
-      <div className="glass-card p-8 text-center" data-testid="agent-confirmed">
+      <div className="glass-card p-8 text-center" data-testid="agent-confirmed" role="status">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-gold">Registered</p>
         <h2 className="mt-3 text-2xl font-semibold text-pearl">
           Covenant Block {phase.cbtCode} is open.
@@ -107,6 +109,10 @@ export function AgentRegistrationStudio() {
   return (
     <div className="space-y-6" data-testid="agent-describe">
       <section className="glass-card p-6">
+        {/* Drafting is async — announce the in-flight state (UI audit #25). */}
+        <p role="status" className="sr-only">
+          {phase.kind === 'loading' ? 'Composing your draft…' : ''}
+        </p>
         <h2 className="font-mono text-sm uppercase tracking-widest text-gold">Describe the work</h2>
         <p className="mt-2 text-sm text-white/50">
           Plain words are enough — what you made, who owns what, and how it splits. The agent
@@ -114,6 +120,7 @@ export function AgentRegistrationStudio() {
           never writes to the registry — your confirmation does.
         </p>
         <textarea
+          aria-label="Describe the work"
           className={`${FIELD} mt-4 min-h-40`}
           value={description}
           placeholder="e.g. I produced a track called Midnight Clear with my collaborator Second Writer — I own the master, we split the composition 60/40, and their publisher administers the publishing pool…"
@@ -121,7 +128,10 @@ export function AgentRegistrationStudio() {
           data-testid="agent-description"
         />
         {error && (
-          <p className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+          <p
+            role="alert"
+            className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-red-300"
+          >
             {error}
           </p>
         )}

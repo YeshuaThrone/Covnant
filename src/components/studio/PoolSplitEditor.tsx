@@ -15,8 +15,10 @@ import {
   type PoolName,
 } from '@/lib/splits/shared';
 
+// The keyboard focus ring is the shared :focus-visible token in globals.css
+// (UI audit #22) — no per-field suppressor here, it would zero the ring.
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function emptyHolder(): HolderDraft {

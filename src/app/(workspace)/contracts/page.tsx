@@ -6,7 +6,7 @@ import {
 } from '@/lib/contracts/templates';
 import { listContracts } from '@/lib/contracts/store';
 import { presentationStatus, STATUS_CHIP_CLASSES } from '@/lib/contracts/presentation';
-import { masterCategoryFromParam } from '@/lib/master/taxonomy';
+import { MASTER_TAB_PANEL_ID, masterCategoryFromParam, masterTabId } from '@/lib/master/taxonomy';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
 import { summarizeSovereignLedger } from '@/lib/master/sovereignLedger';
 import { HeaderActions } from '@/components/workspace/HeaderActions';
@@ -70,7 +70,14 @@ export default async function ContractsPage({
         <MasterCategoryTabs active={active} basePath="/contracts" />
       </div>
 
-      <section aria-label="Master ledger for this vertical" className="mt-6 space-y-4">
+      <section
+        aria-label="Master ledger for this vertical"
+        role="tabpanel"
+        id={MASTER_TAB_PANEL_ID}
+        aria-labelledby={masterTabId(active)}
+        tabIndex={0}
+        className="mt-6 space-y-4"
+      >
         <h2 className="font-mono text-xs uppercase tracking-[0.3em] text-white/40">
           Sovereign ledger — {active ? 'selected vertical' : 'all verticals'}
         </h2>
