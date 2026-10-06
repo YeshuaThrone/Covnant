@@ -3,11 +3,11 @@ import { expect, test } from '@playwright/test';
 import { ATOMIC_TEMPLATE_REGISTRY, atomicRecordsForCategory } from '@/lib/master/masterStore';
 
 /**
- * Spec §07 (directive §4) — Contract Vault gates: 20 deterministic agreements
- * across the SIX MASTER entertainment verticals (founder canon — Film &
+ * Spec §07 (directive §4) — Contract Vault gates: 23 deterministic agreements
+ * across the SEVEN MASTER entertainment verticals (founder canon — Film &
  * Television, Audio & Recorded Sound, Publishing & Literary, Live Performance
- * & Comedy, Interactive & Digital Media, Commercial & Brand Licensing), the
- * /templates master-vertical
+ * & Comedy, Sports & Athletics, Interactive & Digital Media, Commercial &
+ * Brand Licensing), the /templates master-vertical
  * library, auto-fill from the asset of record (names, splits, identifiers —
  * PRO/IPI never fabricated), Draft/Pending/Completed presentation, signature
  * tracking, and draft → final → export.
@@ -157,11 +157,11 @@ test('template navigation generates an auto-filled agreement from the asset of r
   await expect(page.getByText('No settled revenue for this asset yet.')).toBeVisible();
 });
 
-test('vault lists 20 templates under the six master vertical tabs', async ({ page }) => {
+test('vault lists 23 templates under the seven master vertical tabs', async ({ page }) => {
   await page.goto('/contracts');
 
   const templateCards = page.locator('a[href^="/contracts/new?template="]');
-  await expect(templateCards).toHaveCount(20);
+  await expect(templateCards).toHaveCount(23);
 
   // Master vertical tabs (href-scoped — card names also contain category words).
   for (const key of [
@@ -169,6 +169,7 @@ test('vault lists 20 templates under the six master vertical tabs', async ({ pag
     'AUDIO_AND_RECORDED_SOUND',
     'PUBLISHING_AND_LITERARY',
     'LIVE_PERFORMANCE_AND_COMEDY',
+    'SPORTS_AND_ATHLETICS',
     'INTERACTIVE_AND_DIGITAL_MEDIA',
     'COMMERCIAL_AND_BRAND_LICENSING',
   ]) {
@@ -180,6 +181,19 @@ test('vault lists 20 templates under the six master vertical tabs', async ({ pag
   await page.waitForURL(/category=INTERACTIVE_AND_DIGITAL_MEDIA/);
   await expect(page.locator('a[href^="/contracts/new?template="]')).toHaveCount(3);
   await expect(page.getByText('In-Game Music Sync Licensing')).toBeVisible();
+
+  // The three expansion verticals each carry their mapped agreement — no
+  // vertical renders the 'does not yet cover' strip (data audit #4).
+  for (const [key, name] of [
+    ['LIVE_PERFORMANCE_AND_COMEDY', 'Live Performance & Touring Agreement'],
+    ['PUBLISHING_AND_LITERARY', 'Publishing & Literary Rights Agreement'],
+    ['SPORTS_AND_ATHLETICS', 'Athlete Engagement & Prize Purse Agreement'],
+  ] as const) {
+    await page.locator(`a[href="/contracts?category=${key}"]`).click();
+    await page.waitForURL(new RegExp(`category=${key}`));
+    await expect(page.locator('a[href^="/contracts/new?template="]')).toHaveCount(1);
+    await expect(page.getByText(name)).toBeVisible();
+  }
 });
 
 test('generates a Split Sheet from the asset of record, tracks signatures, saves a draft, finalizes, and exports', async ({
