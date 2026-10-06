@@ -16,7 +16,7 @@ import {
 } from '@/lib/splits/shared';
 
 const FIELD =
-  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-[#F2F4F8] placeholder:text-white/30 focus:border-gold focus:outline-none';
+  'w-full rounded-lg border border-white/10 bg-onyx-800 px-3 py-2 text-sm text-pearl placeholder:text-white/30 focus:border-gold focus:outline-none';
 const LABEL = 'block text-xs uppercase tracking-wider text-white/40 mb-1';
 
 export function emptyHolder(): HolderDraft {

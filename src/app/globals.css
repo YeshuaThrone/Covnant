@@ -22,6 +22,8 @@
   --color-gold-champagne: #f3e5ab;
   --color-gold-muted: #997a15;
   --color-gold-bright: #ffd700;
+  /* Pearl — the page-title light; pairs with the obsidian grounds. */
+  --color-pearl: #f2f4f8;
 
   /* Emerald Gold gradient (active verification badges only) */
   --gradient-emerald-gold: linear-gradient(90deg, #10b981 0%, #d4af37 100%);

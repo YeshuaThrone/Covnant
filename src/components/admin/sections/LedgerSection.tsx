@@ -177,7 +177,7 @@ export function LedgerSection({
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(totals.feesMinor, totals.currency)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90" data-testid="corner-dust-minor-cell">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90" data-testid="corner-dust-minor-cell">
                         {summaryDustDisplay(totals.dustMinor)}
                       </td>
                     </tr>

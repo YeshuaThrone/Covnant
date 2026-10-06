@@ -229,7 +229,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(period.withheldMinor, 'USD')}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(period.dustMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/80">
@@ -283,7 +283,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(totals.feeMinor, totals.currency)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(totals.dustMinor, totals.currency)}
                       </td>
                     </tr>
@@ -345,7 +345,7 @@ export function TaxSection({ tax }: { tax: TaxSectionData }) {
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
                         {formatMinor(row.feeMinor, 'USD')}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/90">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/90">
                         {formatMinor(row.dustMinor, 'USD')}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-white/60">

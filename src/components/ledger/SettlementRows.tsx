@@ -138,7 +138,7 @@ function TableRow({
         <td className="px-4 py-3 text-right font-mono text-xs text-white/60">
           {formatLedgerAmount(row.covenantFee, row.currency)}
         </td>
-        <td className="px-4 py-3 text-right font-mono text-xs text-[#FFD700]/80" data-testid="corner-dust-cell">
+        <td className="px-4 py-3 text-right font-mono text-xs text-gold-bright/80" data-testid="corner-dust-cell">
           {formatLedgerAmount(row.cornerDustCollected, row.currency)}
         </td>
         <td className="px-4 py-3">
