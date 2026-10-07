@@ -176,6 +176,183 @@ export interface SponsorshipDealEntity {
   readonly targetSplit: EntityTargetSplit;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INDUSTRY-COMPLETION EXPANSION CLASSES (2026-10-07): fifteen new forms of
+// entertainment relationship completing the founder's 26-sector atomic
+// registry — every previously telemetryMetric-only sector now binds a typed
+// entity class. VIRTUAL_AVATARS class-maps onto the VTubing creator form
+// (same rig-ownership canon); BOOKS and LITERATURE already ride the existing
+// PUBLISHING class. Same canon shape as every class above: typed interface,
+// prefix-canon template id, domain telemetry, and the shared compiler-locked
+// 50/35/15 split (ENTITY_TARGET_SPLIT stays the ONE split constant; no class
+// carries its own split literal).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Motorsport circuit entity — telemetry track time and pit-lane media money. */
+export interface MotorsportCircuitEntity {
+  readonly entityType: 'MOTORSPORT_CIRCUIT';
+  /** Template prefix canon: TPL-MTR-*. */
+  readonly templateId: string;
+  readonly telemetryLaneHours: number;
+  readonly pitLaneAssetLock: boolean;
+  readonly lapBroadcastMicroPayoutUSD: number;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Arena operator entity — turnstile traffic and in-venue concessions yield. */
+export interface ArenaOperatorEntity {
+  readonly entityType: 'ARENA_OPERATOR';
+  /** Template prefix canon: TPL-ARN-*. */
+  readonly templateId: string;
+  readonly turnstileTraffic: number;
+  readonly concessionsYieldUSD: number;
+  readonly gateClearanceLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Movie studio entity — the back-catalog circulation engine, library-tracked. */
+export interface MovieStudioEntity {
+  readonly entityType: 'MOVIE_STUDIO';
+  /** Template prefix canon: TPL-MOV-*. */
+  readonly templateId: string;
+  readonly filmographyCount: number;
+  readonly contractedLibraryTitles: number;
+  readonly distributionTerritoryLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Video platform entity — watch-hour distribution and creator-fund micro routing. */
+export interface VideoPlatformEntity {
+  readonly entityType: 'VIDEO_PLATFORM';
+  /** Template prefix canon: TPL-VID-*. */
+  readonly templateId: string;
+  readonly streamHours: number;
+  readonly avrailLock: boolean;
+  readonly avodMicroYieldUSD: number;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Streaming service entity — the subscription-pool distribution form. */
+export interface StreamingServiceEntity {
+  readonly entityType: 'STREAMING_SERVICE';
+  /** Template prefix canon: TPL-STR-*. */
+  readonly templateId: string;
+  readonly subscriberTierCount: number;
+  readonly streamMicroYieldUSD: number;
+  readonly feedIsolationActive: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Gaming studio entity — microtransaction distribution over player sessions. */
+export interface GamingStudioEntity {
+  readonly entityType: 'GAMING_STUDIO';
+  /** Template prefix canon: TPL-GAM-*. */
+  readonly templateId: string;
+  readonly engineThreshold: number;
+  readonly robloxDevExRate: number;
+  readonly assetTreeDepthLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Interactive experience entity — participation licensing and session yield. */
+export interface InteractiveExperienceEntity {
+  readonly entityType: 'INTERACTIVE_EXPERIENCE';
+  /** Seed id canon: TPL-IXP-* — the registry's Experience-Producer id prefix. */
+  readonly templateId: string;
+  readonly xrSessionHours: number;
+  readonly immersionYieldUSD: number;
+  readonly captureLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Software license entity — seat counts and license-key activation yield. */
+export interface SoftwareLicenseEntity {
+  readonly entityType: 'SOFTWARE_LICENSE';
+  /** Template prefix canon: TPL-SFT-*. */
+  readonly templateId: string;
+  readonly seatLicenseCount: number;
+  readonly apiInvocationMicroPayoutUSD: number;
+  readonly escrowLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Digital asset vault entity — custody holds and asset-transfer micro routing. */
+export interface DigitalAssetVaultEntity {
+  readonly entityType: 'DIGITAL_ASSET_VAULT';
+  /** Template prefix canon: TPL-DGA-*. */
+  readonly templateId: string;
+  readonly vaultHoldCount: number;
+  readonly microTippingYieldUSD: number;
+  readonly custodyLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Fashion house entity — physical garment production yield and inventory. */
+export interface FashionHouseEntity {
+  readonly entityType: 'FASHION_HOUSE';
+  /** Template prefix canon: TPL-FSH-*. */
+  readonly templateId: string;
+  readonly cutSewUnitYieldUSD: number;
+  readonly atelierLock: boolean;
+  readonly wholesaleInventoryCount: number;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Modeling agency entity — runway and campaign booking yield. */
+export interface ModelingAgencyEntity {
+  readonly entityType: 'MODELING_AGENCY';
+  /** Template prefix canon: TPL-MDL-*. */
+  readonly templateId: string;
+  readonly campaignDayRate: number;
+  readonly imageUsageMicroPayoutUSD: number;
+  readonly likenessLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** CAD asset store entity — spatial polygon licensing and render-engine yield. */
+export interface CadAssetStoreEntity {
+  readonly entityType: 'CAD_ASSET_STORE';
+  /** Template prefix canon: TPL-CAD-*. */
+  readonly templateId: string;
+  readonly meshDownloadCount: number;
+  readonly apiInvocationMicroPayoutUSD: number;
+  readonly polygonLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Visual arts studio entity — exhibition proceeds and print-edition yield. */
+export interface VisualArtsStudioEntity {
+  readonly entityType: 'VISUAL_ARTS_STUDIO';
+  /** Template prefix canon: TPL-VIS-*. */
+  readonly templateId: string;
+  readonly editionCount: number;
+  readonly galleryCommissionYieldUSD: number;
+  readonly provenanceLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Design practice entity — portfolio licensing and derivative-deployment royalty. */
+export interface DesignPracticeEntity {
+  readonly entityType: 'DESIGN_PRACTICE';
+  /** Template prefix canon: TPL-DES-*. */
+  readonly templateId: string;
+  readonly retainerCount: number;
+  readonly royaltyOnApplicationUSD: number;
+  readonly attributionLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
+/** Virtual avatar creator entity — rig ownership and direct-fan tipping money; the VTUBING and VIRTUAL_AVATARS sectors ride this ONE class. */
+export interface VirtualAvatarCreatorEntity {
+  readonly entityType: 'VIRTUAL_AVATAR_CREATOR';
+  /** Template prefix canon: TPL-VTB-*. */
+  readonly templateId: string;
+  readonly streamFrameRenderHours: number;
+  readonly directFanMicroTippingUSD: number;
+  readonly rigOwnershipLock: boolean;
+  readonly targetSplit: EntityTargetSplit;
+}
+
 /** The isolated entity union — the six founder-canon classes plus the five expansion classes. */
 export type SovereignAtomicEntity =
   | FilmEntity
@@ -188,7 +365,22 @@ export type SovereignAtomicEntity =
   | TournamentEventEntity
   | EsportsStreamEntity
   | SocialChannelEntity
-  | SponsorshipDealEntity;
+  | SponsorshipDealEntity
+  | MotorsportCircuitEntity
+  | ArenaOperatorEntity
+  | MovieStudioEntity
+  | VideoPlatformEntity
+  | StreamingServiceEntity
+  | GamingStudioEntity
+  | InteractiveExperienceEntity
+  | SoftwareLicenseEntity
+  | DigitalAssetVaultEntity
+  | FashionHouseEntity
+  | ModelingAgencyEntity
+  | CadAssetStoreEntity
+  | VisualArtsStudioEntity
+  | DesignPracticeEntity
+  | VirtualAvatarCreatorEntity;
 
 /**
  * The drop-2 execution canon: every entity execution reports exactly one of
@@ -214,8 +406,26 @@ export type AtomicEntityClassTag =
   | 'SPORTS'
   | 'ESPORTS'
   | 'SOCIAL'
-  | 'SPONSORSHIP';
-
+  | 'SPONSORSHIP'
+  // Industry-completion expansion (2026-10-07) — the fifteen new class tags
+  // completing the 26-sector canon: one tag per new class, and
+  // VIRTUAL_AVATARS rides the VTubing creator class the same way BOOKS and
+  // LITERATURE ride PUBLISHING.
+  | 'MOTORSPORT'
+  | 'ARENA'
+  | 'MOVIES'
+  | 'VIDEO'
+  | 'STREAMING'
+  | 'GAMING'
+  | 'INTERACTIVE'
+  | 'SOFTWARE'
+  | 'DIGITAL_ASSETS'
+  | 'FASHION'
+  | 'MODELING'
+  | 'CAD'
+  | 'VISUAL_ARTS'
+  | 'DESIGN'
+  | 'VTUBING';
 
 /** The class tag of an entity — the pill-badge vocabulary, one per class. */
 export function entityClassTag(entity: SovereignAtomicEntity): AtomicEntityClassTag {
@@ -241,6 +451,39 @@ export function entityClassTag(entity: SovereignAtomicEntity): AtomicEntityClass
       return 'SOCIAL';
     case 'SPONSORSHIP_DEAL':
       return 'SPONSORSHIP';
+    // Industry-completion expansion (2026-10-07) — one tag per class;
+    // VIRTUAL_AVATARS rides the VTubing creator class like BOOKS and
+    // LITERATURE ride PUBLISHING.
+    case 'MOTORSPORT_CIRCUIT':
+      return 'MOTORSPORT';
+    case 'ARENA_OPERATOR':
+      return 'ARENA';
+    case 'MOVIE_STUDIO':
+      return 'MOVIES';
+    case 'VIDEO_PLATFORM':
+      return 'VIDEO';
+    case 'STREAMING_SERVICE':
+      return 'STREAMING';
+    case 'GAMING_STUDIO':
+      return 'GAMING';
+    case 'INTERACTIVE_EXPERIENCE':
+      return 'INTERACTIVE';
+    case 'SOFTWARE_LICENSE':
+      return 'SOFTWARE';
+    case 'DIGITAL_ASSET_VAULT':
+      return 'DIGITAL_ASSETS';
+    case 'FASHION_HOUSE':
+      return 'FASHION';
+    case 'MODELING_AGENCY':
+      return 'MODELING';
+    case 'CAD_ASSET_STORE':
+      return 'CAD';
+    case 'VISUAL_ARTS_STUDIO':
+      return 'VISUAL_ARTS';
+    case 'DESIGN_PRACTICE':
+      return 'DESIGN';
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return 'VTUBING';
   }
 }
 
@@ -260,6 +503,29 @@ export const TEMPLATE_PREFIX = {
   ESPORTS: 'TPL-ESX-',
   SOCIAL: 'TPL-SOC-',
   SPONSORSHIP: 'TPL-SPN-',
+  /** Industry-completion expansion prefixes (2026-10-07). */
+  MOTORSPORT: 'TPL-MTR-',
+  ARENA: 'TPL-ARN-',
+  MOVIES: 'TPL-MOV-',
+  VIDEO: 'TPL-VID-',
+  STREAMING: 'TPL-STR-',
+  GAMING: 'TPL-GAM-',
+  /** Seed id canon: TPL-IXP-* — the sector's registry prefix (the SDK
+   * interface's TPL-INT- comment describes the class canon's intent, but the
+   * registry is the binding source of truth and the guard must bind it). */
+  INTERACTIVE: 'TPL-IXP-',
+  SOFTWARE: 'TPL-SFT-',
+  DIGITAL_ASSETS: 'TPL-DGA-',
+  FASHION: 'TPL-FSH-',
+  MODELING: 'TPL-MDL-',
+  CAD: 'TPL-CAD-',
+  VISUAL_ARTS: 'TPL-VIS-',
+  DESIGN: 'TPL-DES-',
+  VTUBING: 'TPL-VTB-',
+  /** The VIRTUAL_AVATARS sector's own ids; the class stays VirtualAvatarCreator. */
+  VIRTUAL_AVATARS: 'TPL-VAV-',
+  /** The ATHLETICS sector's own ids; the class stays AthleteContract. */
+  ATHLETICS: 'TPL-ATH-',
 } as const;
 
 /**
@@ -315,7 +581,9 @@ export function isPublishingEntity(entity: SovereignAtomicEntity): entity is Pub
 export function isAthleteContractEntity(entity: SovereignAtomicEntity): entity is AthleteContractEntity {
   return (
     entity.entityType === 'ATHLETE_CONTRACT' &&
-    entity.templateId.startsWith(TEMPLATE_PREFIX.SPORTS)
+    [TEMPLATE_PREFIX.SPORTS, TEMPLATE_PREFIX.ATHLETICS].some((prefix) =>
+      entity.templateId.startsWith(prefix),
+    )
   );
 }
 
@@ -347,6 +615,119 @@ export function isSponsorshipDealEntity(entity: SovereignAtomicEntity): entity i
   );
 }
 
+/**
+ * The fifteen industry-completion expansion guards (2026-10-07) — class AND
+ * prefix, fail-closed, exactly like every class above. Required by the
+ * serving route: a class without a guard cannot be served at all (the route
+ * 502s on a guard-failed entity), so the guards ship WITH the classes.
+ */
+export function isMotorsportCircuitEntity(entity: SovereignAtomicEntity): entity is MotorsportCircuitEntity {
+  return (
+    entity.entityType === 'MOTORSPORT_CIRCUIT' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.MOTORSPORT)
+  );
+}
+
+export function isArenaOperatorEntity(entity: SovereignAtomicEntity): entity is ArenaOperatorEntity {
+  return (
+    entity.entityType === 'ARENA_OPERATOR' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.ARENA)
+  );
+}
+
+export function isMovieStudioEntity(entity: SovereignAtomicEntity): entity is MovieStudioEntity {
+  return (
+    entity.entityType === 'MOVIE_STUDIO' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.MOVIES)
+  );
+}
+
+export function isVideoPlatformEntity(entity: SovereignAtomicEntity): entity is VideoPlatformEntity {
+  return (
+    entity.entityType === 'VIDEO_PLATFORM' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.VIDEO)
+  );
+}
+
+export function isStreamingServiceEntity(entity: SovereignAtomicEntity): entity is StreamingServiceEntity {
+  return (
+    entity.entityType === 'STREAMING_SERVICE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.STREAMING)
+  );
+}
+
+export function isGamingStudioEntity(entity: SovereignAtomicEntity): entity is GamingStudioEntity {
+  return (
+    entity.entityType === 'GAMING_STUDIO' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.GAMING)
+  );
+}
+
+export function isInteractiveExperienceEntity(entity: SovereignAtomicEntity): entity is InteractiveExperienceEntity {
+  return (
+    entity.entityType === 'INTERACTIVE_EXPERIENCE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.INTERACTIVE)
+  );
+}
+
+export function isSoftwareLicenseEntity(entity: SovereignAtomicEntity): entity is SoftwareLicenseEntity {
+  return (
+    entity.entityType === 'SOFTWARE_LICENSE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.SOFTWARE)
+  );
+}
+
+export function isDigitalAssetVaultEntity(entity: SovereignAtomicEntity): entity is DigitalAssetVaultEntity {
+  return (
+    entity.entityType === 'DIGITAL_ASSET_VAULT' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.DIGITAL_ASSETS)
+  );
+}
+
+export function isFashionHouseEntity(entity: SovereignAtomicEntity): entity is FashionHouseEntity {
+  return (
+    entity.entityType === 'FASHION_HOUSE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.FASHION)
+  );
+}
+
+export function isModelingAgencyEntity(entity: SovereignAtomicEntity): entity is ModelingAgencyEntity {
+  return (
+    entity.entityType === 'MODELING_AGENCY' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.MODELING)
+  );
+}
+
+export function isCadAssetStoreEntity(entity: SovereignAtomicEntity): entity is CadAssetStoreEntity {
+  return (
+    entity.entityType === 'CAD_ASSET_STORE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.CAD)
+  );
+}
+
+export function isVisualArtsStudioEntity(entity: SovereignAtomicEntity): entity is VisualArtsStudioEntity {
+  return (
+    entity.entityType === 'VISUAL_ARTS_STUDIO' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.VISUAL_ARTS)
+  );
+}
+
+export function isDesignPracticeEntity(entity: SovereignAtomicEntity): entity is DesignPracticeEntity {
+  return (
+    entity.entityType === 'DESIGN_PRACTICE' &&
+    entity.templateId.startsWith(TEMPLATE_PREFIX.DESIGN)
+  );
+}
+
+export function isVirtualAvatarCreatorEntity(entity: SovereignAtomicEntity): entity is VirtualAvatarCreatorEntity {
+  return (
+    entity.entityType === 'VIRTUAL_AVATAR_CREATOR' &&
+    [TEMPLATE_PREFIX.VTUBING, TEMPLATE_PREFIX.VIRTUAL_AVATARS].some((prefix) =>
+      entity.templateId.startsWith(prefix),
+    )
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GUARD REGISTRY (Universal Execution Lane expansion, 2026-09-20): EVERY
 // atomic sector — the founder's 26 plus the three generation-4 expansion
@@ -375,32 +756,32 @@ export interface SectorGuardBinding {
 /** The 29 atomic-sector guard bindings — one per sector, no sector left out. */
 export const ATOMIC_SECTOR_GUARDS: readonly SectorGuardBinding[] = Object.freeze([
   { guardId: 'GUARD-SECTOR-MUSIC', sector: 'MUSIC', prefixes: ['TPL-MUS-'], entityType: 'MASTER_RECORDING' },
-  { guardId: 'GUARD-SECTOR-GAMING', sector: 'GAMING', prefixes: ['TPL-GAM-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-GAMING', sector: 'GAMING', prefixes: ['TPL-GAM-'], entityType: 'GAMING_STUDIO' },
   { guardId: 'GUARD-SECTOR-ESPORTS', sector: 'ESPORTS', prefixes: ['TPL-ESX-'], entityType: 'ESPORTS_STREAM' },
-  { guardId: 'GUARD-SECTOR-INTERACTIVE', sector: 'INTERACTIVE', prefixes: ['TPL-IXP-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-INTERACTIVE', sector: 'INTERACTIVE', prefixes: ['TPL-IXP-'], entityType: 'INTERACTIVE_EXPERIENCE' },
   { guardId: 'GUARD-SECTOR-PODCASTING', sector: 'PODCASTING', prefixes: ['TPL-PDC-'], entityType: 'PODCAST_NETWORK' },
-  { guardId: 'GUARD-SECTOR-STREAMING', sector: 'STREAMING', prefixes: ['TPL-STR-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-STREAMING', sector: 'STREAMING', prefixes: ['TPL-STR-'], entityType: 'STREAMING_SERVICE' },
   { guardId: 'GUARD-SECTOR-SOCIAL_MEDIA', sector: 'SOCIAL_MEDIA', prefixes: ['TPL-SOC-'], entityType: 'SOCIAL_CHANNEL' },
   { guardId: 'GUARD-SECTOR-PUBLISHING', sector: 'PUBLISHING', prefixes: ['TPL-PUB-'], entityType: 'LITERARY_WORK' },
-  { guardId: 'GUARD-SECTOR-MOVIES', sector: 'MOVIES', prefixes: ['TPL-MOV-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-MOVIES', sector: 'MOVIES', prefixes: ['TPL-MOV-'], entityType: 'MOVIE_STUDIO' },
   { guardId: 'GUARD-SECTOR-FILM', sector: 'FILM', prefixes: ['TPL-FLM-'], entityType: 'FEATURE_FILM' },
   { guardId: 'GUARD-SECTOR-TV', sector: 'TV', prefixes: ['TPL-TV-'], entityType: 'LINEAR_TV' },
-  { guardId: 'GUARD-SECTOR-VIDEO', sector: 'VIDEO', prefixes: ['TPL-VID-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-VIDEO', sector: 'VIDEO', prefixes: ['TPL-VID-'], entityType: 'VIDEO_PLATFORM' },
   { guardId: 'GUARD-SECTOR-SPORTS', sector: 'SPORTS', prefixes: ['TPL-SPT-'], entityType: 'ATHLETE_CONTRACT' },
-  { guardId: 'GUARD-SECTOR-MOTORSPORT', sector: 'MOTORSPORT', prefixes: ['TPL-MTR-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-ARENA', sector: 'ARENA', prefixes: ['TPL-ARN-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-ATHLETICS', sector: 'ATHLETICS', prefixes: ['TPL-ATH-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-MOTORSPORT', sector: 'MOTORSPORT', prefixes: ['TPL-MTR-'], entityType: 'MOTORSPORT_CIRCUIT' },
+  { guardId: 'GUARD-SECTOR-ARENA', sector: 'ARENA', prefixes: ['TPL-ARN-'], entityType: 'ARENA_OPERATOR' },
+  { guardId: 'GUARD-SECTOR-ATHLETICS', sector: 'ATHLETICS', prefixes: ['TPL-ATH-'], entityType: 'ATHLETE_CONTRACT' },
   {
     guardId: 'GUARD-SECTOR-SPORTS_AND_ATHLETICS',
     sector: 'SPORTS_AND_ATHLETICS',
     prefixes: ['TPL-TRN-'],
     entityType: 'TOURNAMENT_EVENT',
   },
-  { guardId: 'GUARD-SECTOR-FASHION', sector: 'FASHION', prefixes: ['TPL-FSH-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-MODELING', sector: 'MODELING', prefixes: ['TPL-MDL-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-CAD', sector: 'CAD', prefixes: ['TPL-CAD-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-VISUAL_ARTS', sector: 'VISUAL_ARTS', prefixes: ['TPL-VIS-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-DESIGN', sector: 'DESIGN', prefixes: ['TPL-DES-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-FASHION', sector: 'FASHION', prefixes: ['TPL-FSH-'], entityType: 'FASHION_HOUSE' },
+  { guardId: 'GUARD-SECTOR-MODELING', sector: 'MODELING', prefixes: ['TPL-MDL-'], entityType: 'MODELING_AGENCY' },
+  { guardId: 'GUARD-SECTOR-CAD', sector: 'CAD', prefixes: ['TPL-CAD-'], entityType: 'CAD_ASSET_STORE' },
+  { guardId: 'GUARD-SECTOR-VISUAL_ARTS', sector: 'VISUAL_ARTS', prefixes: ['TPL-VIS-'], entityType: 'VISUAL_ARTS_STUDIO' },
+  { guardId: 'GUARD-SECTOR-DESIGN', sector: 'DESIGN', prefixes: ['TPL-DES-'], entityType: 'DESIGN_PRACTICE' },
   {
     guardId: 'GUARD-SECTOR-SPONSORSHIP',
     sector: 'SPONSORSHIP',
@@ -409,10 +790,10 @@ export const ATOMIC_SECTOR_GUARDS: readonly SectorGuardBinding[] = Object.freeze
   },
   { guardId: 'GUARD-SECTOR-BOOKS', sector: 'BOOKS', prefixes: ['TPL-BOK-'], entityType: 'LITERARY_WORK' },
   { guardId: 'GUARD-SECTOR-LITERATURE', sector: 'LITERATURE', prefixes: ['TPL-LTR-'], entityType: 'LITERARY_WORK' },
-  { guardId: 'GUARD-SECTOR-DIGITAL_ASSETS', sector: 'DIGITAL_ASSETS', prefixes: ['TPL-DGA-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-SOFTWARE', sector: 'SOFTWARE', prefixes: ['TPL-SFT-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-VTUBING', sector: 'VTUBING', prefixes: ['TPL-VTB-'], entityType: null },
-  { guardId: 'GUARD-SECTOR-VIRTUAL_AVATARS', sector: 'VIRTUAL_AVATARS', prefixes: ['TPL-VAV-'], entityType: null },
+  { guardId: 'GUARD-SECTOR-DIGITAL_ASSETS', sector: 'DIGITAL_ASSETS', prefixes: ['TPL-DGA-'], entityType: 'DIGITAL_ASSET_VAULT' },
+  { guardId: 'GUARD-SECTOR-SOFTWARE', sector: 'SOFTWARE', prefixes: ['TPL-SFT-'], entityType: 'SOFTWARE_LICENSE' },
+  { guardId: 'GUARD-SECTOR-VTUBING', sector: 'VTUBING', prefixes: ['TPL-VTB-'], entityType: 'VIRTUAL_AVATAR_CREATOR' },
+  { guardId: 'GUARD-SECTOR-VIRTUAL_AVATARS', sector: 'VIRTUAL_AVATARS', prefixes: ['TPL-VAV-'], entityType: 'VIRTUAL_AVATAR_CREATOR' },
 ]);
 
 /** The 6 factory-vertical guard bindings — every factory template is covered. */

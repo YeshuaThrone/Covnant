@@ -186,13 +186,18 @@ describe('payload hydration — completeness for every seeded sector', () => {
         expect(labels).toContain('PRO Telemetry Binding');
       }
     }
-    // A sector without an SDK entity class keeps its telemetryMetric canon.
+    // FASHION bound its typed entity class in the industry-completion
+    // wave (2026-10-07) — every atomic sector renders full fields, never
+    // the metric fallback, so the class tags and labels render verbatim.
     const fashion = resolveExecutionLane({ templateKey: 'TPL-FSH-001', cbt: 'CBT-FSH-3F7A1B9D5E2C' });
     expect(fashion.ok).toBe(true);
     if (fashion.ok) {
-      expect(fashion.lane.telemetry.kind).toBe('sector_metric');
-      if (fashion.lane.telemetry.kind === 'sector_metric') {
-        expect(fashion.lane.telemetry.telemetryMetric.length).toBeGreaterThan(0);
+      expect(fashion.lane.telemetry.kind).toBe('entity');
+      if (fashion.lane.telemetry.kind === 'entity') {
+        expect(fashion.lane.telemetry.classTag).toBe('FASHION');
+        const labels = fashion.lane.telemetry.fields.map((field) => field.label);
+        expect(labels).toContain('Cut and Sew Unit Yield');
+        expect(labels).toContain('Atelier');
       }
     }
   });

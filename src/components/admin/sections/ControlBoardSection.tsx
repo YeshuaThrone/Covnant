@@ -39,9 +39,9 @@ export function ControlBoardSection({ board }: { board: ControlBoardState }) {
       </div>
       <p className="mt-2 max-w-2xl text-sm text-white/50">
         Atomic Entity Clearing &amp; Real-Time Telemetry Matrix — {factoryCount} contract
-        templates and {atomicCount} atomic sector records across the seven master
-        entertainment verticals, hydrated from the same master store engine as the
-        /templates board. Click a vertical to swap the boards below.
+        templates and {atomicCount} atomic sector records, every one of the 29 atomic
+        sectors carrying a typed entity class, hydrated from the same master store engine
+        as the /templates board. Click a vertical to swap the boards below.
       </p>
 
       <div className="mt-6">
