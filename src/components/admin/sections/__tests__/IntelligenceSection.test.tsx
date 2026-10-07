@@ -414,9 +414,10 @@ describe('IntelligenceSection — the live dev-seed render', () => {
   });
 
   it('renders a roster option for every registered entity — the full cleared universe', () => {
-    // The 29 bound entity seeds of the atomic registry — additive expansion
-    // updates this pin deliberately.
-    expect((html.match(/<option /g) ?? []).length).toBe(29);
+    // The 46 bound entity seeds of the registries — the 17 industry-completion
+    // atomic seeds (2026-10-07) joined the 29 prior bound seeds — additive
+    // expansion updates this pin deliberately.
+    expect((html.match(/<option /g) ?? []).length).toBe(46);
   });
 
   it('renders the four surfaces for the opened entity, with the demo disclosure', () => {

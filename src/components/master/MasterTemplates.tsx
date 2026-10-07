@@ -168,6 +168,98 @@ function entityTelemetryRows(entity: SovereignAtomicEntity): Array<[string, stri
         ['Deal value', formatUsdAmount(entity.dealValueUSD)],
         ['Activation window', entity.activationWindowLock ? 'LOCKED' : 'OPEN'],
       ];
+    // Industry-completion expansion (2026-10-07) — the previously
+    // telemetryMetric-only sectors render their domain fields now.
+    case 'MOTORSPORT_CIRCUIT':
+      return [
+        ['Telemetry lane hours', executionsLabel(entity.telemetryLaneHours)],
+        ['Lap broadcast micro payout', formatUsdAmount(entity.lapBroadcastMicroPayoutUSD)],
+        ['Pit lane asset lock', entity.pitLaneAssetLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'ARENA_OPERATOR':
+      return [
+        ['Turnstile traffic', executionsLabel(entity.turnstileTraffic)],
+        ['Concessions yield', formatUsdAmount(entity.concessionsYieldUSD)],
+        ['Gate clearance', entity.gateClearanceLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'MOVIE_STUDIO':
+      return [
+        ['Filmography count', executionsLabel(entity.filmographyCount)],
+        ['Contracted library titles', executionsLabel(entity.contractedLibraryTitles)],
+        ['Distribution territory', entity.distributionTerritoryLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'VIDEO_PLATFORM':
+      return [
+        ['Stream hours', executionsLabel(entity.streamHours)],
+        ['AVOD micro yield', formatUsdAmount(entity.avodMicroYieldUSD)],
+        ['AV rail', entity.avrailLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'STREAMING_SERVICE':
+      return [
+        ['Subscriber tier count', `${entity.subscriberTierCount} tiers`],
+        ['Stream micro yield', formatUsdAmount(entity.streamMicroYieldUSD)],
+        ['Feed isolation', entity.feedIsolationActive ? 'ACTIVE' : 'IDLE'],
+      ];
+    case 'GAMING_STUDIO':
+      return [
+        ['Engine threshold', executionsLabel(entity.engineThreshold)],
+        ['Roblox DevEx rate', entity.robloxDevExRate.toFixed(4)],
+        ['Asset tree depth', entity.assetTreeDepthLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'INTERACTIVE_EXPERIENCE':
+      return [
+        ['XR session hours', executionsLabel(entity.xrSessionHours)],
+        ['Immersion yield', formatUsdAmount(entity.immersionYieldUSD)],
+        ['Capture', entity.captureLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'SOFTWARE_LICENSE':
+      return [
+        ['Seat license count', executionsLabel(entity.seatLicenseCount)],
+        ['API invocation micro payout', formatUsdAmount(entity.apiInvocationMicroPayoutUSD)],
+        ['Escrow', entity.escrowLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'DIGITAL_ASSET_VAULT':
+      return [
+        ['Vault hold count', executionsLabel(entity.vaultHoldCount)],
+        ['Micro tipping yield', formatUsdAmount(entity.microTippingYieldUSD)],
+        ['Custody', entity.custodyLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'FASHION_HOUSE':
+      return [
+        ['Cut and sew unit yield', formatUsdAmount(entity.cutSewUnitYieldUSD)],
+        ['Wholesale inventory count', executionsLabel(entity.wholesaleInventoryCount)],
+        ['Atelier', entity.atelierLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'MODELING_AGENCY':
+      return [
+        ['Campaign day rate', formatUsdAmount(entity.campaignDayRate)],
+        ['Image usage micro payout', formatUsdAmount(entity.imageUsageMicroPayoutUSD)],
+        ['Likeness', entity.likenessLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'CAD_ASSET_STORE':
+      return [
+        ['Mesh download count', executionsLabel(entity.meshDownloadCount)],
+        ['API invocation micro payout', formatUsdAmount(entity.apiInvocationMicroPayoutUSD)],
+        ['Polygon', entity.polygonLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'VISUAL_ARTS_STUDIO':
+      return [
+        ['Edition count', executionsLabel(entity.editionCount)],
+        ['Gallery commission yield', formatUsdAmount(entity.galleryCommissionYieldUSD)],
+        ['Provenance', entity.provenanceLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'DESIGN_PRACTICE':
+      return [
+        ['Retainer count', executionsLabel(entity.retainerCount)],
+        ['Royalty on application', formatUsdAmount(entity.royaltyOnApplicationUSD)],
+        ['Attribution', entity.attributionLock ? 'LOCKED' : 'OPEN'],
+      ];
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return [
+        ['Stream frame render hours', executionsLabel(entity.streamFrameRenderHours)],
+        ['Direct fan micro tipping', formatUsdAmount(entity.directFanMicroTippingUSD)],
+        ['Rig ownership', entity.rigOwnershipLock ? 'LOCKED' : 'OPEN'],
+      ];
   }
 }
 

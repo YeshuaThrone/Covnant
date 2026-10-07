@@ -95,6 +95,21 @@ export const CLASS_LABELS: Record<EntityIntelligence['class'], string> = {
   ESPORTS_STREAM: 'Esports streams',
   SOCIAL_CHANNEL: 'Social channels',
   SPONSORSHIP_DEAL: 'Sponsorship deals',
+  MOTORSPORT_CIRCUIT: 'Motorsport circuits',
+  ARENA_OPERATOR: 'Arena operators',
+  MOVIE_STUDIO: 'Movie studios',
+  VIDEO_PLATFORM: 'Video platforms',
+  STREAMING_SERVICE: 'Streaming services',
+  GAMING_STUDIO: 'Gaming studios',
+  INTERACTIVE_EXPERIENCE: 'Interactive experiences',
+  SOFTWARE_LICENSE: 'Software licenses',
+  DIGITAL_ASSET_VAULT: 'Digital asset vaults',
+  FASHION_HOUSE: 'Fashion houses',
+  MODELING_AGENCY: 'Modeling agencies',
+  CAD_ASSET_STORE: 'CAD asset stores',
+  VISUAL_ARTS_STUDIO: 'Visual arts studios',
+  DESIGN_PRACTICE: 'Design practices',
+  VIRTUAL_AVATAR_CREATOR: 'Virtual avatar creators',
 };
 
 /** The canon promised-value field's own voice, per class that carries one. */
@@ -197,6 +212,99 @@ function telemetryRows(
         { label: 'Campaign id', value: readout.campaignId },
         { label: 'Activation window', value: lockedLabel(readout.activationWindowLock) },
         { label: 'Deal value', value: formatUsdWholeBigint(readout.promisedUSD) },
+      ];
+    // Industry-completion expansion (2026-10-07) — one rows arm per newly
+    // registered class; each has no promised-value field in canon, so the
+    // valuation block draws its honest null for these classes.
+    case 'MOTORSPORT_CIRCUIT':
+      return [
+        { label: 'Telemetry lane hours', value: groupInteger(readout.telemetryLaneHours) },
+        { label: 'Lap broadcast micro payout', value: formatUsdAmount(readout.lapBroadcastMicroPayoutUSD) },
+        { label: 'Pit lane asset lock', value: lockedLabel(readout.pitLaneAssetLock) },
+      ];
+    case 'ARENA_OPERATOR':
+      return [
+        { label: 'Turnstile traffic', value: groupInteger(readout.turnstileTraffic) },
+        { label: 'Concessions yield', value: formatUsdAmount(readout.concessionsYieldUSD) },
+        { label: 'Gate clearance', value: lockedLabel(readout.gateClearanceLock) },
+      ];
+    case 'MOVIE_STUDIO':
+      return [
+        { label: 'Filmography count', value: groupInteger(readout.filmographyCount) },
+        { label: 'Contracted library titles', value: groupInteger(readout.contractedLibraryTitles) },
+        { label: 'Distribution territory', value: lockedLabel(readout.distributionTerritoryLock) },
+      ];
+    case 'VIDEO_PLATFORM':
+      return [
+        { label: 'Stream hours', value: groupInteger(readout.streamHours) },
+        { label: 'AVOD micro yield', value: formatUsdAmount(readout.avodMicroYieldUSD) },
+        { label: 'AV rail', value: lockedLabel(readout.avrailLock) },
+      ];
+    case 'STREAMING_SERVICE':
+      return [
+        { label: 'Subscriber tier count', value: groupInteger(readout.subscriberTierCount) },
+        { label: 'Stream micro yield', value: formatUsdAmount(readout.streamMicroYieldUSD) },
+        { label: 'Feed isolation', value: activeLabel(readout.feedIsolationActive) },
+      ];
+    case 'GAMING_STUDIO':
+      return [
+        { label: 'Engine threshold', value: groupInteger(readout.engineThreshold) },
+        { label: 'Roblox DevEx rate', value: readout.robloxDevExRate.toFixed(4) },
+        { label: 'Asset tree depth', value: lockedLabel(readout.assetTreeDepthLock) },
+      ];
+    case 'INTERACTIVE_EXPERIENCE':
+      return [
+        { label: 'XR session hours', value: groupInteger(readout.xrSessionHours) },
+        { label: 'Immersion yield', value: formatUsdAmount(readout.immersionYieldUSD) },
+        { label: 'Capture', value: lockedLabel(readout.captureLock) },
+      ];
+    case 'SOFTWARE_LICENSE':
+      return [
+        { label: 'Seat license count', value: groupInteger(readout.seatLicenseCount) },
+        { label: 'API invocation micro payout', value: formatUsdAmount(readout.apiInvocationMicroPayoutUSD) },
+        { label: 'Escrow', value: lockedLabel(readout.escrowLock) },
+      ];
+    case 'DIGITAL_ASSET_VAULT':
+      return [
+        { label: 'Vault hold count', value: groupInteger(readout.vaultHoldCount) },
+        { label: 'Micro tipping yield', value: formatUsdAmount(readout.microTippingYieldUSD) },
+        { label: 'Custody', value: lockedLabel(readout.custodyLock) },
+      ];
+    case 'FASHION_HOUSE':
+      return [
+        { label: 'Cut and sew unit yield', value: formatUsdAmount(readout.cutSewUnitYieldUSD) },
+        { label: 'Wholesale inventory count', value: groupInteger(readout.wholesaleInventoryCount) },
+        { label: 'Atelier', value: lockedLabel(readout.atelierLock) },
+      ];
+    case 'MODELING_AGENCY':
+      return [
+        { label: 'Campaign day rate', value: formatUsdAmount(readout.campaignDayRate) },
+        { label: 'Image usage micro payout', value: formatUsdAmount(readout.imageUsageMicroPayoutUSD) },
+        { label: 'Likeness', value: lockedLabel(readout.likenessLock) },
+      ];
+    case 'CAD_ASSET_STORE':
+      return [
+        { label: 'Mesh download count', value: groupInteger(readout.meshDownloadCount) },
+        { label: 'API invocation micro payout', value: formatUsdAmount(readout.apiInvocationMicroPayoutUSD) },
+        { label: 'Polygon', value: lockedLabel(readout.polygonLock) },
+      ];
+    case 'VISUAL_ARTS_STUDIO':
+      return [
+        { label: 'Edition count', value: groupInteger(readout.editionCount) },
+        { label: 'Gallery commission yield', value: formatUsdAmount(readout.galleryCommissionYieldUSD) },
+        { label: 'Provenance', value: lockedLabel(readout.provenanceLock) },
+      ];
+    case 'DESIGN_PRACTICE':
+      return [
+        { label: 'Retainer count', value: groupInteger(readout.retainerCount) },
+        { label: 'Royalty on application', value: formatUsdAmount(readout.royaltyOnApplicationUSD) },
+        { label: 'Attribution', value: lockedLabel(readout.attributionLock) },
+      ];
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return [
+        { label: 'Stream frame render hours', value: groupInteger(readout.streamFrameRenderHours) },
+        { label: 'Direct fan micro tipping', value: formatUsdAmount(readout.directFanMicroTippingUSD) },
+        { label: 'Rig ownership', value: lockedLabel(readout.rigOwnershipLock) },
       ];
     default: {
       // A newly registered class lands HERE at compile time — the build

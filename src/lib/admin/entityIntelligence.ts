@@ -226,6 +226,190 @@ export interface SponsorshipDealIntelligence {
   readonly cohort: CohortRank;
 }
 
+// Industry-completion expansion (2026-10-07) — one readout per newly
+// registered class, the same four reads; promisedUSD stays the honest null
+// because none of these classes carries a promised-value field in canon.
+
+export interface MotorsportIntelligence {
+  readonly class: 'MOTORSPORT_CIRCUIT';
+  readonly templateId: string;
+  readonly telemetryLaneHours: number;
+  readonly lapBroadcastMicroPayoutUSD: number;
+  readonly pitLaneAssetLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface ArenaIntelligence {
+  readonly class: 'ARENA_OPERATOR';
+  readonly templateId: string;
+  readonly turnstileTraffic: number;
+  readonly concessionsYieldUSD: number;
+  readonly gateClearanceLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface MovieStudioIntelligence {
+  readonly class: 'MOVIE_STUDIO';
+  readonly templateId: string;
+  readonly filmographyCount: number;
+  readonly contractedLibraryTitles: number;
+  readonly distributionTerritoryLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface VideoPlatformIntelligence {
+  readonly class: 'VIDEO_PLATFORM';
+  readonly templateId: string;
+  readonly streamHours: number;
+  readonly avodMicroYieldUSD: number;
+  readonly avrailLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface StreamingServiceIntelligence {
+  readonly class: 'STREAMING_SERVICE';
+  readonly templateId: string;
+  readonly subscriberTierCount: number;
+  readonly streamMicroYieldUSD: number;
+  readonly feedIsolationActive: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface GamingStudioIntelligence {
+  readonly class: 'GAMING_STUDIO';
+  readonly templateId: string;
+  readonly engineThreshold: number;
+  readonly robloxDevExRate: number;
+  readonly assetTreeDepthLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface InteractiveExperienceIntelligence {
+  readonly class: 'INTERACTIVE_EXPERIENCE';
+  readonly templateId: string;
+  readonly xrSessionHours: number;
+  readonly immersionYieldUSD: number;
+  readonly captureLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface SoftwareLicenseIntelligence {
+  readonly class: 'SOFTWARE_LICENSE';
+  readonly templateId: string;
+  readonly seatLicenseCount: number;
+  readonly apiInvocationMicroPayoutUSD: number;
+  readonly escrowLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface DigitalAssetVaultIntelligence {
+  readonly class: 'DIGITAL_ASSET_VAULT';
+  readonly templateId: string;
+  readonly vaultHoldCount: number;
+  readonly microTippingYieldUSD: number;
+  readonly custodyLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface FashionHouseIntelligence {
+  readonly class: 'FASHION_HOUSE';
+  readonly templateId: string;
+  readonly cutSewUnitYieldUSD: number;
+  readonly wholesaleInventoryCount: number;
+  readonly atelierLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface ModelingAgencyIntelligence {
+  readonly class: 'MODELING_AGENCY';
+  readonly templateId: string;
+  readonly campaignDayRate: number;
+  readonly imageUsageMicroPayoutUSD: number;
+  readonly likenessLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface CadAssetStoreIntelligence {
+  readonly class: 'CAD_ASSET_STORE';
+  readonly templateId: string;
+  readonly meshDownloadCount: number;
+  readonly apiInvocationMicroPayoutUSD: number;
+  readonly polygonLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface VisualArtsStudioIntelligence {
+  readonly class: 'VISUAL_ARTS_STUDIO';
+  readonly templateId: string;
+  readonly editionCount: number;
+  readonly galleryCommissionYieldUSD: number;
+  readonly provenanceLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface DesignPracticeIntelligence {
+  readonly class: 'DESIGN_PRACTICE';
+  readonly templateId: string;
+  readonly retainerCount: number;
+  readonly royaltyOnApplicationUSD: number;
+  readonly attributionLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
+export interface VirtualAvatarCreatorIntelligence {
+  readonly class: 'VIRTUAL_AVATAR_CREATOR';
+  readonly templateId: string;
+  readonly streamFrameRenderHours: number;
+  readonly directFanMicroTippingUSD: number;
+  readonly rigOwnershipLock: boolean;
+  readonly promisedUSD: null;
+  readonly cleared: bigint;
+  readonly trend: readonly TrendPoint[];
+  readonly cohort: CohortRank;
+}
+
 /**
  * The per-entity intelligence readout — the discriminated union over the
  * registered entity classes, one arm each. Every arm carries the four
@@ -244,7 +428,23 @@ export type EntityIntelligence =
   | TournamentEventIntelligence
   | EsportsStreamIntelligence
   | SocialChannelIntelligence
-  | SponsorshipDealIntelligence;
+  | SponsorshipDealIntelligence
+  // The fifteen industry-completion classes (2026-10-07).
+  | MotorsportIntelligence
+  | ArenaIntelligence
+  | MovieStudioIntelligence
+  | VideoPlatformIntelligence
+  | StreamingServiceIntelligence
+  | GamingStudioIntelligence
+  | InteractiveExperienceIntelligence
+  | SoftwareLicenseIntelligence
+  | DigitalAssetVaultIntelligence
+  | FashionHouseIntelligence
+  | ModelingAgencyIntelligence
+  | CadAssetStoreIntelligence
+  | VisualArtsStudioIntelligence
+  | DesignPracticeIntelligence
+  | VirtualAvatarCreatorIntelligence;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The ledger scan — the analyticsFlows.ts treatment, mirrored privately.
@@ -505,6 +705,188 @@ function intelligenceArm(
         campaignId: entity.campaignId,
         activationWindowLock: entity.activationWindowLock,
         promisedUSD: promisedUSDFrom(entity.dealValueUSD),
+        cleared,
+        trend,
+        cohort,
+      };
+    // Industry-completion expansion (2026-10-07) — one arm per newly
+    // registered class, the same four reads.
+    case 'MOTORSPORT_CIRCUIT':
+      return {
+        class: 'MOTORSPORT_CIRCUIT',
+        templateId: entity.templateId,
+        telemetryLaneHours: entity.telemetryLaneHours,
+        lapBroadcastMicroPayoutUSD: entity.lapBroadcastMicroPayoutUSD,
+        pitLaneAssetLock: entity.pitLaneAssetLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'ARENA_OPERATOR':
+      return {
+        class: 'ARENA_OPERATOR',
+        templateId: entity.templateId,
+        turnstileTraffic: entity.turnstileTraffic,
+        concessionsYieldUSD: entity.concessionsYieldUSD,
+        gateClearanceLock: entity.gateClearanceLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'MOVIE_STUDIO':
+      return {
+        class: 'MOVIE_STUDIO',
+        templateId: entity.templateId,
+        filmographyCount: entity.filmographyCount,
+        contractedLibraryTitles: entity.contractedLibraryTitles,
+        distributionTerritoryLock: entity.distributionTerritoryLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'VIDEO_PLATFORM':
+      return {
+        class: 'VIDEO_PLATFORM',
+        templateId: entity.templateId,
+        streamHours: entity.streamHours,
+        avodMicroYieldUSD: entity.avodMicroYieldUSD,
+        avrailLock: entity.avrailLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'STREAMING_SERVICE':
+      return {
+        class: 'STREAMING_SERVICE',
+        templateId: entity.templateId,
+        subscriberTierCount: entity.subscriberTierCount,
+        streamMicroYieldUSD: entity.streamMicroYieldUSD,
+        feedIsolationActive: entity.feedIsolationActive,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'GAMING_STUDIO':
+      return {
+        class: 'GAMING_STUDIO',
+        templateId: entity.templateId,
+        engineThreshold: entity.engineThreshold,
+        robloxDevExRate: entity.robloxDevExRate,
+        assetTreeDepthLock: entity.assetTreeDepthLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'INTERACTIVE_EXPERIENCE':
+      return {
+        class: 'INTERACTIVE_EXPERIENCE',
+        templateId: entity.templateId,
+        xrSessionHours: entity.xrSessionHours,
+        immersionYieldUSD: entity.immersionYieldUSD,
+        captureLock: entity.captureLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'SOFTWARE_LICENSE':
+      return {
+        class: 'SOFTWARE_LICENSE',
+        templateId: entity.templateId,
+        seatLicenseCount: entity.seatLicenseCount,
+        apiInvocationMicroPayoutUSD: entity.apiInvocationMicroPayoutUSD,
+        escrowLock: entity.escrowLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'DIGITAL_ASSET_VAULT':
+      return {
+        class: 'DIGITAL_ASSET_VAULT',
+        templateId: entity.templateId,
+        vaultHoldCount: entity.vaultHoldCount,
+        microTippingYieldUSD: entity.microTippingYieldUSD,
+        custodyLock: entity.custodyLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'FASHION_HOUSE':
+      return {
+        class: 'FASHION_HOUSE',
+        templateId: entity.templateId,
+        cutSewUnitYieldUSD: entity.cutSewUnitYieldUSD,
+        wholesaleInventoryCount: entity.wholesaleInventoryCount,
+        atelierLock: entity.atelierLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'MODELING_AGENCY':
+      return {
+        class: 'MODELING_AGENCY',
+        templateId: entity.templateId,
+        campaignDayRate: entity.campaignDayRate,
+        imageUsageMicroPayoutUSD: entity.imageUsageMicroPayoutUSD,
+        likenessLock: entity.likenessLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'CAD_ASSET_STORE':
+      return {
+        class: 'CAD_ASSET_STORE',
+        templateId: entity.templateId,
+        meshDownloadCount: entity.meshDownloadCount,
+        apiInvocationMicroPayoutUSD: entity.apiInvocationMicroPayoutUSD,
+        polygonLock: entity.polygonLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'VISUAL_ARTS_STUDIO':
+      return {
+        class: 'VISUAL_ARTS_STUDIO',
+        templateId: entity.templateId,
+        editionCount: entity.editionCount,
+        galleryCommissionYieldUSD: entity.galleryCommissionYieldUSD,
+        provenanceLock: entity.provenanceLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'DESIGN_PRACTICE':
+      return {
+        class: 'DESIGN_PRACTICE',
+        templateId: entity.templateId,
+        retainerCount: entity.retainerCount,
+        royaltyOnApplicationUSD: entity.royaltyOnApplicationUSD,
+        attributionLock: entity.attributionLock,
+        promisedUSD: null,
+        cleared,
+        trend,
+        cohort,
+      };
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return {
+        class: 'VIRTUAL_AVATAR_CREATOR',
+        templateId: entity.templateId,
+        streamFrameRenderHours: entity.streamFrameRenderHours,
+        directFanMicroTippingUSD: entity.directFanMicroTippingUSD,
+        rigOwnershipLock: entity.rigOwnershipLock,
+        promisedUSD: null,
         cleared,
         trend,
         cohort,

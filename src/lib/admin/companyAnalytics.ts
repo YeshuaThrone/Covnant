@@ -508,9 +508,12 @@ function flowKindSplitFrom(
 }
 
 /**
- * The industry display labels — the ten atomic class tags' structural
- * vocabulary. An unregistered tag renders as itself (the flowKindLabel
- * pattern: never swallowed).
+ * The industry display labels — the atomic class tags' structural
+ * vocabulary. Three tags disambiguate against their entertainment
+ * siblings: Video is the creator-video industry against TV (linear
+ * broadcast), Streaming is the subscription service against Video, and
+ * Social is the channel layer. An unregistered tag renders as itself
+ * (the flowKindLabel pattern: never swallowed).
  */
 const INDUSTRY_LABELS: Record<AtomicEntityClassTag, string> = {
   MUSIC: 'Music',
@@ -523,6 +526,23 @@ const INDUSTRY_LABELS: Record<AtomicEntityClassTag, string> = {
   ESPORTS: 'Esports',
   SOCIAL: 'Social',
   SPONSORSHIP: 'Sponsorship',
+  MOTORSPORT: 'Motorsport',
+  ARENA: 'Arena',
+  MOVIES: 'Movies',
+  VIDEO: 'Video',
+  STREAMING: 'Streaming',
+  GAMING: 'Gaming',
+  INTERACTIVE: 'Interactive',
+  SOFTWARE: 'Software',
+  DIGITAL_ASSETS: 'Digital Assets',
+  FASHION: 'Fashion',
+  MODELING: 'Modeling',
+  CAD: 'CAD',
+  VISUAL_ARTS: 'Visual Arts',
+  DESIGN: 'Design',
+  // Both VTUBING and VIRTUAL_AVATARS carry this tag (one class, two
+  // sectors), so the label names both industries.
+  VTUBING: 'VTubing & virtual avatars',
 };
 
 function industryLabel(tag: string): string {

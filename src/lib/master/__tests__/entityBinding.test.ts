@@ -35,8 +35,9 @@ import type {
 } from '../CovnantAtomicDataSDK';
 
 /** The sectors whose registry records carry an SDK entity class (canon):
- *  the founder's seven bound sectors plus the five generation-4 expansion
- *  sectors (2026-09-22). */
+ *  the founder's seven bound sectors, the five generation-4 expansion
+ *  sectors (2026-09-22), and the seventeen industry-completion sectors
+ *  (2026-10-07) --- every atomic sector the taxonomy carries. */
 const ENTITY_BOUND_SECTORS = [
   'MUSIC',
   'FILM',
@@ -50,6 +51,23 @@ const ENTITY_BOUND_SECTORS = [
   'ESPORTS',
   'SOCIAL_MEDIA',
   'SPONSORSHIP',
+  'GAMING',
+  'INTERACTIVE',
+  'STREAMING',
+  'MOVIES',
+  'VIDEO',
+  'MOTORSPORT',
+  'ARENA',
+  'ATHLETICS',
+  'FASHION',
+  'MODELING',
+  'CAD',
+  'VISUAL_ARTS',
+  'DESIGN',
+  'DIGITAL_ASSETS',
+  'SOFTWARE',
+  'VTUBING',
+  'VIRTUAL_AVATARS',
 ] as const;
 
 const atomicById = (id: string): AtomicContractRecord => {
@@ -154,18 +172,19 @@ describe('atomic entity binding — sector-driven', () => {
     expect(deal.activationWindowLock).toBe(false);
   });
 
-  it('keeps every sector WITHOUT an entity class on telemetryMetric — no force-fitting', () => {
-    for (const sector of ATOMIC_SECTOR_ORDER) {
-      if ((ENTITY_BOUND_SECTORS as readonly string[]).includes(sector)) continue;
-      const records = ATOMIC_TEMPLATE_REGISTRY.filter((r) => r.atomicSector === sector);
-      expect(records.length, `sector ${sector} lost its records`).toBeGreaterThanOrEqual(1);
-      for (const record of records) {
-        expect(bindAtomicEntity(record), `${record.templateId} must bind no entity`).toBeNull();
-      }
-    }
+  it('keeps the coverage honest — every atomic sector carries a typed entity class', () => {
+    // The industry-completion wave (2026-10-07) bound the LAST metric-only
+    // sectors: no sector may remain on the telemetryMetric fallback.
+    const unbound = ATOMIC_SECTOR_ORDER.filter(
+      (sector) => !(ENTITY_BOUND_SECTORS as readonly string[]).includes(sector),
+    );
+    expect(unbound).toEqual([]);
+    // And the manifest canon agrees — every atomic sector the taxonomy
+    // carries is entity-bound, no extra names either.
+    expect(ENTITY_BOUND_SECTORS.length).toBe(ATOMIC_SECTOR_ORDER.length);
   });
 
-  it('carries the full coverage manifest — which sectors bind entities, which stay metric-only', () => {
+  it('carries the full coverage manifest — every sector binds entities on every record', () => {
     const manifest = ATOMIC_SECTOR_ORDER.map((sector) => ({
       sector,
       vertical: ATOMIC_SECTOR_TO_VERTICAL[sector],

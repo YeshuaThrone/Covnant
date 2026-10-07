@@ -39,16 +39,31 @@ import {
   ATOMIC_SECTOR_GUARDS,
   entityClassTag,
   isAthleteContractEntity,
+  isArenaOperatorEntity,
+  isCadAssetStoreEntity,
+  isDesignPracticeEntity,
+  isDigitalAssetVaultEntity,
   isEsportsStreamEntity,
+  isFashionHouseEntity,
   isFilmEntity,
+  isGamingStudioEntity,
+  isInteractiveExperienceEntity,
   isLiveEntity,
+  isModelingAgencyEntity,
+  isMotorsportCircuitEntity,
+  isMovieStudioEntity,
   isMusicEntity,
   isPodcastEntity,
   isPublishingEntity,
   isSocialChannelEntity,
+  isSoftwareLicenseEntity,
   isSponsorshipDealEntity,
+  isStreamingServiceEntity,
   isTournamentEventEntity,
   isTvEntity,
+  isVideoPlatformEntity,
+  isVirtualAvatarCreatorEntity,
+  isVisualArtsStudioEntity,
   type AtomicEntityClassTag,
   type AtomicExecutionTelemetry,
   type LanePoolName,
@@ -1334,6 +1349,31 @@ const ENTITY_TELEMETRY_SEEDS: Readonly<Record<string, SovereignAtomicEntity>> = 
   'TPL-SOC-001': { entityType: 'SOCIAL_CHANNEL', templateId: 'TPL-SOC-001', platform: 'TIKTOK', channelId: 'SOC-7401', contentMatchYieldUSD: 12_000, monetizationReviewLock: true, targetSplit: ENTITY_TARGET_SPLIT },
   // SPONSORSHIP — the cross-industry brand-deal seed.
   'TPL-SPN-001': { entityType: 'SPONSORSHIP_DEAL', templateId: 'TPL-SPN-001', brandPartner: 'Nike', campaignId: 'SPN-2026-40', dealValueUSD: 950_000, activationWindowLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  // INDUSTRY-COMPLETION EXPANSION (2026-10-07) — the previously
+  // telemetryMetric-only atomic sectors now binding typed entity telemetry,
+  // in the same canon shape (domain digits, one lock boolean, THE one
+  // 50/35/15 split); so every one of the 29 atomic sectors renders a full
+  // typed entity card. ATHLETICS rides the existing AthleteContract class
+  // (the older sports canon; the NIL record is the athlete form), and
+  // VIRTUAL_AVATARS rides the VirtualAvatarCreator class — the Books and
+  // Literature pattern.
+  'TPL-MTR-001': { entityType: 'MOTORSPORT_CIRCUIT', templateId: 'TPL-MTR-001', telemetryLaneHours: 2_140, pitLaneAssetLock: true, lapBroadcastMicroPayoutUSD: 7_400, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-ARN-001': { entityType: 'ARENA_OPERATOR', templateId: 'TPL-ARN-001', turnstileTraffic: 48_200, concessionsYieldUSD: 316_500, gateClearanceLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-MOV-001': { entityType: 'MOVIE_STUDIO', templateId: 'TPL-MOV-001', filmographyCount: 214, contractedLibraryTitles: 9_800, distributionTerritoryLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-VID-001': { entityType: 'VIDEO_PLATFORM', templateId: 'TPL-VID-001', streamHours: 9_120_000, avrailLock: false, avodMicroYieldUSD: 128_400, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-STR-001': { entityType: 'STREAMING_SERVICE', templateId: 'TPL-STR-001', subscriberTierCount: 5, streamMicroYieldUSD: 942_000, feedIsolationActive: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-GAM-001': { entityType: 'GAMING_STUDIO', templateId: 'TPL-GAM-001', engineThreshold: 14, robloxDevExRate: 0.0035, assetTreeDepthLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-IXP-001': { entityType: 'INTERACTIVE_EXPERIENCE', templateId: 'TPL-IXP-001', xrSessionHours: 6_400, immersionYieldUSD: 86_400, captureLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-SFT-001': { entityType: 'SOFTWARE_LICENSE', templateId: 'TPL-SFT-001', seatLicenseCount: 48_600, apiInvocationMicroPayoutUSD: 4_260, escrowLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-DGA-001': { entityType: 'DIGITAL_ASSET_VAULT', templateId: 'TPL-DGA-001', vaultHoldCount: 1_260, microTippingYieldUSD: 18_400, custodyLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-FSH-001': { entityType: 'FASHION_HOUSE', templateId: 'TPL-FSH-001', cutSewUnitYieldUSD: 2_140_000, atelierLock: true, wholesaleInventoryCount: 84_200, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-MDL-001': { entityType: 'MODELING_AGENCY', templateId: 'TPL-MDL-001', campaignDayRate: 12_400, imageUsageMicroPayoutUSD: 6_800, likenessLock: false, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-CAD-001': { entityType: 'CAD_ASSET_STORE', templateId: 'TPL-CAD-001', meshDownloadCount: 214_000, apiInvocationMicroPayoutUSD: 3_120, polygonLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-VIS-001': { entityType: 'VISUAL_ARTS_STUDIO', templateId: 'TPL-VIS-001', editionCount: 320, galleryCommissionYieldUSD: 148_600, provenanceLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-DES-001': { entityType: 'DESIGN_PRACTICE', templateId: 'TPL-DES-001', retainerCount: 18, royaltyOnApplicationUSD: 64_200, attributionLock: true, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-VTB-001': { entityType: 'VIRTUAL_AVATAR_CREATOR', templateId: 'TPL-VTB-001', streamFrameRenderHours: 3_640, rigOwnershipLock: true, directFanMicroTippingUSD: 21_600, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-VAV-001': { entityType: 'VIRTUAL_AVATAR_CREATOR', templateId: 'TPL-VAV-001', streamFrameRenderHours: 1_280, rigOwnershipLock: false, directFanMicroTippingUSD: 9_800, targetSplit: ENTITY_TARGET_SPLIT },
+  'TPL-ATH-001': { entityType: 'ATHLETE_CONTRACT', templateId: 'TPL-ATH-001', contractId: 'ATH-NIL-2026-01', sport: 'Track and Field', sponsorshipGuaranteeUSD: 640_000, endorsementExclusivityLock: false, targetSplit: ENTITY_TARGET_SPLIT },
 });
 
 /**
@@ -1361,6 +1401,28 @@ const ATOMIC_ENTITY_SECTORS: ReadonlySet<AtomicSector> = new Set<AtomicSector>([
   'ESPORTS',
   'SOCIAL_MEDIA',
   'SPONSORSHIP',
+  // Industry-completion expansion (2026-10-07): the remaining atomic
+  // sectors — every one of the 29 atomic sectors now binds a typed
+  // entity class. ATHLETICS rides the existing AthleteContract class and
+  // VIRTUAL_AVATARS the VirtualAvatarCreator class (the sector-derived
+  // prefix list both guards take).
+  'GAMING',
+  'INTERACTIVE',
+  'STREAMING',
+  'MOVIES',
+  'VIDEO',
+  'MOTORSPORT',
+  'ARENA',
+  'ATHLETICS',
+  'FASHION',
+  'MODELING',
+  'CAD',
+  'VISUAL_ARTS',
+  'DESIGN',
+  'DIGITAL_ASSETS',
+  'SOFTWARE',
+  'VTUBING',
+  'VIRTUAL_AVATARS',
 ]);
 
 /** Factory prefix → entity class tag; null when the prefix binds no entity. */
@@ -1434,6 +1496,38 @@ export function validateServedEntity(entity: SovereignAtomicEntity): boolean {
       return isSocialChannelEntity(entity) && splitHolds;
     case 'SPONSORSHIP_DEAL':
       return isSponsorshipDealEntity(entity) && splitHolds;
+    // The fifteen industry-completion classes (2026-10-07) — every new
+    // class enforces the same fail-closed pairing and the shared split.
+    case 'MOTORSPORT_CIRCUIT':
+      return isMotorsportCircuitEntity(entity) && splitHolds;
+    case 'ARENA_OPERATOR':
+      return isArenaOperatorEntity(entity) && splitHolds;
+    case 'MOVIE_STUDIO':
+      return isMovieStudioEntity(entity) && splitHolds;
+    case 'VIDEO_PLATFORM':
+      return isVideoPlatformEntity(entity) && splitHolds;
+    case 'STREAMING_SERVICE':
+      return isStreamingServiceEntity(entity) && splitHolds;
+    case 'GAMING_STUDIO':
+      return isGamingStudioEntity(entity) && splitHolds;
+    case 'INTERACTIVE_EXPERIENCE':
+      return isInteractiveExperienceEntity(entity) && splitHolds;
+    case 'SOFTWARE_LICENSE':
+      return isSoftwareLicenseEntity(entity) && splitHolds;
+    case 'DIGITAL_ASSET_VAULT':
+      return isDigitalAssetVaultEntity(entity) && splitHolds;
+    case 'FASHION_HOUSE':
+      return isFashionHouseEntity(entity) && splitHolds;
+    case 'MODELING_AGENCY':
+      return isModelingAgencyEntity(entity) && splitHolds;
+    case 'CAD_ASSET_STORE':
+      return isCadAssetStoreEntity(entity) && splitHolds;
+    case 'VISUAL_ARTS_STUDIO':
+      return isVisualArtsStudioEntity(entity) && splitHolds;
+    case 'DESIGN_PRACTICE':
+      return isDesignPracticeEntity(entity) && splitHolds;
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return isVirtualAvatarCreatorEntity(entity) && splitHolds;
   }
 }
 

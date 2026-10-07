@@ -432,6 +432,158 @@ function formatEntityTelemetry(entity: SovereignAtomicEntity): LaneTelemetry {
           { label: 'Activation Window', value: entity.activationWindowLock ? 'Locked' : 'Open' },
         ],
       };
+    // Industry-completion expansion (2026-10-07) — the previously
+    // telemetryMetric-only sectors render their full domain fields now.
+    case 'MOTORSPORT_CIRCUIT':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Telemetry Lane Hours', value: `${entity.telemetryLaneHours.toLocaleString('en-US')} hours` },
+          { label: 'Lap Broadcast Micro Payout', value: formatUsdAmount(entity.lapBroadcastMicroPayoutUSD) },
+          { label: 'Pit Lane Asset Lock', value: entity.pitLaneAssetLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'ARENA_OPERATOR':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Turnstile Traffic', value: `${entity.turnstileTraffic.toLocaleString('en-US')} entries` },
+          { label: 'Concessions Yield', value: formatUsdAmount(entity.concessionsYieldUSD) },
+          { label: 'Gate Clearance', value: entity.gateClearanceLock ? 'Locked' : 'Clear' },
+        ],
+      };
+    case 'MOVIE_STUDIO':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Filmography Count', value: `${entity.filmographyCount.toLocaleString('en-US')} titles` },
+          { label: 'Contracted Library Titles', value: entity.contractedLibraryTitles.toLocaleString('en-US') },
+          { label: 'Distribution Territory', value: entity.distributionTerritoryLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'VIDEO_PLATFORM':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Stream Hours', value: `${entity.streamHours.toLocaleString('en-US')} hours` },
+          { label: 'AVOD Micro Yield', value: formatUsdAmount(entity.avodMicroYieldUSD) },
+          { label: 'AV Rail', value: entity.avrailLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'STREAMING_SERVICE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Subscriber Tier Count', value: `${entity.subscriberTierCount.toLocaleString('en-US')} tiers` },
+          { label: 'Stream Micro Yield', value: formatUsdAmount(entity.streamMicroYieldUSD) },
+          { label: 'Feed Isolation', value: entity.feedIsolationActive ? 'Active' : 'Inactive' },
+        ],
+      };
+    case 'GAMING_STUDIO':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Engine Threshold', value: entity.engineThreshold.toLocaleString('en-US') },
+          { label: 'Roblox DevEx Rate', value: entity.robloxDevExRate.toFixed(4) },
+          { label: 'Asset Tree Depth', value: entity.assetTreeDepthLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'INTERACTIVE_EXPERIENCE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'XR Session Hours', value: `${entity.xrSessionHours.toLocaleString('en-US')} hours` },
+          { label: 'Immersion Yield', value: formatUsdAmount(entity.immersionYieldUSD) },
+          { label: 'Capture', value: entity.captureLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'SOFTWARE_LICENSE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Seat License Count', value: entity.seatLicenseCount.toLocaleString('en-US') },
+          { label: 'API Invocation Micro Payout', value: formatUsdAmount(entity.apiInvocationMicroPayoutUSD) },
+          { label: 'Escrow', value: entity.escrowLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'DIGITAL_ASSET_VAULT':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Vault Hold Count', value: entity.vaultHoldCount.toLocaleString('en-US') },
+          { label: 'Micro Tipping Yield', value: formatUsdAmount(entity.microTippingYieldUSD) },
+          { label: 'Custody', value: entity.custodyLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'FASHION_HOUSE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Cut and Sew Unit Yield', value: formatUsdAmount(entity.cutSewUnitYieldUSD) },
+          { label: 'Wholesale Inventory Count', value: entity.wholesaleInventoryCount.toLocaleString('en-US') },
+          { label: 'Atelier', value: entity.atelierLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'MODELING_AGENCY':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Campaign Day Rate', value: formatUsdAmount(entity.campaignDayRate) },
+          { label: 'Image Usage Micro Payout', value: formatUsdAmount(entity.imageUsageMicroPayoutUSD) },
+          { label: 'Likeness', value: entity.likenessLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'CAD_ASSET_STORE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Mesh Download Count', value: entity.meshDownloadCount.toLocaleString('en-US') },
+          { label: 'API Invocation Micro Payout', value: formatUsdAmount(entity.apiInvocationMicroPayoutUSD) },
+          { label: 'Polygon', value: entity.polygonLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'VISUAL_ARTS_STUDIO':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Edition Count', value: `${entity.editionCount.toLocaleString('en-US')} editions` },
+          { label: 'Gallery Commission Yield', value: formatUsdAmount(entity.galleryCommissionYieldUSD) },
+          { label: 'Provenance', value: entity.provenanceLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'DESIGN_PRACTICE':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Retainer Count', value: `${entity.retainerCount.toLocaleString('en-US')} retainers` },
+          { label: 'Royalty on Application', value: formatUsdAmount(entity.royaltyOnApplicationUSD) },
+          { label: 'Attribution', value: entity.attributionLock ? 'Locked' : 'Open' },
+        ],
+      };
+    case 'VIRTUAL_AVATAR_CREATOR':
+      return {
+        kind: 'entity',
+        classTag,
+        fields: [
+          { label: 'Stream Frame Render Hours', value: `${entity.streamFrameRenderHours.toLocaleString('en-US')} hours` },
+          { label: 'Direct Fan Micro Tipping', value: formatUsdAmount(entity.directFanMicroTippingUSD) },
+          { label: 'Rig Ownership', value: entity.rigOwnershipLock ? 'Locked' : 'Open' },
+        ],
+      };
   }
 }
 
