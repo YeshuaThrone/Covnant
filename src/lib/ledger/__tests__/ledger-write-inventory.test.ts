@@ -535,6 +535,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // returned jsonb shape). Touches only creator_ytd_earnings — still no
       // DDL on universal_royalty_ledger — the referencing pin below holds.
       '0061_creator_ytd_increment_fix.sql',
+      // Contract tenant scoping (audit F6/F7, spec D7): a nullable
+      // contracts.creator_id + index — the ownership column the vault's
+      // creator-scoped reads/finalize/export filter on. Touches only
+      // contracts — still no DDL on universal_royalty_ledger — the
+      // referencing pin below holds.
+      '0062_contract_creator_id.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

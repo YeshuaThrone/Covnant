@@ -49,6 +49,18 @@ vi.mock('@/lib/contracts/store', () => ({
   markContractFinal: storeMock.markContractFinal,
 }));
 
+// The ownership stamp's seam (spec D7) — mocked per test like the export
+// route's battery mocks it; the real module shape is preserved.
+vi.mock('@/lib/server/sessionCreator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server/sessionCreator')>();
+  return {
+    ...actual,
+    resolveSessionCreator: vi.fn(),
+  };
+});
+
+import { resolveSessionCreator } from '@/lib/server/sessionCreator';
+
 const engineMock = vi.hoisted(() => ({
   auditor: { RunFullSystemAudit: vi.fn() },
   Constructor: vi.fn(),
@@ -91,6 +103,9 @@ beforeEach(() => {
   headersMock.get.mockReturnValue(undefined);
   storeMock.saveContract.mockReset();
   storeMock.markContractFinal.mockReset();
+  // The default save posture: no creator session bound (a pure operator
+  // save) — the ownership stamp stays NULL.
+  vi.mocked(resolveSessionCreator).mockResolvedValue({ kind: 'anonymous' });
   engineMock.Constructor.mockClear();
   engineMock.auditor.RunFullSystemAudit.mockReset();
 });
@@ -196,7 +211,46 @@ describe('saveContractAction / markContractFinalAction — gated (audit F2)', ()
 
     expect(result).toEqual({ success: true, id: 'CTR-TEST0001', status: 'DRAFT' });
     expect(storeMock.saveContract).toHaveBeenCalledTimes(1);
-    expect(storeMock.saveContract).toHaveBeenCalledWith(INPUT);
+    // No creator session bound → the ownership stamp stays NULL (spec D7).
+    expect(storeMock.saveContract).toHaveBeenCalledWith(INPUT, null);
+  });
+
+  it('save: stamps the registered creator identity of the verified session (spec D7)', async () => {
+    headersMock.get.mockImplementation((name: string) =>
+      name === 'cookie' ? operatorCookieHeader() : null,
+    );
+    vi.mocked(resolveSessionCreator).mockResolvedValue({
+      kind: 'registered',
+      creator: {
+        payee_id: 'rh_A',
+        stage_name: 'Creator A',
+        kyc_status: 'APPROVED',
+        bank_account_linked: true,
+        provisioning_status: 'PROVISIONED',
+      },
+    });
+    storeMock.saveContract.mockResolvedValue({ id: 'CTR-TEST0001', status: 'DRAFT' });
+
+    await saveContractAction(INPUT);
+
+    expect(storeMock.saveContract).toHaveBeenCalledWith(INPUT, 'rh_A');
+  });
+
+  it('save: fails closed on a session-resolver read failure — store never touched', async () => {
+    headersMock.get.mockImplementation((name: string) =>
+      name === 'cookie' ? operatorCookieHeader() : null,
+    );
+    const { SessionCreatorReadError } = await import('@/lib/server/sessionCreator');
+    vi.mocked(resolveSessionCreator).mockRejectedValue(
+      new SessionCreatorReadError('registry_read_failed', 'Failed to load the creator registry.'),
+    );
+
+    const result = await saveContractAction(INPUT);
+
+    // A read failure never saves silently unattributed — the save is
+    // refused with the resolver's named code.
+    expect(result).toEqual({ success: false, error: 'registry_read_failed' });
+    expect(storeMock.saveContract).not.toHaveBeenCalled();
   });
 
   it('finalize: refuses admin_not_configured when the secret is unset — store never touched', async () => {
@@ -231,6 +285,20 @@ describe('saveContractAction / markContractFinalAction — gated (audit F2)', ()
 
     expect(result).toEqual({ success: true, status: 'FINAL' });
     expect(storeMock.markContractFinal).toHaveBeenCalledTimes(1);
-    expect(storeMock.markContractFinal).toHaveBeenCalledWith('CTR-TEST0001');
+    // The finalize runs under the operator viewer the gate just proved
+    // (spec D7) — every row visible, so unknown AND foreign ids collapse
+    // into the same not-found shape below.
+    expect(storeMock.markContractFinal).toHaveBeenCalledWith('CTR-TEST0001', { role: 'operator' });
+  });
+
+  it('finalize: unknown id answers the not-found shape (foreign ids resolve to the same miss in the store, spec D7)', async () => {
+    headersMock.get.mockImplementation((name: string) =>
+      name === 'cookie' ? operatorCookieHeader() : null,
+    );
+    storeMock.markContractFinal.mockResolvedValue(undefined);
+
+    const result = await markContractFinalAction('CTR-DOESNOTEXIST');
+
+    expect(result).toEqual({ success: false, error: 'Contract not found.' });
   });
 });

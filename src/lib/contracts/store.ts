@@ -43,7 +43,6 @@ export interface StoredContract {
 export type ContractViewer = { role: 'operator' } | { role: 'creator'; creatorId: string };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __covnantContractStore: Map<string, StoredContract> | undefined;
 }
 
