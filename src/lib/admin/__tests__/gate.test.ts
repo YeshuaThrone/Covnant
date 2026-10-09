@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   ADMIN_COOKIE_NAME,
   ADMIN_SESSION_TTL_SECONDS,
@@ -21,9 +22,30 @@ import {
 
 const PASSWORD = 'test-admin-password-1234';
 
+/**
+ * The gate reads Supabase through the module's supabaseFromEnv seam (the
+ * same seam sessionCreator.test.ts mocks): the real factory's createClient
+ * builds a realtime client that throws in the node test environment (no
+ * WebSocket constructor), and the gate's contract is only
+ * undefined-vs-configured — never the client itself.
+ */
+const supabaseMock = vi.hoisted(() => ({
+  supabaseFromEnv: vi.fn<() => SupabaseClient | undefined>(() => undefined),
+}));
+
+vi.mock('@/lib/supabase', () => ({ supabaseFromEnv: supabaseMock.supabaseFromEnv }));
+
 function withEnv(value: string | undefined): void {
   if (value === undefined) delete process.env.ADMIN_DASHBOARD_PASSWORD;
   else process.env.ADMIN_DASHBOARD_PASSWORD = value;
+}
+
+/**
+ * The Supabase half of the carve-out's new precondition (audit F8): the
+ * passwordless door opens only when no database is configured.
+ */
+function withSupabase(configured: boolean): void {
+  supabaseMock.supabaseFromEnv.mockReturnValue(configured ? ({} as SupabaseClient) : undefined);
 }
 
 afterEach(() => {
@@ -169,6 +191,7 @@ describe('verifyAdminSession — the DON_DEV_SEED carve-out is deployment-aware 
   afterEach(() => {
     vi.unstubAllEnvs();
     withEnv(undefined);
+    withSupabase(false);
     delete process.env.DON_DEV_SEED;
     delete process.env.VERCEL_ENV;
   });
@@ -176,9 +199,11 @@ describe('verifyAdminSession — the DON_DEV_SEED carve-out is deployment-aware 
   it('opens without a password under DON_DEV_SEED=1 on a production-BUILD preview server (next start e2e)', () => {
     // The seeded preview runs `next build && next start`: NODE_ENV is
     // 'production' there, and the deployment tier (VERCEL_ENV) is unset.
+    // The door opens only over NO database (audit F8) — Supabase unconfigured.
     vi.stubEnv('NODE_ENV', 'production');
     process.env.DON_DEV_SEED = '1';
     withEnv(undefined);
+    withSupabase(false);
     expect(verifyAdminSession(null)).toEqual({ ok: true });
   });
 
@@ -187,7 +212,38 @@ describe('verifyAdminSession — the DON_DEV_SEED carve-out is deployment-aware 
     vi.stubEnv('VERCEL_ENV', 'preview');
     process.env.DON_DEV_SEED = '1';
     withEnv(undefined);
+    withSupabase(false);
     expect(verifyAdminSession(null)).toEqual({ ok: true });
+  });
+
+  it('refuses the carve-out when Supabase IS configured — real data demands the operator secret (audit F8)', () => {
+    // The F8 footgun: a staging deploy with real credentials and no
+    // password must not expose a full operator console over real data,
+    // seed flag or not — the demo door's rule, applied to the gate.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(undefined);
+    withSupabase(true);
+    const verdict = verifyAdminSession(null);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.status).toBe(503);
+      expect(verdict.code).toBe('admin_not_configured');
+    }
+  });
+
+  it('refuses the carve-out on a passwordless next start with Supabase configured (the e2e-shaped deployment tier)', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.DON_DEV_SEED = '1';
+    withEnv(undefined);
+    withSupabase(true);
+    const verdict = verifyAdminSession(null);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.status).toBe(503);
+      expect(verdict.code).toBe('admin_not_configured');
+    }
   });
 
   it('NEVER opens a production DEPLOYMENT console on the seed flag — 503 admin_not_configured', () => {

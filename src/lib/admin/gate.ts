@@ -25,6 +25,8 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { supabaseFromEnv } from '@/lib/supabase';
+
 export const ADMIN_COOKIE_NAME = 'covnant_admin_session';
 
 /** One operator shift — the cookie re-prompts rather than persisting for weeks. */
@@ -123,8 +125,19 @@ export function verifyAdminSession(
   // production deployment (VERCEL_ENV === 'production', the same signal
   // isDevSeedMode uses) never opens on the seed flag alone: with the
   // password configured it demands the signed cookie; without one it still
-  // answers 503 admin_not_configured.
-  if (!password && env.DON_DEV_SEED === '1' && env.VERCEL_ENV !== 'production') {
+  // answers 503 admin_not_configured. And the door only opens over NO
+  // database: a deployment carrying real Supabase credentials is a
+  // real-data environment, so it needs the operator secret — the demo door
+  // (demoSeeds.demoDoorOpen) runs the same supabaseFromEnv() === undefined
+  // rule, so the passwordless console and its demo seed data open and
+  // close together. Checked last so password-configured and production
+  // paths never construct a client (audit F8).
+  if (
+    !password &&
+    env.DON_DEV_SEED === '1' &&
+    env.VERCEL_ENV !== 'production' &&
+    supabaseFromEnv() === undefined
+  ) {
     return { ok: true };
   }
   if (!password) return NOT_CONFIGURED;
