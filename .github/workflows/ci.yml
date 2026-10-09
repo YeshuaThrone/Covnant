@@ -42,7 +42,7 @@ jobs:
       # Cache the Next.js incremental build cache. The post-build save
       # happens automatically via the actions/cache post step.
       - name: Cache .next/cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .next/cache
           # New cache entry whenever packages or source files change.
@@ -1209,7 +1209,7 @@ jobs:
       # The install step below still runs (--with-deps guarantees OS libs);
       # on a cache hit it is a fast no-op for the browser download itself.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -1220,7 +1220,7 @@ jobs:
       # Cache the Next.js incremental build cache (same keys as the verify
       # job). The post-build save happens automatically via the post step.
       - name: Cache .next/cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
