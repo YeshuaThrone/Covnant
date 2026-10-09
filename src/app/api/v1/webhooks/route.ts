@@ -3,8 +3,17 @@ import { donJsonError } from "@/lib/server/http";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { getStore } from "@/lib/server/store";
 import { clientIdentity } from "@/modules/don/http";
-import { validateUnifiedWebhookPayload } from "@/lib/don/validation";
+import { validateUnifiedWebhookPayload, type UnifiedWebhookPayload } from "@/lib/don/validation";
 import { ingestBaasWebhook, ingestDspWebhook } from "@/lib/server/webhooks";
+import {
+  authenticateUnifiedStandardWebhook,
+  type DonWebhookSecretEnv,
+} from "@/modules/don/webhookSignature";
+
+/** The signing secret each unified payload kind must have verified under. */
+function expectedSecretForKind(kind: UnifiedWebhookPayload["kind"]): DonWebhookSecretEnv {
+  return kind === "baas" ? "COLUMN_WEBHOOK_SECRET" : "DSP_WEBHOOK_SECRET";
+}
 
 export async function POST(request: NextRequest) {
   const identity = clientIdentity(request);
@@ -17,9 +26,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Signature gate (Standard Webhooks HMAC), matching the typed baas/ and
+  // dsp/ routes: unsigned, stale, or unverifiable bodies are rejected here
+  // — BEFORE the body is parsed, validated, or the store is read — so no
+  // forged delivery can settle/fail/reverse a payout or fabricate royalty
+  // income. Unset secrets fail closed with a 401 not-configured error.
+  const auth = await authenticateUnifiedStandardWebhook(request, [
+    "COLUMN_WEBHOOK_SECRET",
+    "DSP_WEBHOOK_SECRET",
+  ]);
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(auth.rawBody);
   } catch {
     return donJsonError(
       400,
@@ -31,6 +51,19 @@ export async function POST(request: NextRequest) {
   if (!parsed.ok) {
     const status = parsed.code === "malformed_body" ? 400 : 422;
     return donJsonError(status, parsed.code, parsed.message);
+  }
+
+  // Kind↔secret binding: the payload kind is only knowable after parsing,
+  // but the delivery must still be signed by the payload kind's own
+  // provider secret — a BaaS body signed under the DSP secret (or vice
+  // versa) is an unknown-secret delivery, and accepting it would make this
+  // route a weaker sibling of the typed routes. No store is touched.
+  if (auth.verifiedWith !== expectedSecretForKind(parsed.value.kind)) {
+    return donJsonError(
+      403,
+      "signature_invalid",
+      "Webhook signature is invalid or stale.",
+    );
   }
 
   if (parsed.value.kind === "baas") {
