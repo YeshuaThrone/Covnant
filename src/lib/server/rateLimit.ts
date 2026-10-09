@@ -83,16 +83,26 @@ export const EMAIL_CONFIRMATION_COOLDOWN: RateLimitConfig = {
   windowMs: 60_000,
 };
 
-type Bucket = { count: number; windowStart: number };
+/**
+ * Each bucket carries the windowMs of the config that created it, so the
+ * sweep can judge every bucket by its OWN window — a short-window caller's
+ * sweep must never evict a live long-window (money-initiation) bucket
+ * (C10).
+ */
+type Bucket = { count: number; windowStart: number; windowMs: number };
 
 const buckets = new Map<string, Bucket>();
 
-/** Bound the map: drop expired buckets once the table grows past this size. */
-const SWEEP_THRESHOLD = 10_000;
+/**
+ * Bound the map: drop expired buckets once the table grows past this size.
+ * Exported for the regression tests — they must push the map past the real
+ * threshold to trigger a genuine sweep.
+ */
+export const SWEEP_THRESHOLD = 10_000;
 
-function sweepExpired(now: number, windowMs: number): void {
+function sweepExpired(now: number): void {
   for (const [key, bucket] of buckets) {
-    if (now - bucket.windowStart >= windowMs) {
+    if (now - bucket.windowStart >= bucket.windowMs) {
       buckets.delete(key);
     }
   }
@@ -103,9 +113,9 @@ export function checkRateLimit(key: string, config: RateLimitConfig): RateLimitV
   const bucket = buckets.get(key);
   if (bucket === undefined || now - bucket.windowStart >= config.windowMs) {
     if (buckets.size >= SWEEP_THRESHOLD) {
-      sweepExpired(now, config.windowMs);
+      sweepExpired(now);
     }
-    buckets.set(key, { count: 1, windowStart: now });
+    buckets.set(key, { count: 1, windowStart: now, windowMs: config.windowMs });
     return { ok: true };
   }
   if (bucket.count >= config.limit) {
