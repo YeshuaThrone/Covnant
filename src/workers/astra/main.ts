@@ -79,7 +79,8 @@ async function main(): Promise<void> {
       log(
         `sweep: ${summary.traversed} connections — ` +
           `${summary.extracted} extracted, ${summary.noStatements} empty, ` +
-          `${summary.failed} failed; ${summary.statementsCaptured} statements, ` +
+          `${summary.authFailed} auth-failed, ${summary.failed} failed; ` +
+          `${summary.statementsCaptured} statements, ` +
           `${summary.jobsEnqueued} recon jobs enqueued`,
       );
     } catch (error) {

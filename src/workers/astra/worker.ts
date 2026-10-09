@@ -18,7 +18,10 @@
  * reason, the provenance write records it (never flipping connection
  * status — disconnect is the holder's act), and nothing is enqueued. An
  * empty dashboard is not a failure: 'no_statements' still verifies the
- * dashboard was reached and authenticated.
+ * dashboard was reached and authenticated. A landing that never
+ * authenticates — a failed login bounces to an error page — records
+ * 'auth_failed' and NEVER stamps verifiedAt: a rotated-credential
+ * connection must read as broken, not healthy.
  */
 
 import { decryptCredential } from '@/modules/vault/crypto';
@@ -39,6 +42,7 @@ import type {
   TraversalArtifact,
 } from './records';
 import type { DashboardAnchor, DashboardPage, DashboardSession } from './session';
+import { selectorPresentIn } from './session';
 import { locateControlViaVision } from './visionFallback';
 
 /** Everything the traversal needs from the process around it. */
@@ -85,6 +89,43 @@ export function harvestStatementLinks(
       return pattern.test(anchor.href); // not a parseable URL — test raw
     }
   });
+}
+
+/** Prefix match that respects path segments — `/bank` never matches `/bankrupted`. */
+function urlStartsWithPrefix(url: string, prefix: string): boolean {
+  if (!url.startsWith(prefix)) {
+    return false;
+  }
+  const rest = url.slice(prefix.length);
+  return rest === '' || /^[/?#]/.test(rest);
+}
+
+/**
+ * The verifiedAt gate: did the dashboard landing actually authenticate?
+ * Default (no profile marker): the final URL still starts with the
+ * dashboardUrl — a failed login bounces the landing page to an error or
+ * login re-render whose URL has left the dashboard. Any observation
+ * failure fails closed: an unobservable page is not authenticated.
+ */
+export async function dashboardAuthenticated(
+  page: DashboardPage,
+  profile: AstraAdapterProfile,
+): Promise<boolean> {
+  const marker = profile.authMarker;
+  try {
+    if (marker === undefined || marker.kind === 'url_prefix') {
+      const prefix = marker === undefined ? profile.dashboardUrl : marker.value;
+      return urlStartsWithPrefix(await page.url(), prefix);
+    }
+    if (marker.kind === 'element') {
+      // Works for both drivers: html() is the (unredacted-in-memory,
+      // never-persisted) page body; the selector grammar is the profile's own.
+      return selectorPresentIn(await page.html(), marker.selector);
+    }
+    return (await page.cookieNames()).includes(marker.name);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -257,10 +298,22 @@ export async function traverseConnection(
     artifacts.push(
       await captureArtifact(dashboardPage, `dashboard:${connection.distributor}`, secrets),
     );
+
+    // The verifiedAt gate: a failed login bounces the landing page to an
+    // anchor-free error page — indistinguishable from an empty dashboard
+    // by links alone. Never stamp verified on faith.
+    if (!(await dashboardAuthenticated(dashboardPage, profile))) {
+      const reason = 'auth_failed: dashboard authentication marker not observed after login';
+      await deps.store
+        .markDistributorTraversal(connection.id, { error: reason })
+        .catch(() => undefined);
+      return assembleRecord(base, 'auth_failed', [], artifacts, [], [], reason, now());
+    }
+
     const links = harvestStatementLinks(profile, await dashboardPage.anchors());
 
     if (links.length === 0) {
-      // An empty dashboard still verifies: the login succeeded.
+      // An authenticated empty dashboard still verifies: the marker held.
       await deps.store
         .markDistributorTraversal(connection.id, { verifiedAt: now() })
         .catch(() => undefined);
@@ -337,6 +390,7 @@ export async function runAstraSweep(deps: AstraWorkerDeps): Promise<{
     traversed: traversals.length,
     extracted: traversals.filter((record) => record.outcome === 'extracted').length,
     noStatements: traversals.filter((record) => record.outcome === 'no_statements').length,
+    authFailed: traversals.filter((record) => record.outcome === 'auth_failed').length,
     failed: traversals.filter((record) => record.outcome === 'failed').length,
     statementsCaptured: traversals.reduce(
       (total, record) => total + record.statements.length,

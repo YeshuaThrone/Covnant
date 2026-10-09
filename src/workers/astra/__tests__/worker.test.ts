@@ -34,17 +34,18 @@ import {
 } from "./astraFixtures";
 import {
   ASTRA_ADAPTER_PROFILES,
+  ASTRA_BASE_URL,
   assertProfilesMatchVaultSources,
 } from "../profiles";
 import type { AstraAdapterProfile } from "../profiles";
-import type { FixtureCatalog } from "../session";
+import type { DashboardPage, DashboardSession, FixtureCatalog } from "../session";
 import {
   MissingFixtureError,
   openFixtureSession,
   openPlaywrightSession,
   openRecordingFixtureSession,
 } from "../session";
-import { runAstraSweep, traverseConnection, harvestStatementLinks } from "../worker";
+import { runAstraSweep, traverseConnection, harvestStatementLinks, dashboardAuthenticated } from "../worker";
 import type { AstraWorkerDeps } from "../worker";
 
 const HOLDER = "holder-astra-1";
@@ -275,6 +276,209 @@ describe("sweep and provenance", () => {
     expect(afterFailure!.last_error).not.toBeNull();
     expect(afterFailure!.last_verified_at).toBe(verified!.last_verified_at);
     expect(afterFailure!.status).toBe("connected");
+  });
+});
+
+// --- Authenticated-dashboard gate (verifiedAt) --------------------------------
+
+/** A page double with configurable observables; nothing here can leak. */
+function staticPageDouble(pageUrl: string, html: string): DashboardPage {
+  return {
+    fill: async () => undefined,
+    click: async () => undefined,
+    anchors: async () => [],
+    html: async () => html,
+    url: async () => pageUrl,
+    cookieNames: async () => [],
+    download: async () => {
+      throw new Error("no downloads on this page");
+    },
+  };
+}
+
+/**
+ * A session double whose login "succeeds" (fill/click are inert) but whose
+ * dashboard navigation lands on an ANCHOR-FREE ERROR PAGE at bounceUrl —
+ * the rotated-credentials trigger: the harvest sees zero links and, pre-fix,
+ * cannot tell that from an empty dashboard.
+ */
+function bouncedSession(profile: AstraAdapterProfile, bounceUrl: string): DashboardSession {
+  const loginHtml =
+    '<html><body><form><input id="username"/><input id="password"/>' +
+    '<button type="submit">Sign in</button></form></body></html>';
+  const errorHtml = "<html><body><h1>Session expired</h1></body></html>";
+  return {
+    async goto(url) {
+      return url === profile.dashboardUrl
+        ? staticPageDouble(bounceUrl, errorHtml)
+        : staticPageDouble(url, loginHtml);
+    },
+    close: async () => undefined,
+  };
+}
+
+describe("authenticated-dashboard gate (verifiedAt)", () => {
+  it("a dashboard that bounces to an anchor-free error page records auth_failed with NO verifiedAt", async () => {
+    const store = makeStore();
+    const profile = ASTRA_ADAPTER_PROFILES[0]!; // distrokid
+    const connectionId = await seedConnection(store, profile);
+
+    const record = await traverseConnection(await lastConnection(store), {
+      store,
+      openSession: async () =>
+        bouncedSession(profile, `${ASTRA_BASE_URL}/error?code=session_expired`),
+      now: NOW,
+    });
+
+    // The distinct outcome — never no_statements + verified.
+    expect(record.outcome).toBe("auth_failed");
+    expect(record.error).toContain("auth_failed");
+    expect(record.statements).toHaveLength(0);
+    expect(record.jobIds).toHaveLength(0);
+    expect(await store.listStatementIngests()).toHaveLength(0);
+
+    // The bite: the connection must NOT read as healthy.
+    const after = await lastConnection(store);
+    expect(after!.id).toBe(connectionId);
+    expect(after!.last_verified_at).toBeNull();
+    expect(after!.last_error).toContain("auth_failed");
+    expect(after!.status).toBe("connected"); // disconnect stays the holder's act
+  });
+
+  it("a bounce onto a dashboardUrl EXTENSION is still auth_failed (segment-aware prefix)", async () => {
+    const store = makeStore();
+    const profile = ASTRA_ADAPTER_PROFILES[0]!;
+    await seedConnection(store, profile);
+
+    const record = await traverseConnection(await lastConnection(store), {
+      store,
+      openSession: async () => bouncedSession(profile, `${profile.dashboardUrl}-expired`),
+      now: NOW,
+    });
+
+    expect(record.outcome).toBe("auth_failed");
+    const after = await lastConnection(store);
+    expect(after!.last_verified_at).toBeNull();
+  });
+
+  it("an authenticated empty dashboard still verifies — no_statements with verifiedAt", async () => {
+    const store = makeStore();
+    const profile = ASTRA_ADAPTER_PROFILES[0]!;
+    await seedConnection(store, profile);
+
+    const record = await traverseConnection(await lastConnection(store), {
+      store,
+      openSession: async () => openFixtureSession(emptyDashboardCatalog(profile)),
+      now: NOW,
+    });
+
+    expect(record.outcome).toBe("no_statements");
+    expect(record.error).toBeNull();
+    const after = await lastConnection(store);
+    expect(after!.last_verified_at).not.toBeNull();
+    expect(after!.last_error).toBeNull();
+  });
+
+  it("the sweep counts auth-failed landings in the summary", async () => {
+    const store = makeStore();
+    const [distrokid, tunecore, ascap] = ASTRA_ADAPTER_PROFILES.slice(0, 3);
+    await seedConnection(store, distrokid!);
+    await seedConnection(store, tunecore!);
+    const ascapId = await seedConnection(store, ascap!);
+
+    const { summary, traversals } = await runAstraSweep({
+      store,
+      openSession: async (profile) => {
+        if (profile.distributor === distrokid!.distributor) {
+          return openFixtureSession(composeFixtureCatalog([distrokid!], CREDENTIALS));
+        }
+        if (profile.distributor === tunecore!.distributor) {
+          return openFixtureSession(emptyDashboardCatalog(tunecore!));
+        }
+        return bouncedSession(ascap!, `${ASTRA_BASE_URL}/error?code=session_expired`);
+      },
+      now: NOW,
+    });
+
+    expect(summary.extracted).toBe(1);
+    expect(summary.noStatements).toBe(1);
+    expect(summary.authFailed).toBe(1);
+    expect(summary.failed).toBe(0);
+    expect(traversals.find((record) => record.outcome === "auth_failed")!.connectionId).toBe(
+      ascapId,
+    );
+  });
+
+  it("dashboardAuthenticated: the default is a segment-aware dashboardUrl prefix", async () => {
+    const profile = ASTRA_ADAPTER_PROFILES[0]!; // dashboardUrl: .../distrokid/bank
+    expect(
+      await dashboardAuthenticated(staticPageDouble(`${profile.dashboardUrl}?tab=reports`, ""), profile),
+    ).toBe(true);
+    expect(await dashboardAuthenticated(staticPageDouble(`${profile.dashboardUrl}/`, ""), profile)).toBe(
+      true,
+    );
+    expect(
+      await dashboardAuthenticated(staticPageDouble(`${profile.dashboardUrl}-expired`, ""), profile),
+    ).toBe(false);
+    expect(await dashboardAuthenticated(staticPageDouble(`${ASTRA_BASE_URL}/error`, ""), profile)).toBe(
+      false,
+    );
+  });
+
+  it("dashboardAuthenticated: an explicit url_prefix marker overrides the default", async () => {
+    const profile = ASTRA_ADAPTER_PROFILES[0]!;
+    const marked: AstraAdapterProfile = {
+      ...profile,
+      authMarker: { kind: "url_prefix", value: `${ASTRA_BASE_URL}/distrokid/home` },
+    };
+    expect(
+      await dashboardAuthenticated(staticPageDouble(`${ASTRA_BASE_URL}/distrokid/home/sub`, ""), marked),
+    ).toBe(true);
+    expect(await dashboardAuthenticated(staticPageDouble(profile.dashboardUrl, ""), marked)).toBe(
+      false,
+    );
+  });
+
+  it("dashboardAuthenticated: element and cookie_name markers are honored", async () => {
+    const profile = ASTRA_ADAPTER_PROFILES[0]!;
+    const shellHtml = '<html><body><div class="account-shell">Statements</div></body></html>';
+
+    const elementProfile: AstraAdapterProfile = {
+      ...profile,
+      authMarker: { kind: "element", selector: "div.account-shell" },
+    };
+    expect(await dashboardAuthenticated(staticPageDouble(profile.dashboardUrl, shellHtml), elementProfile)).toBe(
+      true,
+    );
+    expect(
+      await dashboardAuthenticated(staticPageDouble(profile.dashboardUrl, "<html><body></body></html>"), elementProfile),
+    ).toBe(false);
+
+    const cookieProfile: AstraAdapterProfile = {
+      ...profile,
+      authMarker: { kind: "cookie_name", name: "session" },
+    };
+    const withCookie: DashboardPage = {
+      ...staticPageDouble(profile.dashboardUrl, shellHtml),
+      cookieNames: async () => ["session", "csrf"],
+    };
+    const withoutCookie: DashboardPage = {
+      ...staticPageDouble(profile.dashboardUrl, shellHtml),
+      cookieNames: async () => [],
+    };
+    expect(await dashboardAuthenticated(withCookie, cookieProfile)).toBe(true);
+    expect(await dashboardAuthenticated(withoutCookie, cookieProfile)).toBe(false);
+  });
+
+  it("dashboardAuthenticated: an observation failure fails closed", async () => {
+    const profile = ASTRA_ADAPTER_PROFILES[0]!;
+    const broken: DashboardPage = {
+      ...staticPageDouble(profile.dashboardUrl, ""),
+      url: async () => {
+        throw new Error("execution context destroyed");
+      },
+    };
+    expect(await dashboardAuthenticated(broken, profile)).toBe(false);
   });
 });
 
