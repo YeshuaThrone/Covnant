@@ -4,10 +4,30 @@
 // ({error, code} envelope, already the drop's failure shape) and the shared
 // 30/min/IP Don limiter — so the additions here are the wrapper-boundary
 // cases: malformed-JSON 400 and the 31st-request rate-limit outcome.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimits } from "@/lib/server/rateLimit";
 import { resetCovenantRegistry } from "@/lib/server/covenantRegistry";
+import { resolveSessionCreator } from "@/lib/server/sessionCreator";
 import { GET, POST } from "./route";
+
+// Bug hunt F1: the POST is gated behind requireRegisteredOrOperator. These
+// D3-port behavior tests present a registered creator session through the
+// standard mock seam — the gate verdicts themselves live in the authz
+// battery (src/lib/server/__tests__/authz-gates.test.ts).
+vi.mock("@/lib/server/sessionCreator", () => ({
+  resolveSessionCreator: vi.fn(),
+}));
+
+const REGISTERED = {
+  kind: "registered" as const,
+  creator: {
+    payee_id: "rh_sandbox",
+    stage_name: "Sandbox Creator",
+    kyc_status: "APPROVED",
+    bank_account_linked: true,
+    provisioning_status: "PROVISIONED" as const,
+  },
+};
 
 const BODY = {
   title: "Sandbox Track",
@@ -42,6 +62,7 @@ function postRequest(body: string): Request {
 beforeEach(() => {
   resetRateLimits();
   resetCovenantRegistry();
+  vi.mocked(resolveSessionCreator).mockResolvedValue(REGISTERED);
 });
 
 describe("POST /api/v1/works", () => {
