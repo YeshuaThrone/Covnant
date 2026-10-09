@@ -962,6 +962,13 @@ export function validateDspWebhookPayload(
 
 export type SplitReversePayload = {
   split_run_id: string;
+  /**
+   * Operator-only (F6): when true, the reversal may drive a vault bucket
+   * negative — the receivable — instead of refusing with 422 when the vault
+   * cannot fund its clawback. Only means anything on the requireOperator
+   * route; webhook-triggered reversals never set it.
+   */
+  allow_negative_receivable?: boolean;
 };
 
 export function validateSplitReversePayload(
@@ -973,9 +980,20 @@ export function validateSplitReversePayload(
   if (!isNonEmptyString(input.split_run_id)) {
     return fail("missing_split_run_id");
   }
+  if (
+    input.allow_negative_receivable !== undefined &&
+    typeof input.allow_negative_receivable !== "boolean"
+  ) {
+    // A non-boolean override flag must not be silently ignored — the
+    // operator would believe the override is armed when it is not.
+    return fail("malformed_body");
+  }
   return {
     ok: true,
-    value: { split_run_id: input.split_run_id.trim() },
+    value: {
+      split_run_id: input.split_run_id.trim(),
+      allow_negative_receivable: input.allow_negative_receivable === true,
+    },
   };
 }
 

@@ -6,6 +6,7 @@ import { seedVault } from "@/modules/don/__tests__/fixtures";
 import { COMPANY_VARIANCE_PAYEE_ID } from "@/modules/don/constants";
 import type { CreatorTaxProfile } from "@/modules/don/records";
 import { readCreatorCompliance } from "@/modules/compliance/engine";
+import type { LedgerTransactionRecord } from "@/lib/don/types";
 
 /**
  * Wiring battery for split-run reversal (spec criteria 6 and 8): the
@@ -56,6 +57,36 @@ async function runSplit(store: InMemoryStore, amountCents = 10_000) {
     throw new Error(`expected ok, got ${result.status} ${result.code}`);
   }
   return result.value;
+}
+
+// F6 staging: turn one of the run's ledger rows into a settled BaaS payout —
+// a real transfer record (the engine's reversal looks it up by id) plus the
+// run-bound row stamped with that transfer's id, exactly the shape
+// settleLedgerThroughBaas leaves behind after a dispatched payout.
+async function stageSettledPayout(
+  store: InMemoryStore,
+  ledgerRow: LedgerTransactionRecord,
+): Promise<string> {
+  const transfer = await store.insertBaasTransfer({
+    provider: "column",
+    rail: "ach",
+    payee_id: ledgerRow.payee_id,
+    payee_name: ledgerRow.payee_name,
+    amount_cents: ledgerRow.amount_cents,
+    currency: ledgerRow.currency,
+    status: "settled",
+    ledger_transaction_id: ledgerRow.id,
+    created_at: NOW.toISOString(),
+    estimated_settlement: null,
+  });
+  await store.updateLedgerSettlement(ledgerRow.id, {
+    status: "settled",
+    rail: "ach",
+    baas_provider: "column",
+    baas_transfer_id: transfer.id,
+    settled_at: NOW.toISOString(),
+  });
+  return transfer.id;
 }
 
 describe("reverseSplitRun", () => {
@@ -269,6 +300,148 @@ describe("reverseSplitRun", () => {
       const platform = await store.getVault(COMPANY_VARIANCE_PAYEE_ID);
       expect(creator?.pending_balance).toBe(0);
       expect(platform?.pending_balance).toBe(0);
+    });
+  });
+
+  // F6: a run row whose payout actually left the platform (a real
+  // baas_transfer_id) must be reversed through the vault engine, not merely
+  // relabeled failed — the money stayed PAID while the record said failed.
+  it("reverses the BaaS payout of settled rows exactly once", async () => {
+    const store = await wiredStore();
+    const run = await runSplit(store);
+    const creatorRow = run.ledger.find((row) => row.payee_id === "creator_1")!;
+    const transferId = await stageSettledPayout(store, creatorRow);
+
+    const reversal = await reverseSplitRun(store, run.split_run.id, LATER);
+    if (!reversal.ok) {
+      throw new Error(`expected ok, got ${reversal.status} ${reversal.code}`);
+    }
+    expect(reversal.idempotent).toBe(false);
+
+    // The payout moved money: exactly one payout_failed_reversal journal
+    // under the transfer ref, and one payout_reversals row (the engine's
+    // insert-as-lock guard) for the full paid amount.
+    const payoutJournals = await store.listGlJournalsByRef(
+      "baas_transfer",
+      transferId,
+    );
+    expect(payoutJournals).toHaveLength(1);
+    expect(payoutJournals[0]!.kind).toBe("payout_failed_reversal");
+    const payoutReversal = await store.getPayoutReversalByTransfer(transferId);
+    expect(payoutReversal).toBeDefined();
+    expect(payoutReversal!.amount_cents).toBe(creatorRow.amount_cents);
+
+    // The transfer and the run-bound row both say failed; the row keeps its
+    // transfer id.
+    expect((await store.getBaasTransfer(transferId))?.status).toBe("failed");
+    const row = await store.getLedgerTransaction(creatorRow.id);
+    expect(row?.status).toBe("failed");
+    expect(row?.settled_at).toBeNull();
+    expect(row?.baas_transfer_id).toBe(transferId);
+
+    // The money story: the royalty clawback emptied pending; the payout
+    // clawback put the paid-out cents back into the vault as available
+    // (the FBO debit side of the engine's reversal).
+    const creator = await store.getVault("creator_1");
+    expect(creator?.pending_balance).toBe(0);
+    expect(creator?.available_balance).toBe(creatorRow.amount_cents);
+
+    // The run's own journal set is unchanged — the payout reversal journals
+    // under the transfer ref, not the run ref.
+    const runJournals = await store.listGlJournalsByRef(
+      "split_run",
+      run.split_run.id,
+    );
+    expect(runJournals).toHaveLength(2);
+  });
+
+  it("replays idempotently — no second payout reversal on a second call", async () => {
+    const store = await wiredStore();
+    const run = await runSplit(store);
+    const creatorRow = run.ledger.find((row) => row.payee_id === "creator_1")!;
+    const transferId = await stageSettledPayout(store, creatorRow);
+
+    const first = await reverseSplitRun(store, run.split_run.id, LATER);
+    if (!first.ok) {
+      throw new Error(`expected ok, got ${first.status} ${first.code}`);
+    }
+    const second = await reverseSplitRun(store, run.split_run.id, LATER);
+    if (!second.ok) {
+      throw new Error(`expected ok, got ${second.status} ${second.code}`);
+    }
+    expect(second.idempotent).toBe(true);
+    expect(second.reversal.id).toBe(first.reversal.id);
+
+    // Still exactly one payout reversal journal and one payout_reversals
+    // row — the insert-as-lock guard, not a second clawback.
+    const payoutJournals = await store.listGlJournalsByRef(
+      "baas_transfer",
+      transferId,
+    );
+    expect(payoutJournals).toHaveLength(1);
+    const creator = await store.getVault("creator_1");
+    expect(creator?.pending_balance).toBe(0);
+    expect(creator?.available_balance).toBe(creatorRow.amount_cents);
+  });
+
+  // F6 override: a drained vault used to make the reversal 422 forever —
+  // no override path existed. The operator-only override lets the clawback
+  // drive the bucket negative (a receivable) instead.
+  describe("operator override (allowNegativeReceivable)", () => {
+    it("claws back into a negative receivable instead of 422ing a drained vault", async () => {
+      const store = await wiredStore();
+      const run = await runSplit(store);
+      const creatorRow = run.ledger.find((row) => row.payee_id === "creator_1")!;
+      const transferId = await stageSettledPayout(store, creatorRow);
+
+      // The payout settled AND the pending was debited — the vault is
+      // drained, so the royalty clawback cannot be funded.
+      const drained = await store.applyVaultDelta({
+        payee_id: "creator_1",
+        payee_name: "Creator One",
+        delta: {
+          available_balance: 0,
+          pending_balance: -creatorRow.amount_cents,
+          reserve_balance: 0,
+        },
+        min_balances: { pending_balance: 0 },
+        create_if_missing: false,
+        updated_at: LATER.toISOString(),
+      });
+      expect(drained.outcome).toBe("applied");
+
+      // Without the override the reversal refuses and leaves the run
+      // posted — the permanent-422 posture this override exists to break.
+      const refused = await reverseSplitRun(store, run.split_run.id, LATER);
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.status).toBe(422);
+        expect(refused.code).toBe("split_reversal_insufficient");
+      }
+      expect((await store.getSplitRun(run.split_run.id))?.status).toBe(
+        "posted",
+      );
+
+      // With the override the clawback drives pending negative (the
+      // receivable — the payee owes what the vault cannot return) and the
+      // payout is still reversed exactly once.
+      const reversal = await reverseSplitRun(store, run.split_run.id, LATER, {
+        allowNegativeReceivable: true,
+      });
+      if (!reversal.ok) {
+        throw new Error(`expected ok, got ${reversal.status} ${reversal.code}`);
+      }
+      const creator = await store.getVault("creator_1");
+      expect(creator?.pending_balance).toBe(-creatorRow.amount_cents);
+      expect(creator?.available_balance).toBe(creatorRow.amount_cents);
+      const payoutJournals = await store.listGlJournalsByRef(
+        "baas_transfer",
+        transferId,
+      );
+      expect(payoutJournals).toHaveLength(1);
+      expect((await store.getSplitRun(run.split_run.id))?.status).toBe(
+        "reversed",
+      );
     });
   });
 });
