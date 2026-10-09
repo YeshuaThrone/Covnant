@@ -662,17 +662,25 @@ async function insertLedgerRowInTx(tx: TxClient, params: LedgerInsert): Promise<
  * rail + failure status, keyed by the strongest identifier the rail's
  * failure object carries (the ACH return's own transaction id; otherwise
  * the transfer id — a terminal failure happens at most once per transfer).
+ * Never null: when the ACH return's transaction id is absent the
+ * transfer-id fallback applies, so the event finalizes and the compensating
+ * debit is recorded instead of 503-looping into Increase's retry graveyard.
  */
 function failureReference(
   rail: InboundRail,
   status: string,
   transfer: InboundTransferObject,
-): string | null {
+): string {
   if (rail.stem === 'inbound_ach_transfer' && status === 'returned') {
     const transferReturn = subObject(transfer.transfer_return);
     const returnTransactionId = transferReturn?.transaction_id;
-    if (!isNonEmptyString(returnTransactionId)) return null;
-    return `${ACH_RETURN_REFERENCE_PREFIX}${returnTransactionId}`;
+    if (isNonEmptyString(returnTransactionId)) {
+      return `${ACH_RETURN_REFERENCE_PREFIX}${returnTransactionId}`;
+    }
+    // Documented fallback ("<stem>_<status>:<transfer-id>"): a returned
+    // transfer whose return object lacks its transaction id must still
+    // unwind the credit — replay-safe because a terminal failure happens
+    // at most once per transfer.
   }
   return `${rail.stem}_${status}:${String(transfer.id)}`;
 }
@@ -818,10 +826,6 @@ export async function POST(request: Request): Promise<Response> {
       return jsonOk({ ignored: true });
     }
     const referenceId = failureReference(rail, status, transfer);
-    if (referenceId === null) {
-      console.error('Increase failed transfer is missing its pinned failure identifier:', category);
-      return jsonError('Failure details are incomplete; retry pending.', 503);
-    }
     await db.transaction(async (tx) => {
       const rightsHolderId = await resolveHolderIdInTx(tx, accountNumberId);
       await insertLedgerRowInTx(tx, {
