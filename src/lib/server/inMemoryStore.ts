@@ -4986,6 +4986,12 @@ export class InMemoryStore implements Store {
   }
 
   async insertPayoutHold(row: PayoutHoldRecord): Promise<PayoutHoldRecord> {
+    // payout_holds.transfer_id is the table's primary key (0006) — the
+    // settle-path backfill treats the insert as its lock, so this backend
+    // refuses duplicates exactly like the SQL stores' PK constraint does.
+    if (this.payoutHolds.has(row.transfer_id)) {
+      uniqueViolation('payout_holds.transfer_id');
+    }
     this.payoutHolds.set(row.transfer_id, row);
     return row;
   }
