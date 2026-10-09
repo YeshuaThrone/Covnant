@@ -1,8 +1,9 @@
 /**
  * Unit tests — founder canon v24 authenticateJWT + requireRole guard chain
  * (Next.js adaptation). The JWT paths exercise the REAL jsonwebtoken
- * sign/verify round-trip against JWT_SECRET; the fail-closed path asserts
- * the production reject-all behavior.
+ * sign/verify round-trip against JWT_SECRET; the fail-closed paths assert
+ * the unset-secret reject-all behavior in production AND outside it (the
+ * removed DEV-ONLY fallback, audit S1, must never verify).
  */
 
 import jwt from 'jsonwebtoken';
@@ -111,6 +112,23 @@ describe('authenticateJWT', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(403);
+  });
+
+  it('fails closed with JWT_SECRET unset in non-production (no dev fallback)', async () => {
+    // NODE_ENV stays 'test' — the removed DEV-ONLY fallback (audit S1) must
+    // reject outside production too.
+    vi.stubEnv('JWT_SECRET', ''); // empty = unset for the fail-closed check
+    const token = jwt.sign(TEST_USER, TEST_SECRET);
+    const result = authenticateJWT(
+      requestWith({ authorization: `Bearer ${token}` }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      await expect(result.response.json()).resolves.toEqual({
+        error: 'Invalid or expired authentication token.',
+      });
+    }
   });
 
   it('accepts a valid token in production when JWT_SECRET is set', () => {
