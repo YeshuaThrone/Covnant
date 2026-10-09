@@ -25,6 +25,7 @@ import Database from 'better-sqlite3';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  RECON_ATTEMPTS_CAP_ERROR,
   RECON_MAX_ATTEMPTS,
   RECON_STALE_CLAIM_MS,
   type ApplyVaultDeltaResult,
@@ -12235,14 +12236,30 @@ export class SqliteStore implements Store {
       (stamp: string, cutoff: string, claimEngine: string | null): ReconJobDbRow | undefined => {
         const candidate = this.db
           .prepare(
-            `SELECT id FROM royalty_recon_jobs
+            `SELECT id, attempts FROM royalty_recon_jobs
              WHERE status = 'pending'
                 OR (status = 'processing' AND claimed_at IS NOT NULL AND claimed_at < ?)
              ORDER BY created_at, rowid
              LIMIT 1`,
           )
-          .get(cutoff) as { id: string } | undefined;
+          .get(cutoff) as { id: string; attempts: number } | undefined;
         if (candidate === undefined) return undefined;
+        // Claim-time retry budget (C5): a candidate already past the cap —
+        // the crashed-worker poison job whose stale processing claim kept
+        // re-entering the pool — is terminal-failed here instead of re-run
+        // with full side effects. Nothing is returned: the caller's contract
+        // is "undefined = nothing claimed", so the worker sleeps and the next
+        // claim proceeds past the now-terminal row.
+        if (candidate.attempts >= RECON_MAX_ATTEMPTS) {
+          this.db
+            .prepare(
+              `UPDATE royalty_recon_jobs
+               SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(RECON_ATTEMPTS_CAP_ERROR, stamp, stamp, candidate.id);
+          return undefined;
+        }
         this.db
           .prepare(
             `UPDATE royalty_recon_jobs

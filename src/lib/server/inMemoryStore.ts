@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   DEFAULT_LIST_SHOWS_LIMIT,
+  RECON_ATTEMPTS_CAP_ERROR,
   RECON_MAX_ATTEMPTS,
   RECON_STALE_CLAIM_MS,
   type ApplyVaultDeltaResult,
@@ -5321,6 +5322,23 @@ export class InMemoryStore implements Store {
       if (best === undefined || job.created_at < best.created_at) best = job;
     }
     if (best === undefined) return undefined;
+    // Claim-time retry budget (C5): a candidate already past the cap —
+    // the crashed-worker poison job whose stale processing claim kept
+    // re-entering the pool — is terminal-failed here instead of re-run
+    // with full side effects. Nothing is returned: the caller's contract
+    // is "undefined = nothing claimed", so the worker sleeps and the next
+    // claim proceeds past the now-terminal row.
+    if (best.attempts >= RECON_MAX_ATTEMPTS) {
+      const failed: RoyaltyReconJobRecord = {
+        ...best,
+        status: 'failed',
+        error: RECON_ATTEMPTS_CAP_ERROR,
+        completed_at: nowIso,
+        updated_at: nowIso,
+      };
+      this.reconJobs = this.reconJobs.map((row) => (row.id === best.id ? failed : row));
+      return undefined;
+    }
     const claimed: RoyaltyReconJobRecord = {
       ...best,
       status: 'processing',

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import { SqliteStore } from "@/lib/server/sqliteStore";
-import type { Store } from "@/lib/server/store";
+import { RECON_ATTEMPTS_CAP_ERROR, type Store } from "@/lib/server/store";
 import type { VaultAssetRecord } from "@/lib/covnant/vault";
 
 import { loadFixture } from "./fixtures";
@@ -314,5 +314,43 @@ describe.each(BACKENDS)("$name — worker loop", ({ make }) => {
       merch_zero_net: 1,
     });
     expect((await store.listUnclaimedHoldingCredits(100)).length).toBe(1);
+  });
+
+  it("does not re-run a poison job: the claim-time cap terminal-fails it and the queue moves on", async () => {
+    const store = make();
+    // The poison job: claimed by a worker that CRASHES before reporting —
+    // three claims (the middle two through stale-claim recovery) leave it
+    // stale 'processing' with the retry budget spent.
+    const poison = await store.createReconJob({ source: "statement" });
+    await store.claimReconJob(new Date("2026-09-30T12:00:00Z"));
+    await store.claimReconJob(new Date("2026-09-30T12:31:00Z"));
+    await store.claimReconJob(new Date("2026-09-30T13:02:00Z"));
+
+    // A healthy job enqueued behind it, with a parseable ingest.
+    const healthy = await seedJob(store, "distrokid.csv", loadFixture("distrokid.csv"));
+
+    // The pass after the third crash: C5 — the poison row is terminal-failed
+    // by the claim itself (attempts stays 3, the cap error recorded), and
+    // runOnce reports an empty pool. Pre-fix, this pass RE-RAN the job
+    // (attempts 4, a no_statement_ingest failure reported after the fact).
+    const atCap = await runOnce({
+      store,
+      vault: null,
+      now: () => new Date("2026-09-30T13:33:00Z"),
+    });
+    expect(atCap).toBeUndefined();
+    const terminal = await store.getReconJob(poison.id);
+    expect(terminal?.status).toBe("failed");
+    expect(terminal?.attempts).toBe(3);
+    expect(terminal?.error).toBe(RECON_ATTEMPTS_CAP_ERROR);
+
+    // The next pass claims the healthy job: the queue moves on.
+    const next = await runOnce({
+      store,
+      vault: null,
+      now: () => new Date("2026-09-30T13:34:00Z"),
+    });
+    expect(next?.job.id).toBe(healthy.jobId);
+    expect(next?.outcome).toBe("completed");
   });
 });

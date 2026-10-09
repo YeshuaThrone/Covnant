@@ -449,11 +449,23 @@ export const DEFAULT_LIST_SHOWS_LIMIT = 200;
  * Recon claim concurrency constants (migration 0011, spec art_7M0snhxc —
  * the settlement concurrency canon from 0009). A processing claim older
  * than RECON_STALE_CLAIM_MS is stale — its worker crashed, and the job is
- * re-claimable. RECON_MAX_ATTEMPTS is the retry budget failReconJob
- * enforces; past the cap, failure is terminal and honest.
+ * re-claimable. RECON_MAX_ATTEMPTS is the retry budget: failReconJob
+ * enforces it on reported failures, and the claim itself enforces it on
+ * stale-claim recovery (a candidate past the cap is terminal-failed at
+ * claim time, never re-run — migration 0064). Past the cap, failure is
+ * terminal and honest.
  */
 export const RECON_STALE_CLAIM_MS = 30 * 60 * 1000;
 export const RECON_MAX_ATTEMPTS = 3;
+
+/**
+ * The error text a claim-time cap failure records on the row it
+ * terminal-fails: the store itself is the failure reporter — the crashed
+ * worker that held the claim is gone — so every backend and the
+ * migration-0064 claim RPC write this exact string.
+ */
+export const RECON_ATTEMPTS_CAP_ERROR =
+  "retry_budget_exhausted: stale claim past the attempts cap, terminal-failed at claim time";
 
 /**
  * Outcome of recording one completed checkout session. `recorded` is the

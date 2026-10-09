@@ -1162,6 +1162,91 @@ jobs:
           rpc=$($PSQL -c "select available_balance from sovereign_vaults where payee_id = 'ci_vault_check_probe'")
           [ "$rpc" = "1500" ] || { echo "apply_vault_delta wrote the WRONG balance: $rpc"; exit 1; }
           echo "OK: apply_vault_delta applies a legitimate delta through the CHECK"
+      - name: Recon claim attempts-cap regression (migration 0064) — real Postgres RPC calls
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # The blind spot that shipped hotfix 0061 applies here too: the
+          # apply-twice loop above never CALLS the claim RPC it installs.
+          # C5: the migration-0011 claim RPC re-claimed a stale 'processing'
+          # row with NO attempts predicate — a crashed worker's poison job
+          # re-ran with full side effects on every 30-minute stale-claim
+          # recovery, forever. 0064 replaces the RPC with the claim-time cap
+          # (attempts >= RECON_MAX_ATTEMPTS = 3 -> terminal 'failed', NULL
+          # returned). A control first proves this probe FAILS against the
+          # exact 0011 body — a rotten gate is worse than no gate.
+          PSQL="psql -h localhost -U postgres -d covnant_check -tAX -v ON_ERROR_STOP=1"
+
+          probe() {
+            # Deterministic pool: a poison row (stale 'processing' at the
+            # cap — three executions the worker never reported) OLDEST, and
+            # a fresh pending row behind it.
+            $PSQL -c "delete from royalty_recon_jobs where source = 'ci_probe'" >/dev/null
+            $PSQL -c "insert into royalty_recon_jobs (status, source, attempts, claimed_at, created_at) values ('processing', 'ci_probe', 3, now() - interval '35 minutes', now() - interval '1 hour')" >/dev/null
+            $PSQL -c "insert into royalty_recon_jobs (status, source, attempts, created_at) values ('pending', 'ci_probe', 0, now() - interval '30 minutes')" >/dev/null
+            local c1 row err c2
+            # 1) The poison claim: the RPC must report NOTHING claimed.
+            c1=$($PSQL -c "select claim_royalty_recon_job(now() - interval '1 minute', 'ci-engine')")
+            [ -z "$c1" ] || { echo "POISON RE-RUN: the claim handed out a row past the attempts cap: $c1"; return 1; }
+            # 2) The poison row went terminal-failed with the budget spent,
+            #    completed_at stamped — attempts STAYS 3 (no claim increment).
+            row=$($PSQL -c "select status || '|' || attempts || '|' || (completed_at is not null) from royalty_recon_jobs where source = 'ci_probe' and status = 'failed'")
+            [ "$row" = "failed|3|t" ] || { echo "POISON NOT TERMINAL-FAILED (expected failed|3|t): $row"; return 1; }
+            # 3) The recorded error is the honest cap reason.
+            err=$($PSQL -c "select coalesce(error, '<null>') from royalty_recon_jobs where source = 'ci_probe' and status = 'failed'")
+            echo "$err" | grep -F 'retry_budget_exhausted' >/dev/null || { echo "CAP ERROR TEXT MISSING: $err"; return 1; }
+            # 4) The fresh row behind the poison claims normally.
+            c2=$($PSQL -c "select claim_royalty_recon_job(now() - interval '1 minute', 'ci-engine')")
+            echo "$c2" | grep -F '"attempts": 1' >/dev/null || { echo "FRESH ROW DID NOT CLAIM: $c2"; return 1; }
+            echo "OK: poison row terminal-failed at claim time; fresh row claimed"
+          }
+
+          # Control: recreate the ORIGINAL 0011 body — the probe must FAIL
+          # against it (the old body re-claims the poison row).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+          create or replace function public.claim_royalty_recon_job(
+            p_now    timestamptz default now(),
+            p_engine text        default null
+          )
+          returns jsonb
+          language sql
+          set search_path = public
+          as $$
+            update public.royalty_recon_jobs
+            set status = 'processing',
+                engine = p_engine,
+                claimed_at = p_now,
+                started_at = coalesce(started_at, p_now),
+                attempts = attempts + 1,
+                updated_at = p_now
+            where id = (
+              select id from public.royalty_recon_jobs
+              where status = 'pending'
+                 or (status = 'processing' and claimed_at < p_now - interval '30 minutes')
+              order by created_at
+              for update skip locked
+              limit 1
+            )
+            returning to_jsonb(royalty_recon_jobs);
+          $$;
+          SQL
+          if probe; then
+            echo "REGRESSION GATE ROTTEN: the probe passed against the broken 0011 body"; exit 1
+          fi
+          echo "OK: control — the 0011 body re-runs the poison row (the gate detects the bug)"
+
+          # Restore the fixed 0064 body (also proves create-or-replace replay
+          # on a database that already holds probe rows).
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/0064_recon_claim_attempts_cap.sql >/dev/null
+          probe
+          # Second application on the same data — the apply-twice contract.
+          psql -h localhost -U postgres -d covnant_check -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/0064_recon_claim_attempts_cap.sql >/dev/null
+          svc=$($PSQL -c "select has_function_privilege('service_role', 'claim_royalty_recon_job(timestamptz, text)', 'execute')")
+          [ "$svc" = "t" ] || { echo "service_role LOST EXECUTE on the claim RPC: $svc"; exit 1; }
+          echo "OK: 0064 re-applies cleanly and service_role holds EXECUTE"
+
 
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |

@@ -27,7 +27,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { InMemoryStore } from '@/lib/server/inMemoryStore';
 import { SqliteStore } from '@/lib/server/sqliteStore';
 import { SupabaseStore } from '@/lib/server/supabaseStore';
-import type { Store } from '@/lib/server/store';
+import {
+  RECON_ATTEMPTS_CAP_ERROR,
+  RECON_MAX_ATTEMPTS,
+  type Store,
+} from '@/lib/server/store';
 import type { ReconJobResult } from '@/modules/recon/records';
 
 // ---------------------------------------------------------------------------
@@ -170,8 +174,11 @@ class FakeQueryBuilder {
 /**
  * The claim_royalty_recon_job RPC's behavioral fake: the oldest claimable
  * row (pending, or processing with a stale claim) is transitioned to
- * processing with the attempts increment — the migration's single atomic
- * UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1).
+ * processing with the attempts increment — the migration's claim (0011,
+ * replaced by 0064) as one atomic UPDATE ... WHERE id = (SELECT ... FOR
+ * UPDATE SKIP LOCKED LIMIT 1). The 0064 claim-time cap is mirrored here:
+ * a candidate already past the retry budget is terminal-failed instead of
+ * re-claimed, and the RPC reports nothing claimed (data: null).
  */
 function fakeClaimRpc(
   table: FakeTable,
@@ -191,6 +198,15 @@ function fakeClaimRpc(
     if (best === null || (row.created_at as string) < (best.created_at as string)) best = row;
   }
   if (best === null) return { data: null, error: null };
+  if (((best.attempts as number) ?? 0) >= RECON_MAX_ATTEMPTS) {
+    Object.assign(best, {
+      status: 'failed',
+      error: RECON_ATTEMPTS_CAP_ERROR,
+      completed_at: params.p_now,
+      updated_at: params.p_now,
+    });
+    return { data: null, error: null };
+  }
   Object.assign(best, {
     status: 'processing',
     engine: params.p_engine,
@@ -280,6 +296,41 @@ describe('recon job queue — three-backend parity (verification row 4)', () => 
         expect(recovered?.attempts).toBe(2);
         // First-claim provenance survives stale-claim recovery.
         expect(recovered?.started_at).toBe('2026-09-30T12:00:00.000Z');
+      });
+
+      it('claim-time cap: a stale claim past the retry budget is terminal-failed, never re-run', async () => {
+        const store = backend.make();
+        const poison = await store.createReconJob({ source: 'statement' });
+        // Three claimed executions by a worker that crashes before reporting:
+        // each stale reclaim re-enters the pool until the row sits stale
+        // 'processing' with the budget spent.
+        await store.claimReconJob(new Date('2026-09-30T12:00:00Z'));
+        await store.claimReconJob(new Date('2026-09-30T12:31:00Z'));
+        await store.claimReconJob(new Date('2026-09-30T13:02:00Z'));
+        const stuck = await store.getReconJob(poison.id);
+        expect(stuck?.status).toBe('processing');
+        expect(stuck?.attempts).toBe(RECON_MAX_ATTEMPTS);
+
+        // The next stale reclaim is the poison claim. C5: it must go
+        // TERMINAL-failed — not re-run with full side effects (attempts
+        // stays at the cap, no claim increment, completed_at stamped).
+        // The claim reports nothing claimed (the worker sees an empty pool).
+        const reRun = await store.claimReconJob(new Date('2026-09-30T13:33:00Z'));
+        expect(reRun).toBeUndefined();
+        const terminal = await store.getReconJob(poison.id);
+        expect(terminal?.status).toBe('failed');
+        expect(terminal?.attempts).toBe(RECON_MAX_ATTEMPTS);
+        expect(terminal?.error).toBe(RECON_ATTEMPTS_CAP_ERROR);
+        expect(terminal?.completed_at).not.toBeNull();
+        // A terminal row never re-enters the pool.
+        expect(await store.claimReconJob(new Date('2026-09-30T14:00:00Z'))).toBeUndefined();
+
+        // Fresh rows claim normally: a job enqueued behind the poison is
+        // picked up on the pass after the poison's terminal transition.
+        const fresh = await store.createReconJob({ source: 'statement' });
+        const claimed = await store.claimReconJob(new Date('2026-09-30T14:01:00Z'));
+        expect(claimed?.id).toBe(fresh.id);
+        expect(claimed?.attempts).toBe(1);
       });
 
       it('completes an active job with the worker result and marks completed_at', async () => {

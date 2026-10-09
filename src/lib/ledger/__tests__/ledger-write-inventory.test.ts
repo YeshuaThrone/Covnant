@@ -547,6 +547,16 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // apply_vault_delta. Touches only sovereign_vaults — still no DDL on
       // universal_royalty_ledger — the referencing pin below holds.
       '0063_sovereign_vault_bucket_checks.sql',
+      // Recon claim retry-budget hotfix (todo_xJ3UhPR9 / bug C5): 0011's
+      // claim_royalty_recon_job RPC re-claimed stale 'processing' rows with
+      // no attempts predicate — a crashed worker's poison job re-ran with
+      // full side effects on every 30-minute stale-claim recovery, forever.
+      // 0064 replaces the RPC body (CREATE OR REPLACE, identical signature)
+      // with the claim-time attempts cap. Touches only royalty_recon_jobs —
+      // still no DDL on universal_royalty_ledger — the referencing pin
+      // below holds. (Numbered 0062 on the branch; renumbered twice before
+      // merge as siblings #198 and #196 claimed 0062 and 0063 first.)
+      '0064_recon_claim_attempts_cap.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),
