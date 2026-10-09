@@ -13,9 +13,10 @@
  *     JSON.stringify(payload) and transmits exactly that bytes.
  *   - timingSafeEqual throws on length mismatch — a length guard precedes
  *     the compare so attacker-supplied short signatures get 403, not 500.
- *   - WEBHOOK_SECRET default 'secure_webhook_hmac_secret_2026' is DEV-ONLY
- *     canon (the v14 password precedent); production reads the env and
- *     FAILS CLOSED when unset (every request 403s).
+ *   - WEBHOOK_SECRET is required (audit S2 — the DEV-ONLY canon default
+ *     'secure_webhook_hmac_secret_2026' was a public constant and is
+ *     removed): the route reads the env and FAILS CLOSED when unset in
+ *     EVERY environment (every request 403s), local dev included.
  *   - The founder draft imports Worker but omits the consumer — the implied
  *     BullMQ Worker on this queue lives at src/workers/telemetry (the PR 2
  *     worker runtime model; Vercel serverless cannot host long-running
@@ -86,18 +87,13 @@ export function resetTelemetryIngestionQueue(): void {
   ingestionQueue = null;
 }
 
-/** DEV-ONLY fallback (canon v20, verbatim). Never used in production. */
-const DEV_WEBHOOK_SECRET = 'secure_webhook_hmac_secret_2026';
-
 /**
- * The signing secret for the current runtime — undefined in production
- * when WEBHOOK_SECRET is unset (the fail-closed trigger).
+ * The signing secret for the current runtime — undefined whenever
+ * WEBHOOK_SECRET is unset, in EVERY environment (fail closed; no dev
+ * fallback).
  */
 function webhookSecret(): string | undefined {
-  if (process.env.NODE_ENV === 'production' && !process.env.WEBHOOK_SECRET) {
-    return undefined;
-  }
-  return process.env.WEBHOOK_SECRET || DEV_WEBHOOK_SECRET;
+  return process.env.WEBHOOK_SECRET || undefined;
 }
 
 /** The founder 401 body — carried verbatim. */
@@ -136,10 +132,10 @@ export function verifyTelemetrySignature(
 export async function POST(request: Request): Promise<NextResponse> {
   const secret = webhookSecret();
   if (!secret) {
-    // Fail closed: production without WEBHOOK_SECRET rejects everything
-    // (founder-confirmation flag).
+    // Fail closed: an unset WEBHOOK_SECRET rejects everything in every
+    // environment.
     console.error(
-      '[identifier-engine] WEBHOOK_SECRET is unset in production — failing closed on all telemetry requests.',
+      '[identifier-engine] WEBHOOK_SECRET is unset — failing closed on all telemetry requests.',
     );
     return NextResponse.json(INVALID_SIGNATURE_BODY, { status: 403 });
   }
