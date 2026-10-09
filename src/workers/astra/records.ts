@@ -32,7 +32,11 @@ import type {
 } from '@/modules/vault/records';
 
 /** The traversal's outcome — honest about the empty dashboard too. */
-export type AstraTraversalOutcome = 'extracted' | 'no_statements' | 'failed';
+export type AstraTraversalOutcome =
+  | 'extracted'
+  | 'no_statements'
+  | 'auth_failed'
+  | 'failed';
 
 /**
  * One raw statement (or log, or contract) the traversal downloaded. The
@@ -89,6 +93,7 @@ export interface AstraSweepSummary {
   traversed: number;
   extracted: number;
   noStatements: number;
+  authFailed: number;
   failed: number;
   statementsCaptured: number;
   jobsEnqueued: number;

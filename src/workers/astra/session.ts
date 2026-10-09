@@ -42,6 +42,16 @@ export interface DashboardPage {
   anchors(): Promise<readonly DashboardAnchor[]>;
   /** The page's HTML — for redacted audit capture only. */
   html(): Promise<string>;
+  /**
+   * The page's final URL after navigation and any redirects — the
+   * authenticated-landing check's default observable.
+   */
+  url(): Promise<string>;
+  /**
+   * Cookie NAMES visible to the page — names only, never values (the
+   * secrecy contract: values never leave the browser process).
+   */
+  cookieNames(): Promise<readonly string[]>;
   /** Fetch a linked resource's bytes (a statement download). */
   download(url: string): Promise<string>;
 }
@@ -232,6 +242,14 @@ export function openFixtureSession(catalog: FixtureCatalog): DashboardSession {
       async html() {
         return fixturePage(url).html;
       },
+      async url() {
+        // The fixture was recorded at this URL — exactly what goto() navigated.
+        return url;
+      },
+      async cookieNames() {
+        // Fixtures don't model cookies — no profile's fixture needs one.
+        return [];
+      },
       async download(href) {
         const resolved = resolveHref(href, url);
         const content = catalog.downloads.get(resolved);
@@ -279,6 +297,8 @@ export function openRecordingFixtureSession(catalog: FixtureCatalog): {
         },
         anchors: () => page.anchors(),
         html: () => page.html(),
+        url: () => page.url(),
+        cookieNames: () => page.cookieNames(),
         download: (href) => page.download(href),
       };
     },
@@ -376,6 +396,17 @@ function playwrightPage(
     },
     async html() {
       return page.content();
+    },
+    async url() {
+      // The final URL after navigation and redirects — the observable a
+      // failed login's bounce shows up in.
+      return page.url();
+    },
+    async cookieNames() {
+      // Names only, never values — the browser's cookie jar never leaves
+      // the process; the engine learns presence, not contents.
+      const cookies = await page.context().cookies();
+      return cookies.map((cookie) => cookie.name);
     },
     async download(href) {
       const resolved = resolveHref(href, page.url() || baseUrl);

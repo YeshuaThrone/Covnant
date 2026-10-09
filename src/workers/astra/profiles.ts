@@ -25,12 +25,32 @@
 import { DISTRIBUTOR_CREDENTIAL_SOURCES } from '@/modules/vault/records';
 import type { AstraVertical, DistributorConnectionSource } from '@/modules/vault/records';
 
+/**
+ * How the engine confirms a dashboard landing actually authenticated —
+ * the verifiedAt gate. A failed login redirects the landing page to an
+ * error or login re-render, so the default (the final URL still starting
+ * with dashboardUrl) distinguishes reached-and-authenticated from
+ * bounced. A dashboard whose real landing page sits elsewhere can
+ * override with an explicit URL prefix, an element the authenticated
+ * shell renders, or a session-cookie name (names are observed, never
+ * values — the secrecy contract holds).
+ */
+export type AstraAuthMarker =
+  | { kind: 'url_prefix'; value: string }
+  | { kind: 'element'; selector: string }
+  | { kind: 'cookie_name'; name: string };
+
 export interface AstraAdapterProfile {
   distributor: DistributorConnectionSource;
   vertical: AstraVertical;
   loginUrl: string;
   /** The post-login landing page the statement list lives on. */
   dashboardUrl: string;
+  /**
+   * The authenticated-dashboard marker verifiedAt requires. Absent → the
+   * default: the landing page's final URL starts with dashboardUrl.
+   */
+  authMarker?: AstraAuthMarker;
   /** Deterministic login selectors — filled with vault credentials in memory. */
   selectors: {
     username: string;
