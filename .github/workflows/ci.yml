@@ -4,13 +4,25 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # Docs-only changes don't affect build, tests, or schema validation.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 # Cancel superseded runs on the same branch/PR — queued-runner starvation
 # (Oct 5 incident) wasted capacity on runs that were already obsolete.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Least privilege: the default GITHUB_TOKEN is read-only. No job here
+# publishes packages, manages releases, or touches other scopes.
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -27,6 +39,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Cache the Next.js incremental build cache. The post-build save
+      # happens automatically via the actions/cache post step.
+      - name: Cache .next/cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          # New cache entry whenever packages or source files change.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          # If only source changed, restore from the lockfile-hash prefix.
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+
       - name: Lint
         run: npm run lint
 
@@ -38,6 +62,32 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Parallel gate: production dependency vulnerabilities. Non-advisory —
+  # the job fails the pipeline above the configured severity. Runs with
+  # --omit=dev because dev-tooling exposure (e.g. the vitest/tinypool
+  # critical) is a deliberate, documented exception.
+  #
+  # Gate level follows the achievable state after the non-force
+  # remediation in this PR: one high (postcss bundled in next 15.5.27)
+  # survives, fixable only by the breaking next 16 major — so the gate
+  # holds at critical, and the residual is documented in the PR.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=critical
 
   schema:
     runs-on: ubuntu-latest
@@ -1155,8 +1205,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Restore the Chromium download when package-lock.json is unchanged.
+      # The install step below still runs (--with-deps guarantees OS libs);
+      # on a cache hit it is a fast no-op for the browser download itself.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+
+      # Cache the Next.js incremental build cache (same keys as the verify
+      # job). The post-build save happens automatically via the post step.
+      - name: Cache .next/cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
 
       - name: Build
         run: npm run build
