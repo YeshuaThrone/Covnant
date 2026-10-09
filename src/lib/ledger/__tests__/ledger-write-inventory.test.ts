@@ -541,6 +541,12 @@ describe('T1 extended — the universal_royalty_ledger write inventory is pinned
       // contracts — still no DDL on universal_royalty_ledger — the
       // referencing pin below holds.
       '0062_contract_creator_id.sql',
+      // Vault bucket floors at the DDL (bug F11, repo-bug-hunt): a CHECK
+      // refusing a negative available/pending/reserve balance on
+      // sovereign_vaults — the invariant previously lived only inside
+      // apply_vault_delta. Touches only sovereign_vaults — still no DDL on
+      // universal_royalty_ledger — the referencing pin below holds.
+      '0063_sovereign_vault_bucket_checks.sql',
     ]);
     const referencing = migrations.filter((file) =>
       readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').includes('universal_royalty_ledger'),

@@ -1110,6 +1110,59 @@ jobs:
           [ "$svc" = "t" ] || { echo "service_role LOST EXECUTE: $svc"; exit 1; }
           echo "OK: service_role execute grant in place"
 
+      - name: Vault bucket CHECK regression (migration 0063) — real Postgres calls
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # Audit finding F11 (repo-bug-hunt): the sovereign_vaults balance
+          # buckets had no DB-level non-negative floor — the invariant lived
+          # only inside apply_vault_delta, so direct SQL or a future code
+          # path could persist a negative balance silently. This step writes
+          # the way a hostile or buggy writer would: a deliberate negative
+          # UPDATE must FAIL at the DB (SQLSTATE 23514) on every bucket and
+          # leave the row untouched. The control first proves the gate can
+          # DETECT the bug — the same negative update on a check-less clone
+          # of the table MUST persist (the 0057/0061 lesson: a rotten gate
+          # is worse than no gate).
+          PSQL="psql -h localhost -U postgres -d covnant_check -tAX -v ON_ERROR_STOP=1"
+          # Seed one vault row at the defaults (every bucket zero).
+          $PSQL -c "insert into sovereign_vaults (payee_id, payee_name, updated_at) values ('ci_vault_check_probe', 'CI Vault Bucket Probe', now())"
+          # Control: a check-less clone (CREATE TABLE AS copies neither
+          # constraints nor defaults) accepts the negative update — the
+          # probe below passes because of the CHECK, not because negative
+          # updates fail for some unrelated reason.
+          $PSQL -c "create table sovereign_vaults_checkless as table sovereign_vaults"
+          $PSQL -v ON_ERROR_STOP=0 -c "update sovereign_vaults_checkless set available_balance = -1 where payee_id = 'ci_vault_check_probe'" >/dev/null 2>&1 || true
+          control=$($PSQL -c "select count(*) from sovereign_vaults_checkless where available_balance = -1")
+          [ "$control" = "1" ] || { echo "CONTROL FAILED: the check-less clone refused the negative update — this gate cannot detect the bug"; exit 1; }
+          echo "OK: control — without the CHECK the negative update persists"
+          $PSQL -c "drop table sovereign_vaults_checkless"
+          # The constraint is installed and validated on the real table.
+          con=$($PSQL -c "select count(*) from pg_constraint where conrelid = 'public.sovereign_vaults'::regclass and conname = 'sovereign_vaults_buckets_nonnegative' and convalidated")
+          [ "$con" = "1" ] || { echo "MISSING OR UNVALIDATED CONSTRAINT sovereign_vaults_buckets_nonnegative"; exit 1; }
+          echo "OK: sovereign_vaults_buckets_nonnegative installed and validated"
+          # Every bucket refuses its negative update, and the write never
+          # persists — the failed UPDATE leaves the row untouched.
+          for bucket in available_balance pending_balance reserve_balance; do
+            $PSQL -v ON_ERROR_STOP=0 -c "update sovereign_vaults set $bucket = -1 where payee_id = 'ci_vault_check_probe'" >/dev/null 2>&1 || true
+            neg=$($PSQL -c "select count(*) from sovereign_vaults where payee_id = 'ci_vault_check_probe' and (available_balance < 0 or pending_balance < 0 or reserve_balance < 0)")
+            [ "$neg" = "0" ] || { echo "NEGATIVE $bucket ACCEPTED — the bucket CHECK is missing"; exit 1; }
+          done
+          echo "OK: the bucket CHECK refuses a negative balance in every bucket"
+          # Positive control: a legitimate non-negative delta still applies —
+          # the CHECK does not over-constrain the engine's writes.
+          $PSQL -c "update sovereign_vaults set available_balance = 1000, pending_balance = 250, reserve_balance = 50 where payee_id = 'ci_vault_check_probe'"
+          kept=$($PSQL -c "select available_balance || '/' || pending_balance || '/' || reserve_balance from sovereign_vaults where payee_id = 'ci_vault_check_probe'")
+          [ "$kept" = "1000/250/50" ] || { echo "LEGITIMATE DELTA REFUSED by the bucket CHECK: $kept"; exit 1; }
+          echo "OK: non-negative deltas still apply (no over-constraint)"
+          # And the RPC path is untouched: apply_vault_delta still settles a
+          # legitimate delta through the new constraint.
+          outcome=$($PSQL -c "select (apply_vault_delta('ci_vault_check_probe', 'CI Vault Bucket Probe', 500, 0, 0, 0, 0, 0, false, now()) ->> 'outcome')")
+          [ "$outcome" = "applied" ] || { echo "apply_vault_delta BROKEN by the bucket CHECK: $outcome"; exit 1; }
+          rpc=$($PSQL -c "select available_balance from sovereign_vaults where payee_id = 'ci_vault_check_probe'")
+          [ "$rpc" = "1500" ] || { echo "apply_vault_delta wrote the WRONG balance: $rpc"; exit 1; }
+          echo "OK: apply_vault_delta applies a legitimate delta through the CHECK"
+
       - name: Founder v12 acceptance suite in the Docker harness (addenda 31-32)
         run: |
           bash supabase/tests/0012_docker_harness.sh
