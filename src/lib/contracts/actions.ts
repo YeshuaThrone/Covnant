@@ -15,6 +15,7 @@ import { cookies } from 'next/headers';
 import { CovenantAuditorAgent, type SystemAuditReport } from '@/engine/covenant-master-sdk';
 import { ADMIN_COOKIE_NAME, verifyAdminSession } from '@/lib/admin/gate';
 import { markContractFinal, saveContract } from '@/lib/contracts/store';
+import { requireRegisteredOrOperatorAction } from '@/lib/server/actionAccess';
 import type { AgreementContext } from '@/lib/contracts/generator';
 import type { ContractIndustry } from '@/lib/contracts/templates';
 import { getSdk } from '@/lib/sdk';
@@ -60,6 +61,16 @@ export interface SaveContractInput {
 export async function saveContractAction(input: SaveContractInput): Promise<
   { success: true; id: string; status: 'DRAFT' | 'FINAL' } | { success: false; error: string }
 > {
+  // C1 gate: this action writes shared rows through the service-role
+  // client, so the invocation is refused BEFORE the store write unless the
+  // caller is the operator or a registered creator — the same verdict
+  // apiAccess composes for the gated routes (the Contract Vault workspace
+  // pages are creator-facing, so the registered-creator gate is the
+  // least-privilege identity that keeps every legitimate flow working).
+  const access = await requireRegisteredOrOperatorAction();
+  if (!access.ok) {
+    return { success: false, error: access.message };
+  }
   try {
     const saved = await saveContract(input);
     revalidatePath('/contracts');
@@ -73,6 +84,11 @@ export async function saveContractAction(input: SaveContractInput): Promise<
 export async function markContractFinalAction(
   id: string,
 ): Promise<{ success: true; status: 'DRAFT' | 'FINAL' } | { success: false; error: string }> {
+  // C1 gate — same verdict as saveContractAction, before the store write.
+  const access = await requireRegisteredOrOperatorAction();
+  if (!access.ok) {
+    return { success: false, error: access.message };
+  }
   try {
     const updated = await markContractFinal(id);
     if (!updated) return { success: false, error: 'Contract not found.' };
