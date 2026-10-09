@@ -12,6 +12,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: the default GITHUB_TOKEN is read-only. No job here
+# publishes packages, manages releases, or touches other scopes.
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
