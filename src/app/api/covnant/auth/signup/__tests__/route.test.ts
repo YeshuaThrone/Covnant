@@ -139,6 +139,8 @@ function fakeDb(
   options: {
     registry?: { id: string; rights_holders: unknown[] };
     dropAppendedHolder?: boolean;
+    /** 1-indexed db.transaction call to reject (transient DB failure). */
+    rejectTransactionCall?: number;
   } = {},
 ) {
   let registry = options.registry
@@ -207,12 +209,19 @@ function fakeDb(
     }
     return { rows: [] };
   });
+  let transactionCalls = 0;
   const db = {
     query: dbQuery,
     transaction: vi.fn(
       async <T>(
         work: (tx: { query: typeof txQuery }) => Promise<T>,
-      ): Promise<T> => work(tx),
+      ): Promise<T> => {
+        transactionCalls += 1;
+        if (options.rejectTransactionCall === transactionCalls) {
+          throw new Error("connection terminated unexpectedly");
+        }
+        return work(tx);
+      },
     ),
   };
   return { db, dbQuery, txQueries, getRegistry: () => registry };
@@ -776,6 +785,86 @@ describe("POST /api/covnant/auth/signup", () => {
       expect(supabaseMock.profileDeleteEq).toHaveBeenCalled();
       const text = JSON.stringify(bodyJson);
       expect(text).not.toContain("HOLDER_NOT_FOUND");
+    });
+
+    it("compensates the auth signup when the provisioning phase-1 transaction rejects", async () => {
+      // Transaction call 1 is the registry find-or-create; call 2 is the
+      // provisioning core's phase 1 — a transient DB failure there must
+      // surface as a compensated, sanitized 500 (an outcome mapped through
+      // the shared core's PERSISTENCE_FAILED), never an unhandled route
+      // throw that skips the compensation walk.
+      const { db } = fakeDb({ rejectTransactionCall: 2 });
+      mockGetDb.mockReturnValue(db as never);
+      const fetchMock = stubIncreaseAccountNumber([
+        increaseAccountNumberResponse(),
+      ]);
+      const res = await POST(signupRequest(fullPayload()));
+      expect(res.status).toBe(500);
+      const bodyJson = (await res.json()) as {
+        ok: boolean;
+        error: string;
+        reason?: string;
+      };
+      expect(bodyJson).toMatchObject({
+        ok: false,
+        error: "Signup could not complete provisioning.",
+        reason: "provisioning_failed",
+      });
+      // The compensation walk ran: profile row + auth user deleted.
+      expect(supabaseMock.deleteUser).toHaveBeenCalledTimes(1);
+      expect(supabaseMock.profileDeleteEq).toHaveBeenCalled();
+      // Phase 1 fails before the Increase call — no leaked account number.
+      expect(fetchMock).not.toHaveBeenCalled();
+      // Sanitized: the raw transaction error never reaches the client.
+      const text = JSON.stringify(bodyJson);
+      expect(text).not.toContain("connection terminated");
+    });
+
+    it("retries clean after the compensated phase-1 failure — no duplicate_email wedge", async () => {
+      // Before the fix the phase-1 rejection threw past the outcome
+      // mapping: compensation never ran, the committed auth account
+      // survived, and every retry of the same email 409'd duplicate_email
+      // forever. After the fix the retry takes the claim path and
+      // completes provisioning.
+      const { db, getRegistry } = fakeDb({ rejectTransactionCall: 2 });
+      mockGetDb.mockReturnValue(db as never);
+      const fetchMock = stubIncreaseAccountNumber([
+        increaseAccountNumberResponse(),
+      ]);
+      const first = await POST(signupRequest(fullPayload()));
+      expect(first.status).toBe(500);
+      expect(supabaseMock.deleteUser).toHaveBeenCalledTimes(1);
+
+      const retry = await POST(signupRequest(fullPayload()));
+      expect(retry.status).toBe(200); // NOT the 409 duplicate_email wedge
+      const bodyJson = (await retry.json()) as {
+        ok: boolean;
+        created?: boolean;
+        status?: string;
+        reason?: string;
+        alreadyRegistered?: boolean;
+        assetId?: string;
+      };
+      expect(bodyJson).toMatchObject({
+        ok: true,
+        created: false,
+        status: "PROVISIONED",
+        alreadyRegistered: true,
+        assetId: REGISTRY_ASSET_ID,
+      });
+      // Only the retry reached Increase (the failed attempt died in phase 1).
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // The retry claimed the existing holder — no duplicate entry, and
+      // provisioning persisted the virtual account on it.
+      const holders = getRegistry()?.rights_holders ?? [];
+      expect(holders).toHaveLength(1);
+      const entry = holders[0] as {
+        payoutRouting: { covenantVirtualAccount?: Record<string, string> };
+      };
+      expect(entry.payoutRouting.covenantVirtualAccount).toMatchObject({
+        accountNumberId: "account_number_v18nkfqm6afpsrvy82b2",
+      });
+      expectNoAccountNumbers(bodyJson);
     });
   });
 
