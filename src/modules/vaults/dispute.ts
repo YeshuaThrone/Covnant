@@ -20,6 +20,8 @@ import type {
   VaultDisputeRecord,
 } from "@/modules/don/records";
 import type { DisputeLockPayload } from "@/lib/don/validation";
+import { postJournal } from "@/modules/ledger/engine";
+import { compactLegs, vaultCredit, vaultDebit } from "@/modules/ledger/journal";
 
 // A locked payee (vault dispute) or locked work (catalog dispute) freezes
 // incoming credits — routed to reserve upstream.
@@ -121,6 +123,22 @@ export async function applyDisputeLock(
             "Reserve balance is insufficient to release the dispute freeze.",
         };
       }
+      // F5: the thaw sweep is a real money move — post dispute_unlock so the
+      // GL tracks the reserve release back into available/pending.
+      await postJournal(
+        store,
+        {
+          kind: "dispute_unlock",
+          ref_type: "vault",
+          ref_id: vault.payee_id,
+          legs: compactLegs([
+            vaultDebit(vault.payee_id, "reserve", frozenTotal),
+            vaultCredit(vault.payee_id, "available", frozenAvailable),
+            vaultCredit(vault.payee_id, "pending", frozenPending),
+          ]),
+        },
+        now,
+      );
     }
     const dispute = await store.upsertVaultDispute({
       payee_id: vault.payee_id,
@@ -178,6 +196,25 @@ export async function applyDisputeLock(
       message:
         "available_balance + pending_balance cannot cover the dispute freeze.",
     };
+  }
+  // F5: the freeze sweep is a real money move — post dispute_lock so the GL
+  // tracks the available/pending debit into the reserve credit. A
+  // zero-amount freeze moves nothing and posts nothing.
+  if (amount > 0) {
+    await postJournal(
+      store,
+      {
+        kind: "dispute_lock",
+        ref_type: "vault",
+        ref_id: vault.payee_id,
+        legs: compactLegs([
+          vaultDebit(vault.payee_id, "available", frozenFromAvailable),
+          vaultDebit(vault.payee_id, "pending", frozenFromPending),
+          vaultCredit(vault.payee_id, "reserve", amount),
+        ]),
+      },
+      now,
+    );
   }
   const dispute = await store.upsertVaultDispute({
     payee_id: vault.payee_id,
