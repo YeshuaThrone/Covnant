@@ -6,6 +6,7 @@ import { POST, PUT } from '../route';
 import { getDb, type Db } from '@/lib/db';
 import { generateCBTSettlementCode } from '@/lib/ledger/cbt-settlement';
 import { ADMIN_COOKIE_NAME, mintAdminSessionToken } from '@/lib/admin/gate';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 
 /**
  * CBT settlement evidence for the banking ledger INSERT paths
@@ -152,6 +153,9 @@ beforeEach(() => {
   // The PUT disbursement is operator-gated (audit F4): positive-path PUTs
   // run against the REAL gate with a real minted session cookie.
   vi.stubEnv('ADMIN_DASHBOARD_PASSWORD', 'test-admin-password-1234');
+  // The PUT money-initiation limiter (C2) is module state; every test starts
+  // with a fresh 5/min window.
+  resetRateLimits();
 });
 
 afterEach(() => {
@@ -275,8 +279,20 @@ describe('V1/V4 — RTP disbursement hold and reversal', () => {
   it('V4 · the compensating DISBURSEMENT_REVERSAL carries the code and falls back bare on 42703', async () => {
     const first = cbtDb({ metadataColumnMissing: true });
     mockGetDb.mockReturnValue(first.db as unknown as Db);
-    // The dispatch fails → the route unwinds the failed hold with a reversal.
-    stubIncreaseDispatch(null);
+    // The dispatch is EXPLICITLY rejected — a known-failed outcome — so the
+    // route unwinds the failed hold with a reversal. (A fetch throw is an
+    // UNKNOWN outcome since C3: the hold then stays pending for
+    // reconciliation, because a reversal credit on an unknown outcome can
+    // manufacture spendable cents if Increase honored the transfer.)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ detail: 'Insufficient source balance' }), {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
 
     await PUT(
       operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-3' }),

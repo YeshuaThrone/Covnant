@@ -36,19 +36,24 @@
  *   would storm a failing endpoint. Failures are logged server-side instead.
  *
  * PUT — Increase RTP instant disbursement:
- *   Operator-gated (requireOperator) before any body handling →
- *   validate integer cents (MAX_SAFE_INTEGER guarded) → withhold engine tax
- *   for unverified profiles (identical rates and verification logic as the
- *   withdraw route: cents convert to engine smallest units ×10⁶, and the net
- *   converts back through an exact whole-cent division — a sub-cent remainder
- *   fails closed with a sanitized 500 rather than rounding escrow dust) →
- *   reserve the net in-transaction as a PENDING_DISBURSEMENT hold
- *   (amount_cents = −net, reference_id = idempotency key; a 23505 there means
- *   a duplicate submission and returns 409 — never a second hold) → dispatch
- *   the net to Increase over RTP with the client's Idempotency-Key (UUID
- *   fallback) → on rejection record a compensating DISBURSEMENT_REVERSAL
- *   (amount_cents = +net, reference_id = 'reversal-' + key) and fail with a
- *   sanitized error.
+ *   Operator-gated (requireOperator) before any body handling → shared
+ *   money-initiation limiter (5/min, Postgres-backed — the payouts-withdraw /
+ *   accounts-provision posture) → validate integer cents (MAX_SAFE_INTEGER
+ *   guarded) → withhold engine tax for unverified profiles (identical rates
+ *   and verification logic as the withdraw route: cents convert to engine
+ *   smallest units ×10⁶, and the net converts back through an exact
+ *   whole-cent division — a sub-cent remainder fails closed with a sanitized
+ *   500 rather than rounding escrow dust) → reserve the net in-transaction as
+ *   a PENDING_DISBURSEMENT hold (amount_cents = −net, reference_id =
+ *   idempotency key; a 23505 there means a duplicate submission and returns
+ *   409 — never a second hold) → dispatch the net to Increase over RTP with
+ *   the client's Idempotency-Key (UUID fallback) → when the outcome is
+ *   KNOWN-failed (an explicit Increase rejection) record a compensating
+ *   DISBURSEMENT_REVERSAL (amount_cents = +net, reference_id = 'reversal-' +
+ *   key) and fail with a sanitized error; when the outcome is UNKNOWN (the
+ *   fetch threw before a response arrived, or a 2xx with an unparseable body)
+ *   the hold STAYS pending for reconciliation — funds over-held, never
+ *   over-paid (the withdraw route's posture).
  *
  * Account numbers: payoutRouting.accountNumber is the FULL destination
  * account number — a deliberate, user-accepted design requirement for
@@ -61,7 +66,9 @@
  * initiates real money movement, so it answers requireOperator (the same
  * signed operator session every payout rail runs) BEFORE any body is read
  * or store is touched, failing closed (503) when the operator secret is
- * unconfigured.
+ * unconfigured. Behind the gate, the shared money-initiation limiter
+ * (C2) throttles authenticated bursts — 5/min per client, Postgres-backed
+ * — before the escrow read or the Increase call.
  */
 
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -75,6 +82,8 @@ import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { centsToEngineUnits, engineUnitsToCents, SubUnitRemainderError } from './denomination';
 import { cbtSettlementMetadataSql } from '@/lib/ledger/cbt-settlement';
 import { requireOperator } from '@/lib/server/apiAccess';
+import { checkSharedRateLimit, MONEY_INITIATION_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { clientAddress } from '@/lib/server/clientAddress';
 
 export const dynamic = 'force-dynamic';
 
@@ -482,6 +491,19 @@ export async function PUT(request: Request): Promise<Response> {
     return jsonError(access.message, access.status);
   }
 
+  // Shared money-initiation limiter (audit C2): authenticated bursts on the
+  // disbursement surface throttle here — 5/min, Postgres-backed — before any
+  // body handling, the escrow read, or the Increase call. The identity gate
+  // above stays first: an unauthenticated caller is refused without touching
+  // the limiter's store at all.
+  const limit = await checkSharedRateLimit(
+    `banking-rtp:${clientAddress(request)}`,
+    MONEY_INITIATION_RATE_LIMIT,
+  );
+  if (!limit.ok) {
+    return jsonError(`Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`, 429);
+  }
+
   let body: IncreasePayoutBody;
   try {
     body = (await request.json()) as IncreasePayoutBody;
@@ -578,12 +600,17 @@ export async function PUT(request: Request): Promise<Response> {
       }),
     });
   } catch (error) {
-    console.error('Increase RTP request failed:', error);
-    await recordDisbursementReversal(db, {
-      rightsHolderId,
-      netCents: reservation.netCents,
-      idempotencyKey,
-    });
+    // No response arrived — the dispatch outcome is UNKNOWN: the request
+    // may have been honored before the connection dropped. Mirror the
+    // unparseable-2xx branch below (funds over-held, never over-paid): keep
+    // the PENDING_DISBURSEMENT hold for reconciliation — a reversal credit
+    // here would manufacture spendable cents if Increase honored the
+    // transfer. Only a KNOWN-failed outcome (the explicit rejection below)
+    // earns the reversal.
+    console.error(
+      'Increase RTP request failed before a response arrived — outcome unknown; the PENDING_DISBURSEMENT hold remains and needs reconciliation:',
+      error,
+    );
     return jsonError(TRANSFER_FAILED_MESSAGE, 502);
   }
   if (!increaseRes.ok) {
