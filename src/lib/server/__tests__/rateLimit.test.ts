@@ -30,6 +30,57 @@ describe('rate limit rules', () => {
   });
 });
 
+/**
+ * The credential surfaces' in-memory fallback windows (bug-hunt C9). The
+ * routes land on THIS limiter whenever the shared store is unavailable
+ * (DATABASE_URL unset, or a store failure mid-flight) — the fallback must
+ * keep enforcing each surface's window under the exact key its route uses.
+ */
+describe('credential surfaces in-memory fallback windows (bug-hunt C9)', () => {
+  beforeEach(() => {
+    resetRateLimits();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    resetRateLimits();
+  });
+
+  it('blocks the 6th admin-login and signup attempt from one address within the window', () => {
+    for (const [key, config] of [
+      ['covnant-admin-login:203.0.113.5', ADMIN_LOGIN_RATE_LIMIT],
+      ['covnant-signup:203.0.113.6', REGISTER_RATE_LIMIT],
+    ] as const) {
+      for (let i = 0; i < config.limit; i += 1) {
+        expect(checkRateLimit(key, config).ok).toBe(true);
+      }
+      expect(checkRateLimit(key, config).ok).toBe(false);
+    }
+  });
+
+  it('opens a fresh window once it elapses (the fallback stays a fixed window)', () => {
+    const key = 'covnant-signup:203.0.113.6';
+    for (let i = 0; i < REGISTER_RATE_LIMIT.limit; i += 1) {
+      checkRateLimit(key, REGISTER_RATE_LIMIT);
+    }
+    expect(checkRateLimit(key, REGISTER_RATE_LIMIT).ok).toBe(false);
+
+    vi.setSystemTime(1_000_000 + REGISTER_RATE_LIMIT.windowMs);
+    expect(checkRateLimit(key, REGISTER_RATE_LIMIT).ok).toBe(true);
+  });
+
+  it('keeps the sync-license registration window at the Don rule for its bare-identity key', () => {
+    for (let i = 0; i < DON_API_RATE_LIMIT.limit; i += 1) {
+      checkRateLimit('203.0.113.7', DON_API_RATE_LIMIT);
+    }
+    expect(checkRateLimit('203.0.113.7', DON_API_RATE_LIMIT).ok).toBe(false);
+    // A different address is untouched.
+    expect(checkRateLimit('203.0.113.8', DON_API_RATE_LIMIT).ok).toBe(true);
+  });
+});
+
 describe('DON_API_RATE_LIMIT bucket behavior', () => {
   beforeEach(() => {
     resetRateLimits();

@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryResult, QueryResultRow } from 'pg';
 import type { Db } from '@/lib/db';
 import {
+  ADMIN_LOGIN_RATE_LIMIT,
   DON_API_RATE_LIMIT,
   MONEY_INITIATION_RATE_LIMIT,
   PUBLIC_READ_RATE_LIMIT,
   PostgresRateLimiter,
+  REGISTER_RATE_LIMIT,
   checkSharedRateLimit,
   resetRateLimits,
 } from '../rateLimit';
@@ -192,6 +194,47 @@ vi.mock('@/lib/db', async (importOriginal) => {
   };
 });
 
+/**
+ * The three brute-forceable credential surfaces (bug-hunt C9) keyed as
+ * their routes key them: admin login and signup by prefixed address, the
+ * sync-license registration by the Don surface's client identity. Their
+ * budgets must share one window across isolates — the property that makes
+ * the shared limiter the credential surfaces' enforcer rather than the
+ * per-isolate in-memory map.
+ */
+const credentialSurfaces = [
+  {
+    surface: 'admin login',
+    key: 'covnant-admin-login:203.0.113.5',
+    config: ADMIN_LOGIN_RATE_LIMIT,
+  },
+  { surface: 'signup', key: 'covnant-signup:203.0.113.6', config: REGISTER_RATE_LIMIT },
+  { surface: 'sync-license register', key: '203.0.113.7', config: DON_API_RATE_LIMIT },
+];
+
+describe('credential surfaces share one budget across isolates (bug-hunt C9)', () => {
+  beforeEach(() => {
+    resetRateLimits();
+  });
+
+  it.each(credentialSurfaces)(
+    '$surface: a budget exhausted in one isolate blocks the same key in another',
+    async ({ key, config }) => {
+      // Two limiter instances over ONE store model two warm serverless
+      // isolates: separate objects end to end, so the exhausted budget can
+      // only have flowed through the store.
+      const store = new Map<string, FakeBucket>();
+      const isolateA = new PostgresRateLimiter(makeFakeDb(store));
+      const isolateB = new PostgresRateLimiter(makeFakeDb(store));
+
+      for (let i = 0; i < config.limit; i += 1) {
+        expect((await isolateA.check(key, config, 1_000_000)).ok).toBe(true);
+      }
+      expect((await isolateB.check(key, config, 1_000_000)).ok).toBe(false);
+    },
+  );
+});
+
 describe('checkSharedRateLimit fallback behavior', () => {
   const DATABASE_URL_BACKUP = process.env.DATABASE_URL;
 
@@ -246,5 +289,17 @@ describe('checkSharedRateLimit fallback behavior', () => {
     // The failure is surfaced, not swallowed.
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+
+  it('credential surfaces keep their in-memory windows without DATABASE_URL (fallback unchanged)', async () => {
+    // The real getDb() runs with DATABASE_URL deleted: the credential
+    // routes land on the in-memory window exactly as they did pre-credentials.
+    for (const [key, config] of credentialSurfaces.map((s) => [s.key, s.config] as const)) {
+      for (let i = 0; i < config.limit; i += 1) {
+        expect((await checkSharedRateLimit(key, config)).ok).toBe(true);
+      }
+      expect((await checkSharedRateLimit(key, config)).ok).toBe(false);
+      resetRateLimits();
+    }
   });
 });

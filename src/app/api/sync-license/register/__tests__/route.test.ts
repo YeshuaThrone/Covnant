@@ -14,11 +14,60 @@
  *    the submission — never client-controlled; a cleared asset is 409,
  *  - the locked 50/35/15 structure echoed in every 201 response.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 import { POST } from '../route';
 import type { SyncCatalogItemRecord } from '@/modules/sdk/records';
+import { DON_API_RATE_LIMIT, checkSharedRateLimit, resetRateLimits } from '@/lib/server/rateLimit';
+
+type LimiterBucket = { window_start_ms: number; hit_count: number };
+
+/**
+ * A minimal Db accepting only the shared rate limiter's statements: the
+ * idempotent DDL, the single-statement fixed-window upsert (RETURNING the
+ * post-write count), and the sweep DELETE. Counting happens in the given
+ * store's rows — what two warm serverless isolates would share.
+ */
+function makeLimiterDb(store: Map<string, LimiterBucket>) {
+  return {
+    async query(sql: string, params?: unknown[]) {
+      if (sql.includes('CREATE TABLE IF NOT EXISTS rate_limit_buckets')) {
+        return { rows: [] };
+      }
+      if (sql.includes('INSERT INTO rate_limit_buckets')) {
+        const [key, nowMs, windowMs] = params as [string, number, number];
+        const existing = store.get(key);
+        const row =
+          existing === undefined || existing.window_start_ms + windowMs <= nowMs
+            ? { window_start_ms: nowMs, hit_count: 1 }
+            : { window_start_ms: existing.window_start_ms, hit_count: existing.hit_count + 1 };
+        store.set(key, row);
+        // BIGINT arrives as a string from real pg — return it as one.
+        return {
+          rows: [{ hit_count: row.hit_count, window_start_ms: String(row.window_start_ms) }],
+        };
+      }
+      if (sql.includes('DELETE FROM rate_limit_buckets')) return { rows: [] };
+      throw new Error(`Unexpected limiter statement: ${sql.slice(0, 120)}`);
+    },
+    async transaction(): Promise<never> {
+      throw new Error('The rate limiter never opens a transaction.');
+    },
+  };
+}
+
+/**
+ * The shared limiter's db seam (bug-hunt C9): getDb is overridden so the
+ * cross-isolate test can stand a store-backed db under the route's limiter
+ * call. The default (no implementation) keeps getDb null for every other
+ * test — the pre-credentials fallback the real module would run.
+ */
+const dbMock = vi.hoisted(() => ({ getDb: vi.fn() }));
+vi.mock('@/lib/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db')>();
+  return { ...actual, getDb: dbMock.getDb };
+});
 
 const sessionMock = vi.hoisted(() => ({ resolveSessionCreator: vi.fn() }));
 vi.mock('@/lib/server/sessionCreator', () => ({
@@ -228,5 +277,30 @@ describe('POST /api/sync-license/register', () => {
     }
     expect(last?.status).toBe(429);
     expect(await last!.json()).toMatchObject({ reason: 'rate_limited' });
+  });
+});
+
+describe('shared limiter enforcement (bug-hunt C9)', () => {
+  afterEach(() => {
+    dbMock.getDb.mockReset();
+    resetRateLimits();
+  });
+
+  it('consults and enforces the SHARED store — a budget exhausted in another isolate blocks here', async () => {
+    // Isolate A: the address's budget is spent straight through the shared
+    // store; the in-memory limiter never sees a request.
+    const store = new Map<string, LimiterBucket>();
+    dbMock.getDb.mockReturnValue(makeLimiterDb(store) as never);
+    for (let attempt = 0; attempt < DON_API_RATE_LIMIT.limit; attempt += 1) {
+      expect((await checkSharedRateLimit('203.0.113.7', DON_API_RATE_LIMIT)).ok).toBe(true);
+    }
+    // Isolate B: a fresh isolate (cold in-memory map) serves the request —
+    // the limiter runs before body validation, so even a malformed body
+    // must land on the shared verdict.
+    resetRateLimits();
+    const response = await POST(post('not json at all', '203.0.113.7'));
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ reason: 'rate_limited' });
   });
 });
