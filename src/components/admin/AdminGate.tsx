@@ -12,12 +12,10 @@
  * component re-renders into the console.
  */
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { loginFailureMessage } from '@/lib/admin/console';
 
 export function AdminGate({ notice }: { notice?: string }) {
-  const router = useRouter();
   const [password, setPassword] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -35,9 +33,12 @@ export function AdminGate({ notice }: { notice?: string }) {
         cache: 'no-store',
       });
       if (response.ok) {
-        // The signed session cookie is set by the login route; the server
-        // component re-renders into the console on refresh.
-        router.refresh();
+        // The signed session cookie is set by the login route; a full reload
+        // re-renders the server component into the console. router.refresh()
+        // is deliberately avoided here: its RSC payload can race the router
+        // and never apply, leaving the operator on the sign-in form — a full
+        // reload cannot be swallowed.
+        window.location.reload();
         return;
       }
       const body = (await response.json().catch(() => null)) as { reason?: string } | null;

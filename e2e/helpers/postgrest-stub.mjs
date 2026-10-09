@@ -65,6 +65,94 @@ const db = {
     },
   ],
   admin_action_log: [],
+  // MUL Registry (migration 0007) — one clearance row per asset_cbt_code,
+  // plus the append-only transition replay. 0003 is the machine's own
+  // display case: still cleared, term already ended (expired ≠ cleared).
+  mul_clearances: [
+    {
+      asset_cbt_code: 'CBT-TRK-000000000001',
+      state: 'draft',
+      licensee: null,
+      territory: null,
+      term_start: null,
+      term_end: null,
+      updated_at: '2026-09-20T00:00:00.000Z',
+    },
+    {
+      asset_cbt_code: 'CBT-TRK-000000000002',
+      state: 'requested',
+      licensee: 'Northwind Films',
+      territory: 'US',
+      term_start: '2026-09-01T00:00:00.000Z',
+      term_end: '2027-09-01T00:00:00.000Z',
+      updated_at: '2026-09-21T00:00:00.000Z',
+    },
+    {
+      asset_cbt_code: 'CBT-TRK-000000000003',
+      state: 'cleared',
+      licensee: 'Meridian Records',
+      territory: 'GB',
+      term_start: '2026-01-01T00:00:00.000Z',
+      term_end: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-22T00:00:00.000Z',
+    },
+    {
+      asset_cbt_code: 'CBT-TRK-000000000004',
+      state: 'disputed',
+      licensee: 'Harbor Games',
+      territory: 'CA',
+      term_start: '2026-05-01T00:00:00.000Z',
+      term_end: '2027-05-01T00:00:00.000Z',
+      updated_at: '2026-09-23T00:00:00.000Z',
+    },
+    {
+      asset_cbt_code: 'CBT-TRK-000000000005',
+      state: 'revoked',
+      licensee: null,
+      territory: 'DE',
+      term_start: null,
+      term_end: null,
+      updated_at: '2026-09-24T00:00:00.000Z',
+    },
+  ],
+  mul_clearance_transitions: [
+    {
+      id: 'tr_0001_a',
+      asset_cbt_code: 'CBT-TRK-000000000001',
+      from_state: null,
+      to_state: 'draft',
+      note: 'Draft opened for the demo reel.',
+      created_at: '2026-09-20T00:00:00.000Z',
+      insertion_order: 0,
+    },
+    {
+      id: 'tr_0003_a',
+      asset_cbt_code: 'CBT-TRK-000000000003',
+      from_state: null,
+      to_state: 'draft',
+      note: null,
+      created_at: '2026-09-01T00:00:00.000Z',
+      insertion_order: 0,
+    },
+    {
+      id: 'tr_0003_b',
+      asset_cbt_code: 'CBT-TRK-000000000003',
+      from_state: 'draft',
+      to_state: 'requested',
+      note: 'Licensee signed the term sheet.',
+      created_at: '2026-09-02T00:00:00.000Z',
+      insertion_order: 1,
+    },
+    {
+      id: 'tr_0003_c',
+      asset_cbt_code: 'CBT-TRK-000000000003',
+      from_state: 'requested',
+      to_state: 'cleared',
+      note: 'Rights verified against the signed license.',
+      created_at: '2026-09-22T00:00:00.000Z',
+      insertion_order: 2,
+    },
+  ],
   contracts: [
     {
       id: 'contract_seeded_a',
@@ -103,26 +191,50 @@ const server = http.createServer((req, res) => {
 
   const table = url.pathname.match(/^\/rest\/v1\/([a-z_]+)$/)?.[1];
   if (!table || !(table in db)) {
+    if (process.env.STUB_VERBOSE) {
+      console.error(`[stub] MISS ${req.method} ${url.pathname}${url.search}`);
+    }
     res.statusCode = 404;
     return res.end(JSON.stringify({ message: `stub: unknown resource ${url.pathname}` }));
   }
 
-  const idFilter = url.searchParams.get('id'); // "eq.<id>"
+  // PostgREST filters arrive as `col=eq.value` query params (the id=eq. form
+  // below is the MUL stores' asset lookup); select/order/on_conflict are
+  // not filters.
+  const RESERVED_PARAMS = new Set(['select', 'order', 'on_conflict']);
+  const eqFilters = [...url.searchParams.entries()]
+    .filter(([key, value]) => !RESERVED_PARAMS.has(key) && value.startsWith('eq.'))
+    .map(([key, value]) => [key, value.slice(3)]);
 
   if (req.method === 'GET') {
-    let rows = db[table];
-    if (idFilter?.startsWith('eq.')) {
-      rows = rows.filter((row) => row.id === idFilter.slice(3));
+    if (process.env.STUB_VERBOSE) {
+      console.error(`[stub] GET ${url.pathname}${url.search}`);
     }
+    let rows = db[table];
+    for (const [column, value] of eqFilters) {
+      rows = rows.filter((row) => row[column] === value);
+    }
+    // order=col.dir,col2.dir2 — stable multi-key sort (the transition
+    // replay's created_at+insertion_order tie-break).
     const order = url.searchParams.get('order');
     if (order) {
-      const [col, dir] = order.split('.');
-      rows = [...rows].sort((a, b) =>
-        dir === 'desc'
-          ? String(b[col]).localeCompare(String(a[col]))
-          : String(a[col]).localeCompare(String(b[col])),
-      );
+      const keys = order.split(',').map((part) => {
+        const [col, dir] = part.split('.');
+        return { col, desc: dir === 'desc' };
+      });
+      rows = [...rows].sort((a, b) => {
+        for (const { col, desc } of keys) {
+          const cmp = String(a[col]).localeCompare(String(b[col]));
+          if (cmp !== 0) return desc ? -cmp : cmp;
+        }
+        return 0;
+      });
     }
+    // count=exact pages read the filtered-set total off Content-Range.
+    res.setHeader(
+      'content-range',
+      rows.length === 0 ? '*/0' : `0-${rows.length - 1}/${rows.length}`,
+    );
     return send(req, res, 200, rows);
   }
 
@@ -134,18 +246,50 @@ const server = http.createServer((req, res) => {
     const payload = raw ? JSON.parse(raw) : {};
 
     if (req.method === 'POST') {
-      // admin_action_log insert — select('id').single() expects the row back.
-      const row = { id: `act_${crypto.randomUUID()}`, created_at: new Date().toISOString(), ...payload };
-      db.admin_action_log.push(row);
+      // mul_clearances upsert (onConflict: 'asset_cbt_code'): merge into the
+      // existing row when the conflict key already has one, else append.
+      const conflictColumn = url.searchParams.get('on_conflict');
+      if (conflictColumn) {
+        const existing = db[table].findIndex((row) => row[conflictColumn] === payload[conflictColumn]);
+        if (existing >= 0) {
+          Object.assign(db[table][existing], payload);
+          if (process.env.STUB_VERBOSE) {
+            console.error(
+              `[stub] UPSERT ${table} ${JSON.stringify(payload).slice(0, 160)} -> ${JSON.stringify(db[table][existing]).slice(0, 160)}`,
+            );
+          }
+          return send(req, res, 200, [db[table][existing]]);
+        }
+        const inserted = { created_at: new Date().toISOString(), ...payload };
+        db[table].push(inserted);
+        if (process.env.STUB_VERBOSE) {
+          console.error(`[stub] INSERT ${table} ${JSON.stringify(inserted).slice(0, 160)}`);
+        }
+        return send(req, res, 201, [inserted]);
+      }
+      // Plain insert into the addressed table — the row comes back because
+      // .select().single() callers expect it. admin_action_log rows get the
+      // act_ id shape when the caller omits one; other tables (the MUL
+      // transition append) supply their own or take a uuid.
+      const row = {
+        id: payload.id ?? (table === 'admin_action_log' ? `act_${crypto.randomUUID()}` : crypto.randomUUID()),
+        created_at: payload.created_at ?? new Date().toISOString(),
+        ...payload,
+      };
+      db[table].push(row);
+      if (process.env.STUB_VERBOSE) {
+        console.error(`[stub] INSERT ${table} ${JSON.stringify(row).slice(0, 160)}`);
+      }
       return send(req, res, 201, [row]);
     }
 
     if (req.method === 'PATCH') {
-      if (!idFilter?.startsWith('eq.')) {
+      const idFilter = eqFilters.find(([column]) => column === 'id');
+      if (!idFilter) {
         res.statusCode = 400;
         return res.end(JSON.stringify({ message: 'stub: PATCH requires id=eq.' }));
       }
-      const target = db[table].find((row) => row.id === idFilter.slice(3));
+      const target = db[table].find((row) => row.id === idFilter[1]);
       if (!target) return send(req, res, 200, []);
       Object.assign(target, payload);
       return send(req, res, 200, [target]);

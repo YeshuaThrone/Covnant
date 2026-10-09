@@ -11,6 +11,7 @@
  * money stays text micros — never floats (immutability rule).
  */
 
+import type { ClearanceState } from '../../../covnant-sdk/src/mul/clearance';
 import type { SyncLicenseType } from '../../../covnant-sdk/src/contracts/syncLibraryMarketplace';
 
 /** The four canonical rights pipelines (build spec art_MzwqTXym). */
@@ -122,8 +123,11 @@ export type MatchQueuePublicationFormat =
  */
 export type MatchQueueLicenseClass = 'grand_rights' | 'small_rights';
 
-/** MUL clearance lifecycle (append-only history in mul_clearance_transitions). */
-export type MulClearanceState = 'draft' | 'requested' | 'cleared' | 'disputed';
+/** MUL clearance lifecycle — THE MACHINE'S OWN VOCABULARY, not a re-declared
+ * subset: the SDK's ClearanceState is the single source of truth, and the
+ * record layer must name every state the machine can hold (revoked included;
+ * the narrowed four-state union here once made real revoked rows unnameable). */
+export type MulClearanceState = ClearanceState;
 
 /** The current MUL clearance state for one catalog asset — upsert per asset. */
 export interface MulClearanceRecord {
