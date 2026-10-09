@@ -24,12 +24,23 @@
  * envelope and never learns whether an id exists (the gate precedes the
  * store read).
  *
- * StoredContract carries no holder column, so per-row holder matching is
- * not enforceable on this store yet — the gate demands a verified
- * principal rather than pretending row-level scoping it cannot check.
+ * TENANT SCOPING (audit F7, remediation spec D7) — the store now carries
+ * per-row ownership: contracts.creator_id (migration 0062) is stamped from
+ * the creating session's registered-creator identity. After the principal
+ * gate, the export reads under that principal's viewer:
+ *
+ *   - a registered creator exports only the contracts their own session
+ *     created — a foreign id or a NULL-creator (legacy/unattributed) row
+ *     is answered 404;
+ *   - operators/admins export any row, NULL-creator rows included.
+ *
+ * Unknown AND foreign ids answer the same 404 — never 403 — per the
+ * workspace's cross-tenant rule: a miss is indistinguishable from a
+ * nonexistent id. (This replaces the v1 posture that served any stored
+ * contract to any verified principal.)
  */
 
-import { getContract } from '@/lib/contracts/store';
+import { getContract, type ContractViewer } from '@/lib/contracts/store';
 import { isDemoDoorOpen, seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
 import { checkAdminGate } from '@/lib/admin/gate';
 import { donJsonError } from '@/lib/server/http';
@@ -46,6 +57,7 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await params;
 
+  let viewer: ContractViewer;
   if (!isDemoDoorOpen()) {
     let session: Awaited<ReturnType<typeof resolveSessionCreator>>;
     try {
@@ -59,7 +71,15 @@ export async function GET(
 
     // Holder principal — the registered creator session. An anonymous or
     // unenrolled session may still carry the operator cookie.
-    if (session.kind !== 'registered' && !checkAdminGate(request).ok) {
+    const operator = checkAdminGate(request).ok;
+    if (operator) {
+      // The operator cookie outranks the creator session — the console
+      // sees every row.
+      viewer = { role: 'operator' };
+    } else if (session.kind === 'registered') {
+      // The export is scoped to the session's own contracts (spec D7).
+      viewer = { role: 'creator', creatorId: session.creator.payee_id };
+    } else {
       return session.kind === 'anonymous'
         ? donJsonError(401, 'no_session', 'Sign in to export a contract.')
         : donJsonError(
@@ -68,6 +88,8 @@ export async function GET(
             'This session is not enrolled as a rights holder.',
           );
     }
+  } else {
+    viewer = { role: 'operator' };
   }
 
   // The demo door — the same idempotent seed the console and the tax sheet
@@ -75,7 +97,7 @@ export async function GET(
   // whenever the door is closed).
   await seedAdminDemoDataIfEmpty();
 
-  const contract = await getContract(id);
+  const contract = await getContract(id, viewer);
   if (!contract) return new Response('Contract not found.', { status: 404 });
 
   return new Response(contract.document, {

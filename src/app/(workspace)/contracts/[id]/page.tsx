@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { CovenantBlockAsset } from '@/engine/covenant-master-sdk';
 import { getTemplate } from '@/lib/contracts/templates';
 import { getContract } from '@/lib/contracts/store';
+import { resolveContractViewer } from '@/lib/contracts/viewer';
 import { listLedger } from '@/lib/ledger/store';
 import { payoutFlowsFor } from '@/lib/contracts/payouts';
 import { getSdk } from '@/lib/sdk';
@@ -23,7 +24,11 @@ export default async function ContractDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const contract = await getContract(id);
+  // Scoped read (audit F6, spec D7): a foreign or NULL-creator id is
+  // "not found" for a creator, an anonymous visitor (door closed) sees
+  // nothing — every miss answers the same 404, never a 403 distinction.
+  const viewer = await resolveContractViewer();
+  const contract = await getContract(id, viewer);
   if (!contract) notFound();
   const template = getTemplate(contract.templateId);
   if (!template) notFound();
