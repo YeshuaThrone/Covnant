@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST, PUT } from '../route';
 import { getDb, type Db } from '@/lib/db';
 import { generateCBTSettlementCode } from '@/lib/ledger/cbt-settlement';
+import { ADMIN_COOKIE_NAME, mintAdminSessionToken } from '@/lib/admin/gate';
 
 /**
  * CBT settlement evidence for the banking ledger INSERT paths
@@ -118,6 +119,18 @@ function putRequest(body: unknown, headers: Record<string, string> = {}): Reques
   });
 }
 
+/** A REAL minted operator session cookie — the PUT is operator-gated (audit F4). */
+function operatorCookie(): string {
+  const token = mintAdminSessionToken();
+  if (!token) throw new Error('operator token mint failed — ADMIN_DASHBOARD_PASSWORD unset?');
+  return `${ADMIN_COOKIE_NAME}=${token}`;
+}
+
+/** The legit operator path: a PUT carrying the signed operator session cookie. */
+function operatorPutRequest(body: unknown, headers: Record<string, string> = {}): Request {
+  return putRequest(body, { cookie: operatorCookie(), ...headers });
+}
+
 function ledgerInserts(queries: QueryCall[]): QueryCall[] {
   return queries.filter((q) => q.sql.includes('INSERT INTO universal_royalty_ledger'));
 }
@@ -136,6 +149,9 @@ beforeEach(() => {
   vi.stubEnv('LITHIC_WEBHOOK_SECRET', LITHIC_SECRET);
   vi.stubEnv('INCREASE_API_KEY', 'test-increase-key');
   vi.stubEnv('INCREASE_SOURCE_ACCOUNT_ID', 'src_acc_1');
+  // The PUT disbursement is operator-gated (audit F4): positive-path PUTs
+  // run against the REAL gate with a real minted session cookie.
+  vi.stubEnv('ADMIN_DASHBOARD_PASSWORD', 'test-admin-password-1234');
 });
 
 afterEach(() => {
@@ -223,7 +239,7 @@ describe('V1/V4 — RTP disbursement hold and reversal', () => {
     stubIncreaseDispatch({ id: 'rtp_cbt_1', status: 'succeeded' });
 
     const response = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-1' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-1' }),
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true });
@@ -244,7 +260,7 @@ describe('V1/V4 — RTP disbursement hold and reversal', () => {
     stubIncreaseDispatch({ id: 'rtp_cbt_2', status: 'succeeded' });
 
     const response = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-2' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-2' }),
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, netAmountCents: '76000' });
@@ -263,7 +279,7 @@ describe('V1/V4 — RTP disbursement hold and reversal', () => {
     stubIncreaseDispatch(null);
 
     await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-3' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-cbt-3' }),
     );
 
     const reversals = ledgerInserts(first.poolQueries);
