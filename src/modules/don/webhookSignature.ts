@@ -1,6 +1,6 @@
 /**
  * Standard Webhooks HMAC verification for the Don ingestors
- * (/api/v1/webhooks/baas, /api/v1/webhooks/dsp).
+ * (/api/v1/webhooks, /api/v1/webhooks/baas, /api/v1/webhooks/dsp).
  *
  * Ported verbatim from the proven implementation in
  * src/app/api/covnant/webhooks/increase/route.ts (audit art_GG1emERn C2:
@@ -80,20 +80,25 @@ export type StandardWebhookAuth =
   | { ok: false; response: NextResponse<DonApiErrorEnvelope> };
 
 /**
- * The one signature gate for a Don webhook route: reads the raw body and
- * the Standard Webhooks headers, verifies against the per-provider secret
- * named by `secretEnvVar`, and fails closed (401/403) before the caller
- * touches the store. On success the raw body is returned for parsing so the
- * HMAC sees the exact delivered bytes.
+ * The signature gate over material already in hand: verifies the Standard
+ * Webhooks headers against the per-provider secret named by `secretEnvVar`
+ * and fails closed (401/403) before the caller touches the store. This is
+ * the body-level core of `authenticateStandardWebhook`, split out for the
+ * one route that cannot hand over its Request: the unified webhook
+ * (/api/v1/webhooks) must parse the body first to learn which source —
+ * baas or dsp — a delivery is, and a Request's body stream cannot be read
+ * twice. The HMAC still covers the exact delivered bytes because the route
+ * signs over the same raw string it parsed.
  */
-export async function authenticateStandardWebhook(
-  request: Request,
-  secretEnvVar: string,
-): Promise<StandardWebhookAuth> {
-  const rawBody = await request.text();
-  const webhookId = request.headers.get("webhook-id");
-  const webhookTimestamp = request.headers.get("webhook-timestamp");
-  const signatureHeader = request.headers.get("webhook-signature");
+export function authenticateStandardWebhookBody(params: {
+  rawBody: string;
+  headers: Headers;
+  secretEnvVar: string;
+}): StandardWebhookAuth {
+  const { rawBody, headers, secretEnvVar } = params;
+  const webhookId = headers.get("webhook-id");
+  const webhookTimestamp = headers.get("webhook-timestamp");
+  const signatureHeader = headers.get("webhook-signature");
   const configuredSecret = process.env[secretEnvVar];
 
   // Fail closed on ANY missing signature material: 4xx, never processed,
@@ -138,4 +143,22 @@ export async function authenticateStandardWebhook(
     };
   }
   return { ok: true, rawBody };
+}
+
+/**
+ * The one signature gate for a Don webhook route: reads the raw body and
+ * the Standard Webhooks headers, verifies against the per-provider secret
+ * named by `secretEnvVar`, and fails closed (401/403) before the caller
+ * touches the store. On success the raw body is returned for parsing so the
+ * HMAC sees the exact delivered bytes.
+ */
+export async function authenticateStandardWebhook(
+  request: Request,
+  secretEnvVar: string,
+): Promise<StandardWebhookAuth> {
+  return authenticateStandardWebhookBody({
+    rawBody: await request.text(),
+    headers: request.headers,
+    secretEnvVar,
+  });
 }

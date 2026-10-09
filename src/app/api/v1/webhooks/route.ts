@@ -5,6 +5,7 @@ import { getStore } from "@/lib/server/store";
 import { clientIdentity } from "@/modules/don/http";
 import { validateUnifiedWebhookPayload } from "@/lib/don/validation";
 import { ingestBaasWebhook, ingestDspWebhook } from "@/lib/server/webhooks";
+import { authenticateStandardWebhookBody } from "@/modules/don/webhookSignature";
 
 export async function POST(request: NextRequest) {
   const identity = clientIdentity(request);
@@ -17,9 +18,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // The body is read exactly once: its raw bytes are both the JSON payload
+  // and the HMAC input (below), so the signature covers the delivered bytes.
+  const rawBody = await request.text();
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return donJsonError(
       400,
@@ -34,6 +38,20 @@ export async function POST(request: NextRequest) {
   }
 
   if (parsed.value.kind === "baas") {
+    // Signature gate (Standard Webhooks HMAC), mirroring the sibling routes
+    // (/api/v1/webhooks/baas, /api/v1/webhooks/dsp): the payload's kind is
+    // the only source discriminator, so the source-appropriate secret is
+    // selected here and verified BEFORE any ingestor or store access — no
+    // forged delivery can settle/fail/reverse a payout, create/reverse a
+    // split run, or fabricate royalty income. An unset source secret fails
+    // closed with a 401 not-configured error.
+    const auth = authenticateStandardWebhookBody({
+      rawBody,
+      headers: request.headers,
+      secretEnvVar: "COLUMN_WEBHOOK_SECRET",
+    });
+    if (!auth.ok) return auth.response;
+
     const result = await ingestBaasWebhook(getStore(), parsed.value.value);
     if (!result.ok) {
       return donJsonError(result.status, result.code, result.message);
@@ -42,6 +60,13 @@ export async function POST(request: NextRequest) {
       status: result.idempotent ? 200 : 201,
     });
   }
+
+  const auth = authenticateStandardWebhookBody({
+    rawBody,
+    headers: request.headers,
+    secretEnvVar: "DSP_WEBHOOK_SECRET",
+  });
+  if (!auth.ok) return auth.response;
 
   const result = await ingestDspWebhook(getStore(), parsed.value.value);
   if (!result.ok) {
