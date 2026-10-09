@@ -55,14 +55,20 @@ test('ledger gates the audit view — an anonymous visit redirects to the contra
   // preview included) redirects to /contracts on the vault page's pattern,
   // and no per-holder disbursement detail renders. The audit view itself is
   // covered by the vitest page test with a verified session.
-  await page.goto('/ledger');
-  expect(page.url()).toContain('/contracts');
-  await expect(page.getByRole('heading', { name: 'Master Contract Data' })).toBeVisible();
+  const response = await page.goto('/ledger');
 
-  // Nothing from the audit view leaked into the redirected page.
-  await expect(page.getByLabel('Reconciliation audit')).toHaveCount(0);
-  await expect(page.getByRole('columnheader', { name: 'Transaction' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Run system audit' })).toHaveCount(0);
+  // Next streams the redirect the way it does for /vault: the gate throws
+  // before any ledger data is resolved, so the 200 shell carries the
+  // redirect marker and NO audit-view content; the client router then
+  // completes the navigation to /contracts after hydration.
+  const shell = (await response?.text()) ?? '';
+  expect(shell).not.toContain('reconciliation-totals');
+  expect(shell).not.toContain('Run system audit');
+  expect(shell).not.toContain('aria-label="Reconciliation audit"');
+  expect(shell).not.toContain('columnheader');
+
+  await page.waitForURL(/\/contracts$/);
+  await expect(page.getByRole('heading', { name: 'Master Contract Data' })).toBeVisible();
 });
 
 test('membership plans render as static marketing with no payment rails', async ({ page }) => {
