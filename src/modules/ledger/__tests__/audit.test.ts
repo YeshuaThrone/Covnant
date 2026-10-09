@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "@/lib/server/inMemoryStore";
 import { calculateUdrSplits } from "@/lib/server/udrSplits";
-import { auditLedger, glVaultLiabilityCents, immutableLedgerLog } from "../audit";
+import { auditLedger, glVaultLiabilityCents, immutableLedgerLog, ledgerAuditHealthy } from "../audit";
 import { fboDebit, vaultCredit } from "../journal";
 import { creditVault } from "@/modules/vaults/engine";
 
@@ -102,5 +102,78 @@ describe("auditLedger", () => {
     const legs = [fboDebit(25), vaultCredit("c1", "pending", 25)];
     expect(glVaultLiabilityCents(legs)).toBe(25);
     expect(glVaultLiabilityCents([fboDebit(1)])).toBe(0);
+  });
+});
+
+/**
+ * ledgerAuditHealthy is the verdict the scheduled tamper-evidence check
+ * (GET /api/admin/ledger/audit, F7) keys its 200/503 on. These tests pin
+ * both conjuncts independently: books that reconcile through a broken
+ * chain are NOT healthy, and neither is a valid chain over diverged
+ * books.
+ */
+describe("ledgerAuditHealthy", () => {
+  it("is true when the chain is valid and books reconcile", async () => {
+    const store = new InMemoryStore();
+    expect(await ledgerAuditHealthy(await auditLedger(store))).toBe(true);
+  });
+
+  it("is false when books diverge even with a valid chain", async () => {
+    const store = new InMemoryStore();
+    await creditVault(store, "c1", "Yeshua Throne", 50, "available");
+    const report = await auditLedger(store);
+    expect(report.books_reconcile).toBe(false);
+    expect(report.immutable.valid).toBe(true);
+    expect(ledgerAuditHealthy(report)).toBe(false);
+  });
+
+  it("is false when the hash chain is broken even though books reconcile", async () => {
+    const base = new InMemoryStore();
+    const split = await calculateUdrSplits(base, {
+      source: "spotify",
+      period: "2026-08",
+      currency: "USD",
+      settle: false,
+      rail: "rtp",
+      line_items: [
+        {
+          work_id: "trk_01",
+          work_title: "Midnight On 6th",
+          amount_cents: 10_000,
+          splits: [
+            {
+              payee_id: "c1",
+              payee_name: "Yeshua Throne",
+              role: "creator",
+              share_bps: 7000,
+            },
+            {
+              payee_id: "l1",
+              payee_name: "Throne Records",
+              role: "label",
+              share_bps: 3000,
+            },
+          ],
+        },
+      ],
+    });
+    if (!split.ok) throw new Error("fixture split run must settle");
+
+    // Tamper: recompute-verification must fail on a clobbered entry_hash
+    // while every balance still reconciles.
+    const tamperedJournals = (await base.listGlJournals()).map((journal) => ({
+      ...journal,
+      entry_hash: `0x${"0".repeat(64)}`,
+    }));
+    class TamperedChainStore extends InMemoryStore {
+      override async listGlJournals() {
+        return tamperedJournals;
+      }
+    }
+
+    const report = await auditLedger(new TamperedChainStore());
+    expect(report.immutable.valid).toBe(false);
+    expect(report.books_reconcile).toBe(true);
+    expect(ledgerAuditHealthy(report)).toBe(false);
   });
 });

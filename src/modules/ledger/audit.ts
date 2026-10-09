@@ -53,6 +53,17 @@ export type LedgerAuditReport = {
   variance_cents: number;
 };
 
+/**
+ * The tamper-evidence verdict the scheduled check (GET
+ * /api/admin/ledger/audit, F7) keys its 200/503 on: the books are
+ * trustworthy only when BOTH the hash chain verifies AND the books
+ * reconcile — a valid chain over diverged books is just as alarming as a
+ * reconciled balance sheet with a broken chain.
+ */
+export function ledgerAuditHealthy(report: LedgerAuditReport): boolean {
+  return report.immutable.valid && report.books_reconcile;
+}
+
 function toLegs(
   entries: ReadonlyArray<{
     account: string;
