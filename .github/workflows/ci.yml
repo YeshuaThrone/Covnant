@@ -1190,8 +1190,10 @@ jobs:
             [ -z "$c1" ] || { echo "POISON RE-RUN: the claim handed out a row past the attempts cap: $c1"; return 1; }
             # 2) The poison row went terminal-failed with the budget spent,
             #    completed_at stamped — attempts STAYS 3 (no claim increment).
+            # NOTE: `boolean || text` casts via the type's output function
+            # (true/false), NOT psql's bare-column display (t/f).
             row=$($PSQL -c "select status || '|' || attempts || '|' || (completed_at is not null) from royalty_recon_jobs where source = 'ci_probe' and status = 'failed'")
-            [ "$row" = "failed|3|t" ] || { echo "POISON NOT TERMINAL-FAILED (expected failed|3|t): $row"; return 1; }
+            [ "$row" = "failed|3|true" ] || { echo "POISON NOT TERMINAL-FAILED (expected failed|3|true): $row"; return 1; }
             # 3) The recorded error is the honest cap reason.
             err=$($PSQL -c "select coalesce(error, '<null>') from royalty_recon_jobs where source = 'ci_probe' and status = 'failed'")
             echo "$err" | grep -F 'retry_budget_exhausted' >/dev/null || { echo "CAP ERROR TEXT MISSING: $err"; return 1; }
