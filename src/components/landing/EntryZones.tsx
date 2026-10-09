@@ -27,9 +27,10 @@ import { CheckYourEmail } from '@/components/auth/CheckYourEmail';
 
 /* Field class string — the approved chromeless input across every mirrored
  * zone, and the ONLY input state: fields stay editable before, during, and
- * after a submit attempt. The keyboard focus ring is the audit fix: the
- * champagne focus-visible outline matches the zone's button and consent
- * checkbox. */
+ * after a submit attempt. The focus-visible outline utilities here are
+ * deliberately inert: the chromeless override in globals.css
+ * (form[data-entry-zones]) wins the cascade and keeps the entry fields
+ * ring-free in every focus state — founder directive 2026-10-09. */
 const INPUT_CLASS =
   'h-10 w-64 cursor-text bg-transparent text-center text-lg text-emerald-300 caret-amber-400/70 outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-gold-champagne';
 
@@ -148,7 +149,10 @@ export function EntryZones() {
   ].join(' ');
 
   return (
-    <form className="contents" onSubmit={handleSubmit} noValidate>
+    // data-entry-zones — the style hook scoping the chromeless focus
+    // override in globals.css to this form's six inputs and consent
+    // checkbox.
+    <form className="contents" data-entry-zones onSubmit={handleSubmit} noValidate>
       {/* Stage Name entry in open black space below the URD zone — NOT a new
           zone. The statement keeps the established 32px top gap; the invisible
           input occupies the EXISTING 40px slot between statement and bottom
@@ -278,9 +282,10 @@ export function EntryZones() {
           label carries the EXACT statement treatment (mt-8 font-mono
           text-sm uppercase tracking-[0.3em] text-gold-champagne), keeping
           the 32px gap and mono voice of the statements it joins; the
-          checkbox is the native box — champagne accent-color, focus-visible
-          gold outline matching the Continue pattern, no added chrome —
-          unchecked by default, persisting nothing, NOT part of the payload,
+          checkbox is the native box — champagne accent-color, no added
+          chrome, and ring-free on keyboard focus like the six inputs (the
+          globals.css entry-zone override; the Continue button keeps its
+          ring) — unchecked by default, persisting nothing, NOT part of the payload,
           and the submit flow is NOT gated on it. In the input slot: the
           'Continue' button, a BORDERLESS pressable label — no box, no
           hairline (the label brightens on hover so it reads as pressable;
