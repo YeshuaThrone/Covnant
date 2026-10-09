@@ -327,26 +327,34 @@ export async function openPlaywrightSession(
 ): Promise<DashboardSession> {
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    acceptDownloads: true,
-    // Credentials and cookies never leave the browser process; no disk
-    // persistence, no traces, no HAR.
-  });
-  const page = await context.newPage();
-  const timeout = (options.timeoutSeconds ?? 45) * 1000;
-  page.setDefaultTimeout(timeout);
+  try {
+    const context = await browser.newContext({
+      acceptDownloads: true,
+      // Credentials and cookies never leave the browser process; no disk
+      // persistence, no traces, no HAR.
+    });
+    const page = await context.newPage();
+    const timeout = (options.timeoutSeconds ?? 45) * 1000;
+    page.setDefaultTimeout(timeout);
 
-  const session: DashboardSession = {
-    async goto(url) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
-      return playwrightPage(page, options.baseUrl);
-    },
-    async close() {
-      await context.close();
-      await browser.close();
-    },
-  };
-  return session;
+    const session: DashboardSession = {
+      async goto(url) {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        return playwrightPage(page, options.baseUrl);
+      },
+      async close() {
+        await context.close();
+        await browser.close();
+      },
+    };
+    return session;
+  } catch (error) {
+    // Post-launch setup failed, so the caller never received a session and
+    // its cleanup cannot reach the browser — close it here, then let the
+    // original failure propagate (a failing close must not mask it).
+    await browser.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function playwrightPage(

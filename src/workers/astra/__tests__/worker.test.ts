@@ -20,7 +20,7 @@
  * ever flips connection status) and the vision fallback's fail-closed
  * contract (unset seam → recorded failure; a working engine → recovery).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { encryptCredential } from "@/modules/vault/crypto";
 import { InMemoryStore } from "@/lib/server/inMemoryStore";
@@ -38,7 +38,12 @@ import {
 } from "../profiles";
 import type { AstraAdapterProfile } from "../profiles";
 import type { FixtureCatalog } from "../session";
-import { MissingFixtureError, openFixtureSession, openRecordingFixtureSession } from "../session";
+import {
+  MissingFixtureError,
+  openFixtureSession,
+  openPlaywrightSession,
+  openRecordingFixtureSession,
+} from "../session";
 import { runAstraSweep, traverseConnection, harvestStatementLinks } from "../worker";
 import type { AstraWorkerDeps } from "../worker";
 
@@ -394,5 +399,67 @@ describe("traversal store methods on SqliteStore", () => {
     expect(verified!.last_verified_at).not.toBeNull();
     expect(verified!.last_error).toBeNull();
     expect(verified!.status).toBe("connected");
+  });
+});
+
+// --- C8 regression: a post-launch failure must not leak the browser ----------
+
+/**
+ * The production driver's lazy `await import("playwright")` is the injectable
+ * seam: mocking the module lets these tests drive `openPlaywrightSession`
+ * with no browser install, and forces the failure modes the bug describes —
+ * context creation dying AFTER `chromium.launch` succeeded. Pre-fix, the
+ * rejection propagated with the browser still open (the caller's `session`
+ * stayed null, so its cleanup skipped teardown) and Chromium processes piled
+ * up across sweeps.
+ */
+const pw = vi.hoisted(() => ({
+  /** The browser object the mocked `chromium.launch` hands back; set per test. */
+  browser: undefined as
+    | {
+        close: () => Promise<void>;
+        newContext?: () => Promise<unknown>;
+      }
+    | undefined,
+}));
+
+vi.mock("playwright", () => ({
+  chromium: {
+    launch: async () => pw.browser as unknown as import("playwright").Browser,
+  },
+}));
+
+describe("openPlaywrightSession — post-launch failure cleanup", () => {
+  it("closes the browser when newPage rejects, and propagates the rejection", async () => {
+    const close = vi.fn(async () => undefined);
+    const context = {
+      newPage: async () => {
+        throw new Error("newPage exploded");
+      },
+    };
+    pw.browser = {
+      close,
+      newContext: async () => context,
+    };
+
+    await expect(
+      openPlaywrightSession({ baseUrl: "https://dashboard.example.com" }),
+    ).rejects.toThrow("newPage exploded");
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the browser when newContext rejects, and propagates the rejection", async () => {
+    const close = vi.fn(async () => undefined);
+    pw.browser = {
+      close,
+      newContext: async () => {
+        throw new Error("newContext exploded");
+      },
+    };
+
+    await expect(
+      openPlaywrightSession({ baseUrl: "https://dashboard.example.com" }),
+    ).rejects.toThrow("newContext exploded");
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
