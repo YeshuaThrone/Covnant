@@ -525,6 +525,59 @@ describe('POST /api/covnant/webhooks/increase', () => {
       expect(metadata.returnReason).toBe('consumer_authorized_revocation');
     });
 
+    it('debits an ACH return whose transfer_return lacks transaction_id via the documented fallback key', async () => {
+      const { db, insertCalls, ledgerRows } = ledgerBackedDb({ rightsHolderId: HOLDER_ID });
+      mockGetDb.mockReturnValue(db as never);
+      stubTransferFetch(
+        achTransferObject({
+          status: 'returned',
+          transfer_return: {
+            reason: 'consumer_authorized_revocation',
+            returned_at: '2026-09-08T00:00:00Z',
+          },
+        }),
+      );
+      const res = await POST(
+        signedRequest(eventEnvelope('inbound_ach_transfer.updated', ACH_TRANSFER_ID)),
+      );
+      expect(res.status).toBe(200);
+      const inserts = insertCalls();
+      expect(inserts).toHaveLength(1);
+      const params = inserts[0].params as unknown[];
+      expect(params[1]).toBe('-1500000');
+      expect(params[2]).toBe('ROYALTY_INBOUND_RETURN');
+      expect(params[3]).toBe(`inbound_ach_transfer_returned:${ACH_TRANSFER_ID}`);
+      const metadata = JSON.parse(String(params[4])) as Record<string, unknown>;
+      expect(metadata.returnReason).toBe('consumer_authorized_revocation');
+      expect(metadata.returnTransactionId).toBeUndefined();
+      expect(ledgerRows).toHaveLength(1);
+    });
+
+    it('treats a replay of an ACH return lacking transfer_return.transaction_id as 200 without a second row', async () => {
+      const { db, insertCalls, ledgerRows } = ledgerBackedDb({
+        rightsHolderId: HOLDER_ID,
+        insertError: uniqueViolation(),
+      });
+      mockGetDb.mockReturnValue(db as never);
+      stubTransferFetch(
+        achTransferObject({
+          status: 'returned',
+          transfer_return: {
+            reason: 'consumer_authorized_revocation',
+            returned_at: '2026-09-08T00:00:00Z',
+          },
+        }),
+      );
+      const res = await POST(
+        signedRequest(eventEnvelope('inbound_ach_transfer.updated', ACH_TRANSFER_ID)),
+      );
+      expect(res.status).toBe(200);
+      const bodyJson = (await res.json()) as { ok: boolean; deduplicated: boolean };
+      expect(bodyJson).toEqual({ ok: true, deduplicated: true });
+      expect(insertCalls()).toHaveLength(1);
+      expect(ledgerRows).toHaveLength(0);
+    });
+
     it('debits an ACH decline against the transfer id', async () => {
       const { db, insertCalls } = ledgerBackedDb({ rightsHolderId: HOLDER_ID });
       mockGetDb.mockReturnValue(db as never);
