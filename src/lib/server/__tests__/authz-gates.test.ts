@@ -59,6 +59,12 @@ import { POST as exchangePost } from '@/app/api/plaid/exchange-token/route';
 import { POST as provisionPost } from '@/app/api/covnant/accounts/provision/route';
 import { GET as ledgerGet } from '@/app/api/ledger/route';
 import { POST as claimsPost } from '@/app/api/webhooks/claims/route';
+import { POST as contractsExecutePost } from '@/app/api/v1/contracts/execute/route';
+import { POST as worksPost } from '@/app/api/v1/works/route';
+import { POST as sweeperPost } from '@/app/api/v1/sweeper/route';
+import { POST as sweeperAsyncPost } from '@/app/api/v1/sweeper/async/route';
+import { POST as sweeperLuminatePost } from '@/app/api/v1/sweeper/luminate/route';
+import { GET as metricsGet } from '@/app/api/metrics/route';
 
 /** The mocked resolver answers the creator-session seam with these shapes. */
 const CREATOR_A = {
@@ -162,6 +168,7 @@ const ENV_KEYS = [
   'INCREASE_API_KEY',
   'INCREASE_SOURCE_ACCOUNT_ID',
   'BAAS_MODE',
+  'METRICS_BEARER_TOKEN',
 ] as const;
 
 let savedEnv: Record<string, string | undefined>;
@@ -511,5 +518,102 @@ describe('POST /api/webhooks/claims — shared secret, fail closed', () => {
       last = response.status;
     }
     expect(last).toBe(429);
+  });
+});
+
+describe('registered-or-operator gates on the remaining /api/v1 writes (bug hunt F1)', () => {
+  // The five writes the bug hunt found answering visitors. The anonymous
+  // case pins 401 BEFORE any body parse or store write; the registered
+  // case proves pass-through the battery's way — the verdict the route
+  // returns is its OWN (success or domain validation), never a gate
+  // verdict. GET reads on these surfaces stay public, untouched here.
+  const registeredGated: Array<[string, (r: NextRequest) => Promise<Response>]> = [
+    ['/api/v1/contracts/execute', (r) => contractsExecutePost(r)],
+    ['/api/v1/works', (r) => worksPost(r)],
+    ['/api/v1/sweeper', (r) => sweeperPost(r)],
+    ['/api/v1/sweeper/async', (r) => sweeperAsyncPost(r)],
+    ['/api/v1/sweeper/luminate', (r) => sweeperLuminatePost(r)],
+  ];
+
+  for (const [path, handler] of registeredGated) {
+    it(`${path} POST — anonymous caller gets 401`, async () => {
+      anonymous();
+      const response = await handler(post(path, {}));
+      expect(response.status).toBe(401);
+    });
+
+    it(`${path} POST — a registered creator passes the gate to the route's own verdict`, async () => {
+      creatorA();
+      const response = await handler(post(path, {}));
+      expect(response.status).not.toBe(401);
+      expect(response.status).not.toBe(403);
+    });
+  }
+
+  it('POST /api/v1/contracts/execute — anonymous 401 rides the jsonError envelope (reason)', async () => {
+    anonymous();
+    const response = await contractsExecutePost(post('/api/v1/contracts/execute', {}));
+    expect(response.status).toBe(401);
+    expect((await bodyOf(response)).reason).toBe('no_session');
+  });
+
+  it('POST /api/v1/works — anonymous 401 rides the Don envelope (code)', async () => {
+    anonymous();
+    const response = await worksPost(post('/api/v1/works', {}));
+    expect(response.status).toBe(401);
+    expect((await bodyOf(response)).code).toBe('no_session');
+  });
+
+  it('POST /api/v1/contracts/execute — a registered creator mints into the master ledger (201)', async () => {
+    creatorA();
+    // The proven allowed pair from the lane canon tests (same-sector
+    // TPL-MUS-001 binding; the FASHION_RUNWAY alias pair is deliberately
+    // guard-blocked and belongs to the fail-closed tests).
+    const response = await contractsExecutePost(
+      post('/api/v1/contracts/execute', {
+        templateKey: 'TPL-MUS-001',
+        cbt: 'CBT-TRK-A51DF05B4279',
+      }),
+    );
+    expect(response.status).toBe(201);
+    const body = await bodyOf(response);
+    expect(body.ok).toBe(true);
+    expect(typeof body.ledgerId).toBe('string');
+  });
+
+  it('POST /api/v1/sweeper/luminate — a registered creator passes to the route validation (400, not a gate verdict)', async () => {
+    creatorA();
+    const response = await sweeperLuminatePost(post('/api/v1/sweeper/luminate', {}));
+    expect(response.status).toBe(400);
+    // Luminate's own parser (not parseCwrDsrRequest) names this verdict.
+    expect((await bodyOf(response)).code).toBe('malformed_body');
+  });
+});
+
+describe('GET /api/metrics — bearer-gated register (bug hunt N2)', () => {
+  it('401 when METRICS_BEARER_TOKEN is unset — fail closed', async () => {
+    const response = await metricsGet(get('/api/metrics'));
+    expect(response.status).toBe(401);
+    expect((await bodyOf(response)).reason).toBe('metrics_unauthorized');
+  });
+
+  it('401 with a mismatched bearer token', async () => {
+    process.env.METRICS_BEARER_TOKEN = 'metrics_right_token';
+    const response = await metricsGet(get('/api/metrics', { authorization: 'Bearer metrics_wrong_token' }));
+    expect(response.status).toBe(401);
+  });
+
+  it('401 when the Authorization header is not a bearer credential', async () => {
+    process.env.METRICS_BEARER_TOKEN = 'metrics_right_token';
+    const response = await metricsGet(get('/api/metrics', { authorization: 'metrics_right_token' }));
+    expect(response.status).toBe(401);
+  });
+
+  it('200 with the correct bearer token — the register serves', async () => {
+    process.env.METRICS_BEARER_TOKEN = 'metrics_right_token';
+    const response = await metricsGet(get('/api/metrics', { authorization: 'Bearer metrics_right_token' }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(await response.text()).toContain('identifier_ingestion_total');
   });
 });

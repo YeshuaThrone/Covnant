@@ -22,17 +22,22 @@
  *     (entity_guard_failed) — unreachable while the store's integrity
  *     gates hold.
  *
- * AUTH: this door serves the same store-engine data the /contracts/new
- * page renders (workspace shell, session-gated) and the /templates page
- * already reads publicly — the POST is that page's own execution action.
- * It is not an /api/admin surface, so the J1 preview carve-out
- * (verifyAdminSession's DON_DEV_SEED passwordless branch) is not involved.
- * POST is rate limited like the other engine-write doors.
+ * AUTH: the GET stays a public read (the /templates page already reads
+ * these payloads publicly). The POST is GATED (bug hunt F1): minting an
+ * execution record into the master clearing ledger requires a registered
+ * creator session or the signed operator cookie — requireRegisteredOrOperator,
+ * the same verdict the /api/ledger read answers. The gate runs after the
+ * rate limiter and before the body is read: an anonymous caller never
+ * reaches binding validation, minting, or the ledger. It is not an
+ * /api/admin surface, so the J1 preview carve-out (verifyAdminSession's
+ * DON_DEV_SEED passwordless branch) is not involved. POST remains rate
+ * limited like the other engine-write doors.
  */
 
 import type { NextRequest } from 'next/server';
 
 import { jsonError } from '@/lib/server/http';
+import { requireRegisteredOrOperator } from '@/lib/server/apiAccess';
 import { checkRateLimit, DON_API_RATE_LIMIT } from '@/lib/server/rateLimit';
 import { clientIdentity } from '@/modules/don/http';
 import { EXECUTION_LANE_ROUTE_MANIFEST, mintExecutionLane, resolveExecutionLane } from '@/lib/master/executionLane';
@@ -94,6 +99,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   const limit = checkRateLimit(identity, DON_API_RATE_LIMIT);
   if (!limit.ok) {
     return jsonError(429, 'rate_limited', `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`);
+  }
+
+  // GATED (bug hunt F1): a registered creator session or the operator —
+  // never a visitor. The gate answers before the body is read and before
+  // minting can land anything in the master clearing ledger.
+  const access = await requireRegisteredOrOperator(request);
+  if (!access.ok) {
+    return jsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;

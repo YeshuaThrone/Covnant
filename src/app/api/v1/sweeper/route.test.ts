@@ -4,14 +4,34 @@
 // D3 gate: the queue-drain → query_audit_proof round trip — the routes and
 // the default MCP host share the module-singleton registry in one process,
 // so a 202 drained sweep must be visible to the registry-only MCP tool.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimits } from "@/lib/server/rateLimit";
 import { resetCovenantRegistry } from "@/lib/server/covenantRegistry";
+import { resolveSessionCreator } from "@/lib/server/sessionCreator";
 import { EmeraldValMcpToolHost } from "@/mcp/host";
 import { POST as postWork } from "../works/route";
 import { POST as postSweep } from "./route";
 import { POST as postSweepAsync } from "./async/route";
 import { POST as postLuminate } from "./luminate/route";
+
+// Bug hunt F1: these POSTs are gated behind requireRegisteredOrOperator.
+// The D3-port behavior tests present a registered creator session through
+// the standard mock seam — the gate verdicts themselves live in the authz
+// battery (src/lib/server/__tests__/authz-gates.test.ts).
+vi.mock("@/lib/server/sessionCreator", () => ({
+  resolveSessionCreator: vi.fn(),
+}));
+
+const REGISTERED = {
+  kind: "registered" as const,
+  creator: {
+    payee_id: "rh_sandbox",
+    stage_name: "Sandbox Creator",
+    kyc_status: "APPROVED",
+    bank_account_linked: true,
+    provisioning_status: "PROVISIONED" as const,
+  },
+};
 
 const WORK = {
   workId: "WORK_CHAMPION_001",
@@ -51,6 +71,7 @@ function postRequest(url: string, body: unknown): Request {
 beforeEach(() => {
   resetRateLimits();
   resetCovenantRegistry();
+  vi.mocked(resolveSessionCreator).mockResolvedValue(REGISTERED);
 });
 
 describe("Covenant sweeper HTTP mounts", () => {

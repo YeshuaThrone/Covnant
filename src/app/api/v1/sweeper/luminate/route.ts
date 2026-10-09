@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sweepLuminate } from "@/covenant-sdk/routes/luminate";
 import { donJsonError } from "@/lib/server/http";
+import { requireRegisteredOrOperator } from "@/lib/server/apiAccess";
 import { checkRateLimit, DON_API_RATE_LIMIT } from "@/lib/server/rateLimit";
 import { clientIdentity } from "@/modules/don/http";
 
@@ -11,8 +12,12 @@ import { clientIdentity } from "@/modules/don/http";
  * Thin Next.js wrapper over the D1 `covenant-sdk/routes/luminate` logic —
  * the Express-paste composition vendored from EmeraldVal PR #41, re-keyed
  * to Covnant's house HTTP helpers: donJsonError failures ({error, code}
- * envelope), the shared 30/min/IP Don rate limiter, no auth (matching
- * today's unauthenticated /api/v1 surface). The normalizer is a sandbox
+ * envelope) and the shared 30/min/IP Don rate limiter.
+ *
+ * AUTH (bug hunt F1, owner default: gate rather than public-ingest): the
+ * POST is GATED behind requireRegisteredOrOperator — a registered creator
+ * session or the signed operator cookie — answering before the body is
+ * read or any sweep runs. The normalizer is a sandbox
  * fixture: it never calls live Luminate HTTP.
  */
 
@@ -24,6 +29,14 @@ export async function POST(request: NextRequest) {
       "rate_limited",
       `Rate limit exceeded. Retry after ${limit.retryAfterSeconds}s.`,
     );
+  }
+
+  // GATED (bug hunt F1): a registered creator session or the operator —
+  // never a visitor. The gate answers before the body is read and before
+  // any sweep runs.
+  const access = await requireRegisteredOrOperator(request);
+  if (!access.ok) {
+    return donJsonError(access.status, access.code, access.message);
   }
 
   let body: unknown;
