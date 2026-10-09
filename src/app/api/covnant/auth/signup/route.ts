@@ -70,10 +70,10 @@
  * documented Supabase credentials and Increase keys). The former "no
  * Supabase auth-user machinery" guard is retired — this endpoint OWNS auth
  * now (its referenced owner /api/users/register no longer exists). Rate
- * limiting is the drop's per-IP in-memory limiter AFTER validation
- * (src/lib/server/rateLimit.ts — per-isolate memory: bypassable and
- * cold-start-reset on serverless; production hardening needs an external
- * store).
+ * limiting runs AFTER validation through the shared limiter
+ * (src/lib/server/rateLimit.ts — Postgres-backed when DATABASE_URL is set
+ * so the window is shared across serverless isolates; the in-memory window
+ * is the fallback).
  *
  * UCT (Universal Covnant Tag — the creator-root identity; the canonical
  * Generation 8 expansion of "the universal root identity that follows the
@@ -118,7 +118,7 @@ import {
   registerCovnantCreator,
 } from '@/lib/covnant/covnantSignup';
 import { jsonError } from '@/lib/server/http';
-import { checkRateLimit, REGISTER_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { checkSharedRateLimit, REGISTER_RATE_LIMIT } from '@/lib/server/rateLimit';
 import {
   createAdminClient,
   createAuthClient,
@@ -438,14 +438,15 @@ export async function POST(request: Request): Promise<Response> {
     jurisdiction = normalized;
   }
 
-  // Per-IP in-memory rate limit (drop's limiter — see the serverless
-  // caveat in src/lib/server/rateLimit.ts). Runs after validation so a
-  // malformed body never burns the bucket.
+  // Per-IP rate limit through the shared limiter (Postgres-backed when
+  // DATABASE_URL is set, the in-memory window as the fallback — see the
+  // serverless caveat in src/lib/server/rateLimit.ts). Runs after
+  // validation so a malformed body never burns the bucket.
   const clientIp =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
     request.headers.get('x-real-ip') ??
     'unknown';
-  const verdict = checkRateLimit(`covnant-signup:${clientIp}`, REGISTER_RATE_LIMIT);
+  const verdict = await checkSharedRateLimit(`covnant-signup:${clientIp}`, REGISTER_RATE_LIMIT);
   if (!verdict.ok) {
     return jsonError(429, 'rate_limited', 'Too many registrations from this address. Try again later.');
   }

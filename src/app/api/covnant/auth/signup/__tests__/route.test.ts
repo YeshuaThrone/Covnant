@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../route";
 import { getDb } from "@/lib/db";
-import { REGISTER_RATE_LIMIT, resetRateLimits } from "@/lib/server/rateLimit";
+import { REGISTER_RATE_LIMIT, checkSharedRateLimit, resetRateLimits } from "@/lib/server/rateLimit";
 
 /**
  * POST /api/covnant/auth/signup contract tests (instant sign-up, the
@@ -197,7 +197,33 @@ function fakeDb(
     return { rows: [] };
   });
   const tx = { query: txQuery };
-  const dbQuery = vi.fn(async (sql: string) => {
+  // The shared (Postgres-backed) rate limiter's three statements (bug-hunt
+  // C9): the route's limiter call runs against this fake in store-backed
+  // mode, so the fake honors the same fixed-window upsert the real store
+  // does — DDL idempotent, ONE upsert RETURNING the post-write count, and
+  // the sweep DELETE. BIGINT comes back as a string, as pg hands it over.
+  const rateBuckets = new Map<string, { window_start_ms: number; hit_count: number }>();
+  const dbQuery = vi.fn(async (sql: string, params?: unknown[]) => {
+    if (sql.includes("CREATE TABLE IF NOT EXISTS rate_limit_buckets")) {
+      return { rows: [] };
+    }
+    if (sql.includes("INSERT INTO rate_limit_buckets")) {
+      const [key, nowMs, windowMs] = params as [string, number, number];
+      const existing = rateBuckets.get(key);
+      const row =
+        existing === undefined || existing.window_start_ms + (windowMs ?? 0) <= (nowMs ?? 0)
+          ? { window_start_ms: nowMs ?? 0, hit_count: 1 }
+          : { window_start_ms: existing.window_start_ms, hit_count: existing.hit_count + 1 };
+      rateBuckets.set(key, row);
+      return {
+        rows: [
+          { hit_count: row.hit_count, window_start_ms: String(row.window_start_ms) },
+        ],
+      };
+    }
+    if (sql.includes("DELETE FROM rate_limit_buckets")) {
+      return { rows: [] };
+    }
     if (sql.includes("cbt_code = $1") && !sql.includes("FOR UPDATE")) {
       return registry
         ? {
@@ -261,10 +287,13 @@ function increaseAccountNumberResponse(
   );
 }
 
-function signupRequest(body: unknown): Request {
+function signupRequest(body: unknown, identity?: string): Request {
   return new Request("http://localhost/api/covnant/auth/signup", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(identity ? { "x-forwarded-for": identity } : {}),
+    },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -868,7 +897,7 @@ describe("POST /api/covnant/auth/signup", () => {
     });
   });
 
-  describe("rate limiting (in-memory, per-IP)", () => {
+  describe("rate limiting (per-IP)", () => {
     it("returns 429 rate_limited after REGISTER_RATE_LIMIT requests from one address", async () => {
       vi.stubEnv("INCREASE_API_KEY", "");
       const { db, getRegistry } = fakeDb();
@@ -895,6 +924,40 @@ describe("POST /api/covnant/auth/signup", () => {
       expect(getRegistry()?.rights_holders).toHaveLength(
         REGISTER_RATE_LIMIT.limit,
       );
+    });
+
+    it("enforces the SHARED budget across isolates — a cold isolate's in-memory map cannot resurrect it", async () => {
+      vi.stubEnv("INCREASE_API_KEY", "");
+      const { db } = fakeDb();
+      mockGetDb.mockReturnValue(db as never);
+      // Isolate A: the address's budget is spent straight through the
+      // shared store; the in-memory limiter never sees a request.
+      for (let i = 0; i < REGISTER_RATE_LIMIT.limit; i += 1) {
+        expect(
+          (
+            await checkSharedRateLimit(
+              "covnant-signup:203.0.113.9",
+              REGISTER_RATE_LIMIT,
+            )
+          ).ok,
+        ).toBe(true);
+      }
+      // Isolate B: a fresh isolate (cold in-memory map) serves the request.
+      resetRateLimits();
+      const blocked = await POST(
+        signupRequest(
+          fullPayload({ email: "cross-isolate@example.com" }),
+          "203.0.113.9",
+        ),
+      );
+      expect(blocked.status).toBe(429);
+      const bodyJson = (await blocked.json()) as {
+        ok: boolean;
+        reason?: string;
+      };
+      expect(bodyJson).toMatchObject({ ok: false, reason: "rate_limited" });
+      // The shared verdict fired before auth — no account attempted.
+      expect(supabaseMock.signUp).not.toHaveBeenCalled();
     });
   });
 

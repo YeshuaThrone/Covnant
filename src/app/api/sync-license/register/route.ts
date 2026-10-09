@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonError } from '@/lib/server/http';
-import { checkRateLimit, DON_API_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { checkSharedRateLimit, DON_API_RATE_LIMIT } from '@/lib/server/rateLimit';
 import { clientIdentity } from '@/modules/don/http';
 import { resolveSessionCreator } from '@/lib/server/sessionCreator';
 import { getStore } from '@/lib/server/store';
@@ -48,7 +48,10 @@ async function readAssetSheet(cbtCode: string): Promise<AssetSheetRead> {
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const verdict = checkRateLimit(clientIdentity(request), DON_API_RATE_LIMIT);
+  // The shared (Postgres-backed when DATABASE_URL is set) limiter keeps
+  // this surface's brute-force budget durable across serverless isolates;
+  // the limit stays the Don surface's 30/min — reused, not stacked.
+  const verdict = await checkSharedRateLimit(clientIdentity(request), DON_API_RATE_LIMIT);
   if (!verdict.ok) return jsonError(429, 'rate_limited', 'Too many requests — slow down.');
 
   const session = await resolveSessionCreator();
