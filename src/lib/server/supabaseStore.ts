@@ -370,6 +370,10 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type {
+  ClearanceListOptions,
+  ClearanceListPage,
+} from '../../../covnant-sdk/src/mul/clearance';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   SDK_SETTLEMENT_TRANSACTION_TYPE,
@@ -846,6 +850,12 @@ function isRegistryHolderUctEntry(value: unknown): value is RegistryHolderUctEnt
 type DbResult = PromiseLike<{
   data: unknown;
   error: { message: string; code: string } | null;
+  /**
+   * The exact COUNT over the filtered set, present when the select asks
+   * `count: 'exact'` (supabase-js parses it from the response's
+   * Content-Range header). Absent/null on plain selects.
+   */
+  count?: number | null;
 }>;
 
 /** The apply_vault_delta() outcome envelope (migration 0009, H1 guard). */
@@ -875,6 +885,23 @@ export class SupabaseStore implements Store {
     }
     const rows = (data ?? []) as Record<string, unknown>[];
     return rows.map((row) => toRecord<T>(row));
+  }
+
+  /**
+   * Multi-row read with the exact count over the FILTERED set — the page
+   * helper behind listClearances' registry pagination (`total` is the
+   * pre-window denominator, not the page's length).
+   */
+  private async page<T>(
+    result: DbResult,
+    context: string,
+  ): Promise<{ rows: T[]; total: number }> {
+    const { data, error, count } = await result;
+    if (error !== null) {
+      throw new Error(`${context}: ${error.message} (code ${error.code})`);
+    }
+    const rows = ((data ?? []) as Record<string, unknown>[]).map((row) => toRecord<T>(row));
+    return { rows, total: count ?? rows.length };
   }
 
   /** Insert/upsert read: throws when the DB returns no row. */
@@ -7725,6 +7752,28 @@ export class SupabaseStore implements Store {
         .order('insertion_order', { ascending: true }),
       'listClearanceTransitions',
     );
+  }
+
+  async listClearances(options: ClearanceListOptions = {}): Promise<ClearanceListPage> {
+    // One round-trip: count=exact puts the filtered-set total on the same
+    // response as the page's rows (supabase-js parses it off Content-Range).
+    const base = this.client.from(TABLES.mulClearances).select('*', { count: 'exact' });
+    const filtered = options.state === undefined ? base : base.eq('state', options.state);
+    // Newest-update-first. A real Postgres leaves equal stamps unordered —
+    // the backends that can pin the tie (in-memory, SQLite) pin it to
+    // newest-inserted-first; the parity fake keeps the same face for the
+    // distinct-stamp case the parity test pins.
+    const ordered = filtered.order('updated_at', { ascending: false });
+    const offset = options.offset ?? 0;
+    const windowed =
+      options.limit === undefined && offset === 0
+        ? ordered
+        : ordered.range(
+            offset,
+            options.limit === undefined ? Number.MAX_SAFE_INTEGER : offset + options.limit - 1,
+          );
+    const { rows, total } = await this.page<MulClearanceRecord>(windowed, 'listClearances');
+    return { clearances: rows, total };
   }
 
   async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {

@@ -347,6 +347,12 @@ import type {
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
+// The MUL registry's read vocabulary — the SDK's own seam types. Type-only:
+// no runtime graph crosses into the SDK here.
+import type {
+  ClearanceListOptions,
+  ClearanceListPage,
+} from '../../../covnant-sdk/src/mul/clearance';
 import type {
   ReconJobInput,
   ReconJobResult,
@@ -2412,6 +2418,17 @@ export interface Store {
     row: Omit<MulClearanceTransitionRecord, 'id'>,
   ): Promise<MulClearanceTransitionRecord>;
   listClearanceTransitions(assetCbtCode: string): Promise<MulClearanceTransitionRecord[]>;
+
+  /**
+   * Lists current clearances newest-update-first, optionally filtered to one
+   * state and windowed; `total` counts the filtered set before the window —
+   * the MUL registry's pagination math. A read only: every mutation still
+   * rides the SDK's transitionClearance. Vocabulary note: the returned rows
+   * keep the store's narrow MulClearanceState TS union (the seam note in
+   * covnant-sdk/src/mul/clearance.ts) while the column and the state filter
+   * carry all five canonical states at runtime.
+   */
+  listClearances(options?: ClearanceListOptions): Promise<ClearanceListPage>;
 
   /** Quarantines one event verbatim; rejects on a replayed event_id. */
   insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord>;

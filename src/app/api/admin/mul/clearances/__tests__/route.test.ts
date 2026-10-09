@@ -5,8 +5,10 @@ import { setStore } from '@/lib/server/store';
 import { GET, POST } from '../route';
 
 /**
- * POST/GET /api/admin/mul/clearances — the MUL admin surface (API-only in
- * v1 per spec open item #4). Contract: admin-gated (fail-closed 503 on unset
+ * POST/GET /api/admin/mul/clearances — the MUL admin surface. Its /mul
+ * registry page (build spec open item #4, now closed) renders from the
+ * param-less GET and mutates through POST; the route stays the ONLY
+ * mutation path. Contract: admin-gated (fail-closed 503 on unset
  * secret, 401 on absent/invalid cookie), rate limited after validation,
  * store_not_configured 503 before any query, and every SDK typed refusal
  * mapped to its wire status — illegal machine edges 409, invalid fields 422
@@ -259,8 +261,8 @@ describe('GET /api/admin/mul/clearances — reads and audit history', () => {
     expect(await response.json()).toEqual({ ok: true, found: false });
   });
 
-  it('answers 400 when asset_cbt_code is missing', async () => {
-    const response = await GET(getRequest('', authedCookie()));
+  it('answers 400 when asset_cbt_code is present but empty — malformed, not absent', async () => {
+    const response = await GET(getRequest('?asset_cbt_code=', authedCookie()));
     expect(response.status).toBe(400);
   });
 
@@ -290,6 +292,111 @@ describe('GET /api/admin/mul/clearances — reads and audit history', () => {
   it('enforces the admin gate on reads too', async () => {
     const response = await GET(getRequest(`?asset_cbt_code=${ASSET}`));
     expect(response.status).toBe(401);
+  });
+});
+
+describe('GET /api/admin/mul/clearances — the registry list (no asset filter)', () => {
+  it('lists every clearance newest-update-first with machine-mapped fields and the unpaginated total', async () => {
+    // Walk the machine the legal way so the rows are real, not planted.
+    for (const to of ['draft', 'requested'] as const) {
+      await POST(postRequest({ assetCbtCode: ASSET, to }, authedCookie()));
+    }
+    await POST(postRequest({ assetCbtCode: 'CBT-REC-0123456789AB', to: 'draft' }, authedCookie()));
+
+    const response = await GET(getRequest('', authedCookie()));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(true);
+    expect(body.total).toBe(2);
+    // Newest-update-first: the last-walked asset leads.
+    expect(body.clearances[0]).toMatchObject({
+      assetCbtCode: 'CBT-REC-0123456789AB',
+      state: 'draft',
+      licensee: null,
+      territory: null,
+      termStart: null,
+      termEnd: null,
+    });
+    expect(body.clearances[1]).toMatchObject({ assetCbtCode: ASSET, state: 'requested' });
+  });
+
+  it('filters by state and counts the FILTERED set, windowing with limit/offset', async () => {
+    // ASSET walks on to requested; the other two stay in draft — two drafts,
+    // one requested.
+    await POST(postRequest({ assetCbtCode: ASSET, to: 'draft' }, authedCookie()));
+    await POST(postRequest({ assetCbtCode: ASSET, to: 'requested' }, authedCookie()));
+    await POST(
+      postRequest({ assetCbtCode: 'CBT-REC-0123456789AB', to: 'draft' }, authedCookie()),
+    );
+    await POST(
+      postRequest({ assetCbtCode: 'CBT-TRK-0123456789AB', to: 'draft' }, authedCookie()),
+    );
+
+    const requested = await GET(getRequest('?state=requested', authedCookie()));
+    const requestedBody = await requested.json();
+    expect(requestedBody.total).toBe(1);
+    expect(requestedBody.clearances).toHaveLength(1);
+    expect(requestedBody.clearances[0]).toMatchObject({ assetCbtCode: ASSET, state: 'requested' });
+
+    // A window of one still reports the filtered total of 2.
+    const drafts = await GET(getRequest('?state=draft&limit=1&offset=1', authedCookie()));
+    const draftsBody = await drafts.json();
+    expect(draftsBody.total).toBe(2);
+    expect(draftsBody.clearances).toHaveLength(1);
+    // Offset 1 skips the newest draft (TRK, walked last).
+    expect(draftsBody.clearances[0]).toMatchObject({
+      assetCbtCode: 'CBT-REC-0123456789AB',
+      state: 'draft',
+    });
+  });
+
+  it('maps invalid list params to the wire discipline: 422 state, 400 limit, 400 offset', async () => {
+    const badState = await GET(getRequest('?state=granted', authedCookie()));
+    expect(badState.status).toBe(422);
+    expect(await badState.json()).toMatchObject({ ok: false, reason: 'invalid_state' });
+
+    for (const limit of ['0', '201', 'abc', '2.5', '']) {
+      const badLimit = await GET(getRequest(`?limit=${limit}`, authedCookie()));
+      expect(badLimit.status).toBe(400);
+      expect(await badLimit.json()).toMatchObject({ ok: false, reason: 'invalid_limit' });
+    }
+
+    for (const offset of ['-1', 'abc']) {
+      const badOffset = await GET(getRequest(`?offset=${offset}`, authedCookie()));
+      expect(badOffset.status).toBe(400);
+      expect(await badOffset.json()).toMatchObject({ ok: false, reason: 'invalid_offset' });
+    }
+  });
+
+  it('enforces the admin gate on the registry list (401 absent cookie, 503 unset secret)', async () => {
+    const noCookie = await GET(getRequest(''));
+    expect(noCookie.status).toBe(401);
+
+    // Mint before the secret disappears — minting is what fails without it.
+    const cookie = authedCookie();
+    delete process.env.ADMIN_DASHBOARD_PASSWORD;
+    const unsetSecret = await GET(getRequest('', cookie));
+    expect(unsetSecret.status).toBe(503);
+    expect(await unsetSecret.json()).toMatchObject({ ok: false, reason: 'admin_not_configured' });
+  });
+
+  it('answers 503 store_not_configured before any query when the store is unset', async () => {
+    setStore(null);
+    const response = await GET(getRequest('', authedCookie()));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, reason: 'store_not_configured' });
+  });
+
+  it('rate limits the registry list in the same bucket, after validation', async () => {
+    rateMock.checkRateLimit.mockReturnValue({ ok: false, retryAfterSeconds: 7 });
+    const response = await GET(getRequest('', authedCookie()));
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('7');
+    // Validation first: a malformed limit never reaches the bucket.
+    rateMock.checkRateLimit.mockClear();
+    const malformed = await GET(getRequest('?limit=0', authedCookie()));
+    expect(malformed.status).toBe(400);
+    expect(rateMock.checkRateLimit).not.toHaveBeenCalled();
   });
 });
 

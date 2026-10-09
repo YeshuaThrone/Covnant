@@ -1,102 +1,19 @@
-import { spawn } from 'node:child_process';
-import net from 'node:net';
-import { expect, test } from '@playwright/test';
-
 /**
  * Admin console e2e — the gate, the seven gated sections, and the two real
  * mutations (compliance edit, allowlist flip) flowing to the action log.
  *
  * The compliance-edit flow runs against an ISOLATED server on a private
- * port with SUPABASE_URL pointed at e2e/helpers/postgrest-stub.mjs: the
+ * port with SUPABASE_URL pointed at e2e/helpers/postgrest-stub.mjs (see
+ * e2e/helpers/isolated-server.mjs, shared with mul-registry.spec.ts): the
  * gate, routes, validation, and audit logic all run for real — only the
  * PostgREST boundary is stubbed (CI/sandbox has no database). The shared
  * webServer from playwright.config.ts keeps its env untouched so every
  * other spec's Supabase-less behavior is unchanged.
  */
 
-const ADMIN_E2E_PASSWORD = process.env.ADMIN_DASHBOARD_PASSWORD ?? 'e2e-admin-test-password';
+import { expect, test } from '@playwright/test';
+import { ADMIN_E2E_PASSWORD, startIsolatedServer } from './helpers/isolated-server.mjs';
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => resolve(port));
-    });
-  });
-}
-
-interface IsolatedServer {
-  baseUrl: string;
-  stubPort: number;
-  close: () => Promise<void>;
-}
-
-async function startIsolatedServer(): Promise<IsolatedServer> {
-  const appPort = await freePort();
-  const stubPort = await freePort();
-
-  const stub = spawn('node', ['./e2e/helpers/postgrest-stub.mjs'], {
-    env: { ...process.env, PORT: String(stubPort) },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Group leaders: teardown below signals the whole process group, because
-    // `npx next start` re-execs into a detached next-server grandchild that
-    // survives a plain parent kill — leaked servers then starve later boots.
-    detached: true,
-  });
-
-  const app = spawn('npx', ['next', 'start', '-p', String(appPort)], {
-    env: {
-      ...process.env,
-      NEXT_PUBLIC_SUPABASE_URL: `http://127.0.0.1:${stubPort}`,
-      SUPABASE_SERVICE_ROLE_KEY: 'e2e-stub-service-role-key',
-      ADMIN_DASHBOARD_PASSWORD: ADMIN_E2E_PASSWORD,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,
-  });
-
-  const bootLog: string[] = [];
-  app.stdout?.on('data', (chunk: Buffer) => bootLog.push(chunk.toString()));
-  app.stderr?.on('data', (chunk: Buffer) => bootLog.push(chunk.toString()));
-
-  try {
-    await expect
-      .poll(async () => {
-        try {
-          const response = await fetch(`http://127.0.0.1:${appPort}/admin`);
-          return response.status;
-        } catch {
-          return 0;
-        }
-      }, { timeout: 30_000, intervals: [500] })
-      .toBe(200);
-  } catch (error) {
-    // The app never came up — surface the child's own boot output and exit
-    // code so the failure names itself instead of timing out blind.
-    throw new Error(
-      `isolated admin server on :${appPort} never became ready (exit ${app.exitCode}): ${bootLog.join('')}`,
-      { cause: error },
-    );
-  }
-
-  return {
-    baseUrl: `http://127.0.0.1:${appPort}`,
-    stubPort,
-    close: async () => {
-      const stopped = new Promise<void>((resolve) => {
-        app.once('exit', () => resolve());
-        stub.once('exit', () => resolve());
-      });
-      // Negative-PID signals hit the whole process group — the only way the
-      // detached next-server grandchild actually dies with its wrapper.
-      if (app.pid) process.kill(-app.pid, 'SIGTERM');
-      if (stub.pid) process.kill(-stub.pid, 'SIGTERM');
-      await stopped;
-    },
-  };
-}
 
 /**
  * The shared webServer runs the seeded preview, where the founder's J1

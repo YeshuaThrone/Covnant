@@ -113,12 +113,16 @@ class FakeTable {
 interface FakeResult {
   data: unknown;
   error: FakeDbError | null;
+  /** The exact filtered-set count when the select asked count=exact. */
+  count?: number | null;
 }
 
 class FakeQueryBuilder {
   private filters: Array<[string, unknown]> = [];
   private orders: Array<[string, boolean]> = [];
   private limitCount: number | null = null;
+  private rangeSpec: { from: number; to: number } | null = null;
+  private countExact = false;
   private single = false;
   private operation:
     | { kind: 'insert'; row: Row }
@@ -146,7 +150,8 @@ class FakeQueryBuilder {
     return this;
   }
 
-  select(): this {
+  select(_projection?: string, options?: { count?: 'exact' | null }): this {
+    if (options?.count === 'exact') this.countExact = true;
     return this;
   }
 
@@ -162,6 +167,12 @@ class FakeQueryBuilder {
 
   limit(count: number): this {
     this.limitCount = count;
+    return this;
+  }
+
+  /** PostgREST's window — from..to inclusive, applied after ordering. */
+  range(from: number, to: number): this {
+    this.rangeSpec = { from, to };
     return this;
   }
 
@@ -214,13 +225,20 @@ class FakeQueryBuilder {
       // Fall through: select returns the updated rows below.
     }
     const rows = this.sorted(this.table.select().filter((row) => this.matches(row)));
-    const limited = this.limitCount === null ? rows : rows.slice(0, this.limitCount);
+    const total = rows.length;
+    const ranged =
+      this.rangeSpec === null ? rows : rows.slice(this.rangeSpec.from, this.rangeSpec.to + 1);
+    const limited = this.limitCount === null ? ranged : ranged.slice(0, this.limitCount);
     // Real client: .maybeSingle() resolves to the row itself, or data:null
     // when nothing matched — never an array. one()/oneStrict() rely on it.
     if (this.single) {
       return { data: limited[0] ?? null, error: null };
     }
-    return { data: limited, error: null };
+    return {
+      data: limited,
+      error: null,
+      count: this.countExact ? total : undefined,
+    };
   }
 }
 
@@ -563,6 +581,67 @@ describe.each(BACKENDS)('SDK store parity — $name', ({ make, seedIdentity }) =
       // Asset B's history stays out of A's list; A's first row opens with null.
       expect(await store.listClearanceTransitions(assetB)).toHaveLength(1);
       expect(history[0].from_state).toBeNull();
+    });
+
+    it('lists clearances newest-update-first with the filtered-set total, honoring filter and window', async () => {
+      const a = mulClearanceInput({
+        asset_cbt_code: 'CBT-REC-0123456789AB',
+        state: 'draft',
+        updated_at: '2026-09-01T00:00:00Z',
+      });
+      const b = mulClearanceInput({
+        asset_cbt_code: 'CBT-REC-BA9876543210',
+        state: 'cleared',
+        updated_at: '2026-09-03T00:00:00Z',
+      });
+      const c = mulClearanceInput({
+        asset_cbt_code: 'CBT-TRK-0123456789AB',
+        state: 'requested',
+        updated_at: '2026-09-02T00:00:00Z',
+      });
+      await store.upsertClearance(a);
+      await store.upsertClearance(b);
+      await store.upsertClearance(c);
+
+      const all = await store.listClearances();
+      expect(all.total).toBe(3);
+      expect(all.clearances.map((row) => row.asset_cbt_code)).toEqual([
+        b.asset_cbt_code,
+        c.asset_cbt_code,
+        a.asset_cbt_code,
+      ]);
+
+      const cleared = await store.listClearances({ state: 'cleared' });
+      expect(cleared.total).toBe(1);
+      expect(cleared.clearances.map((row) => row.asset_cbt_code)).toEqual([b.asset_cbt_code]);
+
+      const windowed = await store.listClearances({ limit: 2, offset: 1 });
+      expect(windowed.total).toBe(3);
+      expect(windowed.clearances.map((row) => row.asset_cbt_code)).toEqual([
+        c.asset_cbt_code,
+        a.asset_cbt_code,
+      ]);
+
+      // The machine's fifth state round-trips through the registry read too —
+      // the seam note in covnant-sdk/src/mul/clearance.ts: the store's TS
+      // union is narrower than the runtime column.
+      await store.upsertClearance(
+        mulClearanceInput({
+          asset_cbt_code: 'CBT-TRK-BA9876543210',
+          state: 'revoked' as MulClearanceRecord['state'],
+          updated_at: '2026-09-04T00:00:00Z',
+        }),
+      );
+      const revoked = await store.listClearances({ state: 'revoked' });
+      expect(revoked.total).toBe(1);
+      expect(revoked.clearances[0]?.state).toBe('revoked');
+    });
+
+    it('returns an empty page with total 0 when nothing matches the filter', async () => {
+      await store.upsertClearance(mulClearanceInput({ state: 'draft' }));
+      const page = await store.listClearances({ state: 'disputed' });
+      expect(page.total).toBe(0);
+      expect(page.clearances).toEqual([]);
     });
   });
 
