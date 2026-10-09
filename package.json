@@ -29,7 +29,7 @@
     "@supabase/supabase-js": "^2.109.0",
     "bullmq": "^5.81.5",
     "jsonwebtoken": "^9.0.3",
-    "next": "15.5.27",
+    "next": "16.4.0",
     "pg": "^8.23.0",
     "pino": "10.3.1",
     "prom-client": "15.1.3",
