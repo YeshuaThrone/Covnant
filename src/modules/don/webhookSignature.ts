@@ -139,3 +139,82 @@ export async function authenticateStandardWebhook(
   }
   return { ok: true, rawBody };
 }
+
+
+/** Provider signing secrets a unified-route delivery may verify under. */
+export type DonWebhookSecretEnv = "COLUMN_WEBHOOK_SECRET" | "DSP_WEBHOOK_SECRET";
+
+export type UnifiedStandardWebhookAuth =
+  | { ok: true; rawBody: string; verifiedWith: DonWebhookSecretEnv }
+  | { ok: false; response: NextResponse<DonApiErrorEnvelope> };
+
+/**
+ * The unified /api/v1/webhooks route accepts two payload kinds behind one
+ * URL, and the kind is only knowable after the body is parsed — while the
+ * signature can only be verified over the raw bytes. This gate therefore
+ * verifies the delivery against each provider's configured secret in turn
+ * and reports which one authenticated it; the route then binds the
+ * verified secret to the parsed payload kind (BaaS bodies must have
+ * verified under COLUMN_WEBHOOK_SECRET, DSP bodies under
+ * DSP_WEBHOOK_SECRET) so the unified route can never become a weaker
+ * sibling of the typed baas/ and dsp/ routes. Same fail-closed contract
+ * as `authenticateStandardWebhook`: no secret configured → 401, missing
+ * headers → 401, no candidate verifies (wrong or stale) → 403 — all
+ * before the body is parsed or any store is read.
+ */
+export async function authenticateUnifiedStandardWebhook(
+  request: Request,
+  secretEnvVars: readonly DonWebhookSecretEnv[],
+): Promise<UnifiedStandardWebhookAuth> {
+  const rawBody = await request.text();
+  const webhookId = request.headers.get("webhook-id");
+  const webhookTimestamp = request.headers.get("webhook-timestamp");
+  const signatureHeader = request.headers.get("webhook-signature");
+
+  const configured = secretEnvVars
+    .map((name) => ({ name, secret: process.env[name] }))
+    .filter((entry): entry is { name: DonWebhookSecretEnv; secret: string } =>
+      Boolean(entry.secret),
+    );
+
+  if (configured.length === 0) {
+    return {
+      ok: false,
+      response: donJsonError(
+        401,
+        "signature_not_configured",
+        `Webhook signature verification is not configured: none of ${secretEnvVars.join(", ")} is set.`,
+      ),
+    };
+  }
+  if (!webhookId || !webhookTimestamp || !signatureHeader) {
+    return {
+      ok: false,
+      response: donJsonError(
+        401,
+        "signature_missing",
+        "Webhook signature headers are missing.",
+      ),
+    };
+  }
+  const verifiedWith = configured.find((entry) =>
+    verifyStandardWebhookSignature({
+      rawBody,
+      webhookId,
+      webhookTimestamp,
+      signatureHeader,
+      configuredSecret: entry.secret,
+    }),
+  );
+  if (!verifiedWith) {
+    return {
+      ok: false,
+      response: donJsonError(
+        403,
+        "signature_invalid",
+        "Webhook signature is invalid or stale.",
+      ),
+    };
+  }
+  return { ok: true, rawBody, verifiedWith: verifiedWith.name };
+}
