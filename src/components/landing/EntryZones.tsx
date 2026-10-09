@@ -152,6 +152,16 @@ export function EntryZones() {
     // data-entry-zones — the style hook scoping the chromeless focus
     // override in globals.css to this form's six inputs and consent
     // checkbox.
+    //
+    // Autofill annotations (name + autoComplete on every entry input):
+    // founder report 2026-10-09 — Chrome remembers email/phone/password on
+    // this form but forgets the name fields every visit. Root cause: the
+    // inputs carried no autofill identity at all. The tokens are the HTML
+    // standard ones: Stage Name nickname, Legal Name name (single field,
+    // not split), Email email, Phone Number tel, Core Industry & Title
+    // organization-title (the standard token for the title half — no
+    // industry token exists), Password new-password (this form CREATES an
+    // account). Attributes only — zero styling change.
     <form className="contents" data-entry-zones onSubmit={handleSubmit} noValidate>
       {/* Stage Name entry in open black space below the URD zone — NOT a new
           zone. The statement keeps the established 32px top gap; the invisible
@@ -169,6 +179,8 @@ export function EntryZones() {
       <input
         ref={stageNameRef}
         type="text"
+        name="stageName"
+        autoComplete="nickname"
         aria-label="Stage Name"
         className={INPUT_CLASS}
       />
@@ -180,14 +192,17 @@ export function EntryZones() {
           treatment and the same 32px top gap below the shared rule; the
           invisible input repeats the Stage Name field byte-for-byte
           (chromeless h-10 w-64, jade typed text, gold caret, aria-label
-          only); a new bottom golden ruler closes the zone HUGGING the input —
-          zero margin above it, a true pixel mirror of the Stage Name zone.
+          plus the name/autofill annotations); a new bottom golden ruler
+          closes the zone HUGGING the input — zero margin above it, a true
+          pixel mirror of the Stage Name zone.
           NOTHING follows the ruler — the region below stays empty black
           space. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Legal Name</p>
       <input
         ref={legalNameRef}
         type="text"
+        name="legalName"
+        autoComplete="name"
         aria-label="Legal Name"
         className={INPUT_CLASS}
       />
@@ -199,14 +214,17 @@ export function EntryZones() {
           treatment and the same 32px top gap below the shared rule; the
           invisible input repeats the Legal Name field byte-for-byte
           (chromeless h-10 w-64, jade typed text, gold caret, aria-label
-          only); a new bottom golden ruler closes the zone HUGGING the input —
-          zero margin above it, a true pixel mirror of the Legal Name zone.
+          plus the name/autofill annotations); a new bottom golden ruler
+          closes the zone HUGGING the input — zero margin above it, a true
+          pixel mirror of the Legal Name zone.
           NOTHING follows the ruler — the region below stays empty black
           space. */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Email</p>
       <input
         ref={emailRef}
         type="email"
+        name="email"
+        autoComplete="email"
         aria-label="Email"
         className={INPUT_CLASS}
       />
@@ -218,8 +236,9 @@ export function EntryZones() {
           approved). The statement repeats the exact champagne mono treatment
           and the same 32px top gap below the shared rule; the invisible
           input repeats the Email field byte-for-byte (chromeless h-10 w-64,
-          jade typed text, gold caret, aria-label only) with NO prefill — it
-          opens empty like the other collected fields. Type tel: semantically
+          jade typed text, gold caret, aria-label plus the name/autofill
+          annotations) with NO prefill — it opens empty like the other
+          collected fields. Type tel: semantically
           correct for a phone entry, zero styling change. A new bottom golden
           ruler closes the zone HUGGING the input — zero margin above it, a
           true pixel mirror of the Email zone. The Core Industry & Title zone
@@ -228,6 +247,8 @@ export function EntryZones() {
       <input
         ref={phoneNumberRef}
         type="tel"
+        name="phoneNumber"
+        autoComplete="tel"
         aria-label="Phone Number"
         className={INPUT_CLASS}
       />
@@ -239,14 +260,16 @@ export function EntryZones() {
           champagne mono treatment and the same 32px top gap below the
           shared rule; the invisible input repeats the Email field
           byte-for-byte (chromeless h-10 w-64, jade typed text, gold caret,
-          aria-label only); a new bottom golden ruler closes the zone HUGGING
-          the input — zero margin above it, a true pixel mirror of the Email
-          zone. The Password zone follows below this ruler (micro-edit 11
-          reorder). */}
+          aria-label plus the name/autofill annotations); a new bottom golden
+          ruler closes the zone HUGGING the input — zero margin above it, a
+          true pixel mirror of the Email zone. The Password zone follows
+          below this ruler (micro-edit 11 reorder). */}
       <p className="mt-8 font-mono text-sm uppercase tracking-[0.3em] text-gold-champagne">Core Industry &amp; Title</p>
       <input
         ref={coreIndustryTitleRef}
         type="text"
+        name="coreIndustryTitle"
+        autoComplete="organization-title"
         aria-label="Core Industry & Title"
         className={INPUT_CLASS}
       />
@@ -270,6 +293,8 @@ export function EntryZones() {
       <input
         ref={passwordRef}
         type="password"
+        name="password"
+        autoComplete="new-password"
         aria-label="Password"
         className={INPUT_CLASS}
       />
