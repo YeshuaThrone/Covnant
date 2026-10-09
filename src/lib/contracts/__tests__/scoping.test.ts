@@ -191,7 +191,12 @@ describe("migration 0062 — double-apply safe (the repo's CI migration contract
   it("exists and sorts after 0061 (the migrations' lexical-order contract)", () => {
     const migrations = readdirSync(MIGRATIONS_DIR).sort();
     expect(migrations).toContain(FILE);
-    expect(migrations.indexOf(FILE)).toBe(migrations.length - 1);
+    // The lexical-order contract is "sorts after 0061", not "is the last
+    // file in the directory" — later migrations (0063+) stack after it by
+    // design, so a tail-position pin would fail on the next migration.
+    expect(migrations.indexOf(FILE)).toBeGreaterThan(
+      migrations.indexOf('0061_creator_ytd_increment_fix.sql'),
+    );
   });
 
   it('runs only idempotent DDL — every statement re-applies as a no-op', () => {
