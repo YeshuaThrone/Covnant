@@ -89,6 +89,53 @@ form[data-entry-zones] input:focus-visible {
   outline: none;
 }
 
+/* Signup entry zones — autofill neutralization (founder report 2026-10-09:
+   opaque blocks in the entry fields). WebKit/Blink paints autofilled fields
+   from the UA stylesheet: :-webkit-autofill / :autofill force an opaque
+   background and text color that no outline, border, or box-shadow removal
+   (the #169 chromeless fix) can reach, and the UA background wins with
+   !important, so no author background-color can ever beat it. The standard
+   neutralizer paints over it instead: an inset 1000px box-shadow in the
+   fields' own obsidian ground (the UA rule does not own box-shadow), the
+   canon text fill and the zone's gold caret held identical to the typed
+   state, and a 9999s background-color transition so the UA paint never
+   visually completes. Scoped to the data-entry-zones form exactly like the
+   #169 override — every other surface keeps native autofill chrome. The
+   -webkit and standard :autofill rules stay separate so an engine without
+   :autofill still gets the -webkit block (a single selector list would be
+   dropped whole). No :focus-visible selector appears here — the unlayered
+   focus-ring regression class from #169 is not reintroduced, and rest and
+   focus rendering is untouched because these rules only match a field the
+   browser has actually autofilled.
+   Colors (existing tokens only): #08080a = --color-obsidian-900 /
+   --background, the ground the bg-transparent entry fields sit on;
+   #6ee7b7 = emerald-300, the entry text color (INPUT_CLASS
+   text-emerald-300, the canon light jade); rgba(251, 191, 36, 0.7) =
+   amber-400/70, the entry caret (INPUT_CLASS caret-amber-400/70). */
+form[data-entry-zones] input:-webkit-autofill,
+form[data-entry-zones] input:-webkit-autofill:hover,
+form[data-entry-zones] input:-webkit-autofill:focus,
+form[data-entry-zones] textarea:-webkit-autofill,
+form[data-entry-zones] textarea:-webkit-autofill:hover,
+form[data-entry-zones] textarea:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #08080a inset;
+  -webkit-text-fill-color: #6ee7b7;
+  caret-color: rgba(251, 191, 36, 0.7);
+  transition: background-color 9999s ease-out 0s;
+}
+
+form[data-entry-zones] input:autofill,
+form[data-entry-zones] input:autofill:hover,
+form[data-entry-zones] input:autofill:focus,
+form[data-entry-zones] textarea:autofill,
+form[data-entry-zones] textarea:autofill:hover,
+form[data-entry-zones] textarea:autofill:focus {
+  box-shadow: 0 0 0 1000px #08080a inset;
+  -webkit-text-fill-color: #6ee7b7;
+  caret-color: rgba(251, 191, 36, 0.7);
+  transition: background-color 9999s ease-out 0s;
+}
+
 /* Bold geometric display type for headings and the wordmark. */
 h1,
 h2 {
