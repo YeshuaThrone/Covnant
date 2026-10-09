@@ -46,25 +46,6 @@ import {
 } from "./balances";
 import { isPayoutFrozen } from "./dispute";
 
-async function persistVault(
-  store: Store,
-  payeeId: string,
-  payeeName: string,
-  balances: {
-    available_balance: number;
-    pending_balance: number;
-    reserve_balance: number;
-  },
-  now: Date,
-): Promise<SovereignVaultRecord> {
-  return await store.upsertVault({
-    payee_id: payeeId,
-    payee_name: payeeName,
-    ...balances,
-    updated_at: now.toISOString(),
-  });
-}
-
 export async function creditVault(
   store: Store,
   payeeId: string,
@@ -133,13 +114,41 @@ export async function releaseVaultPending(
       message: "Pending balance is insufficient for that release.",
     };
   }
-  const vault = await persistVault(
-    store,
-    current.payee_id,
-    current.payee_name,
-    released.balances,
-    now,
-  );
+  // Atomic release (migration 0009, H1): the release moves the money with
+  // one guarded additive delta on the CURRENT row — the last vault
+  // money-move still persisting a full-row upsert of a stale read (a credit
+  // landing between the reads above and the write had its cents erased; a
+  // concurrent debit had them resurrected). The pending floor refuses a
+  // release the live balances can no longer back — nothing is written.
+  const applied = await store.applyVaultDelta({
+    payee_id: current.payee_id,
+    payee_name: current.payee_name,
+    delta: {
+      available_balance: released.released_cents,
+      pending_balance: -released.released_cents,
+      reserve_balance: 0,
+    },
+    min_balances: { pending_balance: 0 },
+    create_if_missing: false,
+    updated_at: now.toISOString(),
+  });
+  if (applied.outcome === "not_found") {
+    return {
+      ok: false,
+      status: 404,
+      code: "vault_not_found",
+      message: "No sovereign vault exists for that payee.",
+    };
+  }
+  if (applied.outcome !== "applied") {
+    return {
+      ok: false,
+      status: 422,
+      code: "insufficient_pending",
+      message: "Pending balance is insufficient for that release (payout holds excluded).",
+    };
+  }
+  const vault = applied.vault;
   if (released.released_cents > 0) {
     await postJournal(store, {
       kind: "pending_release",
@@ -171,7 +180,7 @@ export async function settleVaultPayout(
       message: "No BaaS transfer matches that id.",
     };
   }
-  const hold = await store.getPayoutHold(transferId);
+  let hold = await store.getPayoutHold(transferId);
   const vault = await store.getVault(transfer.payee_id);
   if (vault === undefined) {
     return {
@@ -181,7 +190,57 @@ export async function settleVaultPayout(
       message: "No sovereign vault exists for that payee.",
     };
   }
-  if (hold === undefined || hold.status === "settled") {
+  // Settle-vs-hold-insert race (N3): payoutFromVault inserts the payout-hold
+  // row only AFTER the BaaS dispatch returns, so a settlement webhook can be
+  // processed in that gap with no hold row. The old no-hold branch marked
+  // the transfer settled WITHOUT debiting pending — the held amount stayed
+  // releasable while the money had already left (double-pay window).
+  //
+  // Backfill the missing hold row (amount = the transfer record) so the
+  // guarded debit below still happens. payout_holds.transfer_id is the
+  // table's primary key, so the insert is the lock: a lost race (a
+  // concurrent settle's backfill, or the late payoutFromVault insert)
+  // throws, and the re-read falls through to the idempotent / normal path.
+  // A hold-less transfer whose pending cannot back the debit never went
+  // through payoutFromVault's hold — refuse for manual reconcile rather
+  // than settle an unfunded payout.
+  if (hold === undefined) {
+    if (!debitPending(vault, transfer.amount_cents).ok) {
+      return {
+        ok: false,
+        status: 409,
+        code: "payout_hold_missing",
+        message:
+          "No payout hold exists for that transfer and pending_balance cannot backfill one; manual reconciliation required.",
+      };
+    }
+    try {
+      await store.insertPayoutHold({
+        transfer_id: transferId,
+        payee_id: vault.payee_id,
+        amount_cents: transfer.amount_cents,
+        status: "settled",
+        created_at: now.toISOString(),
+      });
+      // Our own backfill won: drive the debit path with the in-flight view;
+      // the stored row is already settled and the finalize below rewrites it
+      // (a no-op). Reusing the settled status here would skip the debit.
+      hold = {
+        transfer_id: transferId,
+        payee_id: vault.payee_id,
+        amount_cents: transfer.amount_cents,
+        status: "in_flight",
+        created_at: now.toISOString(),
+      };
+    } catch (insertError) {
+      const raced = await store.getPayoutHold(transferId);
+      if (raced === undefined) {
+        throw insertError; // not a duplicate-hold failure — surface it
+      }
+      hold = raced;
+    }
+  }
+  if (hold.status === "settled") {
     await store.updateBaasTransferStatus(transferId, "settled");
     if (transfer.ledger_transaction_id) {
       const ledger = await store.getLedgerTransaction(transfer.ledger_transaction_id);
@@ -648,13 +707,25 @@ export async function payoutFromVault(
     baas_transfer_id: result.transfer.id,
     settled_at: null,
   });
-  await store.insertPayoutHold({
-    transfer_id: result.transfer.id,
-    payee_id: current.payee_id,
-    amount_cents: input.amount_cents,
-    status: "in_flight",
-    created_at: now.toISOString(),
-  });
+  try {
+    await store.insertPayoutHold({
+      transfer_id: result.transfer.id,
+      payee_id: current.payee_id,
+      amount_cents: input.amount_cents,
+      status: "in_flight",
+      created_at: now.toISOString(),
+    });
+  } catch (insertError) {
+    // Settle-vs-hold-insert race (N3): a settlement webhook processed during
+    // the dispatch gap backfills the hold row (already settled, pending
+    // debited) — the transfer_id primary key rejects this late insert. The
+    // hold exists and the webhook path owns settlement; re-read and finish
+    // the payout's own bookkeeping instead of failing a dispatched payout.
+    const raced = await store.getPayoutHold(result.transfer.id);
+    if (raced === undefined) {
+      throw insertError; // not a duplicate-hold failure — surface it
+    }
+  }
   await postJournal(store, {
     kind: "payout_hold",
     ref_type: "baas_transfer",

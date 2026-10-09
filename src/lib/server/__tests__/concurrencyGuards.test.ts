@@ -7,7 +7,14 @@ import { calculateUdrSplits, type SplitCalculateSuccess } from "@/lib/server/udr
 import { validateSplitCalculatePayload } from "@/lib/don/validation";
 import { COMPANY_VARIANCE_PAYEE_ID, GL_GENESIS_HASH } from "@/modules/don/constants";
 import type { GlJournalRecord, SovereignVaultRecord } from "@/modules/don/records";
-import { creditVault, payoutFromVault, reverseVaultPayout } from "@/modules/vaults/engine";
+import {
+  creditVault,
+  payoutFromVault,
+  releaseVaultPending,
+  reverseVaultPayout,
+  settleVaultPayout,
+} from "@/modules/vaults/engine";
+import type { AchTransferRequest, BaasTransferResult } from "@/services/baas";
 import { postJournal } from "@/modules/ledger/engine";
 import type { GlLegInput } from "@/modules/ledger/journal";
 
@@ -457,4 +464,184 @@ describe("migration 0009 — split saga idempotency (H3)", () => {
     const valid = validateSplitCalculatePayload({ ...splitInput(), idempotency_key: "op-123" });
     expect(valid.ok).toBe(true);
   });
+});
+
+describe("vault engine — atomic release + settle-without-hold (F4/N3)", () => {
+  // F4: releaseVaultPending was the last vault money-move persisting with a
+  // full-row upsert of a stale read. The two tests pin the read-modify-write
+  // window directly: the interleaved mutation lands between the release's
+  // reads and its write phase (via the sumInFlightPayoutHolds seam).
+
+  it.each(BACKENDS)(
+    "$name: a release computed from a stale read does not erase an interleaved credit",
+    async ({ make }) => {
+      const store = await make();
+      await seedVaultOn(store, "p1", 0, 1000, 0, "Creator One");
+
+      // On the release's first in-flight sum, land a 300-cent credit to
+      // available — the exact spot a concurrent credit occupies in the RMW
+      // window. The old full-row upsert wrote the stale balances back and
+      // erased it; the guarded delta must apply on top of the CURRENT row.
+      const originalSum = store.sumInFlightPayoutHolds.bind(store);
+      let calls = 0;
+      store.sumInFlightPayoutHolds = async (payeeId: string) => {
+        calls += 1;
+        const sum = await originalSum(payeeId);
+        if (calls === 1) {
+          await creditVault(store, "p1", "Payee p1", 300, "available", NOW);
+        }
+        return sum;
+      };
+
+      const result = await releaseVaultPending(store, "p1", 400, NOW);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.released_cents).toBe(400);
+      }
+
+      const vault = await store.getVault("p1");
+      expect(vault!.available_balance).toBe(700); // 300 credit + 400 release — both survive
+      expect(vault!.pending_balance).toBe(600);
+    },
+  );
+
+  it.each(BACKENDS)(
+    "$name: a release whose pending was drained after the read is refused, not written over",
+    async ({ make }) => {
+      const store = await make();
+      await seedVaultOn(store, "p1", 0, 1000, 0, "Creator One");
+
+      // A concurrent guarded debit (a payout settlement's delta) lands
+      // between the release's read and its write. The stale full-row upsert
+      // resurrected the debited cents (money creation); the guarded delta
+      // must refuse the whole move against its pending floor.
+      const originalSum = store.sumInFlightPayoutHolds.bind(store);
+      let calls = 0;
+      store.sumInFlightPayoutHolds = async (payeeId: string) => {
+        calls += 1;
+        const sum = await originalSum(payeeId);
+        if (calls === 1) {
+          const drained = await store.applyVaultDelta({
+            payee_id: "p1",
+            payee_name: "Creator One",
+            delta: { available_balance: 0, pending_balance: -900, reserve_balance: 0 },
+            min_balances: { pending_balance: 0 },
+            create_if_missing: false,
+            updated_at: NOW.toISOString(),
+          });
+          expect(drained.outcome).toBe("applied");
+        }
+        return sum;
+      };
+
+      const result = await releaseVaultPending(store, "p1", 400, NOW);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(422);
+        expect(result.code).toBe("insufficient_pending");
+      }
+
+      const vault = await store.getVault("p1");
+      expect(vault!.pending_balance).toBe(100); // the concurrent debit stands
+      expect(vault!.available_balance).toBe(0); // nothing released
+    },
+  );
+
+  // N3: payoutFromVault inserts the payout-hold row only AFTER the BaaS
+  // dispatch returns, so a settlement webhook can be processed in that gap
+  // with no hold row. The old no-hold branch marked the transfer settled
+  // WITHOUT debiting pending — the held amount stayed releasable while the
+  // money had already left (sub-second double-pay window).
+
+  it.each(BACKENDS)(
+    "$name: a settlement webhook racing the hold insert still debits pending (backfilled hold)",
+    async ({ make }) => {
+      const store = await make();
+      await seedVaultOn(store, "p1", 1000, 0, 0, "Creator One");
+
+      // Reproduce the interleave end-to-end: the injected dispatcher inserts
+      // the BaaS transfer and settles it from INSIDE the dispatch gap —
+      // after payoutFromVault's available→pending delta, before its hold-row
+      // insert.
+      const settleInsideDispatch = async (
+        request: AchTransferRequest,
+      ): Promise<BaasTransferResult> => {
+        const transfer = await store.insertBaasTransfer({
+          provider: "column",
+          rail: "ach",
+          payee_id: "p1",
+          payee_name: "Creator One",
+          amount_cents: request.amount_cents,
+          currency: "USD",
+          status: "submitted",
+          ledger_transaction_id: request.ledger_transaction_id,
+          created_at: NOW.toISOString(),
+          estimated_settlement: null,
+        });
+        const settled = await settleVaultPayout(store, transfer.id, NOW);
+        expect(settled.ok).toBe(true);
+        if (!settled.ok) throw new Error("settle inside dispatch failed");
+        return { ok: true, transfer: settled.transfer, mode: "sandbox" };
+      };
+
+      const payout = await payoutFromVault(
+        store,
+        { payee_id: "p1", amount_cents: 400, rail: "ach" },
+        NOW,
+        settleInsideDispatch,
+      );
+      expect(payout.ok).toBe(true);
+
+      // The strand is gone: the settlement debited the held 400.
+      let vault = await store.getVault("p1");
+      expect(vault!.available_balance).toBe(600);
+      expect(vault!.pending_balance).toBe(0);
+
+      // The backfilled hold row exists and is settled (the late
+      // payoutFromVault insert lost the race to it without failing the payout).
+      const transferId = payout.ok ? payout.transfer.id : "";
+      const hold = await store.getPayoutHold(transferId);
+      expect(hold).toBeDefined();
+      expect(hold!.status).toBe("settled");
+
+      // Webhook redelivery stays idempotent — no second debit.
+      const redelivery = await settleVaultPayout(store, transferId, NOW);
+      expect(redelivery.ok).toBe(true);
+      if (redelivery.ok) {
+        expect(redelivery.idempotent).toBe(true);
+      }
+      vault = await store.getVault("p1");
+      expect(vault!.pending_balance).toBe(0);
+
+      // Nothing is releasable: a correct settlement leaves no stranded
+      // pending. (Pre-fix this released the 400 already paid out.)
+      const release = await releaseVaultPending(store, "p1", undefined, NOW);
+      expect(release.ok).toBe(true);
+      if (release.ok) {
+        expect(release.released_cents).toBe(0);
+      }
+      vault = await store.getVault("p1");
+      expect(vault!.available_balance).toBe(600);
+    },
+  );
+
+  it.each(BACKENDS)(
+    "$name: a duplicate payout hold insert is rejected — transfer_id is the settle lock",
+    async ({ make }) => {
+      const store = await make();
+      const row = {
+        transfer_id: "t1",
+        payee_id: "p1",
+        amount_cents: 500,
+        status: "in_flight" as const,
+        created_at: NOW.toISOString(),
+      };
+      await store.insertPayoutHold(row);
+      await expect(store.insertPayoutHold({ ...row })).rejects.toThrow();
+
+      const hold = await store.getPayoutHold("t1");
+      expect(hold).toBeDefined();
+      expect(hold!.status).toBe("in_flight");
+    },
+  );
 });
