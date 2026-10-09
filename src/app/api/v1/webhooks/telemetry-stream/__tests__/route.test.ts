@@ -29,7 +29,8 @@ vi.mock('bullmq', () => ({
 
 import { POST } from '../route';
 
-const WEBHOOK_SECRET = 'secure_webhook_hmac_secret_2026';
+/** Test-owned stub — the dev constant this file once reused is removed (audit S2). */
+const TEST_WEBHOOK_SECRET = 'test_telemetry_webhook_hmac_secret';
 
 const validPayload = {
   providerId: 'statsperform',
@@ -62,7 +63,7 @@ const postWebhook = async (
 
 const postSigned = async (
   body: unknown,
-  secret: string = WEBHOOK_SECRET,
+  secret: string = TEST_WEBHOOK_SECRET,
 ): Promise<Response> => {
   const raw = JSON.stringify(body);
   return postWebhook(raw, {
@@ -73,7 +74,7 @@ const postSigned = async (
 beforeEach(() => {
   queueState.addCalls.length = 0;
   vi.stubEnv('NODE_ENV', 'test');
-  vi.stubEnv('WEBHOOK_SECRET', WEBHOOK_SECRET);
+  vi.stubEnv('WEBHOOK_SECRET', TEST_WEBHOOK_SECRET);
 });
 
 afterEach(() => {
@@ -101,7 +102,7 @@ describe('HMAC verification (v20, raw-body)', () => {
     const res = await postWebhook(validPayload, {
       'x-hub-signature-256': generateSignature(
         JSON.stringify({ ...validPayload, providerId: 'attacker' }),
-        WEBHOOK_SECRET,
+        TEST_WEBHOOK_SECRET,
       ),
     });
     expect(res.status).toBe(403);
@@ -123,10 +124,16 @@ describe('HMAC verification (v20, raw-body)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('verifies against the DEV-ONLY canon default when no env secret is set', async () => {
-    vi.stubEnv('WEBHOOK_SECRET', '');
+  it('fails closed with WEBHOOK_SECRET unset in non-production (no dev fallback)', async () => {
+    // NODE_ENV stays 'test' — the removed DEV-ONLY fallback (audit S2) must
+    // reject outside production too, before any queue write.
+    vi.stubEnv('WEBHOOK_SECRET', ''); // empty = unset for the fail-closed check
     const res = await postSigned(validPayload);
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Invalid webhook signature.',
+    });
+    expect(queueState.addCalls).toHaveLength(0);
   });
 });
 

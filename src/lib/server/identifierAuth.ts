@@ -12,12 +12,13 @@
  * 403 body does not distinguish invalid vs expired, avoiding token-intel
  * leakage).
  *
- * SECURITY FLAG (the strongest dev-only-canon warning, carried in the PR
- * body): the founder default 'secure_jwt_secret_secret_2026' is DEV-ONLY —
- * a well-known signing key lets anyone forge admin tokens. Production MUST
- * fail closed: when NODE_ENV is production and JWT_SECRET is unset, every
- * bearer request is rejected (the 403 verify-failure path) rather than
- * verified against the public default. Flagged for founder confirmation.
+ * SECRET HANDLING (audit S1 — the strongest dev-only-canon warning,
+ * carried in the PR body): the founder default
+ * 'secure_jwt_secret_secret_2026' was a public constant in source — a
+ * well-known signing key lets anyone forge admin tokens. It is REMOVED:
+ * JWT_SECRET is required in EVERY environment, and when it is unset every
+ * bearer request is rejected (the 403 verify-failure path) — fail closed
+ * unconditionally, local dev included.
  *
  * ROLE VOCAB RELATIONSHIP (flagged): the four JWT roles gate the
  * identifier-ENGINE API surfaces only; the platform's UCT/CVT/CBT tiers
@@ -36,18 +37,12 @@ export interface AuthenticatedUser {
   roles: UserRole[];
 }
 
-/** Dev-only fallback (canon v24, verbatim). Never used in production. */
-const DEV_JWT_SECRET = 'secure_jwt_secret_secret_2026';
-
 /**
- * The signing secret for the current runtime — undefined in production
- * when JWT_SECRET is unset (the fail-closed trigger).
+ * The signing secret for the current runtime — undefined whenever
+ * JWT_SECRET is unset, in EVERY environment (fail closed; no dev fallback).
  */
 function jwtSecret(): string | undefined {
-  if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-    return undefined;
-  }
-  return process.env.JWT_SECRET || DEV_JWT_SECRET;
+  return process.env.JWT_SECRET || undefined;
 }
 
 /** The founder 401 body — carried verbatim. */
@@ -83,11 +78,11 @@ export function authenticateJWT(
   const token = authHeader.split(' ')[1];
   const secret = jwtSecret();
   if (!secret) {
-    // Fail closed: production without JWT_SECRET rejects every bearer
-    // request (founder-confirmation flag — refuse-to-start is impossible
-    // per-request; the reject-all equivalent is this path).
+    // Fail closed: an unset JWT_SECRET rejects every bearer request in
+    // every environment (refuse-to-start is impossible per-request; the
+    // reject-all equivalent is this path).
     console.error(
-      '[identifier-engine] JWT_SECRET is unset in production — failing closed on all bearer requests.',
+      '[identifier-engine] JWT_SECRET is unset — failing closed on all bearer requests.',
     );
     return {
       ok: false,
