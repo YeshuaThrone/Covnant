@@ -22,7 +22,7 @@ jobs:
       # Required for CodeQL to upload SARIF results to the code scanning tab.
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: github/codeql-action/init@v3
         with:
