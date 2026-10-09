@@ -87,8 +87,12 @@ type Bucket = { count: number; windowStart: number };
 
 const buckets = new Map<string, Bucket>();
 
-/** Bound the map: drop expired buckets once the table grows past this size. */
-const SWEEP_THRESHOLD = 10_000;
+/**
+ * Bound the map: drop expired buckets once the table grows past this size.
+ * Exported for the regression tests — they must push the map past the real
+ * threshold to trigger a genuine sweep.
+ */
+export const SWEEP_THRESHOLD = 10_000;
 
 function sweepExpired(now: number, windowMs: number): void {
   for (const [key, bucket] of buckets) {

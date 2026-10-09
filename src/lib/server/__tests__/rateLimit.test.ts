@@ -3,8 +3,11 @@ import {
   ADMIN_LOGIN_RATE_LIMIT,
   checkRateLimit,
   DON_API_RATE_LIMIT,
+  MONEY_INITIATION_RATE_LIMIT,
   REGISTER_RATE_LIMIT,
   resetRateLimits,
+  SWEEP_THRESHOLD,
+  type RateLimitConfig,
 } from '../rateLimit';
 
 /**
@@ -84,3 +87,86 @@ describe('DON_API_RATE_LIMIT bucket behavior', () => {
     }
   });
 });
+
+/**
+ * C10 — the sweep must judge each bucket by its OWN window, not the
+ * triggering caller's.
+ *
+ * sweepExpired used to evaluate every bucket against the current caller's
+ * windowMs: once the map crossed the sweep threshold, a caller on a short
+ * window could delete live long-window (money-initiation) buckets
+ * mid-window, silently restarting their count and lifting the throttle.
+ * Pins: a 60s bucket at 4/5 survives a threshold sweep triggered by a
+ * 5s-window caller and still enforces its own limit afterward.
+ */
+describe('sweepExpired judges each bucket by its own stored windowMs (C10)', () => {
+  /** The short-window caller whose sweep must never touch the 60s bucket. */
+  const SHORT_WINDOW: RateLimitConfig = { limit: 100, windowMs: 5_000 };
+  const MONEY_KEY = 'money:1.2.3.4';
+
+  beforeEach(() => {
+    resetRateLimits();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    resetRateLimits();
+  });
+
+  /** Push the map past the sweep threshold so the next fresh-key check sweeps. */
+  function fillToSweepThreshold(): void {
+    for (let i = 0; i < SWEEP_THRESHOLD; i += 1) {
+      checkRateLimit(`sweep-filler:${i}`, SHORT_WINDOW);
+    }
+  }
+
+  it('a live 60s bucket at 4/5 survives the sweep of a short-window caller and still exhausts at its own limit', () => {
+    for (let i = 0; i < MONEY_INITIATION_RATE_LIMIT.limit - 1; i += 1) {
+      expect(checkRateLimit(MONEY_KEY, MONEY_INITIATION_RATE_LIMIT).ok).toBe(true);
+    }
+
+    fillToSweepThreshold();
+
+    // 6s in: past the short caller's whole window (so the buggy sweep reads
+    // the money bucket as expired) but only 10% into the money bucket's own
+    // 60s window.
+    vi.setSystemTime(1_000_000 + 6_000);
+    expect(checkRateLimit('sweep-trigger:9.9.9.9', SHORT_WINDOW).ok).toBe(true);
+
+    // The bucket survived with its count intact: the 5th hit is still the
+    // last allowed one ...
+    expect(checkRateLimit(MONEY_KEY, MONEY_INITIATION_RATE_LIMIT).ok).toBe(true);
+    // ... and the surviving bucket — not a fresh window — rejects the next hit.
+    const blocked = checkRateLimit(MONEY_KEY, MONEY_INITIATION_RATE_LIMIT);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) {
+      expect(blocked.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+      expect(blocked.retryAfterSeconds).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it('an exhausted 60s bucket still rejects immediately after the sweep of a short-window caller', () => {
+    // Five allowed hits exhaust the 5-per-60s money budget (fixed-window
+    // counting: the first rejection lands on the next hit).
+    for (let i = 0; i < MONEY_INITIATION_RATE_LIMIT.limit; i += 1) {
+      expect(checkRateLimit(MONEY_KEY, MONEY_INITIATION_RATE_LIMIT).ok).toBe(true);
+    }
+
+    fillToSweepThreshold();
+
+    vi.setSystemTime(1_000_000 + 6_000);
+    expect(checkRateLimit('sweep-trigger:9.9.9.9', SHORT_WINDOW).ok).toBe(true);
+
+    // Pre-fix, the sweep deleted the exhausted bucket here, so this hit
+    // opened a fresh 5-hit budget instead of being rejected.
+    const blocked = checkRateLimit(MONEY_KEY, MONEY_INITIATION_RATE_LIMIT);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) {
+      // windowStart=1_000_000, now=1_006_000, own window 60s -> 54s left.
+      expect(blocked.retryAfterSeconds).toBe(54);
+    }
+  });
+});
+
