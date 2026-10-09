@@ -7912,9 +7912,13 @@ export class SupabaseStore implements Store {
     now: Date = new Date(),
     engine: string | null = null,
   ): Promise<RoyaltyReconJobRecord | undefined> {
-    // The migration-0011 claim RPC — one atomic statement with FOR UPDATE
-    // SKIP LOCKED, stale-claim recovery, and the attempts increment. jsonb
-    // null back means the pool was empty (a legal result, not an error).
+    // The migration-0011 claim RPC (replaced by 0064 with the claim-time
+    // attempts cap) — one atomic statement with FOR UPDATE SKIP LOCKED,
+    // stale-claim recovery, and the attempts increment. A candidate past
+    // RECON_MAX_ATTEMPTS is terminal-failed by the RPC itself and NULL is
+    // returned: jsonb null back means nothing was claimed (the pool was
+    // empty, or its oldest candidate was a poison row just terminal-failed)
+    // — a legal result, not an error.
     return this.one<RoyaltyReconJobRecord>(
       this.client.rpc('claim_royalty_recon_job', {
         p_now: now.toISOString(),
