@@ -4,7 +4,14 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # Docs-only changes don't affect build, tests, or schema validation.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 # Cancel superseded runs on the same branch/PR — queued-runner starvation
 # (Oct 5 incident) wasted capacity on runs that were already obsolete.
