@@ -65,6 +65,8 @@ import { POST as sweeperPost } from '@/app/api/v1/sweeper/route';
 import { POST as sweeperAsyncPost } from '@/app/api/v1/sweeper/async/route';
 import { POST as sweeperLuminatePost } from '@/app/api/v1/sweeper/luminate/route';
 import { GET as metricsGet } from '@/app/api/metrics/route';
+import { POST as plaidKycPost } from '@/app/api/v1/auth/plaid-kyc/route';
+import { POST as plaidExchangePost } from '@/app/api/v1/auth/plaid-exchange/route';
 
 /** The mocked resolver answers the creator-session seam with these shapes. */
 const CREATOR_A = {
@@ -587,6 +589,70 @@ describe('registered-or-operator gates on the remaining /api/v1 writes (bug hunt
     expect(response.status).toBe(400);
     // Luminate's own parser (not parseCwrDsrRequest) names this verdict.
     expect((await bodyOf(response)).code).toBe('malformed_body');
+  });
+});
+
+describe('legacy Plaid pair — registered-or-operator gates (bug hunt F3)', () => {
+  // The pre-session-derived pair mint creator-bound Plaid tokens from
+  // body-supplied ids; the newer /api/v1/plaid/link-token and
+  // /api/plaid/exchange-token routes supersede them in the UI. Gated (bug
+  // hunt F3) behind requireRegisteredOrOperator — identity from the
+  // session, never the body — while retirement waits for the owner's word
+  // on external callers. The gate answers before the body is parsed and
+  // before any token is minted.
+  const KYC_BODY = { action: 'create_link_token', creator_id: 'creator_1', products: ['auth'] };
+
+  it('POST /api/v1/auth/plaid-kyc — anonymous caller gets 401 before any token mints', async () => {
+    anonymous();
+    const response = await plaidKycPost(post('/api/v1/auth/plaid-kyc', KYC_BODY));
+    expect(response.status).toBe(401);
+    expect((await bodyOf(response)).code).toBe('no_session');
+  });
+
+  it('POST /api/v1/auth/plaid-exchange — anonymous caller gets 401 before any exchange', async () => {
+    anonymous();
+    const response = await plaidExchangePost(
+      post('/api/v1/auth/plaid-exchange', { creator_id: 'creator_1', public_token: 'pt_forged' }),
+    );
+    expect(response.status).toBe(401);
+    expect((await bodyOf(response)).code).toBe('no_session');
+  });
+
+  it('POST /api/v1/auth/plaid-kyc — a signed-in but unenrolled session is 403 not_registered', async () => {
+    unregistered();
+    const response = await plaidKycPost(post('/api/v1/auth/plaid-kyc', KYC_BODY));
+    expect(response.status).toBe(403);
+    expect((await bodyOf(response)).code).toBe('not_registered');
+  });
+
+  it('POST /api/v1/auth/plaid-kyc — a registered creator mints a sandbox link token', async () => {
+    creatorA();
+    const response = await plaidKycPost(post('/api/v1/auth/plaid-kyc', KYC_BODY));
+    expect(response.status).toBe(201);
+    const body = await bodyOf(response);
+    const result = body.result as { link_token?: string } | undefined;
+    expect((body.link_token as string | undefined) ?? result?.link_token).toBeTruthy();
+  });
+
+  it('POST /api/v1/auth/plaid-exchange — a registered creator exchanges a sandbox public token', async () => {
+    creatorA();
+    const link = await plaidKycPost(post('/api/v1/auth/plaid-kyc', KYC_BODY));
+    expect(link.status).toBe(201);
+    const linkBody = await bodyOf(link);
+    const linkResult = linkBody.result as { public_token?: string } | undefined;
+    const publicToken =
+      (linkBody.public_token as string | undefined) ?? linkResult?.public_token;
+    expect(publicToken).toBeTruthy();
+
+    const response = await plaidExchangePost(
+      post('/api/v1/auth/plaid-exchange', { creator_id: 'creator_1', public_token: publicToken }),
+    );
+    expect(response.status).toBe(201);
+  });
+
+  it('the operator may run both legacy surfaces (operator cookie passes the gate)', async () => {
+    const kyc = await plaidKycPost(post('/api/v1/auth/plaid-kyc', KYC_BODY, operatorHeaders()));
+    expect(kyc.status).toBe(201);
   });
 });
 
