@@ -18,6 +18,10 @@ import { markContractFinal, saveContract } from '@/lib/contracts/store';
 import type { AgreementContext } from '@/lib/contracts/generator';
 import type { ContractIndustry } from '@/lib/contracts/templates';
 import { requireOperator } from '@/lib/server/apiAccess';
+import {
+  resolveSessionCreator,
+  SessionCreatorReadError,
+} from '@/lib/server/sessionCreator';
 import { getSdk } from '@/lib/sdk';
 
 export interface AuditActionResult {
@@ -74,8 +78,25 @@ export async function saveContractAction(input: SaveContractInput): Promise<
   if (!verdict.ok) {
     return { success: false, error: verdict.code };
   }
+  // Ownership stamp (audit F6/F7, spec D7): the saved contract is attributed
+  // to the request's registered-creator identity — the session-bound payee
+  // id resolved from the VERIFIED session, never a client-supplied value.
+  // A save with no bound creator session (a pure operator save, or the
+  // sessionless seeded preview) stays NULL — operator-visible only, the
+  // same as legacy rows. A resolver read failure fails closed: the save is
+  // refused rather than silently unattributed.
+  let creatorId: string | null = null;
   try {
-    const saved = await saveContract(input);
+    const session = await resolveSessionCreator();
+    if (session.kind === 'registered') creatorId = session.creator.payee_id;
+  } catch (error) {
+    if (error instanceof SessionCreatorReadError) {
+      return { success: false, error: error.code };
+    }
+    throw error;
+  }
+  try {
+    const saved = await saveContract(input, creatorId);
     revalidatePath('/contracts');
     revalidatePath(`/contracts/${saved.id}`);
     return { success: true, id: saved.id, status: saved.status };
@@ -97,7 +118,10 @@ export async function markContractFinalAction(
     return { success: false, error: verdict.code };
   }
   try {
-    const updated = await markContractFinal(id);
+    // The operator gate above IS the principal proof (audit F2) — the
+    // finalize runs under that operator viewer, which sees every row
+    // (spec D7): unknown AND foreign ids map to the same not-found error.
+    const updated = await markContractFinal(id, { role: 'operator' });
     if (!updated) return { success: false, error: 'Contract not found.' };
     revalidatePath('/contracts');
     revalidatePath(`/contracts/${id}`);

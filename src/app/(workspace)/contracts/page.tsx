@@ -5,6 +5,7 @@ import {
   templatesByVertical,
 } from '@/lib/contracts/templates';
 import { listContracts } from '@/lib/contracts/store';
+import { resolveContractViewer } from '@/lib/contracts/viewer';
 import { presentationStatus, STATUS_CHIP_CLASSES } from '@/lib/contracts/presentation';
 import { MASTER_TAB_PANEL_ID, masterCategoryFromParam, masterTabId } from '@/lib/master/taxonomy';
 import { resolveMasterLedger } from '@/lib/master/masterStore';
@@ -45,7 +46,12 @@ export default async function ContractsPage({
   // cover yet say so honestly instead of rendering a blank block.
   const templates = active ? templatesByVertical(active) : TEMPLATES;
 
-  const contracts = await listContracts();
+  // Scoped "Saved agreements" (audit F6, spec D7): the list renders only
+  // the contracts the resolved principal may see — a creator their own,
+  // operators/admins all, an anonymous visitor (door closed) nothing. The
+  // resolver's read failures throw — fail closed, never an empty lie.
+  const viewer = await resolveContractViewer();
+  const contracts = await listContracts(viewer);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-12">

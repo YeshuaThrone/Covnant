@@ -9,7 +9,9 @@
  *     the sibling error envelope — even for an EXISTING id, proving the
  *     gate precedes the store read and never leaks existence; unenrolled
  *     session 403 not_registered; the operator cookie passes; a registered
- *     holder session gets the attachment with Content-Disposition intact;
+ *     holder session gets the attachment for their OWN contract — a
+ *     foreign or NULL-creator id answers 404, identical to unknown-id
+ *     (tenant scoping, spec D7);
  *   - demo door open (dev seed mode AND no Supabase): the sessionless
  *     seeded preview still exports the seeded demo contracts.
  */
@@ -34,7 +36,7 @@ import { GET } from '../route';
 import { ADMIN_COOKIE_NAME, mintAdminSessionToken } from '@/lib/admin/gate';
 import { bootDevSeedStore } from '@/lib/server/devSeed';
 import { seedAdminDemoDataIfEmpty } from '@/lib/admin/demoSeeds';
-import { listContracts } from '@/lib/contracts/store';
+import { listContracts, saveContract } from '@/lib/contracts/store';
 import type { StoredContract } from '@/lib/contracts/store';
 
 const REGISTERED = {
@@ -49,6 +51,7 @@ const REGISTERED = {
 };
 
 let demoContract: StoredContract;
+let ownedContract: StoredContract;
 let token: string | undefined;
 
 const originalDon = process.env.DON_DEV_SEED;
@@ -82,6 +85,17 @@ beforeAll(async () => {
   const seeded = await listContracts();
   demoContract = seeded[0];
   expect(demoContract).toBeDefined();
+  // The registered session's OWN contract — stamped 'rh_A' (spec D7), the
+  // seeded rows stay NULL-creator (operator-visible only).
+  ownedContract = await saveContract(
+    {
+      cbtCode: demoContract.cbtCode,
+      templateId: demoContract.templateId,
+      industry: demoContract.industry,
+      context: demoContract.fields,
+    },
+    'rh_A',
+  );
 });
 
 afterAll(() => {
@@ -146,18 +160,45 @@ describe('the export gate in configured mode (demo door closed)', () => {
     expect(res.headers.get('content-disposition')).toContain('attachment');
   });
 
-  it('serves the registered holder session the document with Content-Disposition intact', async () => {
+  it('serves the registered holder session their OWN contract with Content-Disposition intact (spec D7)', async () => {
     vi.mocked(resolveSessionCreator).mockResolvedValue(REGISTERED);
 
-    const res = await callExport(demoContract.id);
+    const res = await callExport(ownedContract.id);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     expect(res.headers.get('content-disposition')).toBe(
-      `attachment; filename="${demoContract.id}-${demoContract.templateId}.txt"`,
+      `attachment; filename="${ownedContract.id}-${ownedContract.templateId}.txt"`,
     );
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.text()).toBe(demoContract.document);
+    expect(await res.text()).toBe(ownedContract.document);
+  });
+
+  it('answers 404 for a registered holder exporting another creator\'s contract — identical to unknown-id (spec D7)', async () => {
+    vi.mocked(resolveSessionCreator).mockResolvedValue({
+      ...REGISTERED,
+      creator: { ...REGISTERED.creator, payee_id: 'rh_B' },
+    });
+
+    const foreign = await callExport(ownedContract.id);
+    const unknown = await callExport('CTR-DOESNOTEXIST');
+
+    // The cross-tenant rule: a foreign id is indistinguishable from a
+    // nonexistent one — the same 404, never a 403 (which would confirm
+    // existence).
+    expect(foreign.status).toBe(404);
+    expect(foreign.status).toBe(unknown.status);
+    expect(await foreign.text()).toBe('Contract not found.');
+    expect(await unknown.text()).toBe('Contract not found.');
+  });
+
+  it('answers 404 for a registered holder exporting a NULL-creator (legacy/unattributed) contract — operator-visible only', async () => {
+    vi.mocked(resolveSessionCreator).mockResolvedValue(REGISTERED);
+
+    const res = await callExport(demoContract.id);
+
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('Contract not found.');
   });
 
   it('maps a session-resolver read failure to 502 fail-closed, never a document', async () => {
