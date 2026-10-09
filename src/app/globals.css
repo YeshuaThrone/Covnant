@@ -72,6 +72,23 @@ body {
   outline-offset: 2px;
 }
 
+/* Signup entry zones — the chromeless exception (founder directive
+   2026-10-09: restore the entry zones to how they were before the audit
+   ring). The global ring above reads as a floating champagne box around the
+   typed name; the EntryZones form carries a data-entry-zones attribute, and
+   this unlayered scoped rule outranks the global rule's (0,1,0)
+   specificity, so it wins the cascade and keeps the six entry inputs and
+   the consent checkbox ring-free whether the visitor clicks or tabs in.
+   Every other surface (dashboard, admin, modals) keeps the global ring.
+   Accessibility tradeoff, recorded on purpose: these seven controls have
+   no visible keyboard-focus indicator — accepted because the zone
+   composition (statement, input slot, gold ruler) plus the gold caret
+   already locates the active field, and the ring survives everywhere
+   else. */
+form[data-entry-zones] input:focus-visible {
+  outline: none;
+}
+
 /* Bold geometric display type for headings and the wordmark. */
 h1,
 h2 {

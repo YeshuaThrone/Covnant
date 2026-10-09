@@ -247,9 +247,10 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: the keyboard focus ring is the single allowed chrome — the
-  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
-  // glow.
+  // On focus: STILL no chrome — the entry zones are chromeless in every
+  // state (the scoped form[data-entry-zones] override in globals.css beats
+  // the global focus ring; founder directive 2026-10-09). No fill, no
+  // lines, no glow, no ring.
   await input.focus();
   const onFocus = await input.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -257,9 +258,7 @@ test('the open black space beneath the URD zone carries the STAGE NAME statement
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('solid');
-  expect(onFocus.outlineWidth).toBe('1px');
-  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
+  expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
   // Placement: the field sits directly beneath the statement in the open black
@@ -447,9 +446,9 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: the keyboard focus ring is the single allowed chrome — the
-  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
-  // glow.
+  // On focus: STILL no chrome — chromeless in every state (the scoped
+  // form[data-entry-zones] override in globals.css; founder directive
+  // 2026-10-09).
   await legalInput.focus();
   const onFocus = await legalInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -457,9 +456,7 @@ test('the mirrored Legal Name zone repeats the Stage Name treatment: identical s
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('solid');
-  expect(onFocus.outlineWidth).toBe('1px');
-  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
+  expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Legal Name bottom ruler now doubles as the shared top rule of the
@@ -611,9 +608,9 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: the keyboard focus ring is the single allowed chrome — the
-  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
-  // glow.
+  // On focus: STILL no chrome — chromeless in every state (the scoped
+  // form[data-entry-zones] override in globals.css; founder directive
+  // 2026-10-09).
   await emailInput.focus();
   const onFocus = await emailInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -621,9 +618,7 @@ test('the mirrored Email zone repeats the Legal Name treatment: identical statem
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('solid');
-  expect(onFocus.outlineWidth).toBe('1px');
-  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
+  expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Email bottom ruler now doubles as the shared top rule of the Phone
@@ -843,9 +838,9 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(atRest.boxShadow).toBe('none');
   expect(atRest.cursor).toBe('text');
 
-  // On focus: the keyboard focus ring is the single allowed chrome — the
-  // 1px champagne focus-visible outline (audit #6). No fill, no lines, no
-  // glow.
+  // On focus: STILL no chrome — chromeless in every state (the scoped
+  // form[data-entry-zones] override in globals.css; founder directive
+  // 2026-10-09).
   await industryInput.focus();
   const onFocus = await industryInput.evaluate(chromeOf);
   expect(onFocus.background).toBe('rgba(0, 0, 0, 0)');
@@ -853,9 +848,7 @@ test('the mirrored Core Industry & Title zone repeats the Email treatment: ident
   expect(onFocus.borderRightWidth).toBe('0px');
   expect(onFocus.borderBottomWidth).toBe('0px');
   expect(onFocus.borderLeftWidth).toBe('0px');
-  expect(onFocus.outlineStyle).toBe('solid');
-  expect(onFocus.outlineWidth).toBe('1px');
-  expect(onFocus.outlineColor).toBe('rgb(243, 229, 171)');
+  expect(onFocus.outlineStyle).toBe('none');
   expect(onFocus.boxShadow).toBe('none');
 
   // The Core Industry & Title bottom ruler now doubles as the shared top
@@ -1063,8 +1056,10 @@ test('the final Consent & Submit zone: an Accept UDR Terms checkbox in the state
   expect(Math.abs(geometry.rowCenter - geometry.ruleCenter)).toBeLessThan(1);
   expect(Math.abs(geometry.buttonCenter - geometry.ruleCenter)).toBeLessThan(1);
 
-  // Keyboard focus (Tab from the Password field) lands on the checkbox, and
-  // its focus-visible gold outline matches the Continue button's pattern.
+  // Keyboard focus (Tab from the Password field) lands on the checkbox —
+  // and it stays RING-FREE: the entry zones are chromeless in every focus
+  // state (the scoped override in globals.css; founder directive
+  // 2026-10-09). The Continue button keeps the global ring pattern.
   await page.getByRole('textbox', { name: 'Password' }).focus();
   await page.keyboard.press('Tab');
   const outlineOf = (el: Element) => {
@@ -1072,14 +1067,15 @@ test('the final Consent & Submit zone: an Accept UDR Terms checkbox in the state
     return { outlineStyle: s.outlineStyle, outlineWidth: s.outlineWidth, outlineColor: s.outlineColor };
   };
   const checkboxFocus = await consentCheckbox.evaluate(outlineOf);
-  expect(checkboxFocus.outlineStyle).toBe('solid');
-  expect(checkboxFocus.outlineWidth).toBe('1px');
+  expect(checkboxFocus.outlineStyle).toBe('none');
   await page.keyboard.press('Tab'); // checkbox → Submit
   // The button transitions colors (incl. outline-color) over 200ms — poll
-  // until the transition settles, then require the SAME outline pattern.
+  // until the transition settles, then require the solid ring pattern.
   await expect(async () => {
     const buttonFocus = await page.getByRole('button', { name: 'Continue' }).evaluate(outlineOf);
-    expect(buttonFocus).toEqual(checkboxFocus);
+    expect(buttonFocus.outlineStyle).toBe('solid');
+    expect(buttonFocus.outlineWidth).toBe('1px');
+    expect(buttonFocus.outlineColor).toBe('rgb(243, 229, 171)');
   }).toPass({ timeout: 2000 });
 
   // Button treatment at rest: statement-voice label, NO box — a borderless
