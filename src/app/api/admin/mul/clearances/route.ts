@@ -1,11 +1,14 @@
 /**
  * POST /api/admin/mul/clearances — move one asset's MUL clearance along the
  * machine; GET /api/admin/mul/clearances?asset_cbt_code=… — read an asset's
- * current clearance and its append-only transition history.
+ * current clearance and its append-only transition history; GET without the
+ * asset filter — the registry list ({ clearances, total }, newest-update-
+ * first, state/limit/offset params).
  *
- * The MUL admin surface, API-only in v1 (build spec open item #4
- * recommendation): the admin console gains clearance screens in a later
- * phase, so this route is the entire operator surface. All domain rules —
+ * The MUL admin surface's wire: the /mul registry page (the admin console's
+ * operator surface, closing build spec open item #4) renders from and
+ * mutates through these handlers — this route remains the ONLY mutation
+ * path. All domain rules —
  * the state machine, territory (ISO 3166-1), term parsing, licensee
  * tracking — live in the SDK module (covnant-sdk/src/mul/clearance.ts),
  * which persists through the Store seam's mul_clearances methods (PR 3).
@@ -44,6 +47,7 @@ import {
   CLEARANCE_STATES,
   ClearanceTransitionError,
   MulClearanceValidationError,
+  clearanceFromRecord,
   getClearance,
   transitionFromRecord,
   type ClearanceState,
@@ -170,6 +174,11 @@ export async function GET(request: Request): Promise<Response> {
 
   const url = new URL(request.url);
   const assetCbtCode = url.searchParams.get('asset_cbt_code');
+  // Registry mode: no asset filter lists every clearance (paginated). The
+  // empty string still refuses below — a blank filter is malformed, not
+  // absent.
+  if (assetCbtCode === null) return registryList(request, url);
+
   if (!isNonEmptyString(assetCbtCode)) {
     return jsonError(400, 'missing_asset_cbt_code', 'asset_cbt_code is required.');
   }
@@ -192,6 +201,66 @@ export async function GET(request: Request): Promise<Response> {
   );
   return Response.json(
     { ok: true, found: true, clearance, transitions },
+    { headers: { 'cache-control': 'no-store' } },
+  );
+}
+
+const LIST_DEFAULT_LIMIT = 50;
+const LIST_MAX_LIMIT = 200;
+
+/**
+ * The registry read: every clearance newest-update-first plus the
+ * filtered-set total, machine-mapped through clearanceFromRecord (a corrupt
+ * row refuses loudly — the same discipline the single-asset read keeps).
+ * Same gate, same bucket, same wire discipline as the rest of the route.
+ */
+async function registryList(request: Request, url: URL): Promise<Response> {
+  const stateParam = url.searchParams.get('state');
+  if (stateParam !== null && !CLEARANCE_STATES.includes(stateParam as ClearanceState)) {
+    return jsonError(
+      422,
+      'invalid_state',
+      `state must be one of: ${CLEARANCE_STATES.join(', ')}.`,
+    );
+  }
+
+  const limitParam = url.searchParams.get('limit');
+  let limit = LIST_DEFAULT_LIMIT;
+  if (limitParam !== null) {
+    const parsed = Number(limitParam);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > LIST_MAX_LIMIT) {
+      return jsonError(
+        400,
+        'invalid_limit',
+        `limit must be an integer between 1 and ${LIST_MAX_LIMIT}.`,
+      );
+    }
+    limit = parsed;
+  }
+
+  const offsetParam = url.searchParams.get('offset');
+  let offset = 0;
+  if (offsetParam !== null) {
+    const parsed = Number(offsetParam);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return jsonError(400, 'invalid_offset', 'offset must be a non-negative integer.');
+    }
+    offset = parsed;
+  }
+
+  const verdict = checkRateLimit(`covnant-admin-mul:${clientAddress(request)}`, ADMIN_API_RATE_LIMIT);
+  if (!verdict.ok) return rateLimited(verdict.retryAfterSeconds);
+
+  const configured = storeOr503();
+  if ('response' in configured) return configured.response;
+
+  const result = await configured.store.listClearances({
+    state: stateParam === null ? undefined : (stateParam as ClearanceState),
+    limit,
+    offset,
+  });
+  return Response.json(
+    { ok: true, clearances: result.clearances.map(clearanceFromRecord), total: result.total },
     { headers: { 'cache-control': 'no-store' } },
   );
 }
