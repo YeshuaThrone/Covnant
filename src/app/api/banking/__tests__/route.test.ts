@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto';
 import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { POST, PUT } from '../route';
 import { getDb } from '@/lib/db';
+import { ADMIN_COOKIE_NAME, mintAdminSessionToken } from '@/lib/admin/gate';
 
 /**
  * POST/PUT /api/banking contract tests against the authoritative live schema:
@@ -10,7 +11,8 @@ import { getDb } from '@/lib/db';
  * (payoutRouting / taxProfile), balances are the flat SUM(amount_cents) over
  * the holder's ledger rows, and reference_id carries the database idempotency
  * (23505 replay/duplicate handling). pg + fetch are mocked — no network, no
- * database, no env vars.
+ * database; the only stubbed env vars are the Lithic/Increase keys and the
+ * operator password that backs the PUT's requireOperator gate (audit F4).
  */
 
 vi.mock('@/lib/db', () => ({ getDb: vi.fn() }));
@@ -143,6 +145,18 @@ function putRequest(body: unknown, headers: Record<string, string> = {}): Reques
   });
 }
 
+/** A REAL minted operator session cookie — the gate runs its own HMAC crypto. */
+function operatorCookie(): string {
+  const token = mintAdminSessionToken();
+  if (!token) throw new Error('operator token mint failed — ADMIN_DASHBOARD_PASSWORD unset?');
+  return `${ADMIN_COOKIE_NAME}=${token}`;
+}
+
+/** The legit operator path: a PUT carrying the signed operator session cookie. */
+function operatorPutRequest(body: unknown, headers: Record<string, string> = {}): Request {
+  return putRequest(body, { cookie: operatorCookie(), ...headers });
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -160,6 +174,9 @@ beforeEach(() => {
   vi.stubEnv('LITHIC_WEBHOOK_SECRET', LITHIC_SECRET);
   vi.stubEnv('INCREASE_API_KEY', 'test-increase-key');
   vi.stubEnv('INCREASE_SOURCE_ACCOUNT_ID', 'src_acc_1');
+  // The PUT disbursement is operator-gated (audit F4): positive-path PUTs
+  // run against the REAL gate with a real minted session cookie.
+  vi.stubEnv('ADMIN_DASHBOARD_PASSWORD', 'test-admin-password-1234');
 });
 
 afterEach(() => {
@@ -307,11 +324,11 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
     for (const amountInCents of [undefined, '', 'abc', '0', '-5', 1.5, '1e9']) {
-      const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents }));
+      const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents }));
       expect(res.status).toBe(400);
     }
     for (const rightsHolderId of [undefined, '', 42]) {
-      const res = await PUT(putRequest({ rightsHolderId, amountInCents: '100000' }));
+      const res = await PUT(operatorPutRequest({ rightsHolderId, amountInCents: '100000' }));
       expect(res.status).toBe(400);
     }
   });
@@ -319,7 +336,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
   it('returns 400 for amounts above Number.MAX_SAFE_INTEGER', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '9007199254740993' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '9007199254740993' }));
     expect(res.status).toBe(400);
   });
 
@@ -327,20 +344,20 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     vi.stubEnv('INCREASE_API_KEY', '');
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(503);
   });
 
   it('returns 503 when DATABASE_URL is unconfigured', async () => {
     mockGetDb.mockReturnValue(null);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(503);
   });
 
   it('returns 404 when the holder is on no cbt_assets JSONB array', async () => {
     const fake = happyDb({ holderById: null });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_missing', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_missing', amountInCents: '100000' }));
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe('Rights holder not found.');
   });
@@ -348,7 +365,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
   it('returns 422 when the payout exceeds the SUM-derived balance of an empty ledger', async () => {
     const fake = happyDb({ availableCents: '0' });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('Insufficient escrow balance for withdrawal.');
     expect(fake.txQueries.some((q) => q.sql.includes('INSERT INTO'))).toBe(false);
@@ -357,7 +374,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
   it('returns 409 when payoutRouting has no full account number for RTP', async () => {
     const fake = happyDb({ holderById: holderEntry({ payoutRouting: { routingNumber: '021000021' } }) });
     mockGetDb.mockReturnValue(fake.db as never);
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('No verified banking destination found for Increase payout.');
   });
@@ -368,7 +385,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_1', status: 'succeeded' })]);
 
     const res = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-1' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-1' }),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -407,7 +424,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_2', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const body = await res.json();
     expect(body.taxWithheld).toBe('30000');
     expect(body.netAmountCents).toBe('70000');
@@ -422,7 +439,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_3', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const body = await res.json();
     expect(body.taxWithheld).toBe('30000');
     expect(body.netAmountCents).toBe('70000');
@@ -434,7 +451,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_4', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: 100000 }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: 100000 }));
     const body = await res.json();
     expect(body.taxWithheld).toBe('0');
     expect(body.netAmountCents).toBe('100000');
@@ -450,7 +467,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_x', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100001' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100001' }));
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe('Payout cannot be represented in whole cents.');
@@ -464,7 +481,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_5', status: 'succeeded' })]);
 
     const res = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-dup' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-dup' }),
     );
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('disbursement already in progress for this idempotency key');
@@ -476,7 +493,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_6', status: 'succeeded' })]);
 
-    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const init = fetchMock.mock.calls[0][1] as RequestInit & { headers: Record<string, string> };
     expect(init.headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -486,7 +503,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     const fetchMock = stubFetch([jsonResponse({ id: 'rtp_7', status: 'succeeded' })]);
 
-    await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000', idempotencyKey: 'key-body-1' }));
+    await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000', idempotencyKey: 'key-body-1' }));
     const holdInserts = fake.txQueries.filter((q) => q.sql.includes('INSERT INTO'));
     expect(holdInserts[0].params?.[2]).toBe('key-body-1');
     const init = fetchMock.mock.calls[0][1] as RequestInit & { headers: Record<string, string> };
@@ -499,7 +516,7 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     stubFetch([jsonResponse({ detail: 'Insufficient source balance — internal upstream detail' }, 422)]);
 
     const res = await PUT(
-      putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-2' }),
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }, { 'Idempotency-Key': 'idem-2' }),
     );
     expect(res.status).toBe(502);
     const body = await res.json();
@@ -521,8 +538,62 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     mockGetDb.mockReturnValue(fake.db as never);
     stubFetch([jsonResponse({ id: 'rtp_8', status: 'succeeded' })]);
 
-    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
     const serialized = JSON.stringify(await res.json());
     expect(serialized).not.toContain('123456789');
+  });
+});
+
+describe('PUT /api/banking — operator gate (audit F4)', () => {
+  it('rejects an unauthenticated PUT before any store access or transfer initiation', async () => {
+    // Spy-only fetch: the gate must refuse before the Increase dispatch —
+    // and before the reservation transaction — ever run.
+    const fetchMock = stubFetch([]);
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: 'Admin sign-in required.' });
+    expect(mockGetDb).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with 503 admin_not_configured when no operator secret is configured', async () => {
+    // Empty password = unconfigured; pin the J1 seed carve-out closed so the
+    // verdict is deterministic regardless of the ambient shell env.
+    vi.stubEnv('ADMIN_DASHBOARD_PASSWORD', '');
+    vi.stubEnv('DON_DEV_SEED', '');
+    const fetchMock = stubFetch([]);
+    const res = await PUT(putRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'Admin dashboard is not configured.' });
+    expect(mockGetDb).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a forged session cookie (401) without touching the store', async () => {
+    const fetchMock = stubFetch([]);
+    const res = await PUT(
+      putRequest(
+        { rightsHolderId: 'rh_1', amountInCents: '100000' },
+        { cookie: `${ADMIN_COOKIE_NAME}=1759999999999.deadbeef` },
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: 'Admin sign-in required.' });
+    expect(mockGetDb).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('admits the legit operator path: a real minted cookie reaches the Increase dispatch', async () => {
+    const fake = happyDb();
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = stubFetch([jsonResponse({ id: 'rtp_gate_1', status: 'succeeded' })]);
+
+    const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.disbursementId).toBe('rtp_gate_1');
+    expect(mockGetDb).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
