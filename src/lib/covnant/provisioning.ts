@@ -78,7 +78,7 @@ export type ProvisioningOutcome =
   | { status: 'HOLDER_VANISHED'; idempotencyKey: string }
   /** Increase was unreachable, rejected the call, or returned a malformed/incomplete object. */
   | { status: 'INCREASE_UNAVAILABLE' }
-  /** Phase 3 persistence failed for a non-provisioning reason (transaction error). */
+  /** Phase 1 or phase 3 persistence failed for a non-provisioning reason (transaction error). */
   | { status: 'PERSISTENCE_FAILED' };
 
 /** Provisioning failure with an already-sanitized client message and status (internal). */
@@ -241,19 +241,33 @@ export async function provisionRightsHolderVirtualAccount(
   // Phase 1 — under the row lock: resolve the holder, short-circuit when
   // already provisioned (idempotent, NO Increase call), otherwise release
   // the lock so the external call never holds a database transaction open.
-  const firstLookup = await db.transaction<
+  let firstLookup:
     | { alreadyProvisioned: true; virtualAccount: CovenantVirtualAccount }
     | { alreadyProvisioned: false }
-    | null
-  >(async (tx) => {
-    const lookup = await findHolderInTx(tx, assetId, rightsHolderId);
-    if (!lookup) return null;
-    const existing = storedVirtualAccount(lookup.holder);
-    if (existing) {
-      return { alreadyProvisioned: true, virtualAccount: existing };
-    }
-    return { alreadyProvisioned: false };
-  });
+    | null;
+  try {
+    firstLookup = await db.transaction<
+      | { alreadyProvisioned: true; virtualAccount: CovenantVirtualAccount }
+      | { alreadyProvisioned: false }
+      | null
+    >(async (tx) => {
+      const lookup = await findHolderInTx(tx, assetId, rightsHolderId);
+      if (!lookup) return null;
+      const existing = storedVirtualAccount(lookup.holder);
+      if (existing) {
+        return { alreadyProvisioned: true, virtualAccount: existing };
+      }
+      return { alreadyProvisioned: false };
+    });
+  } catch (error) {
+    // A transient phase-1 failure must be an outcome, not a throw — the
+    // throws-nothing contract below is what lets the signup route run its
+    // compensation walk and keeps a retried signup clean instead of wedged
+    // on a 409 duplicate_email (the committed auth account would otherwise
+    // never be rolled back).
+    console.error('Provisioning phase-1 lookup transaction failed:', error);
+    return { status: 'PERSISTENCE_FAILED' };
+  }
   if (firstLookup === null) {
     return { status: 'HOLDER_NOT_FOUND' };
   }
