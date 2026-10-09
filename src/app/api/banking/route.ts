@@ -36,7 +36,8 @@
  *   would storm a failing endpoint. Failures are logged server-side instead.
  *
  * PUT — Increase RTP instant disbursement:
- *   Validate integer cents (MAX_SAFE_INTEGER guarded) → withhold engine tax
+ *   Operator-gated (requireOperator) before any body handling →
+ *   validate integer cents (MAX_SAFE_INTEGER guarded) → withhold engine tax
  *   for unverified profiles (identical rates and verification logic as the
  *   withdraw route: cents convert to engine smallest units ×10⁶, and the net
  *   converts back through an exact whole-cent division — a sub-cent remainder
@@ -55,8 +56,12 @@
  * outbound Increase call and is NEVER returned from any API response or
  * logged.
  *
- * Caller authentication: none, consistent with the locked v1 server-side
- * posture of the PR #23 routes.
+ * Caller authentication: POST verifies the Lithic HMAC signature over the
+ * raw body; PUT is operator-gated (audit F4) — the RTP disbursement
+ * initiates real money movement, so it answers requireOperator (the same
+ * signed operator session every payout rail runs) BEFORE any body is read
+ * or store is touched, failing closed (503) when the operator secret is
+ * unconfigured.
  */
 
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -69,6 +74,7 @@ import {
 import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { centsToEngineUnits, engineUnitsToCents, SubUnitRemainderError } from './denomination';
 import { cbtSettlementMetadataSql } from '@/lib/ledger/cbt-settlement';
+import { requireOperator } from '@/lib/server/apiAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -466,6 +472,16 @@ interface IncreasePayoutBody {
 
 // 2. INCREASE INSTANT RTP DISBURSEMENT
 export async function PUT(request: Request): Promise<Response> {
+  // GATED (audit F4): the RTP disbursement initiates real money movement —
+  // operator-only, the same verdict the BaaS payout rails answer. The gate
+  // runs before any body handling or store access and fails closed (503)
+  // when the operator secret is unconfigured; rejections keep the route's
+  // jsonError shape. POST's Lithic HMAC path above is untouched.
+  const access = requireOperator(request);
+  if (!access.ok) {
+    return jsonError(access.message, access.status);
+  }
+
   let body: IncreasePayoutBody;
   try {
     body = (await request.json()) as IncreasePayoutBody;
