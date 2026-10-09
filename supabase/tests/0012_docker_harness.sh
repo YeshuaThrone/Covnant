@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Founder v14 Docker validation harness (directive addendum 32) for the 0012
-# acceptance run: postgres:16-alpine, container universal_registry_db,
+# acceptance run: public.ecr.aws/docker/library/postgres:16-alpine (no-auth
+# ECR mirror of the Docker official image), container universal_registry_db,
 # database universal_registry, user registry_admin, port 5432, healthcheck
 # pg_isready. init.sql IS the founder v11 migration (our 0012) — initdb.d
 # scripts run only on first volume initialization, so the pgdata volume is
@@ -30,7 +31,7 @@ docker run -d --name universal_registry_db \
   --mount type=bind,source="$(pwd)/0012_docker_roles.sql",target=/docker-entrypoint-initdb.d/00-roles.sql \
   --mount type=bind,source="$(pwd)/../migrations/0012_universal_identity.sql",target=/docker-entrypoint-initdb.d/init.sql \
   --health-cmd="pg_isready -U registry_admin -d universal_registry" \
-  postgres:16-alpine >/dev/null
+  public.ecr.aws/docker/library/postgres:16-alpine >/dev/null
 
 # Bounded readiness wait (2 min cap): if the container dies mid-init (initdb
 # failure, pull stall), docker exec would fail forever in an unbounded loop —
