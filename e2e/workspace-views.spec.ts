@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test';
 
 /**
  * Spec §5 — the core workspace views behind the sidebar: dashboard metrics
- * and quick actions, catalog grid with universal registry pills, ledger
- * reconciliation audit, membership plans without payment rails, and
+ * and quick actions, catalog grid with universal registry pills, the
+ * ledger's session gate (the audit view itself is covered by the vitest
+ * page test), membership plans without payment rails, and
  * client-side settings persistence. Data-state tolerant: runs green in both
  * memory mode and Supabase mode.
  */
@@ -46,19 +47,28 @@ test('catalog shows registered assets with universal registry pills, or the empt
   }
 });
 
-test('ledger renders the reconciliation audit above the settlement table', async ({ page }) => {
-  await page.goto('/ledger');
+test('ledger gates the audit view — an anonymous visit redirects to the contracts vault', async ({
+  page,
+}) => {
+  // F3 / spec D6: the ledger page is the administrator's full royalty-ledger
+  // audit view, so it is fail-closed — a sessionless visit (the demo-door
+  // preview included) redirects to /contracts on the vault page's pattern,
+  // and no per-holder disbursement detail renders. The audit view itself is
+  // covered by the vitest page test with a verified session.
+  const response = await page.goto('/ledger');
 
-  // Reconciliation status strip — badge text varies with data state.
-  await expect(page.getByLabel('Reconciliation audit').getByText(/Reconciled|Attention|No settlements/)).toBeVisible();
+  // Next streams the redirect the way it does for /vault: the gate throws
+  // before any ledger data is resolved, so the 200 shell carries the
+  // redirect marker and NO audit-view content; the client router then
+  // completes the navigation to /contracts after hydration.
+  const shell = (await response?.text()) ?? '';
+  expect(shell).not.toContain('reconciliation-totals');
+  expect(shell).not.toContain('Run system audit');
+  expect(shell).not.toContain('aria-label="Reconciliation audit"');
+  expect(shell).not.toContain('columnheader');
 
-  // Exact per-currency totals render when the ledger holds rows.
-  if ((await page.getByTestId('reconciliation-totals').count()) > 0) {
-    await expect(page.getByTestId('reconciliation-totals')).toContainText('Gross');
-  }
-
-  await expect(page.getByRole('columnheader', { name: 'Transaction' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Run system audit' })).toBeVisible();
+  await page.waitForURL(/\/contracts$/);
+  await expect(page.getByRole('heading', { name: 'Master Contract Data' })).toBeVisible();
 });
 
 test('membership plans render as static marketing with no payment rails', async ({ page }) => {

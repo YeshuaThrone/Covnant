@@ -9,6 +9,9 @@
  * below, unchanged.
  */
 
+import { redirect } from 'next/navigation';
+
+import { resolveSessionCreator } from '@/lib/server/sessionCreator';
 import { listAssets } from '@/lib/sdk';
 import { listLedger } from '@/lib/ledger/store';
 import { attachRegistryPills } from '@/lib/ledger/finances';
@@ -56,6 +59,18 @@ export default async function LedgerPage({
 }: {
   searchParams: Promise<{ category?: string }>;
 }) {
+  // F3 — this page rendered the full royalty ledger (per-holder disbursement
+  // detail: holder id/name, shares, withholding, net) to anonymous visitors.
+  // GATED, fail-closed: the verified session resolves as the FIRST statement,
+  // before any input handling or store access, and an anonymous visitor is
+  // redirected on the vault page's pattern (redirect('/contracts')). Any
+  // verified session passes — a session gate (spec D6), not an enrollment
+  // check; a session READ failure propagates and renders no data either way.
+  const session = await resolveSessionCreator();
+  if (session.kind === 'anonymous') {
+    redirect('/contracts');
+  }
+
   const { category } = await searchParams;
   const active = masterCategoryFromParam(category);
 
