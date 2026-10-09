@@ -10,14 +10,16 @@
  * stored, logged, or echoed back; the token's HMAC is keyed by the secret
  * so rotating it invalidates every outstanding session.
  *
- * Rate limited per address (the signup route's limiter) AFTER body
- * validation so a malformed body never burns the bucket — bad passwords
- * do.
+ * Rate limited per address through the DURABLE shared limiter
+ * (checkSharedRateLimit — Postgres-backed when DATABASE_URL is configured,
+ * so the brute-force budget holds across serverless isolates and cold
+ * starts) AFTER body validation so a malformed body never burns the
+ * bucket — bad passwords do.
  */
 
 import { readAdminPassword, adminPasswordMatches, adminSessionCookie, mintAdminSessionToken } from '@/lib/admin/gate';
 import { jsonError } from '@/lib/server/http';
-import { checkRateLimit, ADMIN_LOGIN_RATE_LIMIT } from '@/lib/server/rateLimit';
+import { checkSharedRateLimit, ADMIN_LOGIN_RATE_LIMIT } from '@/lib/server/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
     request.headers.get('x-real-ip') ??
     'unknown';
-  const verdict = checkRateLimit(`covnant-admin-login:${clientIp}`, ADMIN_LOGIN_RATE_LIMIT);
+  const verdict = await checkSharedRateLimit(`covnant-admin-login:${clientIp}`, ADMIN_LOGIN_RATE_LIMIT);
   if (!verdict.ok) {
     return jsonError(429, 'rate_limited', 'Too many sign-in attempts. Try again later.');
   }
