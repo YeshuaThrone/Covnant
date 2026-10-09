@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import type { GlLegInput } from "./journal";
-import type { GlEntryRecord, GlJournalRecord } from "@/modules/don/records";
+import type { GlJournalRecord } from "@/modules/don/records";
 import { GL_GENESIS_HASH } from "@/modules/don/constants";
 
 // Everything that participates in the hash — the journal's financial content
@@ -39,28 +39,6 @@ export function hashJournal(
       credit_cents: leg.credit_cents,
     })),
     created_at: journal.created_at,
-    sequence,
-    prev_hash: prevHash,
-  });
-  return createHash("sha256").update(payload).digest("hex");
-}
-
-// Entry-level hash over the foundation's GlEntryRecord (the transcription's
-// entry rows carried entry_type/ref_type/ref_id/work_id — the merged record
-// pins identity to id/journal_id). Position fields stay INSIDE the payload so
-// entries hash-chain exactly like journals.
-export function hashEntry(
-  entry: GlEntryRecord,
-  sequence: number,
-  prevHash: string,
-): string {
-  const payload = JSON.stringify({
-    id: entry.id,
-    journal_id: entry.journal_id,
-    account: entry.account,
-    debit_cents: entry.debit_cents,
-    credit_cents: entry.credit_cents,
-    created_at: entry.created_at,
     sequence,
     prev_hash: prevHash,
   });
