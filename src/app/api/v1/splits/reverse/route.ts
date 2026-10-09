@@ -42,7 +42,12 @@ export async function POST(request: NextRequest) {
     return donJsonError(status, parsed.code, parsed.message);
   }
 
-  const result = await reverseSplitRun(getStore(), parsed.value.split_run_id);
+  const result = await reverseSplitRun(getStore(), parsed.value.split_run_id, new Date(), {
+    // Operator-only (F6): the requireOperator gate above is what makes this
+    // safe — an operator may claw a run back into a negative receivable
+    // rather than leave it stuck with a permanent 422.
+    allowNegativeReceivable: parsed.value.allow_negative_receivable,
+  });
   if (!result.ok) {
     return donJsonError(result.status, result.code, result.message);
   }
