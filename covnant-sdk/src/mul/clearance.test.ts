@@ -56,6 +56,9 @@ function stubStore(): ClearanceStore & {
     async listClearanceTransitions(assetCbtCode: string) {
       return transitions.filter((row) => row.asset_cbt_code === assetCbtCode);
     },
+    async listClearances() {
+      return { clearances: [...clearances.values()], total: clearances.size };
+    },
   };
 }
 

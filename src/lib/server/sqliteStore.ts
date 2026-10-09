@@ -379,6 +379,10 @@ import type {
   SyncCatalogItemRecord,
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
+import type {
+  ClearanceListOptions,
+  ClearanceListPage,
+} from '../../../covnant-sdk/src/mul/clearance';
 import type { AdminActionRecord } from '@/lib/admin/actionLog';
 import {
   SDK_SETTLEMENT_TRANSACTION_TYPE,
@@ -11995,6 +11999,30 @@ export class SqliteStore implements Store {
         )
         .all(assetCbtCode) as MulClearanceTransitionRecord[],
     );
+  }
+
+  async listClearances(options: ClearanceListOptions = {}): Promise<ClearanceListPage> {
+    const params: string[] = [];
+    if (options.state !== undefined) params.push(options.state);
+    const where = options.state === undefined ? '' : 'WHERE state = ? ';
+    // Total counts the FILTERED set before the window — the pagination
+    // math's denominator, never the page's length.
+    const total = (
+      this.db
+        .prepare(`SELECT COUNT(*) AS total FROM mul_clearances ${where}`)
+        .get(...params) as { total: number }
+    ).total;
+    // Newest-update-first; rowid DESC is the parity tiebreak (the
+    // later-inserted row first among equal stamps, matching the in-memory
+    // sort). LIMIT -1 is SQLite's no-limit.
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM mul_clearances ${where}
+         ORDER BY updated_at DESC, rowid DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, options.limit ?? -1, options.offset ?? 0) as MulClearanceRecord[];
+    return { clearances: rows, total };
   }
 
   async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {

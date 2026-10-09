@@ -196,6 +196,10 @@ import type {
   SyncLicensePurchaseRecord,
 } from '@/modules/sdk/records';
 import type {
+  ClearanceListOptions,
+  ClearanceListPage,
+} from '../../../covnant-sdk/src/mul/clearance';
+import type {
   SpatialAuditEscrowDrawdownRecord,
   SpatialAuditEscrowPolicyRecord,
   SpatialAuditEscrowReconciliationRecord,
@@ -5182,6 +5186,22 @@ export class InMemoryStore implements Store {
       (row) => row.created_at,
       'asc',
     );
+  }
+
+  async listClearances(options: ClearanceListOptions = {}): Promise<ClearanceListPage> {
+    const all = [...this.mulClearances.values()];
+    const filtered =
+      options.state === undefined ? all : all.filter((row) => row.state === options.state);
+    // Newest-update-first; sortByTime's desc tiebreak puts the
+    // later-inserted row first among equal stamps (the store's parity
+    // contract, mirrored by the other backends).
+    const sorted = sortByTime(filtered, (row) => row.updated_at, 'desc');
+    const offset = options.offset ?? 0;
+    const windowed =
+      options.limit === undefined
+        ? sorted.slice(offset)
+        : sorted.slice(offset, offset + options.limit);
+    return { clearances: windowed, total: filtered.length };
   }
 
   async insertMatchQueueEntry(row: Omit<MatchQueueRecord, 'id'>): Promise<MatchQueueRecord> {

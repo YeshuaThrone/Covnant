@@ -81,6 +81,30 @@ export interface MulClearance {
 }
 
 /**
+ * The registry read's options — every field optional; the caller bounds the
+ * page. `state` filters to one machine state, `limit`/`offset` window the
+ * rows. Purely read-shaped: nothing here can move the machine.
+ */
+export interface ClearanceListOptions {
+  /** Filter to one machine state; omitted lists every state. */
+  state?: ClearanceState;
+  /** Page size; omitted returns every matching row. */
+  limit?: number;
+  /** Rows to skip (0-based); defaults to 0. */
+  offset?: number;
+}
+
+/**
+ * One registry page — the current-state rows newest-update-first (equal
+ * stamps break by newest-inserted) plus `total`, the count of the FILTERED
+ * set before the window, which is the pagination math's denominator.
+ */
+export interface ClearanceListPage {
+  clearances: MulClearanceRecord[];
+  total: number;
+}
+
+/**
  * The clearance slice of the Store seam (src/lib/server/store.ts) — stated
  * structurally so the real Store satisfies it and the SDK stays free of the
  * store graph. SDK PRs consume the PR 3 methods and never touch store files.
@@ -92,6 +116,13 @@ export interface ClearanceStore {
     row: Omit<MulClearanceTransitionRecord, 'id'>,
   ): Promise<MulClearanceTransitionRecord>;
   listClearanceTransitions(assetCbtCode: string): Promise<MulClearanceTransitionRecord[]>;
+  /**
+   * Lists CURRENT clearances newest-update-first, optionally filtered to one
+   * state and windowed; `total` counts the filtered set before the window.
+   * The registry's read — every mutation still rides transitionClearance,
+   * which alone can move the machine.
+   */
+  listClearances(options?: ClearanceListOptions): Promise<ClearanceListPage>;
 }
 
 /** One machine edge, from the current state (null = no clearance yet). */
