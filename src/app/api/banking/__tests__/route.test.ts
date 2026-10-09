@@ -4,6 +4,7 @@ import type { TaxProfile } from '@/engine/covenant-master-sdk';
 import { POST, PUT } from '../route';
 import { getDb } from '@/lib/db';
 import { ADMIN_COOKIE_NAME, mintAdminSessionToken } from '@/lib/admin/gate';
+import { resetRateLimits } from '@/lib/server/rateLimit';
 
 /**
  * POST/PUT /api/banking contract tests against the authoritative live schema:
@@ -177,6 +178,9 @@ beforeEach(() => {
   // The PUT disbursement is operator-gated (audit F4): positive-path PUTs
   // run against the REAL gate with a real minted session cookie.
   vi.stubEnv('ADMIN_DASHBOARD_PASSWORD', 'test-admin-password-1234');
+  // The PUT money-initiation limiter (C2) is module state; every test starts
+  // with a fresh 5/min window.
+  resetRateLimits();
 });
 
 afterEach(() => {
@@ -323,12 +327,25 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
   it('returns 400 for invalid payout parameters', async () => {
     const fake = happyDb();
     mockGetDb.mockReturnValue(fake.db as never);
-    for (const amountInCents of [undefined, '', 'abc', '0', '-5', 1.5, '1e9']) {
-      const res = await PUT(operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents }));
+    for (const [i, amountInCents] of [undefined, '', 'abc', '0', '-5', 1.5, '1e9'].entries()) {
+      // Each attempt is its own client: a unique address per iteration keeps
+      // the route's 5/min money-initiation limiter from gating the
+      // validation battery.
+      const res = await PUT(
+        operatorPutRequest(
+          { rightsHolderId: 'rh_1', amountInCents },
+          { 'x-forwarded-for': `198.51.100.${i}` },
+        ),
+      );
       expect(res.status).toBe(400);
     }
-    for (const rightsHolderId of [undefined, '', 42]) {
-      const res = await PUT(operatorPutRequest({ rightsHolderId, amountInCents: '100000' }));
+    for (const [i, rightsHolderId] of [undefined, '', 42].entries()) {
+      const res = await PUT(
+        operatorPutRequest(
+          { rightsHolderId, amountInCents: '100000' },
+          { 'x-forwarded-for': `198.51.101.${i}` },
+        ),
+      );
       expect(res.status).toBe(400);
     }
   });
@@ -525,7 +542,11 @@ describe('PUT /api/banking — Increase RTP disbursement', () => {
     expect(serialized).not.toContain('Insufficient source balance');
     expect(serialized).not.toContain('123456789');
 
-    const reversals = fake.poolQueries.filter((q) => q.sql.includes('INSERT INTO'));
+    // Ledger-scoped filter: the shared limiter's rate_limit_buckets upsert
+    // also lands on the pool and is not a ledger write.
+    const reversals = fake.poolQueries.filter((q) =>
+      q.sql.includes('INSERT INTO universal_royalty_ledger'),
+    );
     expect(reversals).toHaveLength(1);
     expect(reversals[0].sql).toContain("'DISBURSEMENT_REVERSAL'");
     expect(reversals[0].sql).toContain('reference_id');
@@ -593,7 +614,68 @@ describe('PUT /api/banking — operator gate (audit F4)', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.disbursementId).toBe('rtp_gate_1');
-    expect(mockGetDb).toHaveBeenCalledTimes(1);
+    // The operator gate and the shared money-initiation limiter (C2) each
+    // resolve the db handle once before the route's own use.
+    expect(mockGetDb).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PUT /api/banking — money-initiation limiter + unknown-outcome hold (C2/C3)', () => {
+  it('returns 429 once the money-initiation window is exhausted — before any body handling', async () => {
+    // getDb pinned null: the shared limiter exercises its in-memory fallback
+    // directly (production pre-credentials), independent of any leftover
+    // mock return value from a previous test; the route itself then 503s.
+    mockGetDb.mockReturnValue(null);
+    // MONEY_INITIATION_RATE_LIMIT is 5/min: five authenticated attempts burn
+    // the window (each refused 503 by the route's unconfigured-db guard), and
+    // the sixth is the limiter's own verdict.
+    // A FRESH Request per attempt: a Request body is a stream, consumed by
+    // the first json() read.
+    const put = (): Request =>
+      operatorPutRequest({ rightsHolderId: 'rh_1', amountInCents: '100000' });
+    for (let i = 0; i < 5; i++) {
+      const res = await PUT(put());
+      expect(res.status).toBe(503);
+    }
+    const res = await PUT(put());
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toMatch(/^Rate limit exceeded\. Retry after \d+s\.$/);
+  });
+
+  it('keeps the PENDING_DISBURSEMENT hold and returns 502 when fetch throws after dispatch (C3)', async () => {
+    const fake = happyDb();
+    mockGetDb.mockReturnValue(fake.db as never);
+    const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>();
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed: connection reset'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await PUT(
+      operatorPutRequest(
+        { rightsHolderId: 'rh_1', amountInCents: '100000' },
+        { 'Idempotency-Key': 'idem-drop' },
+      ),
+    );
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe('Increase RTP transfer failed.');
+
+    // The hold survives in the reservation transaction; no reversal credit
+    // lands anywhere — the transfer may have been honored before the
+    // connection dropped, and a reversal here would manufacture spendable
+    // cents. Reconciliation owns the stranded hold. (The pool filter is
+    // ledger-scoped: the limiter's rate_limit_buckets upsert is a different
+    // table.)
+    const holdInserts = fake.txQueries.filter((q) =>
+      q.sql.includes('INSERT INTO universal_royalty_ledger'),
+    );
+    expect(holdInserts).toHaveLength(1);
+    expect(holdInserts[0].sql).toContain("'PENDING_DISBURSEMENT'");
+    // No DISBURSEMENT_REVERSAL anywhere — pool or transaction.
+    expect(
+      [...fake.poolQueries, ...fake.txQueries].some((q) =>
+        q.sql.includes("'DISBURSEMENT_REVERSAL'"),
+      ),
+    ).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
