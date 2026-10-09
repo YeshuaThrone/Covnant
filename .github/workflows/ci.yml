@@ -1243,7 +1243,7 @@ jobs:
       # what the page actually showed. Upload them whenever the suite fails.
       - name: Upload Playwright failure evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-failure-evidence
           path: test-results/
