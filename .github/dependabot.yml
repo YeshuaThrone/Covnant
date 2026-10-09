@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Weekly npm dependency updates, capped to avoid review pile-up.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Keep the pinned actions in .github/workflows on their latest patches.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
